@@ -98,8 +98,9 @@ typedef long bidb_blockofs_t;
  * Hashing
  ******************************************************************************/
 
-static unsigned long hash_string(const char *key) {
-	unsigned long h = 0;
+/* creates a 32-bit hash of a null terminated string */
+static uint_least32_t hash_string32(const char *key) {
+	uint_least32_t h=0;
 
 	while(*key) {
 		h=h*65599+*key++;
@@ -110,7 +111,22 @@ static unsigned long hash_string(const char *key) {
 	return h;
 }
 
-static uint_least32_t hash_int32(uint_least32_t key) {
+/* creates a 32-bit hash of a blob of memory */
+static uint_least32_t hash_mem32(const char *key, size_t len) {
+	uint_least32_t h=0;
+
+	while(len>0) {
+		h=h*65599+*key++;
+		/* this might be faster on some systems with fast shifts and slow mult:
+		 * h=(h<<6)+(h<<16)-h+*key++;
+		 */
+		len--;
+	}
+	return h;
+}
+
+/* creates a 32-bit hash of a 32-bit value */
+static uint_least32_t hash_uint32(uint_least32_t key) {
 	key=(key^61)*ROR32(key,16);
 	key+=key<<3;
 	key^=ROR32(key, 4);
@@ -119,7 +135,9 @@ static uint_least32_t hash_int32(uint_least32_t key) {
 	return key;
 }
 
-static uint_least64_t hash_int64(uint_least64_t key) {
+#if 0
+/* creates a 64-bit hash of a 64-bit value */
+static uint_least64_t hash64_uint64(uint_least64_t key) {
 	key=~key+(key<<21);
 	key^=ROR64(key, 24);
 	key*=265;
@@ -128,6 +146,18 @@ static uint_least64_t hash_int64(uint_least64_t key) {
 	key^=ROR64(key, 28);
 	key+=key<<31;
 	return key;
+}
+#endif
+
+/* turns a 64-bit value into a 32-bit hash */
+static uint_least32_t hash_uint64(uint_least64_t key) {
+	key=(key<<18)-key-1;
+	key^=ROR64(key, 31);
+	key*=21;
+	key^=ROR64(key, 11);
+	key+=key<<6;
+	key^=ROR64(key, 22);
+	return (uint_least32_t)key;
 }
 
 /****************************************************************************** 
