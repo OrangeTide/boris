@@ -71,6 +71,16 @@
 /* ReaD Big-Endian 32-bit value */
 #define RD_BE32(src, offset) (((src)[offset]*16777216L)|((src)[(offset)+1]*65536L)|((src)[(offset)+2]*256)|(src)[(offset)+3])
 
+/** Rotate operations **/
+#define ROL8(a,b) (((uint_least8_t)(a)<<(b))|((uint_least8_t)(a)>>(8-(b))))
+#define ROL16(a,b) (((uint_least16_t)(a)<<(b))|((uint_least16_t)(a)>>(16-(b))))
+#define ROL32(a,b) (((uint_least32_t)(a)<<(b))|((uint_least32_t)(a)>>(32-(b))))
+#define ROL64(a,b) (((uint_least64_t)(a)<<(b))|((uint_least64_t)(a)>>(64-(b))))
+#define ROR8(a,b) (((uint_least8_t)(a)>>(b))|((uint_least8_t)(a)<<(8-(b))))
+#define ROR16(a,b) (((uint_least16_t)(a)>>(b))|((uint_least16_t)(a)<<(16-(b))))
+#define ROR32(a,b) (((uint_least32_t)(a)>>(b))|((uint_least32_t)(a)<<(32-(b))))
+#define ROR64(a,b) (((uint_least64_t)(a)>>(b))|((uint_least64_t)(a)<<(64-(b))))
+
 /****************************************************************************** 
  * Types and data structures
  ******************************************************************************/
@@ -83,6 +93,42 @@ typedef long bidb_blockofs_t;
 /****************************************************************************** 
  * Prototypes
  ******************************************************************************/
+
+/****************************************************************************** 
+ * Hashing
+ ******************************************************************************/
+
+static unsigned long hash_string(const char *key) {
+	unsigned long h = 0;
+
+	while(*key) {
+		h=h*65599+*key++;
+		/* this might be faster on some systems with fast shifts and slow mult:
+		 * h=(h<<6)+(h<<16)-h+*key++;
+		 */
+	}
+	return h;
+}
+
+static uint_least32_t hash_int32(uint_least32_t key) {
+	key=(key^61)*ROR32(key,16);
+	key+=key<<3;
+	key^=ROR32(key, 4);
+	key*=668265261;
+	key^=ROR32(key, 15);
+	return key;
+}
+
+static uint_least64_t hash_int64(uint_least64_t key) {
+	key=~key+(key<<21);
+	key^=ROR64(key, 24);
+	key*=265;
+	key^=ROR64(key,14);
+	key*=21;
+	key^=ROR64(key, 28);
+	key+=key<<31;
+	return key;
+}
 
 /****************************************************************************** 
  * Binary Database
