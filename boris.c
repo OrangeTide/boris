@@ -253,6 +253,7 @@ static size_t bitmap_allocbits;
 int bitmap_resize(size_t newbits) {
 	unsigned *tmp;
 	newbits=ROUNDUP(newbits, BITMAP_BITSIZE);
+	fprintf(stderr, "%s():Allocating %d bytes\n", __func__, newbits/CHAR_BIT);
 	tmp=realloc(bitmap, newbits/CHAR_BIT);
 	if(!tmp) {
 		perror("realloc()");
@@ -267,30 +268,74 @@ void bitmap_clear(unsigned ofs, unsigned len) {
 	unsigned *p, mask, word_count;
 	unsigned bofs, bcnt;
 
-	assert((ofs+len)<=bitmap_allocbits);
+	/* allocate more */
+	if(ofs+len>bitmap_allocbits) {
+		bitmap_resize(ofs+len);
+	}
 
 	p=bitmap+ofs/BITMAP_BITSIZE;
 	bofs=ofs%BITMAP_BITSIZE;
 
-	mask=(~0U)<<(BITMAP_BITSIZE-bofs); /* make some 1s at the top */
-	printf("%s\n", convert_number(mask, 2));
+	if(bofs) {
+		mask=(~0U)<<(BITMAP_BITSIZE-bofs); /* make some 1s at the top */
+	} else {
+		/* shifting by the entire word size is not guarenteed to work */
+		mask=0;
+	}
 
 	word_count=len/BITMAP_BITSIZE;
 	bcnt=len%BITMAP_BITSIZE;
 
-	while(word_count>0) {
-		printf("go.\n");
-		*p++;
-		word_count--;
+	if(word_count) {
+		*p&=mask;
+		p++;
+		mask=0;
+
+		while(word_count>1) {
+			*p++=0;
+			word_count--;
+		}
 	}
 
 	mask|=(~0U)>>(bcnt+bofs); /* make some 1s at the bottom */
-	printf("%s\n", convert_number(mask, 2));
 
 	*p&=mask;
 }
 
 void bitmap_set(unsigned ofs, unsigned len) {
+	unsigned *p, mask, word_count;
+	unsigned bofs, bcnt;
+
+	/* allocate more */
+	if(ofs+len>bitmap_allocbits) {
+		bitmap_resize(ofs+len);
+	}
+
+	p=bitmap+ofs/BITMAP_BITSIZE;
+	bofs=ofs%BITMAP_BITSIZE;
+	bcnt=len%BITMAP_BITSIZE;
+
+	mask=(~0U)>>(bcnt+bofs); /* make some 1s at the bottom */
+
+	word_count=len/BITMAP_BITSIZE;
+
+	if(word_count) {
+		*p|=mask;
+		p++;
+		mask=0;
+
+		while(word_count>1) {
+			*p++=~0;
+			word_count--;
+		}
+	}
+
+	if(bofs) {
+		/* shifting by the entire word size is not guarenteed to work */
+		mask|=(~0U)<<(BITMAP_BITSIZE-bofs); /* make some 1s at the top */
+	}
+
+	*p|=mask;
 }
 
 int bitmap_get(unsigned ofs) {
@@ -338,6 +383,45 @@ void bitmap_loadmem(unsigned char *d, size_t len) {
 unsigned bitmap_length(void) {
 	return ROUNDUP(bitmap_allocbits, CHAR_BIT);
 }
+
+#ifndef NDEBUG
+void bitmap_test(void) {
+	int i;
+	bitmap_resize(1024);
+	/* fill in with a test pattern */
+	for(i=0;i<5;i++) {
+		bitmap[i]=0x12345678;
+	}
+
+	bitmap_set(12, 64);
+	/* display the test pattern */
+	printf("bitmap_set():\n");
+	for(i=0;i<5;i++) {
+		printf("0x%08x\n", bitmap[i]);
+	}
+
+	bitmap_clear(12, 64);
+	/* display the test pattern */
+	printf("bitmap_clear():\n");
+	for(i=0;i<5;i++) {
+		printf("0x%08x\n", bitmap[i]);
+	}
+
+	bitmap_set(0, BITMAP_BITSIZE*5);
+	/* display the test pattern */
+	printf("bitmap_set():\n");
+	for(i=0;i<5;i++) {
+		printf("0x%08x\n", bitmap[i]);
+	}
+
+	bitmap_clear(0, BITMAP_BITSIZE*5);
+	/* display the test pattern */
+	printf("bitmap_clear():\n");
+	for(i=0;i<5;i++) {
+		printf("0x%08x\n", bitmap[i]);
+	}
+}
+#endif
 
 /****************************************************************************** 
  * Freelist
@@ -750,13 +834,16 @@ struct object_base *object_iscached(unsigned id) {
  ******************************************************************************/
 
 int main(void) {
+#ifndef NDEBUG
+	bitmap_test();
+#endif
+
+	/*
 	bidb_open(BIDB_FILE, 1);
 	bidb_close();
-	/*
-	bitmap_resize(1024);
-	bitmap_clear(5, 3);
-	*/
 	bidb_show_info();
+	*/
+	
 	return 0;
 }
 
