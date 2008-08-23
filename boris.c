@@ -6,12 +6,36 @@
  * Design Documentation
  *
  * components:
- * 	hashcache - looks up ids. loads blobs from disk if not loaded.
- * 	bidb - low level file access fuctions. manages blocks for hashcache
+ * 	recordcache - loads records into memory and caches them
+ * 	bidb - low level file access fuctions. manages blocks for recordcache
  * 	object_base - a generic object type
  * 	object_xxx - free/load/save routines for objects
+ * 	bitmap - manages block bitmap
+ * 	freelist - a malloc-like abstraction for the block bitmaps
  *
+ * objects:
+ * 	base - the following types of objects are defined:
+ * 		room
+ * 		mob
+ * 		item
+ * 	instance - all instances are the same structure:
+ * 		id - object id
+ * 		count - all item instances are stackable 1 to 256.
+ * 		flags - 24 status flags [A-HJ-KM-Z]
+ * 		extra1..extra2 - control values that can be variable
  *
+ * containers:
+ * 	instance parameter holds a id that holds an array of up to 64 objects.
+ *
+ * database saves the following types of blobs:
+ * 	player account
+ * 	room object
+ * 	mob object (also used for characters)
+ * 	item object
+ * 	instances
+ * 	container slots
+ * 	help text
+ * 	
  ******************************************************************************/
 
 /****************************************************************************** 
@@ -24,14 +48,15 @@
 /* database file */ 
 #define BIDB_FILE "boris.bidb"
 
-#define BIDB_MAX_OBJECT_DEFAULT	131072 
-#define BIDB_MAX_BLOCKS_DEFAULT	524288
+#define BIDB_DEFAULT_MAX_RECORDS 131072 
+#define BIDB_DEFAULT_MAX_BLOCKS 524288
 
 /****************************************************************************** 
  * Headers
  ******************************************************************************/
 
 #include <assert.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -56,31 +81,41 @@
 
 /* get number of elements in an array */
 #define NR(x) (sizeof(x)/sizeof*(x))
+
+/* round up/down on a boundry */
 #define ROUNDUP(a,n) (((a)+(n)-1)/(n)*(n))
-#define ROUNDDOWN(a,n) ((a)/(n)*(n))
+#define ROUNDDOWN(a,n) ((a)-((a)%(n)))
 
-#define make_name2(x,y) x##y
-#define make_name(x,y) make_name2(x,y)
+/* make four ASCII characters into a 32-bit integer */
+#define FOURCC(a,b,c,d)	( \
+	((uint_least32_t)(d)<<24) \
+	|((uint_least32_t)(c)<<16) \
+	|((uint_least32_t)(b)<<8) \
+	|(a))
 
-/* var() is used for making temp variables in macros */
-#define var(x) make_name(x,__LINE__)
+/* used by var */
+#define _make_name2(x,y) x##y
+#define _make_name(x,y) _make_name2(x,y)
+
+/* VAR() is used for making temp variables in macros */
+#define VAR(x) _make_name(x,__LINE__)
 
 /** byte-order functions **/
 
 /* WRite Big-Endian 32-bit value */
 #define WR_BE32(dest, offset, value) do { \
-		unsigned var(tmp)=value; \
-		(dest)[offset]=(var(tmp)/16777216L)%256; \
-		(dest)[(offset)+1]=(var(tmp)/65536L)%256; \
-		(dest)[(offset)+2]=(var(tmp)/256)%256; \
-		(dest)[(offset)+3]=var(tmp)%256; \
+		unsigned VAR(tmp)=value; \
+		(dest)[offset]=(VAR(tmp)/16777216L)%256; \
+		(dest)[(offset)+1]=(VAR(tmp)/65536L)%256; \
+		(dest)[(offset)+2]=(VAR(tmp)/256)%256; \
+		(dest)[(offset)+3]=VAR(tmp)%256; \
 	} while(0)
 
 /* WRite Big-Endian 16-bit value */
 #define WR_BE16(dest, offset, value) do { \
-		unsigned var(tmp)=value; \
-		(dest)[offset]=(var(tmp)/256)%256; \
-		(dest)[(offset)+1]=var(tmp)%256; \
+		unsigned VAR(tmp)=value; \
+		(dest)[offset]=(VAR(tmp)/256)%256; \
+		(dest)[(offset)+1]=VAR(tmp)%256; \
 	} while(0)
 
 /* ReaD Big-Endian 16-bit value */
@@ -118,6 +153,27 @@ struct lru_entry {
  * Prototypes
  ******************************************************************************/
 
+/****************************************************************************** 
+ * Debug routines
+ ******************************************************************************/
+#ifndef NDEBUG
+static const char *convert_number(unsigned n, unsigned base) {
+	static char number_buffer[65];
+	static char tab[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-";
+    char *o; /* output */
+    if(base<2) base=2;
+	if(base>sizeof tab) base=sizeof tab;
+    o=number_buffer+sizeof number_buffer;
+    *--o=0;
+    do {
+        *--o=tab[n%base];
+        n/=base;
+    } while(n);
+    /* len=number_buffer+sizeof number_buffer-1-o; */
+    return o;
+}
+
+#endif
 /****************************************************************************** 
  * Hashing Functions
  ******************************************************************************/
@@ -208,6 +264,30 @@ int bitmap_resize(size_t newbits) {
 }
 
 void bitmap_clear(unsigned ofs, unsigned len) {
+	unsigned *p, mask, word_count;
+	unsigned bofs, bcnt;
+
+	assert((ofs+len)<=bitmap_allocbits);
+
+	p=bitmap+ofs/BITMAP_BITSIZE;
+	bofs=ofs%BITMAP_BITSIZE;
+
+	mask=(~0U)<<(BITMAP_BITSIZE-bofs); /* make some 1s at the top */
+	printf("%s\n", convert_number(mask, 2));
+
+	word_count=len/BITMAP_BITSIZE;
+	bcnt=len%BITMAP_BITSIZE;
+
+	while(word_count>0) {
+		printf("go.\n");
+		*p++;
+		word_count--;
+	}
+
+	mask|=(~0U)>>(bcnt+bofs); /* make some 1s at the bottom */
+	printf("%s\n", convert_number(mask, 2));
+
+	*p&=mask;
 }
 
 void bitmap_set(unsigned ofs, unsigned len) {
@@ -260,29 +340,43 @@ unsigned bitmap_length(void) {
 }
 
 /****************************************************************************** 
- * Hashing Cache
+ * Freelist
  ******************************************************************************/
 
-struct hash_entry {
+/* allocates blocks from the bitmap
+ * returns offset of the allocation */
+long freelist_alloc(unsigned count) {
+}
+
+/* adds a piece to the freelist pool */
+long freelist_pool(long ofs, unsigned count) {
+}
+
+/****************************************************************************** 
+ * Record Cacheing - look up records and automatically load them
+ ******************************************************************************/
+
+struct recordcache_entry {
 	unsigned id;
 	bidb_blockofs_t ofs;
 	unsigned count;
 	struct lru_entry lru; /* if data is not NULL, then the data is loaded */
 };
 
-static struct hashcache_entry **hashcache_table;
-static size_t hashcache_table_nr, hashcache_table_mask;
+static struct recordcache_entry **recordcache_table;
+static size_t recordcache_table_nr, recordcache_table_mask;
 
+/* rounds up 0 to 1 */
 static size_t roundup2(size_t val) {
 	size_t n;
 	for(n=1;n<val;n<<=1) ;
 	return n;
 }
 
-int hashcache_init(unsigned max_entries) {
-	struct hashcache_entry **tmp;
-	assert(hashcache_table==NULL);
-	if(hashcache_table) {
+int recordcache_init(unsigned max_entries) {
+	struct recordcache_entry **tmp;
+	assert(recordcache_table==NULL);
+	if(recordcache_table) {
 		fprintf(stderr, "hash table already initialized\n");
 		return 0; /* failure */
 	}
@@ -292,10 +386,10 @@ int hashcache_init(unsigned max_entries) {
 		perror("malloc()");
 		return 0; /* failure */
 	}
-	hashcache_table=tmp;
-	hashcache_table_nr=max_entries;
-	hashcache_table_mask=hashcache_table_nr-1;
-	fprintf(stderr, "hash table size is %u\n", hashcache_table_nr);
+	recordcache_table=tmp;
+	recordcache_table_nr=max_entries;
+	recordcache_table_mask=recordcache_table_nr-1;
+	fprintf(stderr, "hash table size is %u\n", recordcache_table_nr);
 	return 1;
 }
 
@@ -304,34 +398,72 @@ int hashcache_init(unsigned max_entries) {
  ******************************************************************************/
 
 /*
- * 
  * Binary database
  * ===============
- * block size=every element is a block
+ * block size=1024. everything is in multiples of a block
  * 
- * superblock:
- * 	magic
- * 	maximum object count
- * 	hash table offset (size is based on max object count)
- * 	block bitmap offset	
+ * extents are 32-bits values. 22-bit offset, 10-bit length
  *
- * hash table:
- *  item id (if top bit is set, then item is a string)
- *  block number:22
- *  block count:10
+ *
+ * [ON-DISK]
+ * 
+ * superblock
+ * 	magic
+ * 	record table extents [16]
+ * 
+ * record table
+ * 	record extent [n]
+ * 
+ * [IN-MEMORY]
+ * 
+ * max records
+ * record table extents
+ * hash table for id to extent	
+ * freelist
+ * block bitmap
+ *
+ * [TYPES OF RECORDS]
+ *
+ * object_base/object_mob/object_item/object_room
+ * sparse integer to record number table
+ * string to record number table
+ * sparse record number to string table
+ *
  */
 
 #define BIDB_BLOCK_SZ 1024
+#define BIDB_SUPERBLOCK_SZ	1 /* size in blocks */
+
+/* macros for manipulating extent descriptors */
+#define BIDB_EXTENT_LENGTH_BITS 10U
+#define BIDB_EXTENT_OFFSET_BITS (32U-BIDB_EXTENT_LENGTH_BITS)
+#define BIDB_EXTENT(o,l) (((o)<<BIDB_EXTENT_LENGTH_BITS)|(l))
+#define BIDB_EXTENT_NONE 0U
+#define BIDB_EXTENT_LENGTH(e)	((e)&((1<<BIDB_EXTENT_LENGTH_BITS)-1))
+#define BIDB_EXTENT_OFFSET(e)	((uint_least32_t)(e)>>BIDB_EXTENT_LENGTH_BITS)
+/* an extent is a 32 bit value */
+#define BIDB_EXTENTPTR_SZ (32/CHAR_BIT)
+/* size of a record pointer (1 extent) */
+#define BIDB_RECPTR_SZ BIDB_EXTENTPTR_SZ
+
+struct bidb_extent {
+	unsigned length, offset; /* both are in block-sized units */
+};
+
 static FILE *bidb_file;
 static char *bidb_filename;
 static struct {
-	unsigned max_object_count, max_block_count, object_count;
-	bidb_blockofs_t hash_off, bitmap_off; /* in multiples of blocks */
+	struct bidb_extent record_extents[16];
+	unsigned record_max, block_max;
+	struct bidb_stats {
+		unsigned records_used;
+	} stats;
 } bidb_superblock;
 
-static int bidb_read_blocks(unsigned char *data, bidb_blockofs_t block_number, unsigned block_count) {
+/* block_offset starts AFTER superblock */
+static int bidb_read_blocks(unsigned char *data, bidb_blockofs_t block_offset, unsigned block_count) {
 	size_t res;
-	if(fseek(bidb_file, block_number * BIDB_BLOCK_SZ, SEEK_SET)) {
+	if(fseek(bidb_file, (block_offset+BIDB_SUPERBLOCK_SZ)*BIDB_BLOCK_SZ, SEEK_SET)) {
 		perror(bidb_filename);
 		return 0; /* failure */
 	}
@@ -345,9 +477,10 @@ static int bidb_read_blocks(unsigned char *data, bidb_blockofs_t block_number, u
 	return 1; /* success */
 }
 
-static int bidb_write_blocks(const unsigned char *data, bidb_blockofs_t block_number, unsigned block_count) {
+/* block_offset starts AFTER superblock */
+static int bidb_write_blocks(const unsigned char *data, bidb_blockofs_t block_offset, unsigned block_count) {
 	size_t res;
-	if(fseek(bidb_file, block_number * BIDB_BLOCK_SZ, SEEK_SET)) {
+	if(fseek(bidb_file, (block_offset+BIDB_SUPERBLOCK_SZ)*BIDB_BLOCK_SZ, SEEK_SET)) {
 		perror(bidb_filename);
 		return 0; /* failure */
 	}
@@ -361,27 +494,66 @@ static int bidb_write_blocks(const unsigned char *data, bidb_blockofs_t block_nu
 	return 1; /* success */
 }
 
+/* check extent to see if it is in range of nr_blocks */
+static int bidb_check_extent(struct bidb_extent *e, unsigned nr_blocks) {
+	unsigned end;
+	assert(e!=NULL);
+	if(!e)
+		return 1; /* ignore */
+	if(e->length==0) {
+		return 1; /* zero length extents don't exist */
+	}
+	end=(e->length+e->offset); /* end is last+1 */
+	return (end<=nr_blocks);
+}
+
 static int bidb_load_superblock(void) {
-	unsigned char data[BIDB_BLOCK_SZ];
-	if(bidb_read_blocks(data, 0, 1)) {
+	unsigned char data[BIDB_BLOCK_SZ*BIDB_SUPERBLOCK_SZ];
+	uint_least32_t tmp;
+	unsigned i, total_record_length;
+	long filesize;
+	int empty_fl;
+
+	/* get the file size and check it */
+	fseek(bidb_file, 0, SEEK_END);
+	filesize=ftell(bidb_file);
+	if((filesize%BIDB_BLOCK_SZ)!=0) {
+		fprintf(stderr, "%s:database file is not a multiple of %u bytes\n", bidb_filename, BIDB_BLOCK_SZ);
+		return 0;
+	}
+	bidb_superblock.block_max=filesize/BIDB_BLOCK_SZ;
+
+	if(bidb_read_blocks(data, -BIDB_SUPERBLOCK_SZ, BIDB_SUPERBLOCK_SZ)) {
 		if(memcmp("BiDB", data, 4)) {
 			fprintf(stderr, "%s:not a data file\n", bidb_filename);
 			return 0; /* failure : invalid magic */
 		}
-		bidb_superblock.object_count=0;
-		bidb_superblock.max_object_count=RD_BE32(data, 4);
-		bidb_superblock.max_block_count=RD_BE32(data, 8);
-		bidb_superblock.hash_off=RD_BE32(data, 12);
-		bidb_superblock.bitmap_off=RD_BE32(data, 16);
+		bidb_superblock.stats.records_used=0;
+
+		for(i=0,total_record_length=0;i<NR(bidb_superblock.record_extents);i++) {
+			tmp=RD_BE32(data, 4+4*i);
+			bidb_superblock.record_extents[i].offset=BIDB_EXTENT_OFFSET(tmp);
+			bidb_superblock.record_extents[i].length=BIDB_EXTENT_LENGTH(tmp);
+			total_record_length+=bidb_superblock.record_extents[i].length;
+		}
+		bidb_superblock.record_max=BIDB_BLOCK_SZ/BIDB_RECPTR_SZ*total_record_length;
 
 		/** sanity checks **/
-		if(roundup2(bidb_superblock.max_object_count)!=bidb_superblock.max_object_count) {
-			fprintf(stderr, "%s:superblock error:max_object_count must be a power of 2\n", bidb_filename);
-			return 0; /* failure : superblock data doesn't make sense */
+
+		for(i=0, empty_fl=0;i<NR(bidb_superblock.record_extents);i++) {
+			if(bidb_superblock.record_extents[i].length==0) { /* empty extent */
+				empty_fl=1;
+			} else if(empty_fl) {
+				fprintf(stderr, "%s:record table extent list has holes in it\n", bidb_filename);
+				return 0;
+			}
 		}
-		if(bidb_superblock.hash_off!=0 && bidb_superblock.bitmap_off==0) {
-			fprintf(stderr, "%s:superblock error:hash table allocated before block bitmap\n", bidb_filename);
-			return 0;
+
+		for(i=0;i<NR(bidb_superblock.record_extents);i++) {
+			if(!bidb_check_extent(&bidb_superblock.record_extents[i], filesize/(unsigned)BIDB_BLOCK_SZ)) {
+				fprintf(stderr, "%s:record table extent exceeds file size\n", bidb_filename);
+				return 0;
+			}
 		}
 
 		return 1; /* success */
@@ -392,83 +564,31 @@ static int bidb_load_superblock(void) {
 
 static int bidb_save_superblock(void) {
 	unsigned char data[BIDB_BLOCK_SZ];
+	uint_least32_t tmp;
+	unsigned i;
+
+	memset(data, 0, sizeof data);
 	memcpy(data, "BiDB", 4);
-	WR_BE32(data, 4, bidb_superblock.max_object_count);
-	WR_BE32(data, 8, bidb_superblock.max_block_count);
-	WR_BE32(data, 12, bidb_superblock.hash_off);
-	WR_BE32(data, 16, bidb_superblock.bitmap_off);
-	if(!bidb_write_blocks(data, 0, 1)) {
+
+	for(i=0;i<NR(bidb_superblock.record_extents);i++) {
+		tmp=BIDB_EXTENT(bidb_superblock.record_extents[i].offset, bidb_superblock.record_extents[i].length);
+		WR_BE32(data, 4+4*i, tmp);
+	}
+
+	if(!bidb_write_blocks(data, -BIDB_SUPERBLOCK_SZ, 1)) {
 		fprintf(stderr, "%s:could not write superblock\n", bidb_filename);		
 		return 0; /* failure */
 	}
 	return 1; /* success */
 }
 
-static int bidb_save_bitmap(void) {
-	unsigned bitmap_block_count; /* number of blocks to store the bitmap */
-	unsigned char tmp[BIDB_BLOCK_SZ];
-	unsigned i;
-
-	bitmap_block_count=ROUNDUP(bidb_superblock.max_block_count/CHAR_BIT, BIDB_BLOCK_SZ)/BIDB_BLOCK_SZ;
-
-	for(i=0;i<bitmap_block_count;i++) {
-		/* TODO: fill out tmp with data */
-		if(!bidb_read_blocks(tmp, bidb_superblock.bitmap_off+(signed)i, 1)) {
-		}
-	}
-}
-
-static int bidb_load_bitmap(void) {
-	long filesize;
-	unsigned bitmap_block_count; /* number of blocks to store the bitmap */
-
-	fseek(bidb_file, 0, SEEK_END);
-	filesize=ftell(bidb_file);
-
-	if((filesize%BIDB_BLOCK_SZ)!=0) {
-		fprintf(stderr, "%s:database file is not a multiple of %u bytes\n", bidb_filename, BIDB_BLOCK_SZ);
+static int bidb_load_record_table(void) {
+	if(!recordcache_init(bidb_superblock.record_max)) {
+		fprintf(stderr, "%s:could not initialize record table\n", bidb_filename);		
 		return 0;
 	}
-
-	/* round up bitmap count to fill entire blocks */
-	bitmap_block_count=ROUNDUP(bidb_superblock.max_block_count/CHAR_BIT, BIDB_BLOCK_SZ)/BIDB_BLOCK_SZ;
-
-	if(bidb_superblock.bitmap_off) {
-		/* load the bitmap */
-		unsigned char *tmp;
-		tmp=calloc(BIDB_BLOCK_SZ, bitmap_block_count);
-		if(!tmp) {
-			perror("malloc()");
-			return 0; /* failure - could not allocate memory */
-		}
-		if(!bidb_read_blocks(tmp, bidb_superblock.bitmap_off, bitmap_block_count)) {
-			fprintf(stderr, "%s:could not load block bitmap\n", bidb_filename);
-			free(tmp);
-			return 0;
-		}
-		bitmap_loadmem(tmp, bitmap_block_count*BIDB_BLOCK_SZ*CHAR_BIT);
-		free(tmp);
-	} else {
-		/* create a new one from scratch */
-		fprintf(stderr, "%s:creating new block bitmap\n", bidb_filename);
-		assert(bidb_superblock.hash_off==0); /* hash cannot be allocated yet */
-		bitmap_resize(bidb_superblock.max_block_count);
-		bitmap_set(0, 1); /* superblock is allocated by default */
-		/* allocate the block bitmap in the block bitmap */
-		assert(bidb_superblock.bitmap_off>0);
-		bitmap_set((unsigned)bidb_superblock.bitmap_off, bitmap_block_count);
-
-		bidb_save_bitmap();
-	}
-}
-
-static int bidb_load_hash(void) {
-	if(!hashcache_init(bidb_superblock.max_object_count)) {
-		fprintf(stderr, "%s:could not initialize hash table\n", bidb_filename);		
-		return 0;
-	}
-	if(bidb_superblock.hash_off==0) {
-		/* create the hash table on disk */
+	if(bidb_superblock.record_extents[0].length==0) { /* are there any extents? */
+		/* create the record table on disk */
 		/* TODO: find the next available size */
 	}
 	return 1; /* */
@@ -496,11 +616,9 @@ int bidb_open(const char *filename, int create_fl) {
 	if(create_fl) {
 		if(!bidb_load_superblock()) {
 			fprintf(stderr, "%s:creating new superblock\n", bidb_filename);
-			bidb_superblock.object_count=0;
-			bidb_superblock.max_object_count=BIDB_MAX_OBJECT_DEFAULT;
-			bidb_superblock.max_block_count=BIDB_MAX_BLOCKS_DEFAULT;
-			bidb_superblock.hash_off=0;
-			bidb_superblock.bitmap_off=0;
+			bidb_superblock.stats.records_used=0;
+			bidb_superblock.record_max=BIDB_DEFAULT_MAX_RECORDS;
+			bidb_superblock.block_max=BIDB_DEFAULT_MAX_BLOCKS;
 			if(!bidb_save_superblock()) {
 				bidb_close();
 				return 0; /* failure */
@@ -514,20 +632,46 @@ int bidb_open(const char *filename, int create_fl) {
 		}
 	}
 
-	if(!bidb_load_bitmap()) {
-		fprintf(stderr, "%s:could not load bitmap\n", bidb_filename);
-		bidb_close();
-		return 0; /* failure */
-	}
-
-	if(!bidb_load_hash()) {
-		fprintf(stderr, "%s:could not load hash\n", bidb_filename);
+	if(!bidb_load_record_table()) {
+		fprintf(stderr, "%s:could not load record table\n", bidb_filename);
 		bidb_close();
 		return 0; /* failure */
 	}
 	return 1; /* success */
 }
 
+void bidb_show_info(void) {
+#define BIDB_HIGHEST_RECORD 
+#define BIDB_HIGHEST_BLOCK 
+	const uint_least32_t
+		max_extent_size=(BIDB_BLOCK_SZ<<BIDB_EXTENT_LENGTH_BITS)-1U,
+		records_per_block=BIDB_BLOCK_SZ/BIDB_RECPTR_SZ,
+		records_per_extent=records_per_block<<BIDB_EXTENT_LENGTH_BITS,
+		max_records=NR(bidb_superblock.record_extents)*records_per_extent;
+		
+
+	printf(
+		"BiDB configuration info:\n"
+		"  block size: %u bytes\n"
+		"  max extent size: %u blocks (%" PRIu32 " bytes)\n"
+		"  records per block: %" PRIu32 " records\n"
+		"  records per extent: %" PRIu32 " records\n"
+		"  number of record extents: %" PRIu32 " extents\n"
+		"  max number of record: %" PRIu32 " records\n"
+		"  max total size for all records: %" PRIu64 " bytes\n"
+		"  max blocks: %u blocks (%" PRIu64 " bytes)\n", 
+		BIDB_BLOCK_SZ,
+		1<<BIDB_EXTENT_LENGTH_BITS,
+		max_extent_size,
+		records_per_block,
+		records_per_extent,
+		NR(bidb_superblock.record_extents),
+		max_records,
+		(uint_least64_t)max_records<<BIDB_EXTENT_LENGTH_BITS,
+		1<<BIDB_EXTENT_OFFSET_BITS,
+		(uint_least64_t)BIDB_BLOCK_SZ<<BIDB_EXTENT_OFFSET_BITS
+	);
+}
 /****************************************************************************** 
  * Objects
  ******************************************************************************/
@@ -608,6 +752,11 @@ struct object_base *object_iscached(unsigned id) {
 int main(void) {
 	bidb_open(BIDB_FILE, 1);
 	bidb_close();
+	/*
+	bitmap_resize(1024);
+	bitmap_clear(5, 3);
+	*/
+	bidb_show_info();
 	return 0;
 }
 
