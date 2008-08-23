@@ -3,6 +3,18 @@
  */
 
 /****************************************************************************** 
+ * Design Documentation
+ *
+ * components:
+ * 	hashcache - looks up ids. loads blobs from disk if not loaded.
+ * 	bidb - low level file access fuctions. manages blocks for hashcache
+ * 	object_base - a generic object type
+ * 	object_xxx - free/load/save routines for objects
+ *
+ *
+ ******************************************************************************/
+
+/****************************************************************************** 
  * Configuration
  ******************************************************************************/
 
@@ -517,35 +529,20 @@ int bidb_open(const char *filename, int create_fl) {
 }
 
 /****************************************************************************** 
- * Database Records
- ******************************************************************************/
-
-/* typefile file format:
- * type
- * data...
- */
-
-struct rec_controller {
-	char *record_type_name;		/* identifies the class of record */
-	void (*record_load)(FILE *f);
-	void (*record_save)(FILE *f, void *data);
-};
-
-static struct rec_controller *rec_controller_head;
-
-/* finds a Record Controller by name
- * NULL on failure */
-const struct rec_controller *rec_controller_get(const char *name) {
-}
-
-/****************************************************************************** 
  * Objects
  ******************************************************************************/
 
+/* defines an object's class */
+struct object_controller {
+	char *type_name;		/* identifies the class of record */
+	void (*load)(FILE *f);
+	void (*save)(FILE *f, void *data);
+	void (*free)(void *);			/* for freeing an object */
+};
+
 struct object_base {
 	unsigned id;
-	const struct rec_controller *rec_con;
-	void (*object_free)(void *);			/* for freeing an object */
+	const struct object_controller *con;
 };
 
 struct object_mob {
@@ -580,8 +577,12 @@ struct object_base *item_to_base(struct object_item *item) {
 
 /* frees an object of any type */
 void object_free(struct object_base *obj) {
-	if(obj->object_free) {
-		obj->object_free(obj);
+	assert(obj!=NULL);
+	assert(obj->con!=NULL);
+	if(!obj)
+		return; /* ignore NULL */
+	if(obj->con->free) {
+		obj->con->free(obj);
 	} else {
 		free(obj);
 	}
