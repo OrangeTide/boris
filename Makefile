@@ -17,4 +17,6 @@ CPPFLAGS:=-D_XOPEN_SOURCE=600
 
 # LDLIBS:=
 
-boris : boris.o
+boris : boris.c
+
+
