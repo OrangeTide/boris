@@ -49,7 +49,7 @@
 #define BIDB_FILE "boris.bidb"
 
 #define BIDB_DEFAULT_MAX_RECORDS 131072 
-#define BIDB_DEFAULT_MAX_BLOCKS 524288
+/* #define BIDB_DEFAULT_MAX_BLOCKS 524288 */
 
 /****************************************************************************** 
  * Headers
@@ -612,6 +612,15 @@ static struct {
 	} stats;
 } bidb_superblock;
 
+int bidb_close(void) {
+	if(bidb_file) {
+		fclose(bidb_file);
+		bidb_file=0;
+	}
+	free(bidb_filename);
+	bidb_filename=0;
+}
+
 /* block_offset starts AFTER superblock */
 static int bidb_read_blocks(unsigned char *data, bidb_blockofs_t block_offset, unsigned block_count) {
 	size_t res;
@@ -632,6 +641,7 @@ static int bidb_read_blocks(unsigned char *data, bidb_blockofs_t block_offset, u
 /* block_offset starts AFTER superblock */
 static int bidb_write_blocks(const unsigned char *data, bidb_blockofs_t block_offset, unsigned block_count) {
 	size_t res;
+
 	if(fseek(bidb_file, (block_offset+BIDB_SUPERBLOCK_SZ)*BIDB_BLOCK_SZ, SEEK_SET)) {
 		perror(bidb_filename);
 		return 0; /* failure */
@@ -719,6 +729,8 @@ static int bidb_save_superblock(void) {
 	uint_least32_t tmp;
 	unsigned i;
 
+	fprintf(stderr, "%s:saving superblock\n", bidb_filename);
+
 	memset(data, 0, sizeof data);
 	memcpy(data, "BiDB", 4);
 
@@ -734,6 +746,22 @@ static int bidb_save_superblock(void) {
 	return 1; /* success */
 }
 
+static int bidb_save_record_table(void) {
+	unsigned char data[BIDB_BLOCK_SZ];
+	unsigned i, j;
+	fprintf(stderr, "Saving record table\n");
+	for(i=0;i<NR(bidb_superblock.record_extents);i++) {
+		for(j=0;j<bidb_superblock.record_extents[i].length;j++) {
+			memset(data, 0, sizeof data); /* TODO: fill with record data */
+			if(!bidb_write_blocks(data, (signed)(bidb_superblock.record_extents[i].offset+j), 1)) {
+				fprintf(stderr, "%s:could not write record table\n", bidb_filename);		
+				return 0; /* failure */
+			}
+		}
+	}
+	return 1;
+}
+
 static int bidb_load_record_table(void) {
 	if(!recordcache_init(bidb_superblock.record_max)) {
 		fprintf(stderr, "%s:could not initialize record table\n", bidb_filename);		
@@ -741,44 +769,51 @@ static int bidb_load_record_table(void) {
 	}
 	if(bidb_superblock.record_extents[0].length==0) { /* are there any extents? */
 		/* create the record table on disk */
-		/* TODO: find the next available size */
+		fprintf(stderr, "Creating new record table\n");
+
+		/* TODO: break it up into extent-sized pieces */
+		bidb_superblock.record_max=BIDB_DEFAULT_MAX_RECORDS;
+		bidb_superblock.record_extents[0].offset=0; /* TODO: allocate the next available block */
+		bidb_superblock.record_extents[0].length=ROUNDUP(bidb_superblock.record_max*BIDB_RECPTR_SZ, BIDB_BLOCK_SZ)/BIDB_BLOCK_SZ;
+		bidb_save_record_table();
+
+		/* updated the superblock with the record table */
+		if(!bidb_save_superblock()) {
+			bidb_close();
+			return 0; /* failure */
+		}
 	}
 	return 1; /* */
 }
 
-int bidb_close(void) {
-	if(bidb_file) {
-		fclose(bidb_file);
-		bidb_file=0;
-	}
-	free(bidb_filename);
-	bidb_filename=0;
-}
-
 /* create_fl will create if the superblock does not exist */
-int bidb_open(const char *filename, int create_fl) {
+int bidb_open(const char *filename) {
+	int create_fl=0;
 	if(bidb_file)
 		bidb_close();
-	bidb_file=fopen(filename, create_fl ? "a+b" : "r+b");
+	bidb_file=fopen(filename, "r+b");
 	if(!bidb_file) {
-		perror(filename);
-		return 0; /* failure */
+		fprintf(stderr, "%s:creating a new file\n", filename);
+		bidb_file=fopen(filename, "w+b");
+		if(!bidb_file) {
+			perror(filename);
+			return 0; /* failure */
+		}
+		create_fl=1;
 	}
 	bidb_filename=strdup(filename);
-	if(create_fl) {
+	
+	if(!create_fl) {
 		if(!bidb_load_superblock()) {
-			fprintf(stderr, "%s:creating new superblock\n", bidb_filename);
-			bidb_superblock.stats.records_used=0;
-			bidb_superblock.record_max=BIDB_DEFAULT_MAX_RECORDS;
-			bidb_superblock.block_max=BIDB_DEFAULT_MAX_BLOCKS;
-			if(!bidb_save_superblock()) {
-				bidb_close();
-				return 0; /* failure */
-			}
+			bidb_close();
 			return 0; /* failure */
 		}
 	} else {
-		if(!bidb_load_superblock()) {
+		fprintf(stderr, "%s:creating new superblock\n", bidb_filename);
+		bidb_superblock.stats.records_used=0;
+		bidb_superblock.record_max=0;
+		bidb_superblock.block_max=0;
+		if(!bidb_save_superblock()) {
 			bidb_close();
 			return 0; /* failure */
 		}
@@ -902,15 +937,18 @@ struct object_base *object_iscached(unsigned id) {
  ******************************************************************************/
 
 int main(void) {
+	/*
 #ifndef NDEBUG
 	bitmap_test();
 #endif
-
-	/*
-	bidb_open(BIDB_FILE, 1);
-	bidb_close();
-	bidb_show_info();
 	*/
+
+	bidb_show_info();
+	if(!bidb_open(BIDB_FILE)) {
+		printf("Failed\n");
+		return EXIT_FAILURE;
+	}
+	bidb_close();
 	
 	return 0;
 }
