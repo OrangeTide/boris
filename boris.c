@@ -134,6 +134,26 @@
 #define ROR32(a,b) (((uint_least32_t)(a)>>(b))|((uint_least32_t)(a)<<(32-(b))))
 #define ROR64(a,b) (((uint_least64_t)(a)>>(b))|((uint_least64_t)(a)<<(64-(b))))
 
+/** Bitfield operations **/
+/* return in type sized elements to create a bitfield of 'bits' bits */
+#define BITFIELD(bits, type) (((bits)+(CHAR_BIT*sizeof(type))-1)/(CHAR_BIT*sizeof(type)))
+
+/* set bit position 'bit' in bitfield x */
+#define BITSET(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]|=1<<((bit)&((CHAR_BIT*sizeof *(x))-1))
+
+/* clear bit position 'bit' in bitfield x */
+#define BITCLR(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]&=~(1<<((bit)&((CHAR_BIT*sizeof *(x))-1)))
+
+/* toggle bit position 'bit' in bitfield x */
+#define BITINV(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]^=1<<((bit)&((CHAR_BIT*sizeof *(x))-1))
+
+/* return a large non-zero number if the bit is set, zero if clear */
+#define BITTEST(x, bit) ((x)[(bit)/((CHAR_BIT*sizeof *(x)))]&(1<<((bit)&((CHAR_BIT*sizeof *(x))-1))))
+
+/* checks that bit is in range for bitfield x */
+#define BITRANGE(x, bit) ((bit)<(sizeof(x)*CHAR_BIT))
+
+
 /****************************************************************************** 
  * Types and data structures
  ******************************************************************************/
@@ -618,7 +638,8 @@ int recordcache_init(unsigned max_entries) {
 #define BIDB_EXTENTPTR_SZ (32/CHAR_BIT)
 /* size of a record pointer (1 extent) */
 #define BIDB_RECPTR_SZ BIDB_EXTENTPTR_SZ
-
+#define BIDB_RECORDS_PER_BLOCK (BIDB_BLOCK_SZ/BIDB_RECPTR_SZ)
+#define BIDB_RECORDS_PER_EXTENT (BIDB_RECORDS_PER_BLOCK<<BIDB_EXTENT_LENGTH_BITS)
 struct bidb_extent {
 	unsigned length, offset; /* both are in block-sized units */
 };
@@ -627,6 +648,8 @@ static FILE *bidb_file;
 static char *bidb_filename;
 static struct {
 	struct bidb_extent record_extents[16];
+	/* one bit per block */
+	unsigned record_dirty_blocks[BITFIELD(16*BIDB_RECORDS_PER_EXTENT,unsigned)];
 	unsigned record_max, block_max;
 	struct bidb_stats {
 		unsigned records_used;
@@ -713,6 +736,8 @@ static int bidb_load_superblock(void) {
 		}
 		bidb_superblock.stats.records_used=0;
 
+		memset(&bidb_superblock.record_dirty_blocks, 0, sizeof bidb_superblock.record_dirty_blocks);
+
 		for(i=0,total_record_length=0;i<NR(bidb_superblock.record_extents);i++) {
 			tmp=RD_BE32(data, 4+4*i);
 			bidb_superblock.record_extents[i].offset=BIDB_EXTENT_OFFSET(tmp);
@@ -769,15 +794,21 @@ static int bidb_save_superblock(void) {
 
 static int bidb_save_record_table(void) {
 	unsigned char data[BIDB_BLOCK_SZ];
-	unsigned i, j;
+	unsigned i, j, ofs;
 	fprintf(stderr, "Saving record table\n");
-	/* TODO: use bitmap to save only blocks with dirty entries */
-	for(i=0;i<NR(bidb_superblock.record_extents);i++) {
-		for(j=0;j<bidb_superblock.record_extents[i].length;j++) {
-			memset(data, 0, sizeof data); /* TODO: fill with record data */
-			if(!bidb_write_blocks(data, (signed)(bidb_superblock.record_extents[i].offset+j), 1)) {
-				fprintf(stderr, "%s:could not write record table\n", bidb_filename);		
-				return 0; /* failure */
+	/* uses bitarray to save only blocks with dirty entries */
+	for(i=0,ofs=0;i<NR(bidb_superblock.record_extents);i++) {
+		for(j=0;j<bidb_superblock.record_extents[i].length;j++,ofs++) {
+			if(BITTEST(bidb_superblock.record_dirty_blocks, ofs)) {
+				/*
+				fprintf(stderr, "%s:writing record block %d\n", bidb_filename, ofs);
+				*/
+				BITCLR(bidb_superblock.record_dirty_blocks, ofs);
+				memset(data, 0, sizeof data); /* TODO: fill with record data */
+				if(!bidb_write_blocks(data, (signed)(bidb_superblock.record_extents[i].offset+j), 1)) {
+					fprintf(stderr, "%s:could not write record table\n", bidb_filename);		
+					return 0; /* failure */
+				}
 			}
 		}
 	}
@@ -785,6 +816,7 @@ static int bidb_save_record_table(void) {
 }
 
 static int bidb_load_record_table(void) {
+	unsigned i;
 	if(!recordcache_init(bidb_superblock.record_max)) {
 		fprintf(stderr, "%s:could not initialize record table\n", bidb_filename);		
 		return 0;
@@ -797,6 +829,10 @@ static int bidb_load_record_table(void) {
 		bidb_superblock.record_max=BIDB_DEFAULT_MAX_RECORDS;
 		bidb_superblock.record_extents[0].offset=0; /* TODO: allocate the next available block */
 		bidb_superblock.record_extents[0].length=ROUNDUP(bidb_superblock.record_max*BIDB_RECPTR_SZ, BIDB_BLOCK_SZ)/BIDB_BLOCK_SZ;
+		for(i=0;i<bidb_superblock.record_max/BIDB_RECORDS_PER_BLOCK;i++) {
+			BITSET(bidb_superblock.record_dirty_blocks, i);
+		}
+
 		bidb_save_record_table();
 
 		/* updated the superblock with the record table */
