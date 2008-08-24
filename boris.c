@@ -10,7 +10,7 @@
  * 	bidb - low level file access fuctions. manages blocks for recordcache
  * 	object_base - a generic object type
  * 	object_xxx - free/load/save routines for objects
- * 	bitmap - manages block bitmap
+ * 	bitmap - manages large bitmaps
  * 	freelist - a malloc-like abstraction for the block bitmaps
  *
  * objects:
@@ -247,48 +247,64 @@ static uint_least32_t hash_uint64(uint_least64_t key) {
 }
 
 /****************************************************************************** 
- * Block Bitmap
+ * Bitmap API
  ******************************************************************************/
 
-#define BITMAP_BITSIZE ((sizeof *bitmap)*CHAR_BIT)
+#define BITMAP_BITSIZE (sizeof(unsigned)*CHAR_BIT)
 
-static unsigned *bitmap;
-static size_t bitmap_allocbits;
+struct bitmap {
+	unsigned *bitmap;
+	size_t bitmap_allocbits;
+};
+
+void bitmap_init(struct bitmap *bitmap) {
+	assert(bitmap!=NULL);
+	bitmap->bitmap=0;
+	bitmap->bitmap_allocbits=0;
+}
+
+void bitmap_free(struct bitmap *bitmap) {
+	assert(bitmap!=NULL); /* catch when calling free on NULL */
+	if(bitmap) {
+		free(bitmap->bitmap);
+		bitmap_init(bitmap);
+	}
+}
 
 /* newbits is in bits (not bytes) */
-int bitmap_resize(size_t newbits) {
+int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	unsigned *tmp;
 
 	newbits=ROUNDUP(newbits, BITMAP_BITSIZE);
 	fprintf(stderr, "%s():Allocating %d bytes\n", __func__, newbits/CHAR_BIT);
-	tmp=realloc(bitmap, newbits/CHAR_BIT);
+	tmp=realloc(bitmap->bitmap, newbits/CHAR_BIT);
 	if(!tmp) {
 		perror("realloc()");
 		return 0; /* failure */
 	}
-	if(bitmap_allocbits<newbits) {
+	if(bitmap->bitmap_allocbits<newbits) {
 		/* clear out the new bits */
 		size_t len;
-		len=(newbits-bitmap_allocbits)/CHAR_BIT;
-		printf("%s():Clearing %d bytes (ofs %d)\n", __func__, len, bitmap_allocbits/BITMAP_BITSIZE);
-		memset(tmp+bitmap_allocbits/BITMAP_BITSIZE, 0, len);
+		len=(newbits-bitmap->bitmap_allocbits)/CHAR_BIT;
+		printf("%s():Clearing %d bytes (ofs %d)\n", __func__, len, bitmap->bitmap_allocbits/BITMAP_BITSIZE);
+		memset(tmp+bitmap->bitmap_allocbits/BITMAP_BITSIZE, 0, len);
 	}
 
-	bitmap=tmp;
-	bitmap_allocbits=newbits;
+	bitmap->bitmap=tmp;
+	bitmap->bitmap_allocbits=newbits;
 	return 1; /* success */
 }
 
-void bitmap_clear(unsigned ofs, unsigned len) {
+void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
 
 	/* allocate more */
-	if(ofs+len>bitmap_allocbits) {
-		bitmap_resize(ofs+len);
+	if(ofs+len>bitmap->bitmap_allocbits) {
+		bitmap_resize(bitmap, ofs+len);
 	}
 
-	p=bitmap+ofs/BITMAP_BITSIZE; /* point to the first word */
+	p=bitmap->bitmap+ofs/BITMAP_BITSIZE; /* point to the first word */
 	
 	head_ofs=ofs%BITMAP_BITSIZE;
 	head_len=len>BITMAP_BITSIZE-ofs ? BITMAP_BITSIZE-ofs : len;
@@ -312,16 +328,16 @@ void bitmap_clear(unsigned ofs, unsigned len) {
 	}
 }
 
-void bitmap_set(unsigned ofs, unsigned len) {
+void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
 
 	/* allocate more */
-	if(ofs+len>bitmap_allocbits) {
-		bitmap_resize(ofs+len);
+	if(ofs+len>bitmap->bitmap_allocbits) {
+		bitmap_resize(bitmap, ofs+len);
 	}
 
-	p=bitmap+ofs/BITMAP_BITSIZE; /* point to the first word */
+	p=bitmap->bitmap+ofs/BITMAP_BITSIZE; /* point to the first word */
 	
 	head_ofs=ofs%BITMAP_BITSIZE;
 	head_len=len>BITMAP_BITSIZE-ofs ? BITMAP_BITSIZE-ofs : len;
@@ -345,9 +361,9 @@ void bitmap_set(unsigned ofs, unsigned len) {
 }
 
 /* gets a single bit */
-int bitmap_get(unsigned ofs) {
-	if(ofs<bitmap_allocbits) {
-		return (bitmap[ofs/BITMAP_BITSIZE]>>(ofs%BITMAP_BITSIZE))&1;
+int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
+	if(ofs<bitmap->bitmap_allocbits) {
+		return (bitmap->bitmap[ofs/BITMAP_BITSIZE]>>(ofs%BITMAP_BITSIZE))&1;
 	} else {
 		return 0; /* outside of the range, the bits are cleared */
 	}
@@ -355,15 +371,15 @@ int bitmap_get(unsigned ofs) {
 
 /* return the position of the next set bit
  * -1 if the end of the bits was reached */ 
-int bitmap_next_set(unsigned ofs) {
+int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
 	
-	len=bitmap_allocbits/BITMAP_BITSIZE;
+	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
 	/* TODO: check the head */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
-		if(bitmap[i]!=0) {
+		if(bitmap->bitmap[i]!=0) {
 			/* found a set bit - scan the word to find the position */
-			for(bofs=0;((bitmap[i]>>bofs)&1)==0;bofs++) ;
+			for(bofs=0;((bitmap->bitmap[i]>>bofs)&1)==0;bofs++) ;
 			return i*BITMAP_BITSIZE+bofs;
 		}
 	}
@@ -373,15 +389,15 @@ int bitmap_next_set(unsigned ofs) {
 
 /* return the position of the next set bit
  * -1 if the end of the bits was reached */ 
-int bitmap_next_clear(unsigned ofs) {
+int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
 	
-	len=bitmap_allocbits/BITMAP_BITSIZE;
+	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
 	/* TODO: check the head */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
-		if(bitmap[i]!=~0U) {
+		if(bitmap->bitmap[i]!=~0U) {
 			/* found a set bit - scan the word to find the position */
-			for(bofs=0;((bitmap[i]>>bofs)&1)==1;bofs++) ;
+			for(bofs=0;((bitmap->bitmap[i]>>bofs)&1)==1;bofs++) ;
 			return i*BITMAP_BITSIZE+bofs;
 		}
 	}
@@ -392,15 +408,15 @@ int bitmap_next_clear(unsigned ofs) {
 /* loads a chunk of memory into the bitmap buffer
  * erases previous bitmap buffer
  * len is in bytes */
-void bitmap_loadmem(unsigned char *d, size_t len) {
+void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len) {
 	unsigned *p, word_count, i;
 
 	/* resize if too small */
-	if((len*CHAR_BIT)>bitmap_allocbits) {
-		bitmap_resize(len*CHAR_BIT);
+	if((len*CHAR_BIT)>bitmap->bitmap_allocbits) {
+		bitmap_resize(bitmap, len*CHAR_BIT);
 	}
 
-	p=bitmap;
+	p=bitmap->bitmap;
 	word_count=len/sizeof *p; /* number of words in d */
 
 	/* first do the words */
@@ -428,66 +444,71 @@ void bitmap_loadmem(unsigned char *d, size_t len) {
 }
 
 /* returns the length in bytes of the entire bitmap table */
-unsigned bitmap_length(void) {
-	return ROUNDUP(bitmap_allocbits, CHAR_BIT)/CHAR_BIT;
+unsigned bitmap_length(struct bitmap *bitmap) {
+	return bitmap ? ROUNDUP(bitmap->bitmap_allocbits, CHAR_BIT)/CHAR_BIT : 0;
 }
 
 #ifndef NDEBUG
 void bitmap_test(void) {
 	int i;
-	bitmap_resize(1024);
+	struct bitmap bitmap;
+
+	bitmap_init(&bitmap);
+	bitmap_resize(&bitmap, 1024);
 	/* fill in with a test pattern */
 	for(i=0;i<5;i++) {
-		bitmap[i]=0x12345678;
+		bitmap.bitmap[i]=0x12345678;
 	}
 
-	bitmap_set(7, 1);
+	bitmap_set(&bitmap, 7, 1);
 	/* display the test pattern */
 	printf("bitmap_set():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap[i], convert_number(bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
 	}
 
-	bitmap_set(12, 64);
+	bitmap_set(&bitmap, 12, 64);
 	/* display the test pattern */
 	printf("bitmap_set():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap[i], convert_number(bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
 	}
 
-	bitmap_clear(7, 1);
+	bitmap_clear(&bitmap, 7, 1);
 	/* display the test pattern */
 	printf("bitmap_clear():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap[i], convert_number(bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
 	}
 
-	bitmap_clear(12, 64);
+	bitmap_clear(&bitmap, 12, 64);
 	/* display the test pattern */
 	printf("bitmap_clear():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap[i], convert_number(bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
 	}
 
-	bitmap_set(0, BITMAP_BITSIZE*5);
+	bitmap_set(&bitmap, 0, BITMAP_BITSIZE*5);
 	/* display the test pattern */
 	printf("bitmap_set():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap[i], convert_number(bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
 	}
 
-	bitmap_clear(0, BITMAP_BITSIZE*5);
-	bitmap_set(101, 1);
-	printf("word at bit 101 = 0x%08x\n", bitmap[101/BITMAP_BITSIZE]);
-	printf("next set starting at 9 = %d\n", bitmap_next_set(9));
-	bitmap_clear(101, 1);
+	bitmap_clear(&bitmap, 0, BITMAP_BITSIZE*5);
+	bitmap_set(&bitmap, 101, 1);
+	printf("word at bit 101 = 0x%08x\n", bitmap.bitmap[101/BITMAP_BITSIZE]);
+	printf("next set starting at 9 = %d\n", bitmap_next_set(&bitmap, 9));
+	bitmap_clear(&bitmap, 101, 1);
 
-	bitmap_set(0, 101);
-	printf("next clear starting at 9 = %d\n", bitmap_next_clear(9));
-	bitmap_clear(0, 101);
+	bitmap_set(&bitmap, 0, 101);
+	printf("next clear starting at 9 = %d\n", bitmap_next_clear(&bitmap, 9));
+	bitmap_clear(&bitmap, 0, 101);
 
-	bitmap_clear(0, BITMAP_BITSIZE*5);
-	printf("next set should return -1 = %d\n", bitmap_next_set(0));
+	bitmap_clear(&bitmap, 0, BITMAP_BITSIZE*5);
+	printf("next set should return -1 = %d\n", bitmap_next_set(&bitmap, 0));
+
+	bitmap_free(&bitmap);
 }
 #endif
 
@@ -750,6 +771,7 @@ static int bidb_save_record_table(void) {
 	unsigned char data[BIDB_BLOCK_SZ];
 	unsigned i, j;
 	fprintf(stderr, "Saving record table\n");
+	/* TODO: use bitmap to save only blocks with dirty entries */
 	for(i=0;i<NR(bidb_superblock.record_extents);i++) {
 		for(j=0;j<bidb_superblock.record_extents[i].length;j++) {
 			memset(data, 0, sizeof data); /* TODO: fill with record data */
