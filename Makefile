@@ -4,7 +4,7 @@
 # universal settings for all platforms and architectures
 ##############################################################################
 
-CFLAGS:=-Wall -Wextra -Wuninitialized -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -fstrict-aliasing -Wstrict-aliasing -Wpointer-arith -Wcast-align -Wstrict-prototypes -Wold-style-definition -Wredundant-decls -Wnested-externs -std=c89 -pedantic 
+CFLAGS:=-Wall -Wextra -Wuninitialized -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -fstrict-aliasing -Wstrict-aliasing -Wpointer-arith -Wcast-align -Wstrict-prototypes -Wold-style-definition -Wredundant-decls -Wnested-externs -std=c99 -pedantic 
 # debugging and profiling
 CFLAGS+=-g -pg -O1
 # optimization

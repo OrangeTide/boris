@@ -48,8 +48,7 @@
 /* database file */ 
 #define BIDB_FILE "boris.bidb"
 
-#define BIDB_DEFAULT_MAX_RECORDS 131072 
-/* #define BIDB_DEFAULT_MAX_BLOCKS 524288 */
+#define BIDB_DEFAULT_MAX_RECORDS 131072
 
 /****************************************************************************** 
  * Headers
@@ -539,10 +538,14 @@ void bitmap_test(void) {
 /* allocates blocks from the bitmap
  * returns offset of the allocation */
 long freelist_alloc(unsigned count) {
+	abort();
+	return 0;
 }
 
 /* adds a piece to the freelist pool */
 long freelist_pool(long ofs, unsigned count) {
+	abort();
+	return 0;
 }
 
 /****************************************************************************** 
@@ -551,8 +554,6 @@ long freelist_pool(long ofs, unsigned count) {
 
 struct recordcache_entry {
 	unsigned id;
-	bidb_blockofs_t ofs;
-	unsigned count;
 	struct lru_entry lru; /* if data is not NULL, then the data is loaded */
 };
 
@@ -597,6 +598,7 @@ int recordcache_init(unsigned max_entries) {
  * 
  * extents are 32-bits values. 22-bit offset, 10-bit length
  *
+ * extent length is 1 to 1024. (0 is not a valid encoding)
  *
  * [ON-DISK]
  * 
@@ -630,9 +632,9 @@ int recordcache_init(unsigned max_entries) {
 /* macros for manipulating extent descriptors */
 #define BIDB_EXTENT_LENGTH_BITS 10U
 #define BIDB_EXTENT_OFFSET_BITS (32U-BIDB_EXTENT_LENGTH_BITS)
-#define BIDB_EXTENT(o,l) (((o)<<BIDB_EXTENT_LENGTH_BITS)|(l))
-#define BIDB_EXTENT_NONE 0U
-#define BIDB_EXTENT_LENGTH(e)	((e)&((1<<BIDB_EXTENT_LENGTH_BITS)-1))
+#define BIDB_EXTENT(o,l) (((o)<<BIDB_EXTENT_LENGTH_BITS)|((l)-1))
+#define BIDB_EXTENT_NONE 0U		/* this value means at block 0 you must be at least 2 blocks long */
+#define BIDB_EXTENT_LENGTH(e)	(((e)&((1<<BIDB_EXTENT_LENGTH_BITS)-1))+1)
 #define BIDB_EXTENT_OFFSET(e)	((uint_least32_t)(e)>>BIDB_EXTENT_LENGTH_BITS)
 /* an extent is a 32 bit value */
 #define BIDB_EXTENTPTR_SZ (32/CHAR_BIT)
@@ -649,7 +651,7 @@ static char *bidb_filename;
 static struct {
 	struct bidb_extent record_extents[16];
 	/* one bit per block */
-	unsigned record_dirty_blocks[BITFIELD(16*BIDB_RECORDS_PER_EXTENT,unsigned)];
+	unsigned record_dirty_blocks[BITFIELD(16<<BIDB_EXTENT_LENGTH_BITS,unsigned)];
 	unsigned record_max, block_max;
 	struct bidb_stats {
 		unsigned records_used;
@@ -663,6 +665,7 @@ int bidb_close(void) {
 	}
 	free(bidb_filename);
 	bidb_filename=0;
+	return 1;
 }
 
 /* block_offset starts AFTER superblock */
@@ -710,6 +713,7 @@ static int bidb_check_extent(struct bidb_extent *e, unsigned nr_blocks) {
 		return 1; /* zero length extents don't exist */
 	}
 	end=(e->length+e->offset); /* end is last+1 */
+	fprintf(stderr, "end:%u blocks:%u\n", end, nr_blocks);
 	return (end<=nr_blocks);
 }
 
@@ -740,8 +744,14 @@ static int bidb_load_superblock(void) {
 
 		for(i=0,total_record_length=0;i<NR(bidb_superblock.record_extents);i++) {
 			tmp=RD_BE32(data, 4+4*i);
-			bidb_superblock.record_extents[i].offset=BIDB_EXTENT_OFFSET(tmp);
-			bidb_superblock.record_extents[i].length=BIDB_EXTENT_LENGTH(tmp);
+
+			if(tmp==BIDB_EXTENT_NONE) { /* empty extent */
+				bidb_superblock.record_extents[i].offset=0;
+				bidb_superblock.record_extents[i].length=0;
+			} else {
+				bidb_superblock.record_extents[i].offset=BIDB_EXTENT_OFFSET(tmp);
+				bidb_superblock.record_extents[i].length=BIDB_EXTENT_LENGTH(tmp);
+			}
 			total_record_length+=bidb_superblock.record_extents[i].length;
 		}
 		bidb_superblock.record_max=BIDB_BLOCK_SZ/BIDB_RECPTR_SZ*total_record_length;
@@ -758,8 +768,8 @@ static int bidb_load_superblock(void) {
 		}
 
 		for(i=0;i<NR(bidb_superblock.record_extents);i++) {
-			if(!bidb_check_extent(&bidb_superblock.record_extents[i], filesize/(unsigned)BIDB_BLOCK_SZ)) {
-				fprintf(stderr, "%s:record table extent exceeds file size\n", bidb_filename);
+			if(!bidb_check_extent(&bidb_superblock.record_extents[i], filesize/(unsigned)BIDB_BLOCK_SZ-BIDB_SUPERBLOCK_SZ)) {
+				fprintf(stderr, "%s:record table %u extent exceeds file size\n", bidb_filename, i);
 				return 0;
 			}
 		}
@@ -781,7 +791,11 @@ static int bidb_save_superblock(void) {
 	memcpy(data, "BiDB", 4);
 
 	for(i=0;i<NR(bidb_superblock.record_extents);i++) {
-		tmp=BIDB_EXTENT(bidb_superblock.record_extents[i].offset, bidb_superblock.record_extents[i].length);
+		if(bidb_superblock.record_extents[i].length==0) { /* empty extent */
+			tmp=BIDB_EXTENT_NONE;
+		} else {
+			tmp=BIDB_EXTENT(bidb_superblock.record_extents[i].offset, bidb_superblock.record_extents[i].length);
+		}
 		WR_BE32(data, 4+4*i, tmp);
 	}
 
@@ -815,33 +829,80 @@ static int bidb_save_record_table(void) {
 	return 1;
 }
 
+static int bidb_create_record_table(void) {
+	unsigned i, total, next_block, extentblks;
+	assert(bidb_superblock.record_extents[0].offset==0); /* only safe to call if we have no table */
+
+	/* create the record table on disk */
+	fprintf(stderr, "Creating new record table\n");
+
+	/* TODO: break it up into extent-sized pieces */
+	bidb_superblock.record_max=BIDB_DEFAULT_MAX_RECORDS;
+
+	next_block=0; /* TODO: allocate the next available block from freelist */
+
+	/* create all the extents necessary */
+	for(i=0,total=0;i<NR(bidb_superblock.record_extents) && total<bidb_superblock.record_max;i++, total++) {
+		bidb_superblock.record_extents[i].offset=next_block;
+
+		extentblks=ROUNDUP((bidb_superblock.record_max-total)*BIDB_RECPTR_SZ, BIDB_BLOCK_SZ)/BIDB_BLOCK_SZ;
+		if(extentblks>1U<<(BIDB_EXTENT_LENGTH_BITS)) {
+			extentblks=1<<BIDB_EXTENT_LENGTH_BITS;
+		}
+
+		bidb_superblock.record_extents[i].length=extentblks;
+
+		fprintf(stderr, "%s:Record table allocating extent %d (%u %u %u)\n", bidb_filename, i, extentblks, total, next_block);
+
+		next_block+=extentblks; /* TODO: allocate the next available block from freelist */
+		total+=extentblks*BIDB_RECORDS_PER_BLOCK;
+	}
+	
+	/* mark all the blocks for these new extents as dirty */
+	for(i=0;i<bidb_superblock.record_max/BIDB_RECORDS_PER_BLOCK;i++) {
+		BITSET(bidb_superblock.record_dirty_blocks, i);
+	}
+
+	bidb_save_record_table();
+
+	/* updated the superblock with the record table */
+	if(!bidb_save_superblock()) {
+		bidb_close();
+		return 0; /* failure */
+	}
+
+	return 1; /* success */
+}
+
+/* load a record table form disk */
 static int bidb_load_record_table(void) {
-	unsigned i;
 	if(!recordcache_init(bidb_superblock.record_max)) {
 		fprintf(stderr, "%s:could not initialize record table\n", bidb_filename);		
 		return 0;
 	}
-	if(bidb_superblock.record_extents[0].length==0) { /* are there any extents? */
-		/* create the record table on disk */
-		fprintf(stderr, "Creating new record table\n");
-
-		/* TODO: break it up into extent-sized pieces */
-		bidb_superblock.record_max=BIDB_DEFAULT_MAX_RECORDS;
-		bidb_superblock.record_extents[0].offset=0; /* TODO: allocate the next available block */
-		bidb_superblock.record_extents[0].length=ROUNDUP(bidb_superblock.record_max*BIDB_RECPTR_SZ, BIDB_BLOCK_SZ)/BIDB_BLOCK_SZ;
-		for(i=0;i<bidb_superblock.record_max/BIDB_RECORDS_PER_BLOCK;i++) {
-			BITSET(bidb_superblock.record_dirty_blocks, i);
+	if(bidb_superblock.record_extents[0].length==0) { /* no record table found .. create it */
+		if(!bidb_create_record_table()) {
+			return 0;
 		}
-
-		bidb_save_record_table();
-
-		/* updated the superblock with the record table */
-		if(!bidb_save_superblock()) {
-			bidb_close();
-			return 0; /* failure */
-		}
+	} else {
+		/* TODO: read in record table entries */
 	}
 	return 1; /* */
+}
+
+/* mark a record as dirty due to modification */
+void bidb_record_dirty(unsigned record_number) {
+	unsigned blknum;
+
+	blknum=record_number/BIDB_RECORDS_PER_BLOCK;
+
+	if(!BITRANGE(bidb_superblock.record_dirty_blocks, blknum)) {
+		fprintf(stderr, "%s:Dirty block %u not in range!\n", bidb_filename, blknum);
+		return;
+	}
+
+	fprintf(stderr, "%s:Dirty block %u\n", bidb_filename, blknum);
+	BITSET(bidb_superblock.record_dirty_blocks, blknum);
 }
 
 /* create_fl will create if the superblock does not exist */
@@ -916,7 +977,12 @@ void bidb_show_info(void) {
 		1<<BIDB_EXTENT_OFFSET_BITS,
 		(uint_least64_t)BIDB_BLOCK_SZ<<BIDB_EXTENT_OFFSET_BITS
 	);
+	printf(
+		"  memory bytes for dirty records bitmap: %u\n",
+		sizeof bidb_superblock.record_dirty_blocks
+	);
 }
+
 /****************************************************************************** 
  * Objects
  ******************************************************************************/
@@ -982,12 +1048,18 @@ void object_free(struct object_base *obj) {
  ******************************************************************************/
 
 struct object_base *object_load(unsigned id) {
+	abort();
+	return 0;
 }
 
 struct object_base *object_save(unsigned id) {
+	abort();
+	return 0;
 }
 
 struct object_base *object_iscached(unsigned id) {
+	abort();
+	return 0;
 }
 
 /****************************************************************************** 
