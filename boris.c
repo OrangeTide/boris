@@ -318,7 +318,7 @@ int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	unsigned *tmp;
 
 	newbits=ROUNDUP(newbits, BITMAP_BITSIZE);
-	DEBUG("%s():Allocating %d bytes\n", __func__, newbits/CHAR_BIT);
+	DEBUG("%s():Allocating %ld bytes\n", __func__, newbits/CHAR_BIT);
 	tmp=realloc(bitmap->bitmap, newbits/CHAR_BIT);
 	if(!tmp) {
 		perror("realloc()");
@@ -328,7 +328,7 @@ int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 		/* clear out the new bits */
 		size_t len;
 		len=(newbits-bitmap->bitmap_allocbits)/CHAR_BIT;
-		printf("%s():Clearing %d bytes (ofs %d)\n", __func__, len, bitmap->bitmap_allocbits/BITMAP_BITSIZE);
+		DEBUG("%s():Clearing %zd bytes (ofs %ld)\n", __func__, len, bitmap->bitmap_allocbits/BITMAP_BITSIZE);
 		memset(tmp+bitmap->bitmap_allocbits/BITMAP_BITSIZE, 0, len);
 	}
 
@@ -589,7 +589,7 @@ int recordcache_init(unsigned max_entries) {
 	recordcache_table=tmp;
 	recordcache_table_nr=max_entries;
 	recordcache_table_mask=recordcache_table_nr-1;
-	DEBUG("hash table size is %u\n", recordcache_table_nr);
+	DEBUG("hash table size is %zu\n", recordcache_table_nr);
 	return 1;
 }
 
@@ -968,10 +968,10 @@ void bidb_show_info(void) {
 		"  max extent size: %u blocks (%" PRIu32 " bytes)\n"
 		"  records per block: %" PRIu32 " records\n"
 		"  records per extent: %" PRIu32 " records\n"
-		"  number of record extents: %" PRIu32 " extents\n"
+		"  number of record extents: %zu extents\n"
 		"  max number of record: %" PRIu32 " records\n"
 		"  max total size for all records: %" PRIu64 " bytes\n"
-		"  max blocks: %u blocks (%" PRIu64 " bytes)\n", 
+		"  max blocks: %lu blocks (%" PRIu64 " bytes)\n", 
 		BIDB_BLOCK_SZ,
 		1<<BIDB_EXTENT_LENGTH_BITS,
 		max_extent_size,
@@ -980,11 +980,11 @@ void bidb_show_info(void) {
 		NR(bidb_superblock.record_extents),
 		max_records,
 		(uint_least64_t)max_records<<BIDB_EXTENT_LENGTH_BITS,
-		1<<BIDB_EXTENT_OFFSET_BITS,
+		1L<<BIDB_EXTENT_OFFSET_BITS,
 		(uint_least64_t)BIDB_BLOCK_SZ<<BIDB_EXTENT_OFFSET_BITS
 	);
 	printf(
-		"  memory bytes for dirty records bitmap: %u\n",
+		"  memory bytes for dirty records bitmap: %zu\n",
 		sizeof bidb_superblock.record_dirty_blocks
 	);
 }
