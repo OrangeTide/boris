@@ -49,6 +49,7 @@
 #define BIDB_FILE "boris.bidb"
 
 #define BIDB_DEFAULT_MAX_RECORDS 131072
+#define BIDB_MAX_BLOCKS 4194304
 
 /****************************************************************************** 
  * Headers
@@ -152,6 +153,28 @@
 /* checks that bit is in range for bitfield x */
 #define BITRANGE(x, bit) ((bit)<(sizeof(x)*CHAR_BIT))
 
+/** DEBUG MACROS **/
+/* VERBOSE(), DEBUG() and TRACE() macros.
+ * DEBUG() does nothing if NDEBUG is defined
+ * TRACE() does nothing if NTRACE is defined */
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L)
+# define VERBOSE(...) fprintf(stderr, __VA_ARGS__)
+# ifdef NDEBUG
+#  define DEBUG(...) /* DEBUG disabled */
+# else
+#  define DEBUG(...) fprintf(stderr, __VA_ARGS__)
+# endif
+# ifdef NTRACE
+#  define TRACE(...) /* TRACE disabled */
+# else
+#  define TRACE(...) fprintf(stderr, __VA_ARGS__)
+# endif
+#else
+/* TODO: prepare a solution for C89 */
+# error Requires C99.
+#endif
+#define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
+#define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
 
 /****************************************************************************** 
  * Types and data structures
@@ -295,7 +318,7 @@ int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	unsigned *tmp;
 
 	newbits=ROUNDUP(newbits, BITMAP_BITSIZE);
-	fprintf(stderr, "%s():Allocating %zd bytes\n", __func__, newbits/CHAR_BIT);
+	DEBUG("%s():Allocating %d bytes\n", __func__, newbits/CHAR_BIT);
 	tmp=realloc(bitmap->bitmap, newbits/CHAR_BIT);
 	if(!tmp) {
 		perror("realloc()");
@@ -305,7 +328,7 @@ int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 		/* clear out the new bits */
 		size_t len;
 		len=(newbits-bitmap->bitmap_allocbits)/CHAR_BIT;
-		printf("%s():Clearing %zd bytes (ofs %ld)\n", __func__, len, bitmap->bitmap_allocbits/BITMAP_BITSIZE);
+		printf("%s():Clearing %d bytes (ofs %d)\n", __func__, len, bitmap->bitmap_allocbits/BITMAP_BITSIZE);
 		memset(tmp+bitmap->bitmap_allocbits/BITMAP_BITSIZE, 0, len);
 	}
 
@@ -532,23 +555,6 @@ void bitmap_test(void) {
 #endif
 
 /****************************************************************************** 
- * Freelist
- ******************************************************************************/
-
-/* allocates blocks from the bitmap
- * returns offset of the allocation */
-long freelist_alloc(unsigned count) {
-	abort();
-	return 0;
-}
-
-/* adds a piece to the freelist pool */
-long freelist_pool(long ofs, unsigned count) {
-	abort();
-	return 0;
-}
-
-/****************************************************************************** 
  * Record Cacheing - look up records and automatically load them
  ******************************************************************************/
 
@@ -583,7 +589,7 @@ int recordcache_init(unsigned max_entries) {
 	recordcache_table=tmp;
 	recordcache_table_nr=max_entries;
 	recordcache_table_mask=recordcache_table_nr-1;
-	fprintf(stderr, "hash table size is %zu\n", recordcache_table_nr);
+	DEBUG("hash table size is %u\n", recordcache_table_nr);
 	return 1;
 }
 
@@ -713,7 +719,7 @@ static int bidb_check_extent(struct bidb_extent *e, unsigned nr_blocks) {
 		return 1; /* zero length extents don't exist */
 	}
 	end=(e->length+e->offset); /* end is last+1 */
-	fprintf(stderr, "end:%u blocks:%u\n", end, nr_blocks);
+	DEBUG("end:%u blocks:%u\n", end, nr_blocks);
 	return (end<=nr_blocks);
 }
 
@@ -815,12 +821,12 @@ static int bidb_save_record_table(void) {
 		for(j=0;j<bidb_superblock.record_extents[i].length;j++,ofs++) {
 			if(BITTEST(bidb_superblock.record_dirty_blocks, ofs)) {
 				/*
-				fprintf(stderr, "%s:writing record block %d\n", bidb_filename, ofs);
+				DEBUG("%s:writing record block %d\n", bidb_filename, ofs);
 				*/
 				BITCLR(bidb_superblock.record_dirty_blocks, ofs);
 				memset(data, 0, sizeof data); /* TODO: fill with record data */
 				if(!bidb_write_blocks(data, (signed)(bidb_superblock.record_extents[i].offset+j), 1)) {
-					fprintf(stderr, "%s:could not write record table\n", bidb_filename);		
+					DEBUG("%s:could not write record table\n", bidb_filename);		
 					return 0; /* failure */
 				}
 			}
@@ -852,7 +858,7 @@ static int bidb_create_record_table(void) {
 
 		bidb_superblock.record_extents[i].length=extentblks;
 
-		fprintf(stderr, "%s:Record table allocating extent %d (%u %u %u)\n", bidb_filename, i, extentblks, total, next_block);
+		DEBUG("%s:Record table allocating extent %d (%u %u %u)\n", bidb_filename, i, extentblks, total, next_block);
 
 		next_block+=extentblks; /* TODO: allocate the next available block from freelist */
 		total+=extentblks*BIDB_RECORDS_PER_BLOCK;
@@ -901,7 +907,7 @@ void bidb_record_dirty(unsigned record_number) {
 		return;
 	}
 
-	fprintf(stderr, "%s:Dirty block %u\n", bidb_filename, blknum);
+	DEBUG("%s:Dirty block %u\n", bidb_filename, blknum);
 	BITSET(bidb_superblock.record_dirty_blocks, blknum);
 }
 
@@ -962,10 +968,10 @@ void bidb_show_info(void) {
 		"  max extent size: %u blocks (%" PRIu32 " bytes)\n"
 		"  records per block: %" PRIu32 " records\n"
 		"  records per extent: %" PRIu32 " records\n"
-		"  number of record extents: %zu extents\n"
+		"  number of record extents: %" PRIu32 " extents\n"
 		"  max number of record: %" PRIu32 " records\n"
 		"  max total size for all records: %" PRIu64 " bytes\n"
-		"  max blocks: %lu blocks (%" PRIu64 " bytes)\n", 
+		"  max blocks: %u blocks (%" PRIu64 " bytes)\n", 
 		BIDB_BLOCK_SZ,
 		1<<BIDB_EXTENT_LENGTH_BITS,
 		max_extent_size,
@@ -974,14 +980,223 @@ void bidb_show_info(void) {
 		NR(bidb_superblock.record_extents),
 		max_records,
 		(uint_least64_t)max_records<<BIDB_EXTENT_LENGTH_BITS,
-		1L<<BIDB_EXTENT_OFFSET_BITS,
+		1<<BIDB_EXTENT_OFFSET_BITS,
 		(uint_least64_t)BIDB_BLOCK_SZ<<BIDB_EXTENT_OFFSET_BITS
 	);
 	printf(
-		"  memory bytes for dirty records bitmap: %zu\n",
+		"  memory bytes for dirty records bitmap: %u\n",
 		sizeof bidb_superblock.record_dirty_blocks
 	);
 }
+
+/****************************************************************************** 
+ * Freelist
+ ******************************************************************************/
+
+struct freelist_entry {
+	struct freelist_entry *next_global, **prev_global; /* global lists */
+	struct freelist_entry *next_bucket, **prev_bucket; /* bucket lists */
+	struct bidb_extent extent;
+};
+
+/* single list ordered by offset. last entry is a catch-all for huge chunks */
+static struct freelist_entry *freelist_global, *freelist_buckets[(1<<BIDB_EXTENT_LENGTH_BITS)+1];
+
+/* allocates blocks from the bitmap
+ * returns offset of the allocation */
+long freelist_alloc(unsigned count) {
+	/* TODO: implement thist */
+	abort();
+	return 0;
+}
+
+/* lowlevel - detach and free an entry */
+static void freelist_ll_free(struct freelist_entry *e) {
+	assert(e!=NULL);
+	assert(e->prev_global!=NULL);
+	assert(e->prev_global!=(void*)0x99999999);
+	assert(e->prev_bucket!=NULL);
+	if(e->next_global) {
+		e->next_global->prev_global=e->prev_global;
+	}
+	if(e->next_bucket) {
+		e->next_bucket->prev_bucket=e->prev_bucket;
+	}
+	*e->prev_global=e->next_global;
+	*e->prev_bucket=e->next_bucket;
+#ifndef NDEBUG
+	memset(e, 0x99, sizeof *e);
+#endif
+	free(e);
+}
+
+/* lowlevel - append an extra to the global list at prev */
+static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsigned ofs, unsigned count) {
+	struct freelist_entry *new;
+	assert(prev!=NULL);
+	assert(prev!=(void*)0x99999999);
+	new=malloc(sizeof *new);
+	assert(new!=NULL);
+	if(!new) {
+		perror("malloc()");
+		return 0;
+	}
+	new->extent.offset=ofs;
+	new->extent.length=count;
+	new->next_bucket=0;
+	new->prev_bucket=0;
+	new->next_global=*prev;
+	new->prev_global=prev;
+	if(*prev) {
+		(*prev)->prev_global=&new->next_global;
+	}
+	*prev=new;
+	return new;
+}
+
+/* returns true if a bridge is detected */
+static int freelist_ll_isbridge(struct bidb_extent *prev_ext, unsigned ofs, unsigned count, struct bidb_extent *next_ext) {
+	/*
+	DEBUG("testing for bridge:\n"
+			"  last:%6d+%d curr:%6d+%d ofs:%6d+%d\n",
+			prev_ext->offset, prev_ext->length, next_ext->offset, next_ext->length,
+			ofs, count
+	);
+	*/
+	return prev_ext->offset+prev_ext->length==ofs && next_ext->offset==ofs+count;
+}
+
+/* adds a piece to the freelist pool 
+ *
+ * . allocated
+ * _ empty
+ * X new entry
+ *
+ * |.....|_XXX_|......|		normal
+ * |.....|_XXX|.......|		grow-next
+ * |......|XXX_|......|		grow-prev
+ * |......|XXX|.......|		bridge
+ *
+ * WARNING: passing bad parameters will result in strange data in the list 
+ * */
+void freelist_pool(unsigned ofs, unsigned count) {
+	struct freelist_entry *new, *curr, *last;
+	unsigned bucket_nr;
+
+	TRACE_ENTER();
+
+	last=NULL;
+	new=NULL;
+	for(curr=freelist_global;curr;curr=curr->next_global) {
+		assert(curr!=last);
+		assert(curr!=(void*)0x99999999);
+		if(last) {
+			assert(last->next_global==curr); /* sanity check */
+		}
+		/*
+		printf(
+			"c.ofs:%6d c.len:%6d l.ofs:%6d l.len:%6d ofs:%6d len:%6d\n",
+			curr->extent.offset, curr->extent.length,
+			last ? last->extent.offset : -1, last ? last->extent.length : -1,
+			ofs, count
+		);
+		*/
+		if(last && freelist_ll_isbridge(&last->extent, ofs, count, &curr->extent)) {
+			/* |......|XXX|.......|		bridge */
+			DEBUG("|......|XXX|.......|		bridge. last=%u+%u curr=%u+%u new=%u+%u\n", last->extent.length, last->extent.offset, curr->extent.offset, curr->extent.length, ofs, count);
+			/* we are dealing with 3 entries, the last, the new and the current */
+			/* merge the 3 entries into the last entry */
+			last->extent.length+=curr->extent.length+count;
+			assert(curr->prev_global==&last->next_global);
+			freelist_ll_free(curr);
+			assert(freelist_global!=curr);
+			assert(last->next_global!=(void*)0x99999999);
+			assert(last->next_global!=curr); /* deleting it must take it off the list */
+			new=curr=last;
+			break;
+		} else if(curr->extent.offset==ofs+count) {
+			/* |.....|_XXX|.......|		grow-next */
+			DEBUG("|.....|_XXX|.......|		grow-next. curr=%u+%u new=%u+%u\n", curr->extent.offset, curr->extent.length, ofs, count);
+			/* merge new entry into a following entry */
+			curr->extent.offset=ofs;
+			curr->extent.length+=count;
+			new=curr;
+			break;
+		} else if(last && curr->extent.offset+curr->extent.length==ofs) {
+			/* |......|XXX_|......|		grow-prev */
+			DEBUG("|......|XXX_|......|		grow-prev. curr=%u+%u new=%u+%u\n", curr->extent.offset, curr->extent.length, ofs, count);
+			/* merge the new entry into the end of the previous entry */
+			curr->extent.length+=count;
+			new=curr;
+			break;
+		} else if(ofs<curr->extent.offset) {
+			DEBUG("|.....|_XXX_|......|		normal new=%u+%u\n", ofs, count);
+			/* create a new entry */
+			new=freelist_ll_new(curr->prev_global, ofs, count);
+			break;
+		}
+
+		last=curr; /* save this for finding a bridge */
+	}
+	if(!curr) {
+		if(last) {
+			if(last->extent.offset+last->extent.length==ofs) {
+				DEBUG("|......|XXX_|......|		grow-prev. last=%u+%u new=%u+%u\n", last->extent.offset, last->extent.length, ofs, count);
+				last->extent.length+=count;
+				new=last;
+			} else {
+				DEBUG("|............|XXX  |		end. new=%u+%u\n", ofs, count);
+				new=freelist_ll_new(&last->next_global, ofs, count);
+			}
+		} else {
+			DEBUG("|XXX               |		initial. new=%u+%u\n", ofs, count);
+			new=freelist_ll_new(&freelist_global, ofs, count);
+		}
+	}
+
+	/* TODO: push entry into bucket */
+	if(new) {
+		struct freelist_entry **bucketptr;
+		bucket_nr=new->extent.length/(NR(freelist_buckets)-1);
+		if(bucket_nr>=NR(freelist_buckets)) {
+			bucket_nr=NR(freelist_buckets)-1;
+		}
+
+		/* push new entry on the top of the bucket */
+		bucketptr=&freelist_buckets[bucket_nr];
+		new->next_bucket=*bucketptr;
+		if(*bucketptr) {
+			(*bucketptr)->prev_bucket=&new->next_bucket;
+		}
+		new->prev_bucket=bucketptr;
+		*bucketptr=new;
+	}
+}
+
+#ifndef NDEBUG
+void freelist_test(void) {
+	struct freelist_entry *curr; 
+	unsigned n;
+	fprintf(stderr, "::: Making some fragments :::\n");
+	for(n=0;n<60;n+=12) {
+		freelist_pool(n, 6);
+	}
+	fprintf(stderr, "::: Filling in gaps :::\n");
+	for(n=0;n<60;n+=12) {
+		freelist_pool(n+6, 6);
+	}
+	fprintf(stderr, "::: Walking backwards :::\n");
+	for(n=120;n>60;) {
+		n-=6;
+		freelist_pool(n, 6);
+	}
+	for(curr=freelist_global,n=0;curr;curr=curr->next_global,n++) {
+		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
+	}
+
+	/* TODO: test freelist_alloc() */
+}
+#endif
 
 /****************************************************************************** 
  * Objects
@@ -1067,18 +1282,21 @@ struct object_base *object_iscached(unsigned id) {
  ******************************************************************************/
 
 int main(void) {
-	/*
 #ifndef NDEBUG
+	/*
 	bitmap_test();
-#endif
 	*/
+	freelist_test();
+#endif
 
+	/*
 	bidb_show_info();
 	if(!bidb_open(BIDB_FILE)) {
 		printf("Failed\n");
 		return EXIT_FAILURE;
 	}
 	bidb_close();
+	*/
 	
 	return 0;
 }
