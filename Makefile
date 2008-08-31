@@ -15,6 +15,9 @@ CFLAGS+=-g -pg -O1
 # turn on POSIX/susv3 
 CPPFLAGS:=-D_XOPEN_SOURCE=600
 
+#CPPFLAGS+=-DNDEBUG
+CPPFLAGS+=-DNTRACE
+
 # LDLIBS:=
 
 boris : boris.c
