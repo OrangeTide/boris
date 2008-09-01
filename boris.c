@@ -318,7 +318,7 @@ int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	unsigned *tmp;
 
 	newbits=ROUNDUP(newbits, BITMAP_BITSIZE);
-	DEBUG("%s():Allocating %ld bytes\n", __func__, newbits/CHAR_BIT);
+	DEBUG("%s():Allocating %zd bytes\n", __func__, newbits/CHAR_BIT);
 	tmp=realloc(bitmap->bitmap, newbits/CHAR_BIT);
 	if(!tmp) {
 		perror("realloc()");
@@ -328,7 +328,7 @@ int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 		/* clear out the new bits */
 		size_t len;
 		len=(newbits-bitmap->bitmap_allocbits)/CHAR_BIT;
-		DEBUG("%s():Clearing %zd bytes (ofs %ld)\n", __func__, len, bitmap->bitmap_allocbits/BITMAP_BITSIZE);
+		DEBUG("%s():Clearing %zd bytes (ofs %zd)\n", __func__, len, bitmap->bitmap_allocbits/BITMAP_BITSIZE);
 		memset(tmp+bitmap->bitmap_allocbits/BITMAP_BITSIZE, 0, len);
 	}
 
@@ -993,6 +993,9 @@ void bidb_show_info(void) {
  * Freelist
  ******************************************************************************/
 
+/* bucket number to use for overflows */
+#define FREELIST_OVERFLOW_BUCKET (NR(freelist_buckets)-1)
+
 struct freelist_entry {
 	struct freelist_entry *next_global, **prev_global; /* global lists */
 	struct freelist_entry *next_bucket, **prev_bucket; /* bucket lists */
@@ -1002,12 +1005,39 @@ struct freelist_entry {
 /* single list ordered by offset. last entry is a catch-all for huge chunks */
 static struct freelist_entry *freelist_global, *freelist_buckets[(1<<BIDB_EXTENT_LENGTH_BITS)+1];
 
-/* allocates blocks from the bitmap
- * returns offset of the allocation */
-long freelist_alloc(unsigned count) {
-	/* TODO: implement thist */
-	abort();
-	return 0;
+static unsigned freelist_ll_bucketnr(unsigned count) {
+	unsigned ret;
+	ret=count/(NR(freelist_buckets)-1);
+	if(ret>=NR(freelist_buckets)) {
+		ret=FREELIST_OVERFLOW_BUCKET;
+	}
+	return ret;
+}
+
+static void freelist_ll_bucketize(struct freelist_entry *e) {
+	struct freelist_entry **bucketptr;
+	unsigned bucket_nr;
+
+	assert(e!=NULL);
+
+	bucket_nr=freelist_ll_bucketnr(e->extent.length);
+
+	bucketptr=&freelist_buckets[bucket_nr];
+	/* detach the entry */
+	if(e->next_bucket) {
+		e->next_bucket->prev_bucket=e->prev_bucket;
+	}
+	if(e->prev_bucket) {
+		*e->prev_bucket=e->next_bucket;
+	}
+
+	/* push entry on the top of the bucket */
+	e->next_bucket=*bucketptr;
+	if(*bucketptr) {
+		(*bucketptr)->prev_bucket=&e->next_bucket;
+	}
+	e->prev_bucket=bucketptr;
+	*bucketptr=e;
 }
 
 /* lowlevel - detach and free an entry */
@@ -1066,6 +1096,38 @@ static int freelist_ll_isbridge(struct bidb_extent *prev_ext, unsigned ofs, unsi
 	return prev_ext->offset+prev_ext->length==ofs && next_ext->offset==ofs+count;
 }
 
+/* allocate memory from the pool
+ * returns offset of the allocation
+ * return -1 on failure */
+long freelist_alloc(unsigned count) {
+	unsigned bucketnr, ofs;
+	struct freelist_entry **bucketptr, *curr;
+
+	bucketnr=freelist_ll_bucketnr(count);
+	bucketptr=&freelist_buckets[bucketnr];
+	/* TODO: prioritize the order of the check. 1. exact size, 2. double size 3. ? */
+	for(;bucketnr<=FREELIST_OVERFLOW_BUCKET;bucketnr++) {
+		assert(bucketnr<=FREELIST_OVERFLOW_BUCKET);
+		assert(bucketptr!=NULL);
+
+		if(*bucketptr) { /* found an entry*/
+			curr=*bucketptr;
+			assert(curr->extent.length>=count);
+			ofs=curr->extent.offset;
+			curr->extent.offset+=count;
+			curr->extent.length-=count;
+			if(curr->extent.length==0) {
+				freelist_ll_free(curr);
+			} else {
+				/* place in a new bucket */
+				freelist_ll_bucketize(curr);
+			}
+			return ofs;
+		}
+	}
+	return -1;
+}
+
 /* adds a piece to the freelist pool 
  *
  * . allocated
@@ -1081,7 +1143,6 @@ static int freelist_ll_isbridge(struct bidb_extent *prev_ext, unsigned ofs, unsi
  * */
 void freelist_pool(unsigned ofs, unsigned count) {
 	struct freelist_entry *new, *curr, *last;
-	unsigned bucket_nr;
 
 	TRACE_ENTER();
 
@@ -1154,22 +1215,9 @@ void freelist_pool(unsigned ofs, unsigned count) {
 		}
 	}
 
-	/* TODO: push entry into bucket */
+	/* push entry into bucket */
 	if(new) {
-		struct freelist_entry **bucketptr;
-		bucket_nr=new->extent.length/(NR(freelist_buckets)-1);
-		if(bucket_nr>=NR(freelist_buckets)) {
-			bucket_nr=NR(freelist_buckets)-1;
-		}
-
-		/* push new entry on the top of the bucket */
-		bucketptr=&freelist_buckets[bucket_nr];
-		new->next_bucket=*bucketptr;
-		if(*bucketptr) {
-			(*bucketptr)->prev_bucket=&new->next_bucket;
-		}
-		new->prev_bucket=bucketptr;
-		*bucketptr=new;
+		freelist_ll_bucketize(new);
 	}
 }
 
@@ -1190,11 +1238,38 @@ void freelist_test(void) {
 		n-=6;
 		freelist_pool(n, 6);
 	}
+
+	fprintf(stderr, "::: Dump freelist :::\n");
 	for(curr=freelist_global,n=0;curr;curr=curr->next_global,n++) {
 		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
 	}
 
-	/* TODO: test freelist_alloc() */
+	/* test freelist_alloc() */
+	fprintf(stderr, "::: Allocating :::\n");
+	for(n=0;n<60;n+=6) {
+		long ofs;
+		ofs=freelist_alloc(6);
+		TRACE("alloc: %u+%u\n", ofs, 6);
+	}
+
+	fprintf(stderr, "::: Dump freelist :::\n");
+	for(curr=freelist_global,n=0;curr;curr=curr->next_global,n++) {
+		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
+	}
+
+	fprintf(stderr, "::: Allocating :::\n");
+	for(n=0;n<60;n+=6) {
+		long ofs;
+		ofs=freelist_alloc(6);
+		TRACE("alloc: %u+%u\n", ofs, 6);
+	}
+
+	fprintf(stderr, "::: Dump freelist :::\n");
+	for(curr=freelist_global,n=0;curr;curr=curr->next_global,n++) {
+		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
+	}
+
+
 }
 #endif
 
