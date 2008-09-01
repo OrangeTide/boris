@@ -22,4 +22,5 @@ CPPFLAGS+=-DNTRACE
 
 boris : boris.c
 
-
+clean :
+	$(RM) boris
