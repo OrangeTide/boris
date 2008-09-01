@@ -2,7 +2,7 @@
  * example of a very tiny MUD
  */
 
-/****************************************************************************** 
+/******************************************************************************
  * Design Documentation
  *
  * components:
@@ -35,23 +35,23 @@
  * 	instances
  * 	container slots
  * 	help text
- * 	
+ *
  ******************************************************************************/
 
-/****************************************************************************** 
+/******************************************************************************
  * Configuration
  ******************************************************************************/
 
 #define USE_BSD_SOCKETS
 #undef USE_WIN32_SOCKETS
 
-/* database file */ 
+/* database file */
 #define BIDB_FILE "boris.bidb"
 
 #define BIDB_DEFAULT_MAX_RECORDS 131072
 #define BIDB_MAX_BLOCKS 4194304
 
-/****************************************************************************** 
+/******************************************************************************
  * Headers
  ******************************************************************************/
 
@@ -75,8 +75,8 @@
 #include <unistd.h>
 #endif
 
-/****************************************************************************** 
- * Macros 
+/******************************************************************************
+ * Macros
  ******************************************************************************/
 
 /* get number of elements in an array */
@@ -176,7 +176,7 @@
 #define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
 #define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
 
-/****************************************************************************** 
+/******************************************************************************
  * Types and data structures
  ******************************************************************************/
 typedef long bidb_blockofs_t;
@@ -187,15 +187,15 @@ struct lru_entry {
 	struct lru_entry *next;
 };
 
-/****************************************************************************** 
- * Globals 
+/******************************************************************************
+ * Globals
  ******************************************************************************/
 
-/****************************************************************************** 
+/******************************************************************************
  * Prototypes
  ******************************************************************************/
 
-/****************************************************************************** 
+/******************************************************************************
  * Debug routines
  ******************************************************************************/
 #ifndef NDEBUG
@@ -222,7 +222,7 @@ static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 }
 
 #endif
-/****************************************************************************** 
+/******************************************************************************
  * Hashing Functions
  ******************************************************************************/
 
@@ -288,7 +288,7 @@ static uint_least32_t hash_uint64(uint_least64_t key) {
 	return (uint_least32_t)key;
 }
 
-/****************************************************************************** 
+/******************************************************************************
  * Bitmap API
  ******************************************************************************/
 
@@ -347,7 +347,7 @@ void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	}
 
 	p=bitmap->bitmap+ofs/BITMAP_BITSIZE; /* point to the first word */
-	
+
 	head_ofs=ofs%BITMAP_BITSIZE;
 	head_len=len>BITMAP_BITSIZE-ofs ? BITMAP_BITSIZE-ofs : len;
 
@@ -380,7 +380,7 @@ void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	}
 
 	p=bitmap->bitmap+ofs/BITMAP_BITSIZE; /* point to the first word */
-	
+
 	head_ofs=ofs%BITMAP_BITSIZE;
 	head_len=len>BITMAP_BITSIZE-ofs ? BITMAP_BITSIZE-ofs : len;
 
@@ -412,10 +412,10 @@ int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
 }
 
 /* return the position of the next set bit
- * -1 if the end of the bits was reached */ 
+ * -1 if the end of the bits was reached */
 int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
-	
+
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
 	/* TODO: check the head */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
@@ -430,10 +430,10 @@ int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 }
 
 /* return the position of the next set bit
- * -1 if the end of the bits was reached */ 
+ * -1 if the end of the bits was reached */
 int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
-	
+
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
 	/* TODO: check the head */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
@@ -554,7 +554,7 @@ void bitmap_test(void) {
 }
 #endif
 
-/****************************************************************************** 
+/******************************************************************************
  * Record Cacheing - look up records and automatically load them
  ******************************************************************************/
 
@@ -593,7 +593,7 @@ int recordcache_init(unsigned max_entries) {
 	return 1;
 }
 
-/****************************************************************************** 
+/******************************************************************************
  * Binary Database
  ******************************************************************************/
 
@@ -601,25 +601,25 @@ int recordcache_init(unsigned max_entries) {
  * Binary database
  * ===============
  * block size=1024. everything is in multiples of a block
- * 
+ *
  * extents are 32-bits values. 22-bit offset, 10-bit length
  *
  * extent length is 1 to 1024. (0 is not a valid encoding)
  *
  * [ON-DISK]
- * 
+ *
  * superblock
  * 	magic
  * 	record table extents [16]
- * 
+ *
  * record table
  * 	record extent [n]
- * 
+ *
  * [IN-MEMORY]
- * 
+ *
  * max records
  * record table extents
- * hash table for id to extent	
+ * hash table for id to extent
  * freelist
  * block bitmap
  *
@@ -806,7 +806,7 @@ static int bidb_save_superblock(void) {
 	}
 
 	if(!bidb_write_blocks(data, -BIDB_SUPERBLOCK_SZ, 1)) {
-		fprintf(stderr, "%s:could not write superblock\n", bidb_filename);		
+		fprintf(stderr, "%s:could not write superblock\n", bidb_filename);
 		return 0; /* failure */
 	}
 	return 1; /* success */
@@ -826,7 +826,7 @@ static int bidb_save_record_table(void) {
 				BITCLR(bidb_superblock.record_dirty_blocks, ofs);
 				memset(data, 0, sizeof data); /* TODO: fill with record data */
 				if(!bidb_write_blocks(data, (signed)(bidb_superblock.record_extents[i].offset+j), 1)) {
-					DEBUG("%s:could not write record table\n", bidb_filename);		
+					DEBUG("%s:could not write record table\n", bidb_filename);
 					return 0; /* failure */
 				}
 			}
@@ -863,7 +863,7 @@ static int bidb_create_record_table(void) {
 		next_block+=extentblks; /* TODO: allocate the next available block from freelist */
 		total+=extentblks*BIDB_RECORDS_PER_BLOCK;
 	}
-	
+
 	/* mark all the blocks for these new extents as dirty */
 	for(i=0;i<bidb_superblock.record_max/BIDB_RECORDS_PER_BLOCK;i++) {
 		BITSET(bidb_superblock.record_dirty_blocks, i);
@@ -883,7 +883,7 @@ static int bidb_create_record_table(void) {
 /* load a record table form disk */
 static int bidb_load_record_table(void) {
 	if(!recordcache_init(bidb_superblock.record_max)) {
-		fprintf(stderr, "%s:could not initialize record table\n", bidb_filename);		
+		fprintf(stderr, "%s:could not initialize record table\n", bidb_filename);
 		return 0;
 	}
 	if(bidb_superblock.record_extents[0].length==0) { /* no record table found .. create it */
@@ -927,7 +927,7 @@ int bidb_open(const char *filename) {
 		create_fl=1;
 	}
 	bidb_filename=strdup(filename);
-	
+
 	if(!create_fl) {
 		if(!bidb_load_superblock()) {
 			bidb_close();
@@ -953,14 +953,13 @@ int bidb_open(const char *filename) {
 }
 
 void bidb_show_info(void) {
-#define BIDB_HIGHEST_RECORD 
-#define BIDB_HIGHEST_BLOCK 
+#define BIDB_HIGHEST_RECORD
+#define BIDB_HIGHEST_BLOCK
 	const uint_least32_t
 		max_extent_size=(BIDB_BLOCK_SZ<<BIDB_EXTENT_LENGTH_BITS)-1U,
 		records_per_block=BIDB_BLOCK_SZ/BIDB_RECPTR_SZ,
 		records_per_extent=records_per_block<<BIDB_EXTENT_LENGTH_BITS,
 		max_records=NR(bidb_superblock.record_extents)*records_per_extent;
-		
 
 	printf(
 		"BiDB configuration info:\n"
@@ -971,7 +970,7 @@ void bidb_show_info(void) {
 		"  number of record extents: %zu extents\n"
 		"  max number of record: %" PRIu32 " records\n"
 		"  max total size for all records: %" PRIu64 " bytes\n"
-		"  max blocks: %lu blocks (%" PRIu64 " bytes)\n", 
+		"  max blocks: %lu blocks (%" PRIu64 " bytes)\n",
 		BIDB_BLOCK_SZ,
 		1<<BIDB_EXTENT_LENGTH_BITS,
 		max_extent_size,
@@ -989,7 +988,7 @@ void bidb_show_info(void) {
 	);
 }
 
-/****************************************************************************** 
+/******************************************************************************
  * Freelist
  ******************************************************************************/
 
@@ -1156,7 +1155,7 @@ long freelist_alloc(struct freelist *fl, unsigned count) {
 	return -1;
 }
 
-/* adds a piece to the freelist pool 
+/* adds a piece to the freelist pool
  *
  * . allocated
  * _ empty
@@ -1167,7 +1166,7 @@ long freelist_alloc(struct freelist *fl, unsigned count) {
  * |......|XXX_|......|		grow-prev
  * |......|XXX|.......|		bridge
  *
- * WARNING: passing bad parameters will result in strange data in the list 
+ * WARNING: passing bad parameters will result in strange data in the list
  * */
 void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 	struct freelist_entry *new, *curr, *last;
@@ -1260,7 +1259,7 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 #ifndef NDEBUG
 void freelist_test(void) {
 	struct freelist fl;
-	struct freelist_entry *curr; 
+	struct freelist_entry *curr;
 	unsigned n;
 	freelist_init(&fl);
 	fprintf(stderr, "::: Making some fragments :::\n");
@@ -1307,12 +1306,11 @@ void freelist_test(void) {
 		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
 	}
 
-
 	freelist_free(&fl);
 }
 #endif
 
-/****************************************************************************** 
+/******************************************************************************
  * Objects
  ******************************************************************************/
 
@@ -1372,7 +1370,7 @@ void object_free(struct object_base *obj) {
 	}
 }
 
-/****************************************************************************** 
+/******************************************************************************
  * Object Cache
  ******************************************************************************/
 
@@ -1391,7 +1389,7 @@ struct object_base *object_iscached(unsigned id) {
 	return 0;
 }
 
-/****************************************************************************** 
+/******************************************************************************
  * Main
  ******************************************************************************/
 
@@ -1411,10 +1409,10 @@ int main(void) {
 	}
 	bidb_close();
 	*/
-	
+
 	return 0;
 }
 
-/****************************************************************************** 
+/******************************************************************************
  * Notes
  ******************************************************************************/
