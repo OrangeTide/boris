@@ -50,6 +50,7 @@
 
 #define BIDB_DEFAULT_MAX_RECORDS 131072
 #define BIDB_MAX_BLOCKS 4194304
+#define BIDB_GROW_BLOCKS 256 /* number of blocks to grow by */
 
 /******************************************************************************
  * Headers
@@ -187,6 +188,10 @@ struct lru_entry {
 	struct lru_entry *next;
 };
 
+struct bidb_extent {
+	unsigned length, offset; /* both are in block-sized units */
+};
+
 /******************************************************************************
  * Globals
  ******************************************************************************/
@@ -222,6 +227,331 @@ static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 }
 
 #endif
+/******************************************************************************
+ * Freelist
+ ******************************************************************************/
+
+/* bucket number to use for overflows */
+#define FREELIST_OVERFLOW_BUCKET(flp) (NR((flp)->buckets)-1)
+
+struct freelist_entry {
+	struct freelist_entry *next_global, **prev_global; /* global lists */
+	struct freelist_entry *next_bucket, **prev_bucket; /* bucket lists */
+	struct bidb_extent extent;
+};
+
+struct freelist {
+	/* single list ordered by offset to find adjacent chunks. */
+	struct freelist_entry *global;
+	/* buckets for each size, last entry is a catch-all for huge chunks */
+	unsigned nr_buckets;
+	struct freelist_entry **buckets;
+};
+
+static unsigned freelist_ll_bucketnr(struct freelist *fl, unsigned count) {
+	unsigned ret;
+	ret=count/(fl->nr_buckets-1);
+	if(ret>=fl->nr_buckets) {
+		ret=FREELIST_OVERFLOW_BUCKET(fl);
+	}
+	return ret;
+}
+
+static void freelist_ll_bucketize(struct freelist *fl, struct freelist_entry *e) {
+	struct freelist_entry **bucketptr;
+	unsigned bucket_nr;
+
+	assert(e!=NULL);
+
+	bucket_nr=freelist_ll_bucketnr(fl, e->extent.length);
+
+	bucketptr=&fl->buckets[bucket_nr];
+	/* detach the entry */
+	if(e->next_bucket) {
+		e->next_bucket->prev_bucket=e->prev_bucket;
+	}
+	if(e->prev_bucket) {
+		*e->prev_bucket=e->next_bucket;
+	}
+
+	/* push entry on the top of the bucket */
+	e->next_bucket=*bucketptr;
+	if(*bucketptr) {
+		(*bucketptr)->prev_bucket=&e->next_bucket;
+	}
+	e->prev_bucket=bucketptr;
+	*bucketptr=e;
+}
+
+/* lowlevel - detach and free an entry */
+static void freelist_ll_free(struct freelist_entry *e) {
+	assert(e!=NULL);
+	assert(e->prev_global!=NULL);
+	assert(e->prev_global!=(void*)0x99999999);
+	assert(e->prev_bucket!=NULL);
+	if(e->next_global) {
+		e->next_global->prev_global=e->prev_global;
+	}
+	if(e->next_bucket) {
+		e->next_bucket->prev_bucket=e->prev_bucket;
+	}
+	*e->prev_global=e->next_global;
+	*e->prev_bucket=e->next_bucket;
+#ifndef NDEBUG
+	memset(e, 0x99, sizeof *e);
+#endif
+	free(e);
+}
+
+/* lowlevel - append an extra to the global list at prev */
+static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsigned ofs, unsigned count) {
+	struct freelist_entry *new;
+	assert(prev!=NULL);
+	assert(prev!=(void*)0x99999999);
+	new=malloc(sizeof *new);
+	assert(new!=NULL);
+	if(!new) {
+		perror("malloc()");
+		return 0;
+	}
+	new->extent.offset=ofs;
+	new->extent.length=count;
+	new->next_bucket=0;
+	new->prev_bucket=0;
+	new->next_global=*prev;
+	new->prev_global=prev;
+	if(*prev) {
+		(*prev)->prev_global=&new->next_global;
+	}
+	*prev=new;
+	return new;
+}
+
+/* returns true if a bridge is detected */
+static int freelist_ll_isbridge(struct bidb_extent *prev_ext, unsigned ofs, unsigned count, struct bidb_extent *next_ext) {
+	/*
+	DEBUG("testing for bridge:\n"
+			"  last:%6d+%d curr:%6d+%d ofs:%6d+%d\n",
+			prev_ext->offset, prev_ext->length, next_ext->offset, next_ext->length,
+			ofs, count
+	);
+	*/
+	return prev_ext->offset+prev_ext->length==ofs && next_ext->offset==ofs+count;
+}
+
+void freelist_init(struct freelist *fl, unsigned nr_buckets) {
+	fl->nr_buckets=nr_buckets+1; /* add one for the overflow bucket */
+	fl->buckets=calloc(fl->nr_buckets, sizeof *fl->buckets);
+	fl->global=0;
+}
+
+void freelist_free(struct freelist *fl) {
+	while(fl->global) {
+		freelist_ll_free(fl->global);
+	}
+	assert(fl->global==NULL);
+
+#ifndef NDEBUG
+	{
+		unsigned i;
+		for(i=0;i<fl->nr_buckets;i++) {
+			assert(fl->buckets[i]==NULL);
+		}
+	}
+#endif
+}
+
+/* allocate memory from the pool
+ * returns offset of the allocation
+ * return -1 on failure */
+long freelist_alloc(struct freelist *fl, unsigned count) {
+	unsigned bucketnr, ofs;
+	struct freelist_entry **bucketptr, *curr;
+
+	assert(count!=0);
+
+	bucketnr=freelist_ll_bucketnr(fl, count);
+	bucketptr=&fl->buckets[bucketnr];
+	/* TODO: prioritize the order of the check. 1. exact size, 2. double size 3. ? */
+	for(;bucketnr<=FREELIST_OVERFLOW_BUCKET(fl);bucketnr++) {
+		assert(bucketnr<=FREELIST_OVERFLOW_BUCKET(fl));
+		assert(bucketptr!=NULL);
+
+		if(*bucketptr) { /* found an entry*/
+			curr=*bucketptr;
+			DEBUG("curr->extent.length:%u count:%u\n", curr->extent.length, count);
+			assert(curr->extent.length>=count);
+			ofs=curr->extent.offset;
+			curr->extent.offset+=count;
+			curr->extent.length-=count;
+			if(curr->extent.length==0) {
+				freelist_ll_free(curr);
+			} else {
+				/* place in a new bucket */
+				freelist_ll_bucketize(fl, curr);
+			}
+			return ofs;
+		}
+	}
+	return -1;
+}
+
+/* adds a piece to the freelist pool
+ *
+ * . allocated
+ * _ empty
+ * X new entry
+ *
+ * |.....|_XXX_|......|		normal
+ * |.....|_XXX|.......|		grow-next
+ * |......|XXX_|......|		grow-prev
+ * |......|XXX|.......|		bridge
+ *
+ * WARNING: passing bad parameters will result in strange data in the list
+ * */
+void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
+	struct freelist_entry *new, *curr, *last;
+
+	TRACE_ENTER();
+
+	assert(count!=0);
+
+	last=NULL;
+	new=NULL;
+	for(curr=fl->global;curr;curr=curr->next_global) {
+		assert(curr!=last);
+		assert(curr!=(void*)0x99999999);
+		if(last) {
+			assert(last->next_global==curr); /* sanity check */
+		}
+		/*
+		printf(
+			"c.ofs:%6d c.len:%6d l.ofs:%6d l.len:%6d ofs:%6d len:%6d\n",
+			curr->extent.offset, curr->extent.length,
+			last ? last->extent.offset : -1, last ? last->extent.length : -1,
+			ofs, count
+		);
+		*/
+
+		if(ofs==curr->extent.offset) {
+			fprintf(stderr, "overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
+			abort(); /* TODO: make something out of this */
+		} else if(last && freelist_ll_isbridge(&last->extent, ofs, count, &curr->extent)) {
+			/* |......|XXX|.......|		bridge */
+			DEBUG("|......|XXX|.......|		bridge. last=%u+%u curr=%u+%u new=%u+%u\n", last->extent.length, last->extent.offset, curr->extent.offset, curr->extent.length, ofs, count);
+			/* we are dealing with 3 entries, the last, the new and the current */
+			/* merge the 3 entries into the last entry */
+			last->extent.length+=curr->extent.length+count;
+			assert(curr->prev_global==&last->next_global);
+			freelist_ll_free(curr);
+			assert(fl->global!=curr);
+			assert(last->next_global!=(void*)0x99999999);
+			assert(last->next_global!=curr); /* deleting it must take it off the list */
+			new=curr=last;
+			break;
+		} else if(curr->extent.offset==ofs+count) {
+			/* |.....|_XXX|.......|		grow-next */
+			DEBUG("|.....|_XXX|.......|		grow-next. curr=%u+%u new=%u+%u\n", curr->extent.offset, curr->extent.length, ofs, count);
+			/* merge new entry into a following entry */
+			curr->extent.offset=ofs;
+			curr->extent.length+=count;
+			new=curr;
+			break;
+		} else if(last && curr->extent.offset+curr->extent.length==ofs) {
+			/* |......|XXX_|......|		grow-prev */
+			DEBUG("|......|XXX_|......|		grow-prev. curr=%u+%u new=%u+%u\n", curr->extent.offset, curr->extent.length, ofs, count);
+			/* merge the new entry into the end of the previous entry */
+			curr->extent.length+=count;
+			new=curr;
+			break;
+		} else if(ofs<curr->extent.offset) {
+			if(ofs+count>curr->extent.offset) {
+				fprintf(stderr, "overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
+				abort(); /* TODO: make something out of this */
+			}
+			DEBUG("|.....|_XXX_|......|		normal new=%u+%u\n", ofs, count);
+			/* create a new entry */
+			new=freelist_ll_new(curr->prev_global, ofs, count);
+			break;
+		}
+
+		last=curr; /* save this for finding a bridge */
+	}
+	if(!curr) {
+		if(last) {
+			if(last->extent.offset+last->extent.length==ofs) {
+				DEBUG("|......|XXX_|......|		grow-prev. last=%u+%u new=%u+%u\n", last->extent.offset, last->extent.length, ofs, count);
+				last->extent.length+=count;
+				new=last;
+			} else {
+				DEBUG("|............|XXX  |		end. new=%u+%u\n", ofs, count);
+				new=freelist_ll_new(&last->next_global, ofs, count);
+			}
+		} else {
+			DEBUG("|XXX               |		initial. new=%u+%u\n", ofs, count);
+			new=freelist_ll_new(&fl->global, ofs, count);
+		}
+	}
+
+	/* push entry into bucket */
+	if(new) {
+		freelist_ll_bucketize(fl, new);
+	}
+}
+
+#ifndef NDEBUG
+void freelist_dump(struct freelist *fl) {
+	struct freelist_entry *curr;
+	unsigned n;
+	fprintf(stderr, "::: Dumping freelist :::\n");
+	for(curr=fl->global,n=0;curr;curr=curr->next_global,n++) {
+		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
+	}
+}
+
+void freelist_test(void) {
+	struct freelist fl;
+	unsigned n;
+	freelist_init(&fl, 1024);
+	fprintf(stderr, "::: Making some fragments :::\n");
+	for(n=0;n<60;n+=12) {
+		freelist_pool(&fl, n, 6);
+	}
+	fprintf(stderr, "::: Filling in gaps :::\n");
+	for(n=0;n<60;n+=12) {
+		freelist_pool(&fl, n+6, 6);
+	}
+	fprintf(stderr, "::: Walking backwards :::\n");
+	for(n=120;n>60;) {
+		n-=6;
+		freelist_pool(&fl, n, 6);
+	}
+
+	freelist_dump(&fl);
+
+	/* test freelist_alloc() */
+	fprintf(stderr, "::: Allocating :::\n");
+	for(n=0;n<60;n+=6) {
+		long ofs;
+		ofs=freelist_alloc(&fl, 6);
+		TRACE("alloc: %u+%u\n", ofs, 6);
+	}
+
+	freelist_dump(&fl);
+
+	fprintf(stderr, "::: Allocating :::\n");
+	for(n=0;n<60;n+=6) {
+		long ofs;
+		ofs=freelist_alloc(&fl, 6);
+		TRACE("alloc: %u+%u\n", ofs, 6);
+	}
+
+	freelist_dump(&fl);
+
+	freelist_free(&fl);
+}
+#endif
+
 /******************************************************************************
  * Hashing Functions
  ******************************************************************************/
@@ -648,12 +978,7 @@ int recordcache_init(unsigned max_entries) {
 #define BIDB_RECPTR_SZ BIDB_EXTENTPTR_SZ
 #define BIDB_RECORDS_PER_BLOCK (BIDB_BLOCK_SZ/BIDB_RECPTR_SZ)
 #define BIDB_RECORDS_PER_EXTENT (BIDB_RECORDS_PER_BLOCK<<BIDB_EXTENT_LENGTH_BITS)
-struct bidb_extent {
-	unsigned length, offset; /* both are in block-sized units */
-};
 
-static FILE *bidb_file;
-static char *bidb_filename;
 static struct {
 	struct bidb_extent record_extents[16];
 	/* one bit per block */
@@ -662,29 +987,36 @@ static struct {
 	struct bidb_stats {
 		unsigned records_used;
 	} stats;
+	struct freelist freelist;
+	FILE *file;
+	char *filename;
 } bidb_superblock;
 
 int bidb_close(void) {
-	if(bidb_file) {
-		fclose(bidb_file);
-		bidb_file=0;
+#ifndef NDEBUG
+	freelist_dump(&bidb_superblock.freelist);
+#endif
+	freelist_free(&bidb_superblock.freelist);
+	if(bidb_superblock.file) {
+		fclose(bidb_superblock.file);
+		bidb_superblock.file=0;
 	}
-	free(bidb_filename);
-	bidb_filename=0;
+	free(bidb_superblock.filename);
+	bidb_superblock.filename=0;
 	return 1;
 }
 
 /* block_offset starts AFTER superblock */
 static int bidb_read_blocks(unsigned char *data, bidb_blockofs_t block_offset, unsigned block_count) {
 	size_t res;
-	if(fseek(bidb_file, (block_offset+BIDB_SUPERBLOCK_SZ)*BIDB_BLOCK_SZ, SEEK_SET)) {
-		perror(bidb_filename);
+	if(fseek(bidb_superblock.file, (block_offset+BIDB_SUPERBLOCK_SZ)*BIDB_BLOCK_SZ, SEEK_SET)) {
+		perror(bidb_superblock.filename);
 		return 0; /* failure */
 	}
-	res=fread(data, BIDB_BLOCK_SZ, block_count, bidb_file);
+	res=fread(data, BIDB_BLOCK_SZ, block_count, bidb_superblock.file);
 	if(res!=block_count) {
-		if(ferror(bidb_file)) {
-			perror(bidb_filename);
+		if(ferror(bidb_superblock.file)) {
+			perror(bidb_superblock.filename);
 		}
 		return 0; /* failure */
 	}
@@ -695,18 +1027,43 @@ static int bidb_read_blocks(unsigned char *data, bidb_blockofs_t block_offset, u
 static int bidb_write_blocks(const unsigned char *data, bidb_blockofs_t block_offset, unsigned block_count) {
 	size_t res;
 
-	if(fseek(bidb_file, (block_offset+BIDB_SUPERBLOCK_SZ)*BIDB_BLOCK_SZ, SEEK_SET)) {
-		perror(bidb_filename);
+	if(fseek(bidb_superblock.file, (block_offset+BIDB_SUPERBLOCK_SZ)*BIDB_BLOCK_SZ, SEEK_SET)) {
+		perror(bidb_superblock.filename);
 		return 0; /* failure */
 	}
-	res=fwrite(data, BIDB_BLOCK_SZ, block_count, bidb_file);
+	res=fwrite(data, BIDB_BLOCK_SZ, block_count, bidb_superblock.file);
 	if(res!=block_count) {
-		if(ferror(bidb_file)) {
-			perror(bidb_filename);
+		if(ferror(bidb_superblock.file)) {
+			perror(bidb_superblock.filename);
 		}
 		return 0; /* failure */
 	}
 	return 1; /* success */
+}
+
+static struct bidb_extent bidb_allocblocks(unsigned nr_blocks) {
+	struct bidb_extent ret;
+	long ofs;
+	unsigned newlen;
+
+	assert(nr_blocks>0);
+	ofs=freelist_alloc(&bidb_superblock.freelist, nr_blocks);
+	if(ofs==-1) {
+		/* grow */
+		if(BIDB_GROW_BLOCKS<nr_blocks) {
+			newlen=bidb_superblock.block_max+nr_blocks+BIDB_GROW_BLOCKS;
+		} else {
+			newlen=bidb_superblock.block_max+BIDB_GROW_BLOCKS;
+		}
+		fprintf(stderr, "%s:growing file to %u blocks from %u blocks maximum.\n", bidb_superblock.filename, newlen, bidb_superblock.block_max);
+		freelist_pool(&bidb_superblock.freelist, bidb_superblock.block_max, newlen-bidb_superblock.block_max);
+		bidb_superblock.block_max=newlen;
+		ofs=freelist_alloc(&bidb_superblock.freelist, nr_blocks);
+		assert(ofs!=-1);
+	}
+	ret.offset=ofs;
+	ret.length=nr_blocks;
+	return ret;
 }
 
 /* check extent to see if it is in range of nr_blocks */
@@ -731,17 +1088,20 @@ static int bidb_load_superblock(void) {
 	int empty_fl;
 
 	/* get the file size and check it */
-	fseek(bidb_file, 0, SEEK_END);
-	filesize=ftell(bidb_file);
+	fseek(bidb_superblock.file, 0, SEEK_END);
+	filesize=ftell(bidb_superblock.file);
 	if((filesize%BIDB_BLOCK_SZ)!=0) {
-		fprintf(stderr, "%s:database file is not a multiple of %u bytes\n", bidb_filename, BIDB_BLOCK_SZ);
+		fprintf(stderr, "%s:database file is not a multiple of %u bytes\n", bidb_superblock.filename, BIDB_BLOCK_SZ);
 		return 0;
 	}
 	bidb_superblock.block_max=filesize/BIDB_BLOCK_SZ;
+	if(bidb_superblock.block_max>0) {
+		bidb_superblock.block_max--; /* do not count the superblock */
+	}
 
 	if(bidb_read_blocks(data, -BIDB_SUPERBLOCK_SZ, BIDB_SUPERBLOCK_SZ)) {
 		if(memcmp("BiDB", data, 4)) {
-			fprintf(stderr, "%s:not a data file\n", bidb_filename);
+			fprintf(stderr, "%s:not a data file\n", bidb_superblock.filename);
 			return 0; /* failure : invalid magic */
 		}
 		bidb_superblock.stats.records_used=0;
@@ -768,21 +1128,21 @@ static int bidb_load_superblock(void) {
 			if(bidb_superblock.record_extents[i].length==0) { /* empty extent */
 				empty_fl=1;
 			} else if(empty_fl) {
-				fprintf(stderr, "%s:record table extent list has holes in it\n", bidb_filename);
+				fprintf(stderr, "%s:record table extent list has holes in it\n", bidb_superblock.filename);
 				return 0;
 			}
 		}
 
 		for(i=0;i<NR(bidb_superblock.record_extents);i++) {
 			if(!bidb_check_extent(&bidb_superblock.record_extents[i], filesize/(unsigned)BIDB_BLOCK_SZ-BIDB_SUPERBLOCK_SZ)) {
-				fprintf(stderr, "%s:record table %u extent exceeds file size\n", bidb_filename, i);
+				fprintf(stderr, "%s:record table %u extent exceeds file size\n", bidb_superblock.filename, i);
 				return 0;
 			}
 		}
 
 		return 1; /* success */
 	}
-	fprintf(stderr, "%s:could not load superblock\n", bidb_filename);
+	fprintf(stderr, "%s:could not load superblock\n", bidb_superblock.filename);
 	return 0; /* failure : could not read superblock */
 }
 
@@ -791,7 +1151,7 @@ static int bidb_save_superblock(void) {
 	uint_least32_t tmp;
 	unsigned i;
 
-	fprintf(stderr, "%s:saving superblock\n", bidb_filename);
+	fprintf(stderr, "%s:saving superblock\n", bidb_superblock.filename);
 
 	memset(data, 0, sizeof data);
 	memcpy(data, "BiDB", 4);
@@ -806,7 +1166,7 @@ static int bidb_save_superblock(void) {
 	}
 
 	if(!bidb_write_blocks(data, -BIDB_SUPERBLOCK_SZ, 1)) {
-		fprintf(stderr, "%s:could not write superblock\n", bidb_filename);
+		fprintf(stderr, "%s:could not write superblock\n", bidb_superblock.filename);
 		return 0; /* failure */
 	}
 	return 1; /* success */
@@ -821,12 +1181,12 @@ static int bidb_save_record_table(void) {
 		for(j=0;j<bidb_superblock.record_extents[i].length;j++,ofs++) {
 			if(BITTEST(bidb_superblock.record_dirty_blocks, ofs)) {
 				/*
-				DEBUG("%s:writing record block %d\n", bidb_filename, ofs);
+				DEBUG("%s:writing record block %d\n", bidb_superblock.filename, ofs);
 				*/
 				BITCLR(bidb_superblock.record_dirty_blocks, ofs);
 				memset(data, 0, sizeof data); /* TODO: fill with record data */
 				if(!bidb_write_blocks(data, (signed)(bidb_superblock.record_extents[i].offset+j), 1)) {
-					DEBUG("%s:could not write record table\n", bidb_filename);
+					DEBUG("%s:could not write record table\n", bidb_superblock.filename);
 					return 0; /* failure */
 				}
 			}
@@ -836,31 +1196,25 @@ static int bidb_save_record_table(void) {
 }
 
 static int bidb_create_record_table(void) {
-	unsigned i, total, next_block, extentblks;
+	unsigned i, total, extentblks;
 	assert(bidb_superblock.record_extents[0].offset==0); /* only safe to call if we have no table */
 
 	/* create the record table on disk */
 	fprintf(stderr, "Creating new record table\n");
 
-	/* TODO: break it up into extent-sized pieces */
 	bidb_superblock.record_max=BIDB_DEFAULT_MAX_RECORDS;
-
-	next_block=0; /* TODO: allocate the next available block from freelist */
 
 	/* create all the extents necessary */
 	for(i=0,total=0;i<NR(bidb_superblock.record_extents) && total<bidb_superblock.record_max;i++, total++) {
-		bidb_superblock.record_extents[i].offset=next_block;
-
 		extentblks=ROUNDUP((bidb_superblock.record_max-total)*BIDB_RECPTR_SZ, BIDB_BLOCK_SZ)/BIDB_BLOCK_SZ;
 		if(extentblks>1U<<(BIDB_EXTENT_LENGTH_BITS)) {
 			extentblks=1<<BIDB_EXTENT_LENGTH_BITS;
 		}
 
-		bidb_superblock.record_extents[i].length=extentblks;
+		bidb_superblock.record_extents[i]=bidb_allocblocks(extentblks);
 
-		DEBUG("%s:Record table allocating extent %d (%u %u %u)\n", bidb_filename, i, extentblks, total, next_block);
+		DEBUG("%s:Record table allocating extent #%u @ %u+%u\n", bidb_superblock.filename, i, bidb_superblock.record_extents[i].offset, bidb_superblock.record_extents[i].length);
 
-		next_block+=extentblks; /* TODO: allocate the next available block from freelist */
 		total+=extentblks*BIDB_RECORDS_PER_BLOCK;
 	}
 
@@ -883,7 +1237,7 @@ static int bidb_create_record_table(void) {
 /* load a record table form disk */
 static int bidb_load_record_table(void) {
 	if(!recordcache_init(bidb_superblock.record_max)) {
-		fprintf(stderr, "%s:could not initialize record table\n", bidb_filename);
+		fprintf(stderr, "%s:could not initialize record table\n", bidb_superblock.filename);
 		return 0;
 	}
 	if(bidb_superblock.record_extents[0].length==0) { /* no record table found .. create it */
@@ -892,6 +1246,7 @@ static int bidb_load_record_table(void) {
 		}
 	} else {
 		/* TODO: read in record table entries */
+		/* TODO: reserve entries */
 	}
 	return 1; /* */
 }
@@ -903,38 +1258,33 @@ void bidb_record_dirty(unsigned record_number) {
 	blknum=record_number/BIDB_RECORDS_PER_BLOCK;
 
 	if(!BITRANGE(bidb_superblock.record_dirty_blocks, blknum)) {
-		fprintf(stderr, "%s:Dirty block %u not in range!\n", bidb_filename, blknum);
+		fprintf(stderr, "%s:Dirty block %u not in range!\n", bidb_superblock.filename, blknum);
 		return;
 	}
 
-	DEBUG("%s:Dirty block %u\n", bidb_filename, blknum);
+	DEBUG("%s:Dirty block %u\n", bidb_superblock.filename, blknum);
 	BITSET(bidb_superblock.record_dirty_blocks, blknum);
 }
 
 /* create_fl will create if the superblock does not exist */
 int bidb_open(const char *filename) {
 	int create_fl=0;
-	if(bidb_file)
+	if(bidb_superblock.file)
 		bidb_close();
-	bidb_file=fopen(filename, "r+b");
-	if(!bidb_file) {
+	bidb_superblock.file=fopen(filename, "r+b");
+	if(!bidb_superblock.file) {
 		fprintf(stderr, "%s:creating a new file\n", filename);
-		bidb_file=fopen(filename, "w+b");
-		if(!bidb_file) {
+		bidb_superblock.file=fopen(filename, "w+b");
+		if(!bidb_superblock.file) {
 			perror(filename);
 			return 0; /* failure */
 		}
 		create_fl=1;
 	}
-	bidb_filename=strdup(filename);
+	bidb_superblock.filename=strdup(filename);
 
-	if(!create_fl) {
-		if(!bidb_load_superblock()) {
-			bidb_close();
-			return 0; /* failure */
-		}
-	} else {
-		fprintf(stderr, "%s:creating new superblock\n", bidb_filename);
+	if(create_fl) {
+		fprintf(stderr, "%s:creating new superblock\n", bidb_superblock.filename);
 		bidb_superblock.stats.records_used=0;
 		bidb_superblock.record_max=0;
 		bidb_superblock.block_max=0;
@@ -944,8 +1294,18 @@ int bidb_open(const char *filename) {
 		}
 	}
 
+	if(!bidb_load_superblock()) {
+		bidb_close();
+		return 0; /* failure */
+	}
+
+	freelist_init(&bidb_superblock.freelist, 1<<BIDB_EXTENT_LENGTH_BITS);
+	if(bidb_superblock.block_max>0) {
+		freelist_pool(&bidb_superblock.freelist, 0, bidb_superblock.block_max);
+	}
+
 	if(!bidb_load_record_table()) {
-		fprintf(stderr, "%s:could not load record table\n", bidb_filename);
+		fprintf(stderr, "%s:could not load record table\n", bidb_superblock.filename);
 		bidb_close();
 		return 0; /* failure */
 	}
@@ -987,328 +1347,6 @@ void bidb_show_info(void) {
 		sizeof bidb_superblock.record_dirty_blocks
 	);
 }
-
-/******************************************************************************
- * Freelist
- ******************************************************************************/
-
-/* bucket number to use for overflows */
-#define FREELIST_OVERFLOW_BUCKET(flp) (NR((flp)->buckets)-1)
-
-struct freelist_entry {
-	struct freelist_entry *next_global, **prev_global; /* global lists */
-	struct freelist_entry *next_bucket, **prev_bucket; /* bucket lists */
-	struct bidb_extent extent;
-};
-
-struct freelist {
-	/* single list ordered by offset to find adjacent chunks. */
-	struct freelist_entry *global;
-	/* buckets for each size, last entry is a catch-all for huge chunks */
-	struct freelist_entry *buckets[(1<<BIDB_EXTENT_LENGTH_BITS)+1];
-};
-
-static unsigned freelist_ll_bucketnr(struct freelist *fl, unsigned count) {
-	unsigned ret;
-	ret=count/(NR(fl->buckets)-1);
-	if(ret>=NR(fl->buckets)) {
-		ret=FREELIST_OVERFLOW_BUCKET(fl);
-	}
-	return ret;
-}
-
-static void freelist_ll_bucketize(struct freelist *fl, struct freelist_entry *e) {
-	struct freelist_entry **bucketptr;
-	unsigned bucket_nr;
-
-	assert(e!=NULL);
-
-	bucket_nr=freelist_ll_bucketnr(fl, e->extent.length);
-
-	bucketptr=&fl->buckets[bucket_nr];
-	/* detach the entry */
-	if(e->next_bucket) {
-		e->next_bucket->prev_bucket=e->prev_bucket;
-	}
-	if(e->prev_bucket) {
-		*e->prev_bucket=e->next_bucket;
-	}
-
-	/* push entry on the top of the bucket */
-	e->next_bucket=*bucketptr;
-	if(*bucketptr) {
-		(*bucketptr)->prev_bucket=&e->next_bucket;
-	}
-	e->prev_bucket=bucketptr;
-	*bucketptr=e;
-}
-
-/* lowlevel - detach and free an entry */
-static void freelist_ll_free(struct freelist_entry *e) {
-	assert(e!=NULL);
-	assert(e->prev_global!=NULL);
-	assert(e->prev_global!=(void*)0x99999999);
-	assert(e->prev_bucket!=NULL);
-	if(e->next_global) {
-		e->next_global->prev_global=e->prev_global;
-	}
-	if(e->next_bucket) {
-		e->next_bucket->prev_bucket=e->prev_bucket;
-	}
-	*e->prev_global=e->next_global;
-	*e->prev_bucket=e->next_bucket;
-#ifndef NDEBUG
-	memset(e, 0x99, sizeof *e);
-#endif
-	free(e);
-}
-
-/* lowlevel - append an extra to the global list at prev */
-static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsigned ofs, unsigned count) {
-	struct freelist_entry *new;
-	assert(prev!=NULL);
-	assert(prev!=(void*)0x99999999);
-	new=malloc(sizeof *new);
-	assert(new!=NULL);
-	if(!new) {
-		perror("malloc()");
-		return 0;
-	}
-	new->extent.offset=ofs;
-	new->extent.length=count;
-	new->next_bucket=0;
-	new->prev_bucket=0;
-	new->next_global=*prev;
-	new->prev_global=prev;
-	if(*prev) {
-		(*prev)->prev_global=&new->next_global;
-	}
-	*prev=new;
-	return new;
-}
-
-/* returns true if a bridge is detected */
-static int freelist_ll_isbridge(struct bidb_extent *prev_ext, unsigned ofs, unsigned count, struct bidb_extent *next_ext) {
-	/*
-	DEBUG("testing for bridge:\n"
-			"  last:%6d+%d curr:%6d+%d ofs:%6d+%d\n",
-			prev_ext->offset, prev_ext->length, next_ext->offset, next_ext->length,
-			ofs, count
-	);
-	*/
-	return prev_ext->offset+prev_ext->length==ofs && next_ext->offset==ofs+count;
-}
-
-void freelist_init(struct freelist *fl) {
-	unsigned i;
-	fl->global=0;
-	for(i=0;i<NR(fl->buckets);i++) {
-		fl->buckets[i]=0;
-	}
-}
-
-void freelist_free(struct freelist *fl) {
-	while(fl->global) {
-		freelist_ll_free(fl->global);
-	}
-	assert(fl->global==NULL);
-
-#ifndef NDEBUG
-	{
-		unsigned i;
-		for(i=0;i<NR(fl->buckets);i++) {
-			assert(fl->buckets[i]==NULL);
-		}
-	}
-#endif
-}
-
-/* allocate memory from the pool
- * returns offset of the allocation
- * return -1 on failure */
-long freelist_alloc(struct freelist *fl, unsigned count) {
-	unsigned bucketnr, ofs;
-	struct freelist_entry **bucketptr, *curr;
-
-	bucketnr=freelist_ll_bucketnr(fl, count);
-	bucketptr=&fl->buckets[bucketnr];
-	/* TODO: prioritize the order of the check. 1. exact size, 2. double size 3. ? */
-	for(;bucketnr<=FREELIST_OVERFLOW_BUCKET(fl);bucketnr++) {
-		assert(bucketnr<=FREELIST_OVERFLOW_BUCKET(fl));
-		assert(bucketptr!=NULL);
-
-		if(*bucketptr) { /* found an entry*/
-			curr=*bucketptr;
-			assert(curr->extent.length>=count);
-			ofs=curr->extent.offset;
-			curr->extent.offset+=count;
-			curr->extent.length-=count;
-			if(curr->extent.length==0) {
-				freelist_ll_free(curr);
-			} else {
-				/* place in a new bucket */
-				freelist_ll_bucketize(fl, curr);
-			}
-			return ofs;
-		}
-	}
-	return -1;
-}
-
-/* adds a piece to the freelist pool
- *
- * . allocated
- * _ empty
- * X new entry
- *
- * |.....|_XXX_|......|		normal
- * |.....|_XXX|.......|		grow-next
- * |......|XXX_|......|		grow-prev
- * |......|XXX|.......|		bridge
- *
- * WARNING: passing bad parameters will result in strange data in the list
- * */
-void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
-	struct freelist_entry *new, *curr, *last;
-
-	TRACE_ENTER();
-
-	last=NULL;
-	new=NULL;
-	for(curr=fl->global;curr;curr=curr->next_global) {
-		assert(curr!=last);
-		assert(curr!=(void*)0x99999999);
-		if(last) {
-			assert(last->next_global==curr); /* sanity check */
-		}
-		/*
-		printf(
-			"c.ofs:%6d c.len:%6d l.ofs:%6d l.len:%6d ofs:%6d len:%6d\n",
-			curr->extent.offset, curr->extent.length,
-			last ? last->extent.offset : -1, last ? last->extent.length : -1,
-			ofs, count
-		);
-		*/
-
-		if(ofs==curr->extent.offset) {
-			fprintf(stderr, "overlap detected in freelist %p at %u+%u!\n", fl, ofs, count);
-			abort(); /* TODO: make something out of this */
-		} else if(last && freelist_ll_isbridge(&last->extent, ofs, count, &curr->extent)) {
-			/* |......|XXX|.......|		bridge */
-			DEBUG("|......|XXX|.......|		bridge. last=%u+%u curr=%u+%u new=%u+%u\n", last->extent.length, last->extent.offset, curr->extent.offset, curr->extent.length, ofs, count);
-			/* we are dealing with 3 entries, the last, the new and the current */
-			/* merge the 3 entries into the last entry */
-			last->extent.length+=curr->extent.length+count;
-			assert(curr->prev_global==&last->next_global);
-			freelist_ll_free(curr);
-			assert(fl->global!=curr);
-			assert(last->next_global!=(void*)0x99999999);
-			assert(last->next_global!=curr); /* deleting it must take it off the list */
-			new=curr=last;
-			break;
-		} else if(curr->extent.offset==ofs+count) {
-			/* |.....|_XXX|.......|		grow-next */
-			DEBUG("|.....|_XXX|.......|		grow-next. curr=%u+%u new=%u+%u\n", curr->extent.offset, curr->extent.length, ofs, count);
-			/* merge new entry into a following entry */
-			curr->extent.offset=ofs;
-			curr->extent.length+=count;
-			new=curr;
-			break;
-		} else if(last && curr->extent.offset+curr->extent.length==ofs) {
-			/* |......|XXX_|......|		grow-prev */
-			DEBUG("|......|XXX_|......|		grow-prev. curr=%u+%u new=%u+%u\n", curr->extent.offset, curr->extent.length, ofs, count);
-			/* merge the new entry into the end of the previous entry */
-			curr->extent.length+=count;
-			new=curr;
-			break;
-		} else if(ofs<curr->extent.offset) {
-			if(ofs+count>curr->extent.offset) {
-				fprintf(stderr, "overlap detected in freelist %p at %u+%u!\n", fl, ofs, count);
-				abort(); /* TODO: make something out of this */
-			}
-			DEBUG("|.....|_XXX_|......|		normal new=%u+%u\n", ofs, count);
-			/* create a new entry */
-			new=freelist_ll_new(curr->prev_global, ofs, count);
-			break;
-		}
-
-		last=curr; /* save this for finding a bridge */
-	}
-	if(!curr) {
-		if(last) {
-			if(last->extent.offset+last->extent.length==ofs) {
-				DEBUG("|......|XXX_|......|		grow-prev. last=%u+%u new=%u+%u\n", last->extent.offset, last->extent.length, ofs, count);
-				last->extent.length+=count;
-				new=last;
-			} else {
-				DEBUG("|............|XXX  |		end. new=%u+%u\n", ofs, count);
-				new=freelist_ll_new(&last->next_global, ofs, count);
-			}
-		} else {
-			DEBUG("|XXX               |		initial. new=%u+%u\n", ofs, count);
-			new=freelist_ll_new(&fl->global, ofs, count);
-		}
-	}
-
-	/* push entry into bucket */
-	if(new) {
-		freelist_ll_bucketize(fl, new);
-	}
-}
-
-#ifndef NDEBUG
-void freelist_test(void) {
-	struct freelist fl;
-	struct freelist_entry *curr;
-	unsigned n;
-	freelist_init(&fl);
-	fprintf(stderr, "::: Making some fragments :::\n");
-	for(n=0;n<60;n+=12) {
-		freelist_pool(&fl, n, 6);
-	}
-	fprintf(stderr, "::: Filling in gaps :::\n");
-	for(n=0;n<60;n+=12) {
-		freelist_pool(&fl, n+6, 6);
-	}
-	fprintf(stderr, "::: Walking backwards :::\n");
-	for(n=120;n>60;) {
-		n-=6;
-		freelist_pool(&fl, n, 6);
-	}
-
-	fprintf(stderr, "::: Dump freelist :::\n");
-	for(curr=fl.global,n=0;curr;curr=curr->next_global,n++) {
-		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
-	}
-
-	/* test freelist_alloc() */
-	fprintf(stderr, "::: Allocating :::\n");
-	for(n=0;n<60;n+=6) {
-		long ofs;
-		ofs=freelist_alloc(&fl, 6);
-		TRACE("alloc: %u+%u\n", ofs, 6);
-	}
-
-	fprintf(stderr, "::: Dump freelist :::\n");
-	for(curr=fl.global,n=0;curr;curr=curr->next_global,n++) {
-		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
-	}
-
-	fprintf(stderr, "::: Allocating :::\n");
-	for(n=0;n<60;n+=6) {
-		long ofs;
-		ofs=freelist_alloc(&fl, 6);
-		TRACE("alloc: %u+%u\n", ofs, 6);
-	}
-
-	fprintf(stderr, "::: Dump freelist :::\n");
-	for(curr=fl.global,n=0;curr;curr=curr->next_global,n++) {
-		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
-	}
-
-	freelist_free(&fl);
-}
-#endif
 
 /******************************************************************************
  * Objects
@@ -1397,17 +1435,17 @@ int main(void) {
 #ifndef NDEBUG
 	/*
 	bitmap_test();
-	*/
 	freelist_test();
+	*/
 #endif
 
-	/*
 	bidb_show_info();
 	if(!bidb_open(BIDB_FILE)) {
 		printf("Failed\n");
 		return EXIT_FAILURE;
 	}
 	bidb_close();
+	/*
 	*/
 
 	return 0;
