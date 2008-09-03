@@ -11,11 +11,12 @@
  * 	object_base - a generic object type
  * 	object_xxx - free/load/save routines for objects
  * 	bitmap - manages large bitmaps
+ * 	bitfield - manages small staticly sized bitmaps
  * 	freelist - allocate ranges of numbers from a pool
  * 	sockets - manages network sockets
  *
  * dependency:
- *  recordcache - uses bitmap to track dirty blocks
+ *  recordcache - uses bitfield to track dirty blocks
  *  bidb - uses freelist to track free blocks
  *  records - uses freelist to track record numbers (reserve first 100 records)
  *  clients - uses ref counts to determine when to free linked lists items
@@ -991,8 +992,7 @@ int recordcache_init(unsigned max_entries) {
 
 static struct {
 	struct bidb_extent record_extents[16];
-	/* one bit per block */
-	unsigned record_dirty_blocks[BITFIELD(16<<BIDB_EXTENT_LENGTH_BITS,unsigned)];
+	unsigned record_dirty_blocks[BITFIELD(16<<BIDB_EXTENT_LENGTH_BITS,unsigned)]; /* one bit per block - 2Kbyte of bits total */
 	unsigned record_max, block_max;
 	struct bidb_stats {
 		unsigned records_used;
