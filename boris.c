@@ -90,6 +90,7 @@
  * Macros
  ******************************************************************************/
 
+/*=* General purpose macros *=*/
 /* get number of elements in an array */
 #define NR(x) (sizeof(x)/sizeof*(x))
 
@@ -111,8 +112,7 @@
 /* VAR() is used for making temp variables in macros */
 #define VAR(x) _make_name(x,__LINE__)
 
-/** byte-order functions **/
-
+/*=* Byte-order functions *=*/
 /* WRite Big-Endian 32-bit value */
 #define WR_BE32(dest, offset, value) do { \
 		unsigned VAR(tmp)=value; \
@@ -135,7 +135,7 @@
 /* ReaD Big-Endian 32-bit value */
 #define RD_BE32(src, offset) (((src)[offset]*16777216L)|((src)[(offset)+1]*65536L)|((src)[(offset)+2]*256)|(src)[(offset)+3])
 
-/** Rotate operations **/
+/*=* Rotate operations *=*/
 #define ROL8(a,b) (((uint_least8_t)(a)<<(b))|((uint_least8_t)(a)>>(8-(b))))
 #define ROL16(a,b) (((uint_least16_t)(a)<<(b))|((uint_least16_t)(a)>>(16-(b))))
 #define ROL32(a,b) (((uint_least32_t)(a)<<(b))|((uint_least32_t)(a)>>(32-(b))))
@@ -145,7 +145,7 @@
 #define ROR32(a,b) (((uint_least32_t)(a)>>(b))|((uint_least32_t)(a)<<(32-(b))))
 #define ROR64(a,b) (((uint_least64_t)(a)>>(b))|((uint_least64_t)(a)<<(64-(b))))
 
-/** Bitfield operations **/
+/*=* Bitfield operations *=*/
 /* return in type sized elements to create a bitfield of 'bits' bits */
 #define BITFIELD(bits, type) (((bits)+(CHAR_BIT*sizeof(type))-1)/(CHAR_BIT*sizeof(type)))
 
@@ -164,7 +164,7 @@
 /* checks that bit is in range for bitfield x */
 #define BITRANGE(x, bit) ((bit)<(sizeof(x)*CHAR_BIT))
 
-/** DEBUG MACROS **/
+/*=* DEBUG MACROS *=*/
 /* VERBOSE(), DEBUG() and TRACE() macros.
  * DEBUG() does nothing if NDEBUG is defined
  * TRACE() does nothing if NTRACE is defined */
@@ -188,6 +188,51 @@
 #define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
 #define FAILON(e, reason) if(e) { perror("FAILED:" reason); return 0; } } while(0)
 
+/*=* reference counting macros *=*/
+#define REFCOUNT_TYPE int
+#define REFCOUNT_NAME _referencecount
+#define REFCOUNT_INIT(obj) ((obj)->REFCOUNT_NAME=0)
+#define REFCOUNT_TAKE(obj) ((obj)->REFCOUNT_NAME++)
+#define REFCOUNT_PUT(obj, free_func) do { \
+		assert((obj)->REFCOUNT_NAME>0); \
+		if(--(obj)->REFCOUNT_NAME<=0) \
+			free_func((obj)); \
+	} while(0)
+
+/*=* Linked list macros *=*/
+#define LIST_ENTRY(type) struct { type *_next, **_prev; }
+#define LIST_HEAD(headname, type) headname { type *_head; }
+#define LIST_INIT(head) ((head)->_head=NULL)
+#define LIST_ENTRY_INIT(elm, name) do { (elm)->name._next=NULL; (elm)->name._prev=NULL; } while(0)
+#define LIST_TOP(head) ((head)._head)
+#define LIST_NEXT(elm, name) ((elm)->name._next)
+#define LIST_PREVPTR(elm, name) ((elm)->name._prev)
+#define LIST_INSERT_ATPTR(prevptr, elm, name) do { \
+	(elm)->name._prev=(prevptr); \
+	if(((elm)->name._next=*(prevptr))!=NULL) \
+		(elm)->name._next->name._prev=&(elm)->name._next; \
+	*(prevptr)=(elm); \
+	} while(0)
+#define LIST_INSERT_AFTER(where, elm, name) do { \
+		(elm)->name._prev=&(where)->name._next; \
+		if(((elm)->name._next=(where)->name._next)!=NULL) \
+			(where)->name._next->name._prev=&(elm)->name._next; \
+		*(elm)->name._prev=(elm); \
+	} while(0)
+#define LIST_INSERT_HEAD(head, elm, name) do { \
+		(elm)->name._prev=&(head)->_head; \
+		if(((elm)->name._next=(head)->_head)!=NULL) \
+			(head)->_head->name._prev=&(elm)->name._next; \
+		(head)->_head=(elm); \
+	} while(0)
+#define LIST_REMOVE(elm, name) do { \
+		if((elm)->name._next!=NULL) \
+			(elm)->name._next->name._prev=(elm)->name._prev; \
+		if((elm)->name._prev) \
+			*(elm)->name._prev=(elm)->name._next; \
+	} while(0)
+/******* TODO TODO TODO : write unit test for LIST_xxx macros *******/
+
 /******************************************************************************
  * Types and data structures
  ******************************************************************************/
@@ -196,7 +241,7 @@ typedef long bidb_blockofs_t;
 struct lru_entry {
 	void (*free)(void *p);	/* function to free the item */
 	void *data;
-	struct lru_entry *next;
+	LIST_ENTRY(struct lru_entry) queue;
 };
 
 struct bidb_extent {
@@ -246,17 +291,19 @@ static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 #define FREELIST_OVERFLOW_BUCKET(flp) (NR((flp)->buckets)-1)
 
 struct freelist_entry {
-	struct freelist_entry *next_global, **prev_global; /* global lists */
-	struct freelist_entry *next_bucket, **prev_bucket; /* bucket lists */
+	LIST_ENTRY(struct freelist_entry) global; /* global list */
+	LIST_ENTRY(struct freelist_entry) bucket; /* bucket list */
 	struct bidb_extent extent;
 };
 
+LIST_HEAD(struct freelist_listhead, struct freelist_entry);
+
 struct freelist {
 	/* single list ordered by offset to find adjacent chunks. */
-	struct freelist_entry *global;
+	struct freelist_listhead global;
 	/* buckets for each size, last entry is a catch-all for huge chunks */
 	unsigned nr_buckets;
-	struct freelist_entry **buckets;
+	struct freelist_listhead *buckets;
 };
 
 static unsigned freelist_ll_bucketnr(struct freelist *fl, unsigned count) {
@@ -269,45 +316,27 @@ static unsigned freelist_ll_bucketnr(struct freelist *fl, unsigned count) {
 }
 
 static void freelist_ll_bucketize(struct freelist *fl, struct freelist_entry *e) {
-	struct freelist_entry **bucketptr;
 	unsigned bucket_nr;
 
 	assert(e!=NULL);
 
 	bucket_nr=freelist_ll_bucketnr(fl, e->extent.length);
 
-	bucketptr=&fl->buckets[bucket_nr];
 	/* detach the entry */
-	if(e->next_bucket) {
-		e->next_bucket->prev_bucket=e->prev_bucket;
-	}
-	if(e->prev_bucket) {
-		*e->prev_bucket=e->next_bucket;
-	}
+	LIST_REMOVE(e, bucket);
 
 	/* push entry on the top of the bucket */
-	e->next_bucket=*bucketptr;
-	if(*bucketptr) {
-		(*bucketptr)->prev_bucket=&e->next_bucket;
-	}
-	e->prev_bucket=bucketptr;
-	*bucketptr=e;
+	LIST_INSERT_HEAD(&fl->buckets[bucket_nr], e, bucket);
 }
 
 /* lowlevel - detach and free an entry */
 static void freelist_ll_free(struct freelist_entry *e) {
 	assert(e!=NULL);
-	assert(e->prev_global!=NULL);
-	assert(e->prev_global!=(void*)0x99999999);
-	assert(e->prev_bucket!=NULL);
-	if(e->next_global) {
-		e->next_global->prev_global=e->prev_global;
-	}
-	if(e->next_bucket) {
-		e->next_bucket->prev_bucket=e->prev_bucket;
-	}
-	*e->prev_global=e->next_global;
-	*e->prev_bucket=e->next_bucket;
+	assert(e->global._prev!=NULL);
+	assert(e->global._prev!=(void*)0x99999999);
+	assert(e->bucket._prev!=NULL);
+	LIST_REMOVE(e, global);
+	LIST_REMOVE(e, bucket);
 #ifndef NDEBUG
 	memset(e, 0x99, sizeof *e);
 #endif
@@ -327,14 +356,8 @@ static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsi
 	}
 	new->extent.offset=ofs;
 	new->extent.length=count;
-	new->next_bucket=0;
-	new->prev_bucket=0;
-	new->next_global=*prev;
-	new->prev_global=prev;
-	if(*prev) {
-		(*prev)->prev_global=&new->next_global;
-	}
-	*prev=new;
+	LIST_ENTRY_INIT(new, bucket);
+	LIST_INSERT_ATPTR(prev, new, global);
 	return new;
 }
 
@@ -353,20 +376,20 @@ static int freelist_ll_isbridge(struct bidb_extent *prev_ext, unsigned ofs, unsi
 void freelist_init(struct freelist *fl, unsigned nr_buckets) {
 	fl->nr_buckets=nr_buckets+1; /* add one for the overflow bucket */
 	fl->buckets=calloc(fl->nr_buckets, sizeof *fl->buckets);
-	fl->global=0;
+	LIST_INIT(&fl->global);
 }
 
 void freelist_free(struct freelist *fl) {
-	while(fl->global) {
-		freelist_ll_free(fl->global);
+	while(LIST_TOP(fl->global)) {
+		freelist_ll_free(LIST_TOP(fl->global));
 	}
-	assert(fl->global==NULL);
+	assert(LIST_TOP(fl->global)==NULL);
 
 #ifndef NDEBUG
 	{
 		unsigned i;
 		for(i=0;i<fl->nr_buckets;i++) {
-			assert(fl->buckets[i]==NULL);
+			assert(LIST_TOP(fl->buckets[i])==NULL);
 		}
 	}
 #endif
@@ -382,7 +405,7 @@ long freelist_alloc(struct freelist *fl, unsigned count) {
 	assert(count!=0);
 
 	bucketnr=freelist_ll_bucketnr(fl, count);
-	bucketptr=&fl->buckets[bucketnr];
+	bucketptr=&LIST_TOP(fl->buckets[bucketnr]);
 	/* TODO: prioritize the order of the check. 1. exact size, 2. double size 3. ? */
 	for(;bucketnr<=FREELIST_OVERFLOW_BUCKET(fl);bucketnr++) {
 		assert(bucketnr<=FREELIST_OVERFLOW_BUCKET(fl));
@@ -429,11 +452,11 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 
 	last=NULL;
 	new=NULL;
-	for(curr=fl->global;curr;curr=curr->next_global) {
+	for(curr=LIST_TOP(fl->global);curr;curr=LIST_NEXT(curr, global)) {
 		assert(curr!=last);
 		assert(curr!=(void*)0x99999999);
 		if(last) {
-			assert(last->next_global==curr); /* sanity check */
+			assert(LIST_NEXT(last, global)==curr); /* sanity check */
 		}
 		/*
 		printf(
@@ -453,11 +476,11 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 			/* we are dealing with 3 entries, the last, the new and the current */
 			/* merge the 3 entries into the last entry */
 			last->extent.length+=curr->extent.length+count;
-			assert(curr->prev_global==&last->next_global);
+			assert(LIST_PREVPTR(curr, global)==&LIST_NEXT(last, global));
 			freelist_ll_free(curr);
-			assert(fl->global!=curr);
-			assert(last->next_global!=(void*)0x99999999);
-			assert(last->next_global!=curr); /* deleting it must take it off the list */
+			assert(LIST_TOP(fl->global)!=curr);
+			assert(LIST_NEXT(last, global)!=(void*)0x99999999);
+			assert(LIST_NEXT(last, global)!=curr); /* deleting it must take it off the list */
 			new=curr=last;
 			break;
 		} else if(curr->extent.offset==ofs+count) {
@@ -482,7 +505,7 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 			}
 			DEBUG("|.....|_XXX_|......|		normal new=%u+%u\n", ofs, count);
 			/* create a new entry */
-			new=freelist_ll_new(curr->prev_global, ofs, count);
+			new=freelist_ll_new(LIST_PREVPTR(curr, global), ofs, count);
 			break;
 		}
 
@@ -496,11 +519,11 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 				new=last;
 			} else {
 				DEBUG("|............|XXX  |		end. new=%u+%u\n", ofs, count);
-				new=freelist_ll_new(&last->next_global, ofs, count);
+				new=freelist_ll_new(&LIST_NEXT(last, global), ofs, count);
 			}
 		} else {
 			DEBUG("|XXX               |		initial. new=%u+%u\n", ofs, count);
-			new=freelist_ll_new(&fl->global, ofs, count);
+			new=freelist_ll_new(&LIST_TOP(fl->global), ofs, count);
 		}
 	}
 
@@ -515,7 +538,7 @@ void freelist_dump(struct freelist *fl) {
 	struct freelist_entry *curr;
 	unsigned n;
 	fprintf(stderr, "::: Dumping freelist :::\n");
-	for(curr=fl->global,n=0;curr;curr=curr->next_global,n++) {
+	for(curr=LIST_TOP(fl->global),n=0;curr;curr=LIST_NEXT(curr, global),n++) {
 		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
 	}
 }
@@ -1465,21 +1488,23 @@ struct object_base *object_iscached(unsigned id) {
 
 struct socketio_server {
 	SOCKET fd;
-	struct socketio_server *next;
+	LIST_ENTRY(struct socketio_server) list;
 	char *name;
+	REFCOUNT_TYPE REFCOUNT_NAME;
 };
 
 struct socketio_client {
 	SOCKET fd;
-	struct socketio_client *next;
+	LIST_ENTRY(struct socketio_client) list;
 	char *name;
+	REFCOUNT_TYPE REFCOUNT_NAME;
 };
 
-static struct socketio_server *socketio_server_list;
-static struct socketio_client *socketio_client_list;
+static LIST_HEAD(struct socketio_server_list, struct socketio_server) socketio_server_list;
+static LIST_HEAD(struct socketio_client_list, struct socketio_client) socketio_client_list;
 static fd_set socketio_readfds, socketio_writefds;
 #if defined(USE_WIN32_SOCKETS)
-#define socketio_fdmax 0
+#define socketio_fdmax 0 /* does not exist */
 #else
 static SOCKET socketio_fdmax=INVALID_SOCKET; /* used by select() to limit the number of fds to check */
 #endif
@@ -1653,8 +1678,9 @@ static int socketio_listen_bind(struct addrinfo *ai) {
 	newserv=calloc(1, sizeof *newserv);
 	newserv->fd=fd;
 	newserv->name=strdup(hostbuf);
-	newserv->next=socketio_server_list;
-	socketio_server_list=newserv;
+	REFCOUNT_INIT(newserv);
+	REFCOUNT_TAKE(newserv);
+	LIST_INSERT_HEAD(&socketio_server_list, newserv, list);
 
 	socketio_readready(newserv->fd); /* be ready for accept() */
 
@@ -1666,6 +1692,19 @@ failure:
 	socketio_close(fd);
 failure_clean:
 	return 0;
+}
+
+
+static void socketio_ll_client_free(struct socketio_client *client) {
+	if(!client)
+		return;
+	DEBUG("freeing client '%s'\n", client->name);
+}
+
+static void socketio_ll_server_free(struct socketio_server *serv) {
+	if(!serv)
+		return;
+	DEBUG("freeing server '%s'\n", serv->name);
 }
 
 /* 
@@ -1724,7 +1763,7 @@ int socketio_dispatch(struct timeval timeout) {
 	struct socketio_client *clientcurr;
 	int nr;	/* number of sockets to process */
 
-	if(!socketio_server_list && !socketio_client_list) {
+	if(!LIST_TOP(socketio_server_list) && !LIST_TOP(socketio_client_list)) {
 		fprintf(stderr, "No more sockets to watch\n");
 		return 0;
 	}
@@ -1738,39 +1777,44 @@ int socketio_dispatch(struct timeval timeout) {
 	DEBUG("select() returned %d results\n", nr);
 
 	/* check servers */
-	for(servcurr=socketio_server_list;nr>0 && servcurr;servcurr=servcurr->next) {
+	for(servcurr=LIST_TOP(socketio_server_list);nr>0 && servcurr;servcurr=LIST_NEXT(servcurr, list)) {
 		TRACE("Checking server %s\n", servcurr->name);
 		if(FD_ISSET(servcurr->fd, &socketio_readfds)) {
 			FD_CLR(servcurr->fd, &socketio_readfds);
 			/* we just ignore the write bits, listeners should never set */
 			FD_CLR(servcurr->fd, &socketio_writefds);
 			DEBUG("Connection\n");
+			REFCOUNT_TAKE(servcurr);
+			REFCOUNT_PUT(servcurr, socketio_ll_server_free);
 			nr--;	
 		}
 	}
 	/* check clients */
-	for(clientcurr=socketio_client_list;nr>0 && clientcurr;clientcurr=clientcurr->next) {
-		int tmp=0;
+	for(clientcurr=LIST_TOP(socketio_client_list);nr>0 && clientcurr;clientcurr=LIST_NEXT(clientcurr, list)) {
+		int rdfl, wrfl;
 
 		TRACE("Checking client %s\n", clientcurr->name);
-		if(FD_ISSET(clientcurr->fd, &socketio_writefds)) {
-			tmp=1;
-			FD_CLR(clientcurr->fd, &socketio_writefds);
-			DEBUG("Write-ready\n");
-			/* TODO: perform the write handler */
+
+		wrfl=FD_ISSET(clientcurr->fd, &socketio_writefds);
+		rdfl=FD_ISSET(clientcurr->fd, &socketio_readfds);
+
+		if(wrfl || rdfl) {
+			REFCOUNT_TAKE(clientcurr);
+			if(wrfl) {
+				FD_CLR(clientcurr->fd, &socketio_writefds);
+				DEBUG("Write-ready\n");
+				/* TODO: perform the write handler */
+			}
+
+			if(rdfl) {
+				FD_CLR(clientcurr->fd, &socketio_readfds);
+				DEBUG("Read-ready\n");
+				/* TODO: perform the read handler */
+			}
+			nr--;	/* decrement socket count if read, write or both was done */
+			REFCOUNT_PUT(clientcurr, socketio_ll_client_free);
 		}
 
-		if(FD_ISSET(clientcurr->fd, &socketio_readfds)) {
-			tmp=1;
-			FD_CLR(clientcurr->fd, &socketio_readfds);
-			DEBUG("Read-ready\n");
-			/* TODO: perform the read handler */
-		}
-
-		/* decrement if read, write or both was done */
-		if(tmp) {
-			nr--;	
-		}
 	}
 	assert(nr==0);
 	if(nr>0) {
@@ -1851,10 +1895,10 @@ int main(int argc, char **argv) {
 	struct timeval timeout;
 
 #ifndef NDEBUG
-	/*
 	bitmap_test();
 	freelist_test();
 	bidb_show_info();
+	/*
 	*/
 #endif
 
