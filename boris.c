@@ -1484,7 +1484,7 @@ static fd_set socketio_readfds, socketio_writefds;
 static SOCKET socketio_fdmax=INVALID_SOCKET; /* used by select() to limit the number of fds to check */
 #endif
 
-#if defined(USE_WIN32_SOCKETS)
+#if defined(USE_WIN32_SOCKETS) && !defined(gai_strerror)
 static const char *gai_strerror(int err) {
 	switch(err) {
 		case EAI_AGAIN: return "Temporary failure in name resolution";
