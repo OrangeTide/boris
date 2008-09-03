@@ -22,14 +22,12 @@ CPPFLAGS+=-DNTRACE
 
 # LDLIBS:=
 
-all : boris boris.exe
+all : boris
 
 boris : boris.c
-boris.exe : boris.c
 
-clean :
+clean ::
 	$(RM) boris
-	$(RM) boris.exe boris.debug.exe
 
 ## 
 # Windows build
@@ -37,6 +35,11 @@ clean :
 CFLAGS_WIN32:=$(CFLAGS) -D_WIN32_WINNT=0x0501
 CPPFLAGS_WIN32:=$(CPPFLAGS)
 LDLIBS_WIN32:=-lws2_32
+
+boris.exe : boris.c
+
+clean ::
+	$(RM) boris.exe boris.debug.exe
 
 %.win32.o : %.c
 	i586-mingw32msvc-gcc -c $(CFLAGS_WIN32) $(CPPFLAGS_WIN32) -o $@ $^
