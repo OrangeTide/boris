@@ -4,9 +4,11 @@
 # universal settings for all platforms and architectures
 ##############################################################################
 
-CFLAGS:=-Wall -Wextra -Wuninitialized -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -fstrict-aliasing -Wstrict-aliasing -Wpointer-arith -Wcast-align -Wstrict-prototypes -Wold-style-definition -Wredundant-decls -Wnested-externs -std=c99 -pedantic 
-# debugging and profiling
-CFLAGS+=-g -pg -O1
+CFLAGS:=-Wall -Wextra -Wuninitialized -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -Wstrict-aliasing -Wpointer-arith -Wcast-align  -Wold-style-definition -Wredundant-decls -Wnested-externs -std=gnu99 -pedantic 
+# debugging
+CFLAGS+=-g -O1
+# profiling
+# CFLAGS+=-pg
 # optimization
 # CFLAGS+=-Os 
 # enable the following for dead code elimination
@@ -20,7 +22,32 @@ CPPFLAGS+=-DNTRACE
 
 # LDLIBS:=
 
+all : boris boris.exe
+
 boris : boris.c
+boris.exe : boris.c
 
 clean :
 	$(RM) boris
+	$(RM) boris.exe boris.debug.exe
+
+## 
+# Windows build
+#
+CFLAGS_WIN32:=$(CFLAGS) -D_WIN32_WINNT=0x0501
+CPPFLAGS_WIN32:=$(CPPFLAGS)
+LDLIBS_WIN32:=-lws2_32
+
+%.win32.o : %.c
+	i586-mingw32msvc-gcc -c $(CFLAGS_WIN32) $(CPPFLAGS_WIN32) -o $@ $^
+
+%.debug.exe : %.c
+	i586-mingw32msvc-gcc $(CFLAGS_WIN32) $(CPPFLAGS_WIN32) $(LDFLAGS_WIN32) -o $@ $^ $(LDLIBS_WIN32)
+
+.PRECIOUS : %.debug.exe
+
+%.debug.exe : %.win32.o
+	i586-mingw32msvc-gcc $(CFLAGS_WIN32) $(LDFLAGS_WIN32) -o $@ $(filter %.win32.o,$^) $(LDLIBS_WIN32)
+
+%.exe : %.debug.exe
+	i586-mingw32msvc-strip -g -o $@ $(filter %.exe,$^)
