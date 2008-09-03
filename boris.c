@@ -13,7 +13,7 @@
  * 	bitmap - manages large bitmaps
  * 	bitfield - manages small staticly sized bitmaps
  * 	freelist - allocate ranges of numbers from a pool
- * 	sockets - manages network sockets
+ * 	socketio - manages network sockets
  *
  * dependency:
  *  recordcache - uses bitfield to track dirty blocks
@@ -80,6 +80,7 @@
 
 #include <assert.h>
 #include <inttypes.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -111,6 +112,14 @@
 
 /* VAR() is used for making temp variables in macros */
 #define VAR(x) _make_name(x,__LINE__)
+
+/* controls how external functions are exported */
+#if 0
+#define EXPORT
+#else
+/* fake out the export and keep the functions internal */
+#define EXPORT static
+#endif
 
 /*=* Byte-order functions *=*/
 /* WRite Big-Endian 32-bit value */
@@ -186,7 +195,7 @@
 #endif
 #define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
 #define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
-#define FAILON(e, reason) if(e) { perror("FAILED:" reason); return 0; } } while(0)
+#define FAILON(e, reason, label) if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
 
 /*=* reference counting macros *=*/
 #define REFCOUNT_TYPE int
@@ -373,13 +382,13 @@ static int freelist_ll_isbridge(struct bidb_extent *prev_ext, unsigned ofs, unsi
 	return prev_ext->offset+prev_ext->length==ofs && next_ext->offset==ofs+count;
 }
 
-void freelist_init(struct freelist *fl, unsigned nr_buckets) {
+EXPORT void freelist_init(struct freelist *fl, unsigned nr_buckets) {
 	fl->nr_buckets=nr_buckets+1; /* add one for the overflow bucket */
 	fl->buckets=calloc(fl->nr_buckets, sizeof *fl->buckets);
 	LIST_INIT(&fl->global);
 }
 
-void freelist_free(struct freelist *fl) {
+EXPORT void freelist_free(struct freelist *fl) {
 	while(LIST_TOP(fl->global)) {
 		freelist_ll_free(LIST_TOP(fl->global));
 	}
@@ -398,7 +407,7 @@ void freelist_free(struct freelist *fl) {
 /* allocate memory from the pool
  * returns offset of the allocation
  * return -1 on failure */
-long freelist_alloc(struct freelist *fl, unsigned count) {
+EXPORT long freelist_alloc(struct freelist *fl, unsigned count) {
 	unsigned bucketnr, ofs;
 	struct freelist_entry **bucketptr, *curr;
 
@@ -443,7 +452,7 @@ long freelist_alloc(struct freelist *fl, unsigned count) {
  *
  * WARNING: passing bad parameters will result in strange data in the list
  * */
-void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
+EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 	struct freelist_entry *new, *curr, *last;
 
 	TRACE_ENTER();
@@ -534,7 +543,7 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 }
 
 #ifndef NDEBUG
-void freelist_dump(struct freelist *fl) {
+EXPORT void freelist_dump(struct freelist *fl) {
 	struct freelist_entry *curr;
 	unsigned n;
 	fprintf(stderr, "::: Dumping freelist :::\n");
@@ -543,7 +552,7 @@ void freelist_dump(struct freelist *fl) {
 	}
 }
 
-void freelist_test(void) {
+EXPORT void freelist_test(void) {
 	struct freelist fl;
 	unsigned n;
 	freelist_init(&fl, 1024);
@@ -663,13 +672,13 @@ struct bitmap {
 	size_t bitmap_allocbits;
 };
 
-void bitmap_init(struct bitmap *bitmap) {
+EXPORT void bitmap_init(struct bitmap *bitmap) {
 	assert(bitmap!=NULL);
 	bitmap->bitmap=0;
 	bitmap->bitmap_allocbits=0;
 }
 
-void bitmap_free(struct bitmap *bitmap) {
+EXPORT void bitmap_free(struct bitmap *bitmap) {
 	assert(bitmap!=NULL); /* catch when calling free on NULL */
 	if(bitmap) {
 		free(bitmap->bitmap);
@@ -678,7 +687,7 @@ void bitmap_free(struct bitmap *bitmap) {
 }
 
 /* newbits is in bits (not bytes) */
-int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
+EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	unsigned *tmp;
 
 	newbits=ROUNDUP(newbits, BITMAP_BITSIZE);
@@ -701,7 +710,7 @@ int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	return 1; /* success */
 }
 
-void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len) {
+EXPORT void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
 
@@ -734,7 +743,7 @@ void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	}
 }
 
-void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len) {
+EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
 
@@ -767,7 +776,7 @@ void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 }
 
 /* gets a single bit */
-int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
+EXPORT int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
 	if(ofs<bitmap->bitmap_allocbits) {
 		return (bitmap->bitmap[ofs/BITMAP_BITSIZE]>>(ofs%BITMAP_BITSIZE))&1;
 	} else {
@@ -777,7 +786,7 @@ int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
 
 /* return the position of the next set bit
  * -1 if the end of the bits was reached */
-int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
+EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
 
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
@@ -795,7 +804,7 @@ int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 
 /* return the position of the next set bit
  * -1 if the end of the bits was reached */
-int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
+EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
 
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
@@ -814,7 +823,7 @@ int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 /* loads a chunk of memory into the bitmap buffer
  * erases previous bitmap buffer
  * len is in bytes */
-void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len) {
+EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len) {
 	unsigned *p, word_count, i;
 
 	/* resize if too small */
@@ -850,12 +859,12 @@ void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len) {
 }
 
 /* returns the length in bytes of the entire bitmap table */
-unsigned bitmap_length(struct bitmap *bitmap) {
+EXPORT unsigned bitmap_length(struct bitmap *bitmap) {
 	return bitmap ? ROUNDUP(bitmap->bitmap_allocbits, CHAR_BIT)/CHAR_BIT : 0;
 }
 
 #ifndef NDEBUG
-void bitmap_test(void) {
+EXPORT void bitmap_test(void) {
 	int i;
 	struct bitmap bitmap;
 
@@ -937,7 +946,7 @@ static size_t roundup2(size_t val) {
 	return n;
 }
 
-int recordcache_init(unsigned max_entries) {
+EXPORT int recordcache_init(unsigned max_entries) {
 	struct recordcache_entry **tmp;
 	assert(recordcache_table==NULL);
 	if(recordcache_table) {
@@ -1025,7 +1034,7 @@ static struct {
 	char *filename;
 } bidb_superblock;
 
-void bidb_close(void) {
+EXPORT void bidb_close(void) {
 #ifndef NDEBUG
 	freelist_dump(&bidb_superblock.freelist);
 #endif
@@ -1284,7 +1293,7 @@ static int bidb_load_record_table(void) {
 }
 
 /* mark a record as dirty due to modification */
-void bidb_record_dirty(unsigned record_number) {
+EXPORT void bidb_record_dirty(unsigned record_number) {
 	unsigned blknum;
 
 	blknum=record_number/BIDB_RECORDS_PER_BLOCK;
@@ -1299,7 +1308,7 @@ void bidb_record_dirty(unsigned record_number) {
 }
 
 /* create_fl will create if the superblock does not exist */
-int bidb_open(const char *filename) {
+EXPORT int bidb_open(const char *filename) {
 	int create_fl=0;
 	if(bidb_superblock.file)
 		bidb_close();
@@ -1344,7 +1353,7 @@ int bidb_open(const char *filename) {
 	return 1; /* success */
 }
 
-void bidb_show_info(void) {
+EXPORT void bidb_show_info(void) {
 #define BIDB_HIGHEST_RECORD
 #define BIDB_HIGHEST_BLOCK
 	const uint_least32_t
@@ -1410,25 +1419,25 @@ struct object_item {
 };
 
 /* converts a mob to a base object */
-struct object_base *mob_to_base(struct object_mob *mob) {
+EXPORT struct object_base *mob_to_base(struct object_mob *mob) {
 	assert(mob!=NULL);
 	return &mob->base;
 }
 
 /* converts a room to a base object */
-struct object_base *room_to_base(struct object_room *room) {
+EXPORT struct object_base *room_to_base(struct object_room *room) {
 	assert(room!=NULL);
 	return &room->base;
 }
 
 /* converts an item to a base object */
-struct object_base *item_to_base(struct object_item *item) {
+EXPORT struct object_base *item_to_base(struct object_item *item) {
 	assert(item!=NULL);
 	return &item->base;
 }
 
 /* frees an object of any type */
-void object_free(struct object_base *obj) {
+EXPORT void object_free(struct object_base *obj) {
 	assert(obj!=NULL);
 	assert(obj->con!=NULL);
 	if(!obj)
@@ -1444,23 +1453,23 @@ void object_free(struct object_base *obj) {
  * Object Cache
  ******************************************************************************/
 
-struct object_base *object_load(unsigned id) {
+EXPORT struct object_base *object_load(unsigned id) {
 	abort();
 	return 0;
 }
 
-struct object_base *object_save(unsigned id) {
+EXPORT struct object_base *object_save(unsigned id) {
 	abort();
 	return 0;
 }
 
-struct object_base *object_iscached(unsigned id) {
+EXPORT struct object_base *object_iscached(unsigned id) {
 	abort();
 	return 0;
 }
 
 /******************************************************************************
- * Sockets
+ * Socket I/O API
  ******************************************************************************/
 #if defined(USE_BSD_SOCKETS)
 #include <arpa/inet.h>
@@ -1502,9 +1511,10 @@ struct socketio_client {
 
 static LIST_HEAD(struct socketio_server_list, struct socketio_server) socketio_server_list;
 static LIST_HEAD(struct socketio_client_list, struct socketio_client) socketio_client_list;
-static fd_set socketio_readfds, socketio_writefds;
+static fd_set socketio_readfds[2], socketio_writefds[2]; /* ping-pong between fdsets */
+static unsigned socketio_fdset; /* selects fdset 0 or 1 */
 #if defined(USE_WIN32_SOCKETS)
-#define socketio_fdmax 0 /* does not exist */
+#define socketio_fdmax 0 /* not used on Win32 */
 #else
 static SOCKET socketio_fdmax=INVALID_SOCKET; /* used by select() to limit the number of fds to check */
 #endif
@@ -1525,7 +1535,7 @@ static const char *gai_strerror(int err) {
 }
 #endif
 
-int socketio_init(void) {
+EXPORT int socketio_init(void) {
 #if defined(USE_WIN32_SOCKETS)
 	WSADATA wsaData;
 	int err;
@@ -1545,13 +1555,13 @@ int socketio_init(void) {
 	return 1;
 }
 
-void socketio_shutdown(void) {
+EXPORT void socketio_shutdown(void) {
 #if defined(USE_WIN32_SOCKETS)
 	WSACleanup();
 #endif
 }
 
-void socketio_close(SOCKET fd) {
+EXPORT void socketio_close(SOCKET fd) {
 #if defined(USE_WIN32_SOCKETS)
 	closesocket(fd);
 #else
@@ -1560,8 +1570,8 @@ void socketio_close(SOCKET fd) {
 }
 
 /* report that an fd is ready for read events, and update the fdmax value */
-void socketio_readready(SOCKET fd) {
-	FD_SET(fd, &socketio_readfds);
+EXPORT void socketio_readready(SOCKET fd) {
+	FD_SET(fd, &socketio_readfds[socketio_fdset]);
 #if !defined(USE_WIN32_SOCKETS)
 	if(fd>socketio_fdmax) {
 		socketio_fdmax=fd;
@@ -1570,8 +1580,8 @@ void socketio_readready(SOCKET fd) {
 }
 
 /* report that an fd is ready for write events, and update the fdmax value */
-void socketio_writeready(SOCKET fd) {
-	FD_SET(fd, &socketio_writefds);
+EXPORT void socketio_writeready(SOCKET fd) {
+	FD_SET(fd, &socketio_writefds[socketio_fdset]);
 #if !defined(USE_WIN32_SOCKETS)
 	if(fd>socketio_fdmax) {
 		socketio_fdmax=fd;
@@ -1579,8 +1589,7 @@ void socketio_writeready(SOCKET fd) {
 #endif
 }
 
-
-const char *socketio_strerror(void) {
+EXPORT const char *socketio_strerror(void) {
 #if defined(USE_WIN32_SOCKETS)
 	static char buf[64];
 	int res;
@@ -1595,7 +1604,7 @@ const char *socketio_strerror(void) {
 }
 
 /* return true is the last recv()/send() call would have blocked */
-int socketio_wouldblock(void) {
+EXPORT int socketio_wouldblock(void) {
 #if defined(USE_WIN32_SOCKETS)
 	return WSAGetLastError()==WSAEWOULDBLOCK;
 #else
@@ -1603,12 +1612,36 @@ int socketio_wouldblock(void) {
 #endif
 }
 
-int socketio_getpeername(SOCKET fd) {
-	char hostbuf[64], servbuf[16];
+EXPORT int socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, size_t name_len) {
+	char servbuf[16];
 	int res;
+	size_t tmplen;
+
+	/* leave room in name for ":servbuf" and at least 16 characters */
+	if(name_len>=(16+sizeof servbuf)) {
+		name_len-=sizeof servbuf;
+	}
+	res=getnameinfo(sa, salen, name, name_len, servbuf, sizeof servbuf, NI_NUMERICHOST|NI_NUMERICSERV);	
+	SOCKETIO_FAILON(res!=0, "getnameinfo()", failure);
+
+	tmplen=strlen(name);
+	if(name_len>tmplen) {
+		snprintf(name+tmplen, name_len-tmplen, "/%s", servbuf);
+	}
+
+	return 1; /* success */
+
+failure:
+	return 0;
+}
+
+EXPORT int socketio_getpeername(SOCKET fd, char *name, size_t name_len) {
 	struct sockaddr_storage ss;
 	socklen_t sslen;
-	size_t len;
+	int res;
+	
+	assert(fd!=INVALID_SOCKET);
+	assert(name!=NULL);
 
 	sslen=sizeof ss;
 	res=getpeername(fd, (struct sockaddr*)&ss, &sslen);
@@ -1616,28 +1649,18 @@ int socketio_getpeername(SOCKET fd) {
 		fprintf(stderr, "%s():%s\n", __func__, socketio_strerror());
 		return 0;
 	}
-
-	/* leave room in hostbuf for ":servbuf" */
-	res=getnameinfo((struct sockaddr *)&ss, sslen, hostbuf, sizeof hostbuf-sizeof servbuf, servbuf, sizeof servbuf, NI_NUMERICHOST|NI_NUMERICSERV);	
-	SOCKETIO_FAILON(res!=0, "getnameinfo()", failure);
-
-	len=strlen(hostbuf);
-	snprintf(hostbuf+len, sizeof hostbuf-len, ":%s", servbuf);
-
-	DEBUG("getpeername is %s\n", hostbuf);
-	/* TODO: finish this */
-	abort();
-	return 0;
-
-failure:
-	return 0;
+	if(!socketio_sockname((struct sockaddr*)&ss, sslen, name, name_len)) {
+		fprintf(stderr, "Failed %s() on fd %d\n", __func__, fd);
+		return 0;
+	}
+	DEBUG("getpeername is %s\n", name);
+	return 1;
 }
 
 static int socketio_listen_bind(struct addrinfo *ai) {
 	SOCKET fd;
 	int res;
-	size_t len;
-	char hostbuf[64], servbuf[16];
+	char buf[64];
 	struct socketio_server *newserv;
 
 	const int yes=1;
@@ -1668,23 +1691,21 @@ static int socketio_listen_bind(struct addrinfo *ai) {
 	res=listen(fd, SOCKETIO_LISTEN_QUEUE);
 	SOCKETIO_FAILON(res!=0, "forming listening socket", failure);
 
-	/* leave room in hostbuf for ":servbuf" */
-	res=getnameinfo(ai->ai_addr, ai->ai_addrlen, hostbuf, sizeof hostbuf-sizeof servbuf, servbuf, sizeof servbuf, NI_NUMERICHOST|NI_NUMERICSERV);	
-	SOCKETIO_FAILON(res!=0, "getnameinfo()", failure);
-	len=strlen(hostbuf);
-	snprintf(hostbuf+len, sizeof hostbuf-len, ":%s", servbuf);
+	if(!socketio_sockname(ai->ai_addr, ai->ai_addrlen, buf, sizeof buf)) {
+		strcpy(buf, "<UNKNOWN>");
+	}
 
 	/* add server to a list */
 	newserv=calloc(1, sizeof *newserv);
 	newserv->fd=fd;
-	newserv->name=strdup(hostbuf);
+	newserv->name=strdup(buf);
 	REFCOUNT_INIT(newserv);
 	REFCOUNT_TAKE(newserv);
 	LIST_INSERT_HEAD(&socketio_server_list, newserv, list);
 
 	socketio_readready(newserv->fd); /* be ready for accept() */
 
-	DEBUG("Bind success: %s %s\n", ai->ai_family==AF_INET ? "IPv4" : ai->ai_family==AF_INET6 ? "IPv6" : "Unknown", hostbuf);
+	DEBUG("Bind success: %s %s\n", ai->ai_family==AF_INET ? "IPv4" : ai->ai_family==AF_INET6 ? "IPv6" : "Unknown", buf);
 
 	return 1; /* success */
 
@@ -1694,14 +1715,15 @@ failure_clean:
 	return 0;
 }
 
-
 static void socketio_ll_client_free(struct socketio_client *client) {
+	assert(client!=NULL);
 	if(!client)
 		return;
 	DEBUG("freeing client '%s'\n", client->name);
 }
 
 static void socketio_ll_server_free(struct socketio_server *serv) {
+	assert(serv!=NULL);
 	if(!serv)
 		return;
 	DEBUG("freeing server '%s'\n", serv->name);
@@ -1711,7 +1733,7 @@ static void socketio_ll_server_free(struct socketio_server *serv) {
  * family : 0 or AF_INET or AF_INET6
  * socktype: SOCK_STREAM or SOCK_DGRAM 
  */
-int socketio_listen(int family, int socktype, const char *host, const char *port) {
+EXPORT int socketio_listen(int family, int socktype, const char *host, const char *port) {
 	int res;
 	struct addrinfo *ai_res, *curr;
 	struct addrinfo ai_hints;
@@ -1758,20 +1780,51 @@ int socketio_listen(int family, int socktype, const char *host, const char *port
 	return 1; /* success */	
 }
 
-int socketio_dispatch(struct timeval timeout) {
+static int socketio_accept(struct socketio_server *servcurr) {
+	struct sockaddr_storage ss;
+	socklen_t sslen;
+	struct socketio_client *newclient;	
+	SOCKET fd;
+	char buf[64];
+	assert(servcurr!=NULL);
+	assert(servcurr->fd!=INVALID_SOCKET);
+	sslen=sizeof ss;
+	fd=accept(servcurr->fd, (struct sockaddr*)&ss, &sslen);
+	SOCKETIO_FAILON(fd==INVALID_SOCKET, "accept()", failure);
+	newclient=calloc(1, sizeof *newclient);
+	
+	if(!socketio_sockname((struct sockaddr*)&ss, sslen, buf, sizeof buf)) {
+		strcpy(buf, "<UNKNOWN>");
+	}
+	newclient->name=strdup(buf);
+	newclient->fd=fd;
+	REFCOUNT_INIT(newclient);
+	REFCOUNT_TAKE(newclient);
+	LIST_INSERT_HEAD(&socketio_client_list, newclient, list);
+	socketio_readready(fd);
+	DEBUG("Accepted connection %s\n", newclient->name);
+	return 1;
+failure:
+	return 0;
+}
+
+EXPORT int socketio_dispatch(struct timeval timeout) {
 	struct socketio_server *servcurr;
 	struct socketio_client *clientcurr;
 	int nr;	/* number of sockets to process */
+	unsigned old_fdset;
 
 	if(!LIST_TOP(socketio_server_list) && !LIST_TOP(socketio_client_list)) {
 		fprintf(stderr, "No more sockets to watch\n");
 		return 0;
 	}
 
-	nr=select(socketio_fdmax+1, &socketio_readfds, &socketio_writefds, 0, &timeout);
+	nr=select(socketio_fdmax+1, &socketio_readfds[socketio_fdset], &socketio_writefds[socketio_fdset], 0, &timeout);
 #if !defined(USE_WIN32_SOCKETS)
 	socketio_fdmax=INVALID_SOCKET; /* reset the maximum before calling any handlers */
 #endif
+	old_fdset=socketio_fdset;
+	socketio_fdset^=1; /* toggle between 0 and 1 */
 	SOCKETIO_FAILON(nr==SOCKET_ERROR, "select()", failure);
 
 	DEBUG("select() returned %d results\n", nr);
@@ -1779,12 +1832,13 @@ int socketio_dispatch(struct timeval timeout) {
 	/* check servers */
 	for(servcurr=LIST_TOP(socketio_server_list);nr>0 && servcurr;servcurr=LIST_NEXT(servcurr, list)) {
 		TRACE("Checking server %s\n", servcurr->name);
-		if(FD_ISSET(servcurr->fd, &socketio_readfds)) {
-			FD_CLR(servcurr->fd, &socketio_readfds);
+		if(FD_ISSET(servcurr->fd, &socketio_readfds[old_fdset])) {
+			FD_CLR(servcurr->fd, &socketio_readfds[socketio_fdset]);
 			/* we just ignore the write bits, listeners should never set */
-			FD_CLR(servcurr->fd, &socketio_writefds);
-			DEBUG("Connection\n");
+			FD_CLR(servcurr->fd, &socketio_writefds[socketio_fdset]);
 			REFCOUNT_TAKE(servcurr);
+			DEBUG("Connection on %s\n", servcurr->name);
+			socketio_accept(servcurr); /* new clients would set fd_set entries, and trigger in the following if we didn't use two fd_sets */
 			REFCOUNT_PUT(servcurr, socketio_ll_server_free);
 			nr--;	
 		}
@@ -1795,20 +1849,20 @@ int socketio_dispatch(struct timeval timeout) {
 
 		TRACE("Checking client %s\n", clientcurr->name);
 
-		wrfl=FD_ISSET(clientcurr->fd, &socketio_writefds);
-		rdfl=FD_ISSET(clientcurr->fd, &socketio_readfds);
+		wrfl=FD_ISSET(clientcurr->fd, &socketio_writefds[old_fdset]);
+		rdfl=FD_ISSET(clientcurr->fd, &socketio_readfds[old_fdset]);
 
 		if(wrfl || rdfl) {
 			REFCOUNT_TAKE(clientcurr);
 			if(wrfl) {
-				FD_CLR(clientcurr->fd, &socketio_writefds);
-				DEBUG("Write-ready\n");
+				FD_CLR(clientcurr->fd, &socketio_writefds[socketio_fdset]);
+				DEBUG("Write-ready %s\n", clientcurr->name);
 				/* TODO: perform the write handler */
 			}
 
 			if(rdfl) {
-				FD_CLR(clientcurr->fd, &socketio_readfds);
-				DEBUG("Read-ready\n");
+				FD_CLR(clientcurr->fd, &socketio_readfds[socketio_fdset]);
+				DEBUG("Read-ready %s\n", clientcurr->name);
 				/* TODO: perform the read handler */
 			}
 			nr--;	/* decrement socket count if read, write or both was done */
@@ -1895,10 +1949,10 @@ int main(int argc, char **argv) {
 	struct timeval timeout;
 
 #ifndef NDEBUG
+	/*
 	bitmap_test();
 	freelist_test();
 	bidb_show_info();
-	/*
 	*/
 #endif
 
@@ -1914,12 +1968,10 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	atexit(bidb_close);
-	/*
-	*/
 
+	/* TODO: use the next event for the timer */
 	timeout.tv_usec=0;
 	timeout.tv_sec=10;
-
 	while(socketio_dispatch(timeout)) {
 		fprintf(stderr, "Tick\n");
 	}
