@@ -11,7 +11,22 @@
  * 	object_base - a generic object type
  * 	object_xxx - free/load/save routines for objects
  * 	bitmap - manages large bitmaps
- * 	freelist - a malloc-like abstraction for the block bitmaps
+ * 	freelist - allocate ranges of numbers from a pool
+ * 	sockets - manages network sockets
+ *
+ * dependency:
+ *  recordcache - uses bitmap to track dirty blocks
+ *  bidb - uses freelist to track free blocks
+ *  records - uses freelist to track record numbers (reserve first 100 records)
+ *  clients - uses ref counts to determine when to free linked lists items
+ *
+ * types of records:
+ *  objects - base objects for room, mob, or item
+ *  instances - instance data for room, mob or item
+ *  container - container data for room, mob or item (a type of instance data)
+ *  stringmap - maps strings to a data structure (hash table)
+ *  numbermap - maps integers to a data structure (hash table)
+ *  strings - a large string that can span multiple blocks
  *
  * objects:
  * 	base - the following types of objects are defined:
@@ -42,8 +57,14 @@
  * Configuration
  ******************************************************************************/
 
+#if defined(_MSC_VER) || defined(WIN32) || defined(__WIN32__)
+#define USE_WIN32_SOCKETS
+#else
 #define USE_BSD_SOCKETS
-#undef USE_WIN32_SOCKETS
+#endif
+
+/* number of connections that can be queues waiting for accept() */
+#define SOCKETIO_LISTEN_QUEUE 10
 
 /* database file */
 #define BIDB_FILE "boris.bidb"
@@ -63,18 +84,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef USE_BSD_SOCKETS
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
 
 /******************************************************************************
  * Macros
@@ -176,6 +185,7 @@
 #endif
 #define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
 #define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
+#define FAILON(e, reason) if(e) { perror("FAILED:" reason); return 0; } } while(0)
 
 /******************************************************************************
  * Types and data structures
@@ -992,7 +1002,7 @@ static struct {
 	char *filename;
 } bidb_superblock;
 
-int bidb_close(void) {
+void bidb_close(void) {
 #ifndef NDEBUG
 	freelist_dump(&bidb_superblock.freelist);
 #endif
@@ -1003,7 +1013,6 @@ int bidb_close(void) {
 	}
 	free(bidb_superblock.filename);
 	bidb_superblock.filename=0;
-	return 1;
 }
 
 /* block_offset starts AFTER superblock */
@@ -1428,26 +1437,448 @@ struct object_base *object_iscached(unsigned id) {
 }
 
 /******************************************************************************
- * Main
+ * Sockets
  ******************************************************************************/
+#if defined(USE_BSD_SOCKETS)
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+#if !defined(SOCKET) || !defined(INVALID_SOCKET) || !defined(SOCKET_ERROR)
+#define SOCKET int
+#define INVALID_SOCKET (-1)
+#define SOCKET_ERROR (-1)
+#endif
+#elif defined(USE_WIN32_SOCKETS)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#error Must define either USE_BSD_SOCKETS or USE_WIN32_SOCKETS
+#endif
 
-int main(void) {
+#define SOCKETIO_FAILON(e, reason, fail_label) do { if(e) { fprintf(stderr, "ERROR:%s:%s\n", reason, socketio_strerror()); goto fail_label; } } while(0)
+
+struct socketio_server {
+	SOCKET fd;
+	struct socketio_server *next;
+	char *name;
+};
+
+struct socketio_client {
+	SOCKET fd;
+	struct socketio_client *next;
+	char *name;
+};
+
+static struct socketio_server *socketio_server_list;
+static struct socketio_client *socketio_client_list;
+static fd_set socketio_readfds, socketio_writefds;
+#if defined(USE_WIN32_SOCKETS)
+#define socketio_fdmax 0
+#else
+static SOCKET socketio_fdmax=INVALID_SOCKET; /* used by select() to limit the number of fds to check */
+#endif
+
+#if defined(USE_WIN32_SOCKETS)
+static const char *gai_strerror(int err) {
+	switch(err) {
+		case EAI_AGAIN: return "Temporary failure in name resolution";
+		case EAI_BADFLAGS: return "Bad value for ai_flags";
+		case EAI_FAIL: return "Non-recoverable failure in name resolution";
+		case EAI_FAMILY: return "ai_family not supported";
+		case EAI_MEMORY: return "Memory allocation failure";
+		case EAI_NONAME: return "Name or service not known";
+		case EAI_SERVICE: return "Servname not supported for ai_socktype";
+		case EAI_SOCKTYPE: return "ai_socktype not supported";
+	}
+	return "Unknown resolution error";
+}
+#endif
+
+int socketio_init(void) {
+#if defined(USE_WIN32_SOCKETS)
+	WSADATA wsaData;
+	int err;
+
+	err=WSAStartup(MAKEWORD(2,2), &wsaData);
+	if(err!=0) {
+		fprintf(stderr, "WSAStartup() failed (err=%d)\n", err);
+		return 0;
+	}
+	DEBUG("Winsock: VERSION %u.%u\n", 
+		LOBYTE(wsaData.wVersion),
+		HIBYTE(wsaData.wVersion)
+	);
+#endif
+	memset(&socketio_readfds, 0, sizeof socketio_readfds);
+	memset(&socketio_writefds, 0, sizeof socketio_writefds);
+	return 1;
+}
+
+void socketio_shutdown(void) {
+#if defined(USE_WIN32_SOCKETS)
+	WSACleanup();
+#endif
+}
+
+void socketio_close(SOCKET fd) {
+#if defined(USE_WIN32_SOCKETS)
+	closesocket(fd);
+#else
+	close(fd);
+#endif
+}
+
+/* report that an fd is ready for read events, and update the fdmax value */
+void socketio_readready(SOCKET fd) {
+	FD_SET(fd, &socketio_readfds);
+#if !defined(USE_WIN32_SOCKETS)
+	if(fd>socketio_fdmax) {
+		socketio_fdmax=fd;
+	}
+#endif
+}
+
+/* report that an fd is ready for write events, and update the fdmax value */
+void socketio_writeready(SOCKET fd) {
+	FD_SET(fd, &socketio_writefds);
+#if !defined(USE_WIN32_SOCKETS)
+	if(fd>socketio_fdmax) {
+		socketio_fdmax=fd;
+	}
+#endif
+}
+
+
+const char *socketio_strerror(void) {
+#if defined(USE_WIN32_SOCKETS)
+	static char buf[64];
+	int res;
+	res=WSAGetLastError();
+	if(res==0)
+		return "winsock successful";
+	snprintf(buf, sizeof buf, "winsock error %d", res);
+	return buf;
+#else
+	return strerror(errno);
+#endif
+}
+
+/* return true is the last recv()/send() call would have blocked */
+int socketio_wouldblock(void) {
+#if defined(USE_WIN32_SOCKETS)
+	return WSAGetLastError()==WSAEWOULDBLOCK;
+#else
+	return errno==EWOULDBLOCK;
+#endif
+}
+
+int socketio_getpeername(SOCKET fd) {
+	char hostbuf[64], servbuf[16];
+	int res;
+	struct sockaddr_storage ss;
+	socklen_t sslen;
+	size_t len;
+
+	sslen=sizeof ss;
+	res=getpeername(fd, (struct sockaddr*)&ss, &sslen);
+	if(res!=0) {
+		fprintf(stderr, "%s():%s\n", __func__, socketio_strerror());
+		return 0;
+	}
+
+	/* leave room in hostbuf for ":servbuf" */
+	res=getnameinfo((struct sockaddr *)&ss, sslen, hostbuf, sizeof hostbuf-sizeof servbuf, servbuf, sizeof servbuf, NI_NUMERICHOST|NI_NUMERICSERV);	
+	SOCKETIO_FAILON(res!=0, "getnameinfo()", failure);
+
+	len=strlen(hostbuf);
+	snprintf(hostbuf+len, sizeof hostbuf-len, ":%s", servbuf);
+
+	DEBUG("getpeername is %s\n", hostbuf);
+	/* TODO: finish this */
+	abort();
+	return 0;
+
+failure:
+	return 0;
+}
+
+static int socketio_listen_bind(struct addrinfo *ai) {
+	SOCKET fd;
+	int res;
+	size_t len;
+	char hostbuf[64], servbuf[16];
+	struct socketio_server *newserv;
+
+	const int yes=1;
+	assert(ai!=NULL);
+	if(!ai || !ai->ai_addr) {
+		fprintf(stderr, "ERROR:empty socket address\n");
+		return 0;
+	}
+	fd=socket(ai->ai_family, ai->ai_socktype, 0); 
+	SOCKETIO_FAILON(fd==INVALID_SOCKET, "creating socket", failure_clean);
+
+	if(ai->ai_family==AF_INET) {
+		SOCKETIO_FAILON(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&yes, sizeof yes)!=0, "setting SO_REUSEADDR", failure);
+	}
+
+	SOCKETIO_FAILON(bind(fd, ai->ai_addr, ai->ai_addrlen)!=0, "binding to port", failure);
+
+#if defined(USE_WIN32_SOCKETS)
+	{
+		u_long iMode=1;
+		res=ioctlsocket(fd, FIONBIO, &iMode);
+	}
+#else
+	res=fcntl(fd, F_SETFL, O_NONBLOCK);
+#endif
+	SOCKETIO_FAILON(res!=0, "setting non-blocking for accept() socket", failure);
+
+	res=listen(fd, SOCKETIO_LISTEN_QUEUE);
+	SOCKETIO_FAILON(res!=0, "forming listening socket", failure);
+
+	/* leave room in hostbuf for ":servbuf" */
+	res=getnameinfo(ai->ai_addr, ai->ai_addrlen, hostbuf, sizeof hostbuf-sizeof servbuf, servbuf, sizeof servbuf, NI_NUMERICHOST|NI_NUMERICSERV);	
+	SOCKETIO_FAILON(res!=0, "getnameinfo()", failure);
+	len=strlen(hostbuf);
+	snprintf(hostbuf+len, sizeof hostbuf-len, ":%s", servbuf);
+
+	/* add server to a list */
+	newserv=calloc(1, sizeof *newserv);
+	newserv->fd=fd;
+	newserv->name=strdup(hostbuf);
+	newserv->next=socketio_server_list;
+	socketio_server_list=newserv;
+
+	socketio_readready(newserv->fd); /* be ready for accept() */
+
+	DEBUG("Bind success: %s %s\n", ai->ai_family==AF_INET ? "IPv4" : ai->ai_family==AF_INET6 ? "IPv6" : "Unknown", hostbuf);
+
+	return 1; /* success */
+
+failure:
+	socketio_close(fd);
+failure_clean:
+	return 0;
+}
+
+/* 
+ * family : 0 or AF_INET or AF_INET6
+ * socktype: SOCK_STREAM or SOCK_DGRAM 
+ */
+int socketio_listen(int family, int socktype, const char *host, const char *port) {
+	int res;
+	struct addrinfo *ai_res, *curr;
+	struct addrinfo ai_hints;
+
+	assert(port!=NULL);
+	assert(family==0 || family==AF_INET || family==AF_INET6);
+	assert(socktype==SOCK_STREAM || socktype==SOCK_DGRAM);
+
+	memset(&ai_hints, 0, sizeof ai_hints);
+	ai_hints.ai_flags=AI_PASSIVE;
+	ai_hints.ai_family=family;
+	ai_hints.ai_socktype=socktype;
+
+	res=getaddrinfo(host, port, &ai_hints, &ai_res);
+
+	if(res!=0) {
+		fprintf(stderr, "ERROR:hostname parsing error:%s\n", gai_strerror(res));
+		return 0;
+	}
+
+	/* looks for the first AF_INET or AF_INET6 entry */
+	for(curr=ai_res;curr;curr=curr->ai_next) {
+		TRACE("getaddrinfo():family=%d type=%d\n", curr->ai_family, curr->ai_socktype);
+		if(curr->ai_family==AF_INET6 || curr->ai_family==AF_INET) {
+			break;
+		}
+	}
+
+	if(!curr) {
+		freeaddrinfo(ai_res);
+		fprintf(stderr, "Could not find interface for %s:%s\n", host ? host : "*", port);
+		return 0; /* failure */
+	}
+
+	assert(socktype==SOCK_STREAM || socktype==SOCK_DGRAM);
+
+	if(!socketio_listen_bind(curr)) {
+		freeaddrinfo(ai_res);
+		fprintf(stderr, "Could bind socket for %s:%s\n", host ? host : "*", port);
+		return 0; /* failure */
+	}
+
+	freeaddrinfo(ai_res);
+	return 1; /* success */	
+}
+
+int socketio_dispatch(struct timeval timeout) {
+	struct socketio_server *servcurr;
+	struct socketio_client *clientcurr;
+	int nr;	/* number of sockets to process */
+
+	if(!socketio_server_list && !socketio_client_list) {
+		fprintf(stderr, "No more sockets to watch\n");
+		return 0;
+	}
+
+	nr=select(socketio_fdmax+1, &socketio_readfds, &socketio_writefds, 0, &timeout);
+#if !defined(USE_WIN32_SOCKETS)
+	socketio_fdmax=INVALID_SOCKET; /* reset the maximum before calling any handlers */
+#endif
+	SOCKETIO_FAILON(nr==SOCKET_ERROR, "select()", failure);
+
+	DEBUG("select() returned %d results\n", nr);
+
+	/* check servers */
+	for(servcurr=socketio_server_list;nr>0 && servcurr;servcurr=servcurr->next) {
+		TRACE("Checking server %s\n", servcurr->name);
+		if(FD_ISSET(servcurr->fd, &socketio_readfds)) {
+			FD_CLR(servcurr->fd, &socketio_readfds);
+			/* we just ignore the write bits, listeners should never set */
+			FD_CLR(servcurr->fd, &socketio_writefds);
+			DEBUG("Connection\n");
+			nr--;	
+		}
+	}
+	/* check clients */
+	for(clientcurr=socketio_client_list;nr>0 && clientcurr;clientcurr=clientcurr->next) {
+		int tmp=0;
+
+		TRACE("Checking client %s\n", clientcurr->name);
+		if(FD_ISSET(clientcurr->fd, &socketio_writefds)) {
+			tmp=1;
+			FD_CLR(clientcurr->fd, &socketio_writefds);
+			DEBUG("Write-ready\n");
+			/* TODO: perform the write handler */
+		}
+
+		if(FD_ISSET(clientcurr->fd, &socketio_readfds)) {
+			tmp=1;
+			FD_CLR(clientcurr->fd, &socketio_readfds);
+			DEBUG("Read-ready\n");
+			/* TODO: perform the read handler */
+		}
+
+		/* decrement if read, write or both was done */
+		if(tmp) {
+			nr--;	
+		}
+	}
+	assert(nr==0);
+	if(nr>0) {
+		fprintf(stderr, "ERROR:Some sockets were not handled\n");
+		goto failure;	
+	}
+
+	return 1;
+failure:
+	return 0; /* failure */
+}
+/******************************************************************************
+ * Main - Option parsing and initialization
+ ******************************************************************************/
+static int fl_default_family=0;
+
+static void usage(void) {
+	fprintf(stderr, 
+		"usage: boris [-h46] [-p port]\n"
+		"-4      use IPv4-only server addresses\n"
+		"-6      use IPv6-only server addresses\n"
+		"-h      help\n"
+	);
+	exit(EXIT_FAILURE);
+}
+
+/* exits if next_arg is NULL */
+static void need_parameter(int ch, const char *next_arg) {
+	if(!next_arg) {
+		fprintf(stderr, "ERROR: option -%c takes a parameter\n", ch);
+		usage();
+	}
+}
+
+static int process_flag(int ch, const char *next_arg) {
+	switch(ch) {
+		case '4':
+			fl_default_family=AF_INET; /* default to IPv4 */
+			return 0;
+		case '6':
+			fl_default_family=AF_INET6; /* default to IPv6 */
+			return 0;
+		case 'p':
+			need_parameter(ch, next_arg);
+			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg)) {
+				usage();
+			}
+			return 1; /* uses next arg */
+		default:
+			fprintf(stderr, "ERROR: Unknown option -%c\n", ch);
+		case 'h':
+			usage();
+	}
+	return 0; /* didn't use next_arg */
+}
+
+/* process all arguments */
+static void process_args(int argc, char **argv) {
+	int i, j;
+
+	for(i=1;i<argc;i++) {
+		if(argv[i][0]=='-') {
+			for(j=1;argv[i][j];j++) {
+				if(process_flag(argv[i][j], (i+1)<argc ? argv[i+1] : NULL)) {
+					/* a flag used the next_arg */
+					i++;
+					break;
+				}
+			}
+		} else {
+			/* TODO: process arguments */
+			fprintf(stderr, "TODO: process argument '%s'\n", argv[i]);
+		}
+	}
+}
+
+int main(int argc, char **argv) {
+	struct timeval timeout;
+
 #ifndef NDEBUG
 	/*
 	bitmap_test();
 	freelist_test();
+	bidb_show_info();
 	*/
 #endif
 
-	bidb_show_info();
+	if(!socketio_init()) {
+		return EXIT_FAILURE;
+	}
+	atexit(socketio_shutdown);
+
+	process_args(argc, argv);
+
 	if(!bidb_open(BIDB_FILE)) {
 		printf("Failed\n");
 		return EXIT_FAILURE;
 	}
-	bidb_close();
+	atexit(bidb_close);
 	/*
 	*/
 
+	timeout.tv_usec=0;
+	timeout.tv_sec=10;
+
+	while(socketio_dispatch(timeout)) {
+		fprintf(stderr, "Tick\n");
+	}
 	return 0;
 }
 
