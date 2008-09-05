@@ -301,7 +301,7 @@ static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 #define HEAPQUEUE_RIGHT(i) (2*(i)+2)
 #define HEAPQUEUE_PARENT(i) (((i)-1)/2)
 
-struct heapqueue_elm { 
+struct heapqueue_elm {
 	unsigned d; /* key */
 	/* TODO: put useful data in here */
 };
@@ -362,9 +362,9 @@ static int heapqueue_ll_siftup(unsigned i, struct heapqueue_elm *elm) {
 
 /* removes entry at i */
 EXPORT int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret) {
-	/* 1. copy the value at i into ret 
+	/* 1. copy the value at i into ret
 	 * 2. put last node into empty position
-	 * 3. sift-up if moved node smaller than parent, sift-down if larger than either child 
+	 * 3. sift-up if moved node smaller than parent, sift-down if larger than either child
 	 */
 	struct heapqueue_elm *last;
 	assert(ret!=NULL);
@@ -446,7 +446,7 @@ EXPORT int heapqueue_dequeue(struct heapqueue_elm *ret) {
 	/* move last entry to the root, then sift-down */
 	heap_len--;
 	i=heapqueue_ll_siftdown(0, &heap[heap_len]);
-	heap[i]=heap[heap_len]; 
+	heap[i]=heap[heap_len];
 	return 1;
 }
 
@@ -488,12 +488,12 @@ EXPORT void heapqueue_test(void) {
 		heap[i].d=0xdead;
 	}
 #endif
-	
+
 	for(i=0;i<NR(testdata);i++) {
 		elm.d=testdata[i];
 		heapqueue_enqueue(&elm);
 	}
-	
+
 	heapqueue_dump();
 
 	/* test the cancel function and randomly delete everything */
@@ -523,7 +523,7 @@ EXPORT void heapqueue_test(void) {
 		elm.d=testdata[i];
 		heapqueue_enqueue(&elm);
 	}
-	
+
 	/* do a normal dequeue of everything */
 	while(heapqueue_dequeue(&tmp)) {
 		printf("removed head (data=%d)\n", tmp.d);
@@ -1786,7 +1786,7 @@ EXPORT int socketio_init(void) {
 		fprintf(stderr, "WSAStartup() failed (err=%d)\n", err);
 		return 0;
 	}
-	DEBUG("Winsock: VERSION %u.%u\n", 
+	DEBUG("Winsock: VERSION %u.%u\n",
 		LOBYTE(wsaData.wVersion),
 		HIBYTE(wsaData.wVersion)
 	);
@@ -1862,7 +1862,7 @@ EXPORT int socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, s
 	if(name_len>=(16+sizeof servbuf)) {
 		name_len-=sizeof servbuf;
 	}
-	res=getnameinfo(sa, salen, name, name_len, servbuf, sizeof servbuf, NI_NUMERICHOST|NI_NUMERICSERV);	
+	res=getnameinfo(sa, salen, name, name_len, servbuf, sizeof servbuf, NI_NUMERICHOST|NI_NUMERICSERV);
 	SOCKETIO_FAILON(res!=0, "getnameinfo()", failure);
 
 	tmplen=strlen(name);
@@ -1880,7 +1880,7 @@ EXPORT int socketio_getpeername(SOCKET fd, char *name, size_t name_len) {
 	struct sockaddr_storage ss;
 	socklen_t sslen;
 	int res;
-	
+
 	assert(fd!=INVALID_SOCKET);
 	assert(name!=NULL);
 
@@ -1910,7 +1910,7 @@ static int socketio_listen_bind(struct addrinfo *ai) {
 		fprintf(stderr, "ERROR:empty socket address\n");
 		return 0;
 	}
-	fd=socket(ai->ai_family, ai->ai_socktype, 0); 
+	fd=socket(ai->ai_family, ai->ai_socktype, 0);
 	SOCKETIO_FAILON(fd==INVALID_SOCKET, "creating socket", failure_clean);
 
 	if(ai->ai_family==AF_INET) {
@@ -1970,9 +1970,9 @@ static void socketio_ll_server_free(struct socketio_server *serv) {
 	DEBUG("freeing server '%s'\n", serv->name);
 }
 
-/* 
+/*
  * family : 0 or AF_INET or AF_INET6
- * socktype: SOCK_STREAM or SOCK_DGRAM 
+ * socktype: SOCK_STREAM or SOCK_DGRAM
  */
 EXPORT int socketio_listen(int family, int socktype, const char *host, const char *port) {
 	int res;
@@ -2018,13 +2018,13 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 	}
 
 	freeaddrinfo(ai_res);
-	return 1; /* success */	
+	return 1; /* success */
 }
 
 static int socketio_accept(struct socketio_server *servcurr) {
 	struct sockaddr_storage ss;
 	socklen_t sslen;
-	struct socketio_client *newclient;	
+	struct socketio_client *newclient;
 	SOCKET fd;
 	char buf[64];
 	assert(servcurr!=NULL);
@@ -2033,7 +2033,7 @@ static int socketio_accept(struct socketio_server *servcurr) {
 	fd=accept(servcurr->fd, (struct sockaddr*)&ss, &sslen);
 	SOCKETIO_FAILON(fd==INVALID_SOCKET, "accept()", failure);
 	newclient=calloc(1, sizeof *newclient);
-	
+
 	if(!socketio_sockname((struct sockaddr*)&ss, sslen, buf, sizeof buf)) {
 		strcpy(buf, "<UNKNOWN>");
 	}
@@ -2081,7 +2081,7 @@ EXPORT int socketio_dispatch(struct timeval timeout) {
 			DEBUG("Connection on %s\n", servcurr->name);
 			socketio_accept(servcurr); /* new clients would set fd_set entries, and trigger in the following if we didn't use two fd_sets */
 			REFCOUNT_PUT(servcurr, socketio_ll_server_free);
-			nr--;	
+			nr--;
 		}
 	}
 	/* check clients */
@@ -2114,7 +2114,7 @@ EXPORT int socketio_dispatch(struct timeval timeout) {
 	assert(nr==0);
 	if(nr>0) {
 		fprintf(stderr, "ERROR:Some sockets were not handled\n");
-		goto failure;	
+		goto failure;
 	}
 
 	return 1;
@@ -2127,7 +2127,7 @@ failure:
 static int fl_default_family=0;
 
 static void usage(void) {
-	fprintf(stderr, 
+	fprintf(stderr,
 		"usage: boris [-h46] [-p port]\n"
 		"-4      use IPv4-only server addresses\n"
 		"-6      use IPv6-only server addresses\n"

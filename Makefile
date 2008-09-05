@@ -53,4 +53,4 @@ clean ::
 	i586-mingw32msvc-gcc $(CFLAGS_WIN32) $(LDFLAGS_WIN32) -o $@ $(filter %.win32.o,$^) $(LDLIBS_WIN32)
 
 %.exe : %.debug.exe
-	i586-mingw32msvc-strip -g -o $@ $(filter %.exe,$^)
+	i586-mingw32msvc-strip -s -p -o $@ $(filter %.exe,$^)
