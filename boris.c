@@ -1,7 +1,6 @@
 /* boris.c :
  * example of a very tiny MUD
  */
-
 /******************************************************************************
  * Design Documentation
  *
@@ -588,7 +587,7 @@ static void freelist_ll_free(struct freelist_entry *e) {
 	LIST_REMOVE(e, global);
 	LIST_REMOVE(e, bucket);
 #ifndef NDEBUG
-	memset(e, 0x99, sizeof *e);
+	memset(e, 0x99, sizeof *e); /* fill with fake data before freeing */
 #endif
 	free(e);
 }
@@ -1736,26 +1735,31 @@ EXPORT struct object_base *object_iscached(unsigned id) {
 
 #define SOCKETIO_FAILON(e, reason, fail_label) do { if(e) { fprintf(stderr, "ERROR:%s:%s\n", reason, socketio_strerror()); goto fail_label; } } while(0)
 
+struct socketio_client {
+	LIST_ENTRY(struct socketio_client) list;
+	SOCKET fd;
+	char *name;
+	REFCOUNT_TYPE REFCOUNT_NAME;
+	void (*write_event)(struct socketio_client *cl, SOCKET fd);
+	void (*read_event)(struct socketio_client *cl, SOCKET fd);
+};
+
 struct socketio_server {
 	SOCKET fd;
 	LIST_ENTRY(struct socketio_server) list;
 	char *name;
 	REFCOUNT_TYPE REFCOUNT_NAME;
-};
-
-struct socketio_client {
-	SOCKET fd;
-	LIST_ENTRY(struct socketio_client) list;
-	char *name;
-	REFCOUNT_TYPE REFCOUNT_NAME;
+	void (*newclient_write_event)(struct socketio_client *cl, SOCKET fd);
+	void (*newclient_read_event)(struct socketio_client *cl, SOCKET fd);
 };
 
 static LIST_HEAD(struct socketio_server_list, struct socketio_server) socketio_server_list;
 static LIST_HEAD(struct socketio_client_list, struct socketio_client) socketio_client_list;
-static fd_set socketio_readfds[2], socketio_writefds[2]; /* ping-pong between fdsets */
-static unsigned socketio_fdset; /* selects fdset 0 or 1 */
+static fd_set *socketio_readfds, *socketio_writefds;
+static unsigned socketio_fdset_sz; /* number of bits allocated */
 #if defined(USE_WIN32_SOCKETS)
 #define socketio_fdmax 0 /* not used on Win32 */
+static unsigned socketio_socket_count; /* WIN32: the limit of fd_set is the count not the fd number */
 #else
 static SOCKET socketio_fdmax=INVALID_SOCKET; /* used by select() to limit the number of fds to check */
 #endif
@@ -1775,60 +1779,6 @@ static const char *gai_strerror(int err) {
 	return "Unknown resolution error";
 }
 #endif
-
-EXPORT int socketio_init(void) {
-#if defined(USE_WIN32_SOCKETS)
-	WSADATA wsaData;
-	int err;
-
-	err=WSAStartup(MAKEWORD(2,2), &wsaData);
-	if(err!=0) {
-		fprintf(stderr, "WSAStartup() failed (err=%d)\n", err);
-		return 0;
-	}
-	DEBUG("Winsock: VERSION %u.%u\n",
-		LOBYTE(wsaData.wVersion),
-		HIBYTE(wsaData.wVersion)
-	);
-#endif
-	memset(&socketio_readfds, 0, sizeof socketio_readfds);
-	memset(&socketio_writefds, 0, sizeof socketio_writefds);
-	return 1;
-}
-
-EXPORT void socketio_shutdown(void) {
-#if defined(USE_WIN32_SOCKETS)
-	WSACleanup();
-#endif
-}
-
-EXPORT void socketio_close(SOCKET fd) {
-#if defined(USE_WIN32_SOCKETS)
-	closesocket(fd);
-#else
-	close(fd);
-#endif
-}
-
-/* report that an fd is ready for read events, and update the fdmax value */
-EXPORT void socketio_readready(SOCKET fd) {
-	FD_SET(fd, &socketio_readfds[socketio_fdset]);
-#if !defined(USE_WIN32_SOCKETS)
-	if(fd>socketio_fdmax) {
-		socketio_fdmax=fd;
-	}
-#endif
-}
-
-/* report that an fd is ready for write events, and update the fdmax value */
-EXPORT void socketio_writeready(SOCKET fd) {
-	FD_SET(fd, &socketio_writefds[socketio_fdset]);
-#if !defined(USE_WIN32_SOCKETS)
-	if(fd>socketio_fdmax) {
-		socketio_fdmax=fd;
-	}
-#endif
-}
 
 EXPORT const char *socketio_strerror(void) {
 #if defined(USE_WIN32_SOCKETS)
@@ -1851,6 +1801,129 @@ EXPORT int socketio_wouldblock(void) {
 #else
 	return errno==EWOULDBLOCK;
 #endif
+}
+
+#ifndef NDEBUG
+static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds) {
+#if defined(USE_WIN32_SOCKETS)
+	unsigned i;
+	fprintf(stderr, "socketio_socket_count=%d\n", socketio_socket_count);
+	for(i=0;i<readfds->fd_count && i<writefds->fd_count;i++) {
+		if(i<readfds->fd_count) {
+			fprintf(stderr, "READ: fd=%u  ", readfds->fd_array[i]);
+		}
+		if(i<writefds->fd_count) {
+			fprintf(stderr, "WRITE: fd=%u", writefds->fd_array[i]);
+		}
+		fprintf(stderr, "\n");
+	}
+#else
+	SOCKET i;
+	fprintf(stderr, "socketio_fdmax=%d\n", socketio_fdmax);
+	for(i=0;i<=socketio_fdmax;i++) {
+		unsigned r=FD_ISSET(i, readfds), w=FD_ISSET(i, writefds);
+		if(r||w) {
+			fprintf(stderr, "fd=%d (%c%c)\n", i, r?'r':'-', w?'w':'-');
+		}
+	}
+#endif
+}
+#endif
+
+EXPORT int socketio_init(void) {
+#if defined(USE_WIN32_SOCKETS)
+	WSADATA wsaData;
+	int err;
+
+	err=WSAStartup(MAKEWORD(2,2), &wsaData);
+	if(err!=0) {
+		fprintf(stderr, "WSAStartup() failed (err=%d)\n", err);
+		return 0;
+	}
+	DEBUG("Winsock: VERSION %u.%u\n",
+		LOBYTE(wsaData.wVersion),
+		HIBYTE(wsaData.wVersion)
+	);
+#endif
+
+	socketio_fdset_sz=FD_SETSIZE;
+
+#if defined(USE_WIN32_SOCKETS)
+	/* win32 winsock api */
+	socketio_readfds=calloc(1, sizeof *socketio_readfds);
+	socketio_writefds=calloc(1, sizeof *socketio_writefds);
+#elif defined(NFDBITS)
+	/* X/Open compatible APIs */
+	socketio_readfds=calloc(1, socketio_fdset_sz/NFDBITS);
+	socketio_writefds=calloc(1, socketio_fdset_sz/NFDBITS);
+#else
+	/* for non-BSD socket APIs */
+#warning Using generic socket code. define _BSD_SOURCE for Unix socket code
+	socketio_readfds=calloc(1, sizeof *socketio_readfds);
+	socketio_writefds=calloc(1, sizeof *socketio_writefds);
+#endif
+	return 1;
+}
+
+EXPORT void socketio_shutdown(void) {
+#if defined(USE_WIN32_SOCKETS)
+	WSACleanup();
+#endif
+}
+
+EXPORT int socketio_close(SOCKET *fd) {
+	int res;
+	assert(fd!=0);
+	assert(*fd!=INVALID_SOCKET);
+#if defined(USE_WIN32_SOCKETS)
+	socketio_socket_count--; /* track number of open sockets for filling fd_set */
+	res=closesocket(*fd);
+#else
+	res=close(*fd);
+#endif
+	if(res==-1) {
+		fprintf(stderr, "ERROR:close(fd=%d):%s\n", *fd, socketio_strerror());
+	}
+
+	/* do not retain entries for closed fds */
+	FD_CLR(*fd, socketio_readfds);
+	FD_CLR(*fd, socketio_writefds);
+
+	*fd=INVALID_SOCKET;
+	return res;
+}
+
+/* checks the maximum count and updates socketio_fdmax */
+static int socketio_check_count(SOCKET fd) {
+	assert(fd!=INVALID_SOCKET);
+#if defined(USE_WIN32_SOCKETS)
+	if(socketio_socket_count>=socketio_fdset_sz) {
+		DEBUG("too many open sockets (%d) for fd_set (fd_setsize=%d)\n", socketio_socket_count, socketio_fdset_sz);
+		return 0; /* failure */
+	}
+#else
+	if((unsigned)fd>=socketio_fdset_sz) {
+		DEBUG("too many open sockets (%d) for fd_set (fd_setsize=%d)\n", fd, socketio_fdset_sz);
+		return 0; /* failure */
+	}
+	if(fd>socketio_fdmax) {
+		DEBUG("Updating fdmax from %d to %d\n", socketio_fdmax, fd);
+		socketio_fdmax=fd;
+	}
+#endif
+	return 1; /* success */
+}
+
+/* report that an fd is ready for read events, and update the fdmax value */
+EXPORT void socketio_readready(SOCKET fd) {
+	assert(fd!=INVALID_SOCKET);
+	FD_SET(fd, socketio_readfds);
+}
+
+/* report that an fd is ready for write events, and update the fdmax value */
+EXPORT void socketio_writeready(SOCKET fd) {
+	assert(fd!=INVALID_SOCKET);
+	FD_SET(fd, socketio_writefds);
 }
 
 EXPORT int socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, size_t name_len) {
@@ -1898,7 +1971,21 @@ EXPORT int socketio_getpeername(SOCKET fd, char *name, size_t name_len) {
 	return 1;
 }
 
-static int socketio_listen_bind(struct addrinfo *ai) {
+static int socketio_nonblock(SOCKET fd) {
+	int res;
+#if defined(USE_WIN32_SOCKETS)
+	u_long iMode=1;
+	res=ioctlsocket(fd, (int)FIONBIO, &iMode);
+#else
+	res=fcntl(fd, F_SETFL, O_NONBLOCK);
+#endif
+	SOCKETIO_FAILON(res!=0, "setting non-blocking for accept() socket", failure);
+	return 1;
+failure:
+	return 0;
+}
+
+static int socketio_listen_bind(struct addrinfo *ai, void (*newclient_write_event)(struct socketio_client *cl, SOCKET fd), void (*newclient_read_event)(struct socketio_client *cl, SOCKET fd)) {
 	SOCKET fd;
 	int res;
 	char buf[64];
@@ -1913,26 +2000,28 @@ static int socketio_listen_bind(struct addrinfo *ai) {
 	fd=socket(ai->ai_family, ai->ai_socktype, 0);
 	SOCKETIO_FAILON(fd==INVALID_SOCKET, "creating socket", failure_clean);
 
-	if(ai->ai_family==AF_INET) {
+#if defined(USE_WIN32_SOCKETS)
+	socketio_socket_count++; /* track number of open sockets for filling fd_set */
+#endif
+	if(!socketio_check_count(fd)) {
+		fprintf(stderr, "ERROR:too many open sockets. refusing new server!\n");
+		goto failure;
+	}
+
+	if(ai->ai_family==AF_INET || ai->ai_family==AF_INET6) {
 		SOCKETIO_FAILON(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&yes, sizeof yes)!=0, "setting SO_REUSEADDR", failure);
 	}
 
-	SOCKETIO_FAILON(bind(fd, ai->ai_addr, ai->ai_addrlen)!=0, "binding to port", failure);
+	SOCKETIO_FAILON(bind(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen)!=0, "binding to port", failure);
 
-#if defined(USE_WIN32_SOCKETS)
-	{
-		u_long iMode=1;
-		res=ioctlsocket(fd, FIONBIO, &iMode);
+	if(!socketio_nonblock(fd)) {
+		goto failure;
 	}
-#else
-	res=fcntl(fd, F_SETFL, O_NONBLOCK);
-#endif
-	SOCKETIO_FAILON(res!=0, "setting non-blocking for accept() socket", failure);
 
 	res=listen(fd, SOCKETIO_LISTEN_QUEUE);
 	SOCKETIO_FAILON(res!=0, "forming listening socket", failure);
 
-	if(!socketio_sockname(ai->ai_addr, ai->ai_addrlen, buf, sizeof buf)) {
+	if(!socketio_sockname(ai->ai_addr, (socklen_t)ai->ai_addrlen, buf, sizeof buf)) {
 		strcpy(buf, "<UNKNOWN>");
 	}
 
@@ -1942,6 +2031,8 @@ static int socketio_listen_bind(struct addrinfo *ai) {
 	newserv->name=strdup(buf);
 	REFCOUNT_INIT(newserv);
 	REFCOUNT_TAKE(newserv);
+	newserv->newclient_write_event=newclient_write_event;
+	newserv->newclient_read_event=newclient_read_event;
 	LIST_INSERT_HEAD(&socketio_server_list, newserv, list);
 
 	socketio_readready(newserv->fd); /* be ready for accept() */
@@ -1951,7 +2042,7 @@ static int socketio_listen_bind(struct addrinfo *ai) {
 	return 1; /* success */
 
 failure:
-	socketio_close(fd);
+	socketio_close(&fd);
 failure_clean:
 	return 0;
 }
@@ -1961,6 +2052,18 @@ static void socketio_ll_client_free(struct socketio_client *client) {
 	if(!client)
 		return;
 	DEBUG("freeing client '%s'\n", client->name);
+	if(client->fd!=INVALID_SOCKET) {
+		socketio_close(&client->fd);
+	}
+
+	LIST_REMOVE(client, list);
+
+	free(client->name);
+	/* TODO: free any other data structures associated with client */
+#ifndef NDEBUG
+	memset(client, 0xBB, sizeof *client); /* fill with fake data before freeing */
+#endif
+	free(client);
 }
 
 static void socketio_ll_server_free(struct socketio_server *serv) {
@@ -1968,13 +2071,25 @@ static void socketio_ll_server_free(struct socketio_server *serv) {
 	if(!serv)
 		return;
 	DEBUG("freeing server '%s'\n", serv->name);
+	if(serv->fd!=INVALID_SOCKET) {
+		socketio_close(&serv->fd);
+	}
+
+	LIST_REMOVE(serv, list);
+
+	free(serv->name);
+	/* TODO: free any other data structures associated with serv */
+#ifndef NDEBUG
+	memset(serv, 0xBB, sizeof *serv); /* fill with fake data before freeing */
+#endif
+	free(serv);
 }
 
 /*
  * family : 0 or AF_INET or AF_INET6
  * socktype: SOCK_STREAM or SOCK_DGRAM
  */
-EXPORT int socketio_listen(int family, int socktype, const char *host, const char *port) {
+EXPORT int socketio_listen(int family, int socktype, const char *host, const char *port, void (*newclient_write_event)(struct socketio_client *cl, SOCKET fd), void (*newclient_read_event)(struct socketio_client *cl, SOCKET fd)) {
 	int res;
 	struct addrinfo *ai_res, *curr;
 	struct addrinfo ai_hints;
@@ -2011,7 +2126,7 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 
 	assert(socktype==SOCK_STREAM || socktype==SOCK_DGRAM);
 
-	if(!socketio_listen_bind(curr)) {
+	if(!socketio_listen_bind(curr, newclient_write_event, newclient_read_event)) {
 		freeaddrinfo(ai_res);
 		fprintf(stderr, "Could bind socket for %s:%s\n", host ? host : "*", port);
 		return 0; /* failure */
@@ -2019,6 +2134,34 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 
 	freeaddrinfo(ai_res);
 	return 1; /* success */
+}
+
+static void socketio_toomany(SOCKET fd) {
+	const char buf[]="Too many connections\r\n";
+
+	if(socketio_nonblock(fd)) {
+		send(fd, buf, (sizeof buf)-1, 0);
+	}
+	socketio_close(&fd);
+}
+
+static void socketio_fdset_copy(fd_set *dst, const fd_set *src) {
+	assert(dst!=NULL);
+	assert(src!=NULL);
+#if defined(USE_WIN32_SOCKETS)
+	/* copy routine for Win32 */
+	dst->fd_count=src->fd_count;
+	memcpy(dst->fd_array, src->fd_array, src->fd_count * sizeof *src->fd_array);
+#elif defined(NFDBITS)
+	/* X/Open compatible APIs - copy just the used part of the structure */
+	size_t fd_bytes;
+	fd_bytes=ROUNDUP(socketio_fdset_sz, NFDBITS)/8; /* TODO: use fdmax */
+	memcpy(dst, src, fd_bytes);
+#else
+	/* generic copy for non-BSD socket APIs */
+	*dst=*src;
+#endif
+
 }
 
 static int socketio_accept(struct socketio_server *servcurr) {
@@ -2032,6 +2175,17 @@ static int socketio_accept(struct socketio_server *servcurr) {
 	sslen=sizeof ss;
 	fd=accept(servcurr->fd, (struct sockaddr*)&ss, &sslen);
 	SOCKETIO_FAILON(fd==INVALID_SOCKET, "accept()", failure);
+
+#if defined(USE_WIN32_SOCKETS)
+	socketio_socket_count++; /* track number of open sockets for filling fd_set */
+#endif
+
+	if(!socketio_check_count(fd)) {
+		fprintf(stderr, "ERROR:too many open sockets. closing new connection!\n");
+		socketio_toomany(fd); /* send a message to the socket */
+		return 0; /* failure */
+	}
+
 	newclient=calloc(1, sizeof *newclient);
 
 	if(!socketio_sockname((struct sockaddr*)&ss, sslen, buf, sizeof buf)) {
@@ -2041,85 +2195,156 @@ static int socketio_accept(struct socketio_server *servcurr) {
 	newclient->fd=fd;
 	REFCOUNT_INIT(newclient);
 	REFCOUNT_TAKE(newclient);
+	newclient->read_event=servcurr->newclient_read_event;
+	newclient->write_event=servcurr->newclient_write_event;
 	LIST_INSERT_HEAD(&socketio_client_list, newclient, list);
-	socketio_readready(fd);
+	socketio_readready(fd); /* default to being ready for reads */
+	socketio_writeready(fd); /* do first write event as a connection notification */
 	DEBUG("Accepted connection %s\n", newclient->name);
+	socketio_readready(servcurr->fd); /* be ready for next accept() */
 	return 1;
 failure:
 	return 0;
 }
 
-EXPORT int socketio_dispatch(struct timeval timeout) {
-	struct socketio_server *servcurr;
-	struct socketio_client *clientcurr;
+EXPORT int socketio_dispatch(long msec) {
+	struct socketio_server *servcurr, *servnext;
+	struct socketio_client *clientcurr, *clientnext;
+	struct timeval timeout, *to;
 	int nr;	/* number of sockets to process */
-	unsigned old_fdset;
+	fd_set out_readfds, out_writefds;
+
+	if(msec<0) {
+		/* wait forever */
+		to=NULL;
+	} else {
+		timeout.tv_usec=(msec%1000)*1000;
+		timeout.tv_sec=msec/1000;
+		assert(timeout.tv_usec < 1000000);
+		to=&timeout;
+	}
 
 	if(!LIST_TOP(socketio_server_list) && !LIST_TOP(socketio_client_list)) {
 		fprintf(stderr, "No more sockets to watch\n");
 		return 0;
 	}
 
-	nr=select(socketio_fdmax+1, &socketio_readfds[socketio_fdset], &socketio_writefds[socketio_fdset], 0, &timeout);
-#if !defined(USE_WIN32_SOCKETS)
-	socketio_fdmax=INVALID_SOCKET; /* reset the maximum before calling any handlers */
+	socketio_fdset_copy(&out_readfds, socketio_readfds);
+	socketio_fdset_copy(&out_writefds, socketio_writefds);
+
+#ifndef NTRACE
+	socketio_dump_fdset(&out_readfds, &out_writefds);
 #endif
-	old_fdset=socketio_fdset;
-	socketio_fdset^=1; /* toggle between 0 and 1 */
+
+	if(socketio_fdmax==INVALID_SOCKET) {
+		DEBUG("WARNING:currently not waiting on any sockets\n");
+	}
+	nr=select(socketio_fdmax+1, &out_readfds, &out_writefds, 0, to);
 	SOCKETIO_FAILON(nr==SOCKET_ERROR, "select()", failure);
 
 	DEBUG("select() returned %d results\n", nr);
 
+	/* TODO: if NFDBITS is available assume fds_bits is available and base the loop on the fd_set and look up entries on the client list. */
+
 	/* check servers */
-	for(servcurr=LIST_TOP(socketio_server_list);nr>0 && servcurr;servcurr=LIST_NEXT(servcurr, list)) {
+	for(servcurr=LIST_TOP(socketio_server_list);nr>0 && servcurr;servcurr=servnext) {
 		TRACE("Checking server %s\n", servcurr->name);
-		if(FD_ISSET(servcurr->fd, &socketio_readfds[old_fdset])) {
-			FD_CLR(servcurr->fd, &socketio_readfds[socketio_fdset]);
-			/* we just ignore the write bits, listeners should never set */
-			FD_CLR(servcurr->fd, &socketio_writefds[socketio_fdset]);
-			REFCOUNT_TAKE(servcurr);
+		REFCOUNT_TAKE(servcurr);
+		if(FD_ISSET(servcurr->fd, &out_readfds)) {
+			SOCKET fd=servcurr->fd;
+			assert(fd!=INVALID_SOCKET);
+			assert((unsigned)fd < socketio_fdset_sz);
+			FD_CLR(fd, socketio_readfds); /* always disable an actived entry */
+			FD_CLR(fd, socketio_writefds); /* listeners should never set */
+			/* ignore the write bits because listeners won't set them */
 			DEBUG("Connection on %s\n", servcurr->name);
 			socketio_accept(servcurr); /* new clients would set fd_set entries, and trigger in the following if we didn't use two fd_sets */
-			REFCOUNT_PUT(servcurr, socketio_ll_server_free);
 			nr--;
 		}
+		servnext=LIST_NEXT(servcurr, list);
+		REFCOUNT_PUT(servcurr, socketio_ll_server_free); /* this cannot allow any other servers to be removed, else servnext could point to nowwhere */
 	}
 	/* check clients */
-	for(clientcurr=LIST_TOP(socketio_client_list);nr>0 && clientcurr;clientcurr=LIST_NEXT(clientcurr, list)) {
-		int rdfl, wrfl;
+	for(clientcurr=LIST_TOP(socketio_client_list);nr>0 && clientcurr;clientcurr=clientnext) {
+		SOCKET fd=clientcurr->fd;
 
 		TRACE("Checking client %s\n", clientcurr->name);
+		REFCOUNT_TAKE(clientcurr);
+		assert(fd!=INVALID_SOCKET); /* verify consistency of datastructure */
 
-		wrfl=FD_ISSET(clientcurr->fd, &socketio_writefds[old_fdset]);
-		rdfl=FD_ISSET(clientcurr->fd, &socketio_readfds[old_fdset]);
-
-		if(wrfl || rdfl) {
-			REFCOUNT_TAKE(clientcurr);
-			if(wrfl) {
-				FD_CLR(clientcurr->fd, &socketio_writefds[socketio_fdset]);
-				DEBUG("Write-ready %s\n", clientcurr->name);
-				/* TODO: perform the write handler */
+		if(FD_ISSET(fd, &out_writefds)) {
+			/* always disable an activated entry */
+			assert(fd!=INVALID_SOCKET);
+			assert((unsigned)fd < socketio_fdset_sz);
+			FD_CLR(fd, socketio_writefds);
+			DEBUG("Write-ready %s\n", clientcurr->name);
+			/* perform the write handler */
+			if(clientcurr->write_event) {
+				clientcurr->write_event(clientcurr, fd);
 			}
-
-			if(rdfl) {
-				FD_CLR(clientcurr->fd, &socketio_readfds[socketio_fdset]);
-				DEBUG("Read-ready %s\n", clientcurr->name);
-				/* TODO: perform the read handler */
-			}
-			nr--;	/* decrement socket count if read, write or both was done */
-			REFCOUNT_PUT(clientcurr, socketio_ll_client_free);
+			nr--;
 		}
 
+		if(FD_ISSET(fd, &out_readfds)) {
+			/* always disable an activated entry */
+			assert(fd!=INVALID_SOCKET);
+			assert((unsigned)fd < socketio_fdset_sz);
+			FD_CLR(fd, socketio_readfds);
+			DEBUG("Read-ready %s\n", clientcurr->name);
+			/* perform the read handler */
+			if(clientcurr->read_event) {
+				clientcurr->read_event(clientcurr, fd);
+			}
+			nr--;
+		}
+		clientnext=LIST_NEXT(clientcurr, list);
+		REFCOUNT_PUT(clientcurr, socketio_ll_client_free); /* this cannot allow any other clients to be removed, else clientnext could point to nowwhere */
+
 	}
-	assert(nr==0);
 	if(nr>0) {
-		fprintf(stderr, "ERROR:Some sockets were not handled\n");
+		fprintf(stderr, "ERROR:there were %d unhandled socket events\n", nr);
 		goto failure;
 	}
+	assert(nr==0);
 
 	return 1;
 failure:
 	return 0; /* failure */
+}
+/******************************************************************************
+ * Client - handles client connections
+ ******************************************************************************/
+EXPORT void client_write_event(struct socketio_client *cl, SOCKET fd) {
+	/* only call this if the client wasn't closed and we have data in our buffer */
+	if(0) {
+		socketio_writeready(fd);
+	}
+}
+
+/* the first write event happens right after a new connection */
+EXPORT void client_new_event(struct socketio_client *cl, SOCKET fd) {
+	cl->write_event=client_write_event;
+	fprintf(stderr, "Connection %d: %s\n", fd, cl->name);
+	client_write_event(cl, fd); /* chain to the real event */
+}
+
+EXPORT void client_read_event(struct socketio_client *cl, SOCKET fd) {
+	char buf[64];
+	int res;
+
+	res=recv(fd, buf, sizeof buf, 0);
+	if(res<=0) {
+		if(res<0) {
+			fprintf(stderr, "%s():recv() error:fd=%d:%s\n", __func__, fd, socketio_strerror());
+		}
+		/* close the socket and free the client */
+		REFCOUNT_PUT(cl, socketio_ll_client_free);
+		return; /* client was (or will be) closed */
+	}
+
+	DEBUG("Client %d(%s):received %d bytes\n", fd, cl->name, res);
+
+	socketio_readready(fd); /* only call this if the client wasn't closed earlier */
 }
 /******************************************************************************
  * Main - Option parsing and initialization
@@ -2154,7 +2379,7 @@ static int process_flag(int ch, const char *next_arg) {
 			return 0;
 		case 'p':
 			need_parameter(ch, next_arg);
-			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg)) {
+			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, client_write_event, client_read_event)) {
 				usage();
 			}
 			return 1; /* uses next arg */
@@ -2187,8 +2412,6 @@ static void process_args(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-	struct timeval timeout;
-
 #ifndef NDEBUG
 	/*
 	bitmap_test();
@@ -2212,9 +2435,7 @@ int main(int argc, char **argv) {
 	atexit(bidb_close);
 
 	/* TODO: use the next event for the timer */
-	timeout.tv_usec=0;
-	timeout.tv_sec=10;
-	while(socketio_dispatch(timeout)) {
+	while(socketio_dispatch(-1)) {
 		fprintf(stderr, "Tick\n");
 	}
 	return 0;
