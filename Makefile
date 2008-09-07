@@ -14,8 +14,8 @@ CFLAGS+=-g -O1
 # enable the following for dead code elimination
 #CFLAGS+=-ffunction-sections -fdata-sections -Wl,--gc-sections
 
-# turn on POSIX/susv3 
-CPPFLAGS:=-D_XOPEN_SOURCE=600
+# turn on POSIX/susv3 and BSD things
+CPPFLAGS:=-D_XOPEN_SOURCE=600 -D_BSD_SOURCE
 
 #CPPFLAGS+=-DNDEBUG
 CPPFLAGS+=-DNTRACE
