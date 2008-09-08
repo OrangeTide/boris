@@ -65,6 +65,7 @@
 
 /* number of connections that can be queues waiting for accept() */
 #define SOCKETIO_LISTEN_QUEUE 10
+#define CLIENT_OUTPUT_BUFFER_SZ 4096
 
 /* database file */
 #define BIDB_FILE "boris.bidb"
@@ -82,6 +83,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -113,7 +115,7 @@
 #define VAR(x) _make_name(x,__LINE__)
 
 /* controls how external functions are exported */
-#if 0
+#ifndef NDEBUG
 #define EXPORT
 #else
 /* fake out the export and keep the functions internal */
@@ -194,7 +196,7 @@
 #endif
 #define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
 #define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
-#define FAILON(e, reason, label) if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
+#define FAILON(e, reason, label) do { if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
 
 /*=* reference counting macros *=*/
 #define REFCOUNT_TYPE int
@@ -1028,7 +1030,7 @@ EXPORT int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
  * -1 if the end of the bits was reached */
 EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
-
+	assert(bitmap != NULL);
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
 	/* TODO: check the head */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
@@ -1046,7 +1048,7 @@ EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
  * -1 if the end of the bits was reached */
 EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
-
+	assert(bitmap != NULL);
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
 	/* TODO: check the head */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
@@ -1709,6 +1711,168 @@ EXPORT struct object_base *object_iscached(unsigned id) {
 }
 
 /******************************************************************************
+ * Socket Buffers
+ ******************************************************************************/
+struct buffer {
+	char *data;
+	size_t used, max;
+};
+
+EXPORT void buffer_init(struct buffer *b, size_t max) {
+	assert(b != NULL);
+	b->data=malloc(max+1); /* allocate an extra byte past max for null */
+	b->used=0;
+	b->max=max;
+}
+
+/* free the buffer */
+EXPORT void buffer_free(struct buffer *b) {
+	free(b->data);
+	b->data=NULL;
+	b->used=0;
+	b->max=0;
+}
+
+/* expand newlines into CR/LF startin at used
+ * return length of processed string or -1 on overflow */
+static int buffer_ll_expandnl(struct buffer *b, size_t len) { 
+	size_t rem;
+	char *p, *e;
+
+	assert(b != NULL);
+	
+	for(p=b->data+b->used,rem=len;(e=memchr(p, '\n', rem));rem-=e-p,p=e+2) {
+		/* check b->max for overflow */
+		if(p-b->data>=(ptrdiff_t)b->max) {
+			DEBUG("%s():Overflow detected\n", __func__);
+			return -1;
+		}
+		memmove(e+1, e, rem);
+		*e='\r';
+		len++; /* grew by 1 byte */
+	}
+
+	assert(b->used+len <= b->max);
+	return len;
+}
+
+/* special write that does not expand its input.
+ * unlike the other calls, truncation will not load partial data into a buffer */
+EXPORT int buffer_write_noexpand(struct buffer *b, const void *data, size_t len) {
+	if(b->used+len>b->max) {
+		DEBUG("%s():Overflow detected. refusing to send any data.\n", __func__);
+		return -1;
+	}
+
+	memcpy(&b->data[b->used], data, len);
+	b->used+=len;
+
+	assert(b->used <= b->max);
+	return len;
+}
+
+/* writes data and exapands newline to CR/LF */
+EXPORT int buffer_write(struct buffer *b, const char *str, size_t len) {
+	size_t i, j;
+	int ret;
+	assert(b != NULL);
+	if(b->used>=b->max) {
+		DEBUG("Buffer %p is full\n", (void*)b);
+		return -1; /* buffer is full */
+	}
+
+	/* copy the data into the buffer, while expanding newlines */
+	for(i=0,j=b->used;i<len && j<b->max;i++) {
+		if(str[i]=='\n') {
+			b->data[j++]='\r';
+		}
+		b->data[j++]=str[i];
+	}
+	ret=j-b->used;
+	b->used=j;
+	assert(ret>=0);
+	assert(b->used <= b->max);
+
+	if(i<len) {
+		DEBUG("Truncation detected in buffer %p\n", (void*)b);
+		return -1;
+	}
+	TRACE("Wrote %d bytes to buffer %p using %s()\n", j, (void*)b, __func__);
+	return j;
+}
+
+/* puts data in a client's output buffer */
+static int buffer_puts(struct buffer *b, const char *str) {
+	return buffer_write(b, str, strlen(str));
+}
+
+/* printfs and expands newline to CR/LF */
+EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap) {
+	int res;
+	assert(b != NULL);
+	if(!b)
+		return -1; /* failure */
+	if(b->used>=b->max) {
+		DEBUG("Buffer %p is full\n", (void*)b);
+		return -1; /* buffer is full */
+	}
+	/* we allocated an extra byte past max for null terminators */
+	res=vsnprintf(&b->data[b->used], b->max-b->used+1, fmt, ap);
+	if(res<0) { /* some libcs return -1 on truncation */
+		res=b->max-b->used+2; /* trigger the truncation code below */
+	}
+	/* snprintf does not include the null terminator in its count */
+	if((unsigned)res>b->max-b->used) {
+		/* truncation occured */
+		/* TODO: grow the buffer and try again? */
+		DEBUG("Truncation detected in buffer %p\n", (void*)b);
+		res=b->max-b->used;
+	}
+	res=buffer_ll_expandnl(b, (unsigned)res);
+	if(res==-1) {
+		/* TODO: test this code */
+		fprintf(stderr, "%s():Overflow in buffer %p\n", __func__, (void*)b);
+		return -1;
+	}
+	b->used+=res;
+	TRACE("Wrote %d bytes to buffer %p using %s()\n", res, (void*)b, __func__);
+	return res;
+}
+
+/* printfs data in a client's output buffer */
+static int buffer_printf(struct buffer *b, const char *fmt, ...) {
+	va_list ap;
+	int res;
+	va_start(ap, fmt);
+	res=buffer_vprintf(b, fmt, ap);
+	va_end(ap);
+	return res;
+}
+
+EXPORT const char *buffer_data(struct buffer *b, size_t *len) {
+	assert(b != NULL);
+	assert(len != NULL);
+	if(b) {
+		*len=b->used;
+		return b->data;
+	} else {
+		*len=0;
+		return NULL;
+	}
+}
+
+/* returns the remaining data in the buffer */
+EXPORT unsigned buffer_consume(struct buffer *b, size_t len) {
+	assert(len <= b->used);
+	if(len>b->used) {
+		len=b->used;
+	}
+	b->used-=len;
+	memmove(b->data, b->data+len, b->used);
+	return b->used;
+}
+
+/******************************************************************************
  * Socket I/O API
  ******************************************************************************/
 #if defined(USE_BSD_SOCKETS)
@@ -1742,6 +1906,7 @@ struct socketio_client {
 	REFCOUNT_TYPE REFCOUNT_NAME;
 	void (*write_event)(struct socketio_client *cl, SOCKET fd);
 	void (*read_event)(struct socketio_client *cl, SOCKET fd);
+	struct buffer output;
 };
 
 struct socketio_server {
@@ -2059,6 +2224,7 @@ static void socketio_ll_client_free(struct socketio_client *client) {
 	LIST_REMOVE(client, list);
 
 	free(client->name);
+	buffer_free(&client->output);
 	/* TODO: free any other data structures associated with client */
 #ifndef NDEBUG
 	memset(client, 0xBB, sizeof *client); /* fill with fake data before freeing */
@@ -2136,11 +2302,21 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 	return 1; /* success */
 }
 
+EXPORT int socketio_send(SOCKET fd, const void *data, size_t len) {
+	int res;
+	res=send(fd, data, len, 0);
+	SOCKETIO_FAILON(res==-1, "send() to socket", failure);
+	return res;
+failure:
+	return -1;
+}
+
 static void socketio_toomany(SOCKET fd) {
 	const char buf[]="Too many connections\r\n";
 
 	if(socketio_nonblock(fd)) {
 		send(fd, buf, (sizeof buf)-1, 0);
+		socketio_send(fd, buf, (sizeof buf)-1);
 	}
 	socketio_close(&fd);
 }
@@ -2155,13 +2331,37 @@ static void socketio_fdset_copy(fd_set *dst, const fd_set *src) {
 #elif defined(NFDBITS)
 	/* X/Open compatible APIs - copy just the used part of the structure */
 	size_t fd_bytes;
-	fd_bytes=ROUNDUP(socketio_fdset_sz, NFDBITS)/8; /* TODO: use fdmax */
+	assert(socketio_fdmax!=INVALID_SOCKET);
+	if(socketio_fdmax!=INVALID_SOCKET) {
+		fd_bytes=ROUNDUP(socketio_fdmax+1, NFDBITS)/8; /* copy only the necessary bits */
+	} else {
+		fd_bytes=ROUNDUP(socketio_fdset_sz, NFDBITS)/8; /* fdmax looked weird, copy the whole thing */
+	}
 	memcpy(dst, src, fd_bytes);
 #else
 	/* generic copy for non-BSD socket APIs */
 	*dst=*src;
 #endif
 
+}
+
+static struct socketio_client *socketio_ll_newclient(SOCKET fd, const char *name, void (*newclient_write_event)(struct socketio_client *cl, SOCKET fd), void (*newclient_read_event)(struct socketio_client *cl, SOCKET fd)) {
+	struct socketio_client *ret;
+	ret=calloc(1, sizeof *ret);
+	FAILON(!ret, "malloc()", failure);
+	ret->name=strdup(name);
+	ret->fd=fd;
+	REFCOUNT_INIT(ret);
+	REFCOUNT_TAKE(ret);
+	ret->read_event=newclient_read_event;
+	ret->write_event=newclient_write_event;
+	LIST_INSERT_HEAD(&socketio_client_list, ret, list);
+	socketio_readready(fd); /* default to being ready for reads */
+	socketio_writeready(fd); /* do first write event as a connection notification */
+	buffer_init(&ret->output, CLIENT_OUTPUT_BUFFER_SZ);
+	return ret;
+failure:
+	return NULL;
 }
 
 static int socketio_accept(struct socketio_server *servcurr) {
@@ -2183,23 +2383,19 @@ static int socketio_accept(struct socketio_server *servcurr) {
 	if(!socketio_check_count(fd)) {
 		fprintf(stderr, "ERROR:too many open sockets. closing new connection!\n");
 		socketio_toomany(fd); /* send a message to the socket */
-		return 0; /* failure */
+		goto failure;
 	}
-
-	newclient=calloc(1, sizeof *newclient);
 
 	if(!socketio_sockname((struct sockaddr*)&ss, sslen, buf, sizeof buf)) {
 		strcpy(buf, "<UNKNOWN>");
 	}
-	newclient->name=strdup(buf);
-	newclient->fd=fd;
-	REFCOUNT_INIT(newclient);
-	REFCOUNT_TAKE(newclient);
-	newclient->read_event=servcurr->newclient_read_event;
-	newclient->write_event=servcurr->newclient_write_event;
-	LIST_INSERT_HEAD(&socketio_client_list, newclient, list);
-	socketio_readready(fd); /* default to being ready for reads */
-	socketio_writeready(fd); /* do first write event as a connection notification */
+	newclient=socketio_ll_newclient(fd, buf, servcurr->newclient_write_event, servcurr->newclient_read_event);
+	if(!newclient) {
+		fprintf(stderr, "ERROR:could not allocate client, closing connection '%s'\n", buf);
+		socketio_close(&fd);
+		return 0; /* failure */
+	}
+
 	DEBUG("Accepted connection %s\n", newclient->name);
 	socketio_readready(servcurr->fd); /* be ready for next accept() */
 	return 1;
@@ -2244,7 +2440,7 @@ EXPORT int socketio_dispatch(long msec) {
 
 	DEBUG("select() returned %d results\n", nr);
 
-	/* TODO: if NFDBITS is available assume fds_bits is available and base the loop on the fd_set and look up entries on the client list. */
+	/* TODO: if fds_bits is available then base the loop on the fd_set and look up entries on the client list. */
 
 	/* check servers */
 	for(servcurr=LIST_TOP(socketio_server_list);nr>0 && servcurr;servcurr=servnext) {
@@ -2311,20 +2507,212 @@ EXPORT int socketio_dispatch(long msec) {
 failure:
 	return 0; /* failure */
 }
+
 /******************************************************************************
  * Client - handles client connections
  ******************************************************************************/
+struct menuitem {
+	LIST_ENTRY(struct menuitem) item;
+	char *name;
+	char key;
+	void (*action_func)(void *extra1, long extra2, void *object);
+	void *extra1;
+	long extra2;
+};
+
+struct menuinfo {
+	LIST_HEAD(struct, struct menuitem) items;
+	char *title;
+	size_t title_width;
+	struct menuitem *tail;
+};
+
+EXPORT void menu_create(struct menuinfo *mi, const char *title) {
+	assert(mi!=NULL);
+	LIST_INIT(&mi->items);
+	mi->title_width=strlen(title);
+	mi->title=malloc(mi->title_width+1);
+	FAILON(!mi->title, "malloc()", failed);
+	strcpy(mi->title, title);
+	mi->tail=NULL;
+failed:
+	return;
+}
+
+EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*,long,void*), void *extra1, long extra2) {
+	struct menuitem *newitem;
+	newitem=malloc(sizeof *newitem);
+	newitem->name=strdup(name);
+	newitem->key=ch; /* TODO: check for duplicate keys */
+	newitem->action_func=func;
+	newitem->extra1=extra1;
+	newitem->extra2=extra2;
+	if(mi->tail) {
+		LIST_INSERT_AFTER(mi->tail, newitem, item);
+	} else {
+		LIST_INSERT_HEAD(&mi->items, newitem, item);
+	}
+	mi->tail=newitem;
+}
+
+/* draw a little box around the string */
+static void menu_titledraw(struct socketio_client *cl, const char *title, size_t len) {
+	char buf[len+2];
+	memset(buf, '=', len);
+	buf[len]='\n';
+	buf[len+1]=0;
+	if(cl)
+		buffer_puts(&cl->output, buf);
+	DEBUG("%s", buf);
+	if(cl)
+		buffer_printf(&cl->output, "%s\n", title);
+	DEBUG("%s\n", title);
+	if(cl)
+		buffer_puts(&cl->output, buf);
+	DEBUG("%s", buf);
+}
+
+EXPORT void menu_show(struct socketio_client *cl, struct menuinfo *mi) {
+	struct menuitem *curr;
+
+	assert(mi != NULL);
+	menu_titledraw(cl, mi->title, mi->title_width);
+	for(curr=LIST_TOP(mi->items);curr;curr=LIST_NEXT(curr, item)) {
+		if(curr->key) {
+			if(cl) 
+				buffer_printf(&cl->output, "%c. %s\n", curr->key, curr->name);
+			DEBUG("%c. %s\n", curr->key, curr->name);
+		} else {
+			if(cl)
+				buffer_printf(&cl->output, "%s\n", curr->name);
+			DEBUG("%s\n", curr->name);
+		}
+	}
+}
+
+/******************************************************************************
+ * Game - game logic
+ ******************************************************************************/
+static struct menuinfo gamemenu_login;
+int game_init(void) {
+	
+	/* */
+	menu_create(&gamemenu_login, "Login Menu");
+	menu_additem(&gamemenu_login, 'E', "Enter the game", NULL, NULL, 0);
+	menu_additem(&gamemenu_login, 'C', "Create account", NULL, NULL, 0);
+	menu_additem(&gamemenu_login, 'Q', "Disconnect", NULL, NULL, 0);
+
+	return 1;
+}
+
+/******************************************************************************
+ * Telnet protocol constants
+ ******************************************************************************/
+/* TODO: prefix these to clean up the namespace */
+#define IAC '\377'
+#define DONT '\376'
+#define DO '\375'
+#define WONT '\374'
+#define WILL '\373'
+#define SB '\372'
+#define GA '\371'
+#define EL '\370'
+#define EC '\367'
+#define AYT '\366'
+#define AO '\365'
+#define IP '\364'
+#define BREAK '\363'
+#define DM '\362'
+#define NOP '\361'
+#define SE '\360'
+#define EOR '\357'
+#define ABORT '\356'
+#define SUSP '\355'
+#define xEOF '\354' /* this is what BSD arpa/telnet.h calls the EOF */
+#define SYNCH '\362'
+
+#define TELOPT_ECHO 1
+#define TELOPT_LINEMODE 34
+
+/** Linemode sub-options **/
+#define	LM_MODE 1
+#define	LM_FORWARDMASK 2
+#define	LM_SLC 3
+
+#define	MODE_EDIT 1
+#define	MODE_TRAPSIG 2
+#define	MODE_ACK 4
+#define MODE_SOFT_TAB 8
+#define MODE_LIT_ECHO 16
+
+#define	MODE_MASK 31
+
+/******************************************************************************
+ * Client - handles client connections
+ ******************************************************************************/
+static int client_linemode(struct socketio_client *cl, int mode) {
+	const char support[] = {
+		IAC, DO, TELOPT_LINEMODE,
+	};
+	const char enable[] = {
+		IAC, SB, TELOPT_LINEMODE, LM_MODE, MODE_EDIT|MODE_TRAPSIG, IAC, SE
+	};
+	const char disable[] = { /* character at a time mode */
+		IAC, SB, TELOPT_LINEMODE, LM_MODE, MODE_TRAPSIG, IAC, SE
+	};
+	const char *s;
+	size_t len;
+	
+	if(mode) {
+		s=enable;
+		len=sizeof enable;
+	} else {
+		s=disable;
+		len=sizeof disable;
+	}
+
+	if(buffer_write_noexpand(&cl->output, support, sizeof support)<0 || buffer_write_noexpand(&cl->output, s, len)<0) {
+		DEBUG("%s():write failured\n", __func__);
+		REFCOUNT_PUT(cl, socketio_ll_client_free);
+		return 0; /* failure */
+	}
+	return 1; /* success */
+}
+
 EXPORT void client_write_event(struct socketio_client *cl, SOCKET fd) {
+	const char *data;
+	size_t len;
+	int res;
+
 	/* only call this if the client wasn't closed and we have data in our buffer */
-	if(0) {
+	assert(cl != NULL);
+
+	data=buffer_data(&cl->output, &len);
+	res=socketio_send(fd, data, len);
+	if(res<0) {
+		REFCOUNT_PUT(cl, socketio_ll_client_free);
+		return; /* client write failure */
+	}
+	len=buffer_consume(&cl->output, (unsigned)res);
+
+	if(len>0) {
+		/* there is still data in our buffer */
 		socketio_writeready(fd);
 	}
 }
 
 /* the first write event happens right after a new connection */
 EXPORT void client_new_event(struct socketio_client *cl, SOCKET fd) {
+
+	if(!client_linemode(cl, 1)) {
+		return; /* failure, the client would have been deleted */
+	}
+
+	fprintf(stderr, "*** Connection %d: %s\n", fd, cl->name);
+	buffer_printf(&cl->output, "Welcome %d %d %d\n", 1, 2, 3);
+	menu_show(cl, &gamemenu_login);
+
 	cl->write_event=client_write_event;
-	fprintf(stderr, "Connection %d: %s\n", fd, cl->name);
 	client_write_event(cl, fd); /* chain to the real event */
 }
 
@@ -2379,7 +2767,7 @@ static int process_flag(int ch, const char *next_arg) {
 			return 0;
 		case 'p':
 			need_parameter(ch, next_arg);
-			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, client_write_event, client_read_event)) {
+			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, client_new_event, client_read_event)) {
 				usage();
 			}
 			return 1; /* uses next arg */
@@ -2433,6 +2821,11 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	atexit(bidb_close);
+
+	if(!game_init()) {
+		fprintf(stderr, "ERROR: could not start game\n");
+		return 0;
+	}
 
 	/* TODO: use the next event for the timer */
 	while(socketio_dispatch(-1)) {
