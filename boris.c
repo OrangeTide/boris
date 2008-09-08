@@ -819,7 +819,7 @@ EXPORT void freelist_test(void) {
 	for(n=0;n<60;n+=6) {
 		long ofs;
 		ofs=freelist_alloc(&fl, 6);
-		TRACE("alloc: %u+%u\n", ofs, 6);
+		TRACE("alloc: %lu+%u\n", ofs, 6);
 	}
 
 	freelist_dump(&fl);
@@ -828,7 +828,7 @@ EXPORT void freelist_test(void) {
 	for(n=0;n<60;n+=6) {
 		long ofs;
 		ofs=freelist_alloc(&fl, 6);
-		TRACE("alloc: %u+%u\n", ofs, 6);
+		TRACE("alloc: %lu+%u\n", ofs, 6);
 	}
 
 	freelist_dump(&fl);
