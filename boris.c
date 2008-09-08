@@ -80,6 +80,7 @@
  ******************************************************************************/
 
 #include <assert.h>
+#include <ctype.h>
 #include <inttypes.h>
 #include <errno.h>
 #include <limits.h>
@@ -294,6 +295,81 @@ static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 }
 
 #endif
+
+/******************************************************************************
+ * shvar - shell variables
+ ******************************************************************************/
+#define SHVAR_ID_MAX 128	/* maximum number of characters in a $() */
+#define SHVAR_ESCAPE '$'	/* escape character used */
+
+EXPORT int shvar_eval(char *out, size_t len, const char *src, const char *(*match)(const char *key)) {
+	const char *old;
+	char key[SHVAR_ID_MAX];
+	while(*src && len>0) {
+		if(*src==SHVAR_ESCAPE) {
+			const char *key_start, *key_end;
+			old=src; /* save old position */
+			src++;
+			if(*src=='{' || *src=='(') {
+				char end_char;
+				end_char=*src=='{'?'}':')';
+				src++;
+				key_start=key_end=src;
+				while(*src!=end_char) {
+					if(!*src) {
+						size_t tmplen;
+						tmplen=strlen(old);
+						if(tmplen>=len) tmplen=len-1;
+						memcpy(out, old, tmplen);
+						out[tmplen]=0;
+						return 0; /* failure */
+					}
+					src++;
+				}
+				key_end=src;
+				src++;
+			} else if(*src==SHVAR_ESCAPE) {
+				*out++=*src++;
+				len--;
+				continue;
+			} else {
+				key_start=src;
+				while(*src && len>0) {
+					if(!isalnum(*src) && *src!='_') {
+						break;
+					}
+					src++;
+				}
+				key_end=src;
+			}
+			if(match && key_end>=key_start) {
+				const char *tmp;
+				size_t tmplen;
+				assert(key_start<=key_end);
+				memcpy(key, key_start, (size_t)(key_end-key_start));
+				key[key_end-key_start]=0;
+				tmp=match(key);
+				if(tmp) {
+					tmplen=strlen(tmp);
+					if(tmplen>len) return 0; /* failure */
+					memcpy(out, tmp, tmplen);
+					out+=tmplen;
+					len-=tmplen;
+				}
+			}
+		} else {
+			*out++=*src++;
+			len--;
+		}
+	}
+	if(len>0) {
+		*out++=0;
+		len--;
+		return *src==0;
+	}
+	*out=0;
+	return 0; /* failure */
+}
 
 /******************************************************************************
  * heapqueue - a binary heap used as a priority queue
