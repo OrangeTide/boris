@@ -1812,12 +1812,12 @@ EXPORT void buffer_free(struct buffer *b) {
 
 /* expand newlines into CR/LF startin at used
  * return length of processed string or -1 on overflow */
-static int buffer_ll_expandnl(struct buffer *b, size_t len) { 
+static int buffer_ll_expandnl(struct buffer *b, size_t len) {
 	size_t rem;
 	char *p, *e;
 
 	assert(b != NULL);
-	
+
 	for(p=b->data+b->used,rem=len;(e=memchr(p, '\n', rem));rem-=e-p,p=e+2) {
 		/* check b->max for overflow */
 		if(p-b->data>=(ptrdiff_t)b->max) {
@@ -2715,7 +2715,7 @@ EXPORT void menu_show(struct socketio_client *cl, struct menuinfo *mi) {
 	menu_titledraw(cl, mi->title, mi->title_width);
 	for(curr=LIST_TOP(mi->items);curr;curr=LIST_NEXT(curr, item)) {
 		if(curr->key) {
-			if(cl) 
+			if(cl)
 				buffer_printf(&cl->output, "%c. %s\n", curr->key, curr->name);
 			DEBUG("%c. %s\n", curr->key, curr->name);
 		} else {
@@ -2731,7 +2731,7 @@ EXPORT void menu_show(struct socketio_client *cl, struct menuinfo *mi) {
  ******************************************************************************/
 static struct menuinfo gamemenu_login;
 int game_init(void) {
-	
+
 	/* */
 	menu_create(&gamemenu_login, "Login Menu");
 	menu_additem(&gamemenu_login, 'E', "Enter the game", NULL, NULL, 0);
@@ -2786,6 +2786,27 @@ int game_init(void) {
 /******************************************************************************
  * Client - handles client connections
  ******************************************************************************/
+static int client_echomode(struct socketio_client *cl, int mode) {
+	static const char echo_off[] = { IAC, WILL, TELOPT_ECHO }; /* OFF */
+	static const char echo_on[] = { IAC, WONT, TELOPT_ECHO }; /* ON */
+	const char *s;
+	size_t len;
+	if(mode) {
+		s=echo_on;
+		len=sizeof echo_on;
+	} else {
+		s=echo_off;
+		len=sizeof echo_off;
+	}
+
+	if(buffer_write_noexpand(&cl->output, s, len)<0) {
+		DEBUG("%s():write failured\n", __func__);
+		REFCOUNT_PUT(cl, socketio_ll_client_free);
+		return 0; /* failure */
+	}
+	return 1; /* success */
+}
+
 static int client_linemode(struct socketio_client *cl, int mode) {
 	const char support[] = {
 		IAC, DO, TELOPT_LINEMODE,
@@ -2798,7 +2819,7 @@ static int client_linemode(struct socketio_client *cl, int mode) {
 	};
 	const char *s;
 	size_t len;
-	
+
 	if(mode) {
 		s=enable;
 		len=sizeof enable;
@@ -2840,8 +2861,7 @@ EXPORT void client_write_event(struct socketio_client *cl, SOCKET fd) {
 
 /* the first write event happens right after a new connection */
 EXPORT void client_new_event(struct socketio_client *cl, SOCKET fd) {
-
-	if(!client_linemode(cl, 1)) {
+	if(!client_linemode(cl, 1) || !client_echomode(cl, 1)) {
 		return; /* failure, the client would have been deleted */
 	}
 
