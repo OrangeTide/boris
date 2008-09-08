@@ -66,6 +66,7 @@
 /* number of connections that can be queues waiting for accept() */
 #define SOCKETIO_LISTEN_QUEUE 10
 #define CLIENT_OUTPUT_BUFFER_SZ 4096
+#define CLIENT_INPUT_BUFFER_SZ 256
 
 /* database file */
 #define BIDB_FILE "boris.bidb"
@@ -1852,24 +1853,72 @@ static int buffer_printf(struct buffer *b, const char *fmt, ...) {
 EXPORT const char *buffer_data(struct buffer *b, size_t *len) {
 	assert(b != NULL);
 	assert(len != NULL);
-	if(b) {
-		*len=b->used;
-		return b->data;
-	} else {
+	if(!b) {
 		*len=0;
 		return NULL;
 	}
+
+	*len=b->used;
+	return b->data;
+}
+
+/* used for adding more data to the buffer
+ * returns a pointer to the start of the buffer
+ * len is the amount remaining in the buffer */
+EXPORT char *buffer_load(struct buffer *b, size_t *len) {
+	assert(b != NULL);
+	assert(len != NULL);
+	if(!b) {
+		*len=0;
+		return NULL;
+	}
+
+	*len=b->max-b->used; /* remaining */
+	return b->data+b->used;
 }
 
 /* returns the remaining data in the buffer */
 EXPORT unsigned buffer_consume(struct buffer *b, size_t len) {
+	assert(b != NULL);
+	TRACE("len=%zu used=%zu rem=%zu\n", len, b->used, b->max-b->used);
 	assert(len <= b->used);
 	if(len>b->used) {
+		fprintf(stderr, "WARNING:attempted ovewflow of output buffer %p\n", (void*)b);
 		len=b->used;
 	}
 	b->used-=len;
 	memmove(b->data, b->data+len, b->used);
 	return b->used;
+}
+
+/* commits data to buffer
+ */
+EXPORT void buffer_emit(struct buffer *b, size_t len) {
+	assert(b != NULL);
+	assert(b->used <= b->max);
+	assert(b->used + len <= b->max);
+	b->used+=len;
+	if(b->used>b->max) {
+		fprintf(stderr, "WARNING:attempted ovewflow of input buffer %p\n", (void*)b);
+		b->used=b->max;
+	}
+}
+
+EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len) {
+	char *d;
+	assert(b != NULL);
+	assert(consumed_len != NULL);
+	d=memchr(b->data, '\n', b->used);
+	if(!d) {
+		/* no newline found */
+		return NULL;
+	}
+	if(d>b->data && d[-1]=='\r') {
+		d[-1]=0; /* rub out CR */
+	}
+	*d=0; /* rub out LF */
+	*consumed_len=d-b->data+1;
+	return b->data;
 }
 
 /******************************************************************************
@@ -1906,7 +1955,7 @@ struct socketio_client {
 	REFCOUNT_TYPE REFCOUNT_NAME;
 	void (*write_event)(struct socketio_client *cl, SOCKET fd);
 	void (*read_event)(struct socketio_client *cl, SOCKET fd);
-	struct buffer output;
+	struct buffer output, input;
 };
 
 struct socketio_server {
@@ -2225,6 +2274,7 @@ static void socketio_ll_client_free(struct socketio_client *client) {
 
 	free(client->name);
 	buffer_free(&client->output);
+	buffer_free(&client->input);
 	/* TODO: free any other data structures associated with client */
 #ifndef NDEBUG
 	memset(client, 0xBB, sizeof *client); /* fill with fake data before freeing */
@@ -2311,6 +2361,15 @@ failure:
 	return -1;
 }
 
+EXPORT int socketio_recv(SOCKET fd, void *data, size_t len) {
+	int res;
+	res=recv(fd, data, len, 0);
+	SOCKETIO_FAILON(res==-1, "recv() from socket", failure);
+	return res;
+failure:
+	return -1;
+}
+
 static void socketio_toomany(SOCKET fd) {
 	const char buf[]="Too many connections\r\n";
 
@@ -2359,6 +2418,7 @@ static struct socketio_client *socketio_ll_newclient(SOCKET fd, const char *name
 	socketio_readready(fd); /* default to being ready for reads */
 	socketio_writeready(fd); /* do first write event as a connection notification */
 	buffer_init(&ret->output, CLIENT_OUTPUT_BUFFER_SZ);
+	buffer_init(&ret->input, CLIENT_INPUT_BUFFER_SZ);
 	return ret;
 failure:
 	return NULL;
@@ -2693,6 +2753,7 @@ EXPORT void client_write_event(struct socketio_client *cl, SOCKET fd) {
 		REFCOUNT_PUT(cl, socketio_ll_client_free);
 		return; /* client write failure */
 	}
+	TRACE("%s():len=%zu res=%zu\n", __func__, len, res);
 	len=buffer_consume(&cl->output, (unsigned)res);
 
 	if(len>0) {
@@ -2716,23 +2777,39 @@ EXPORT void client_new_event(struct socketio_client *cl, SOCKET fd) {
 	client_write_event(cl, fd); /* chain to the real event */
 }
 
+/* */
 EXPORT void client_read_event(struct socketio_client *cl, SOCKET fd) {
-	char buf[64];
+	const char *line;
+	char *data;
+	size_t len, consumed;
 	int res;
 
-	res=recv(fd, buf, sizeof buf, 0);
-	if(res<=0) {
-		if(res<0) {
-			fprintf(stderr, "%s():recv() error:fd=%d:%s\n", __func__, fd, socketio_strerror());
-		}
-		/* close the socket and free the client */
-		REFCOUNT_PUT(cl, socketio_ll_client_free);
-		return; /* client was (or will be) closed */
+	data=buffer_load(&cl->input, &len);
+	if(len==0) {
+		fprintf(stderr, "WARNING:input buffer full, closing connection %s\n", cl->name);
+		goto failure;
 	}
+	res=socketio_recv(fd, data, len);
+	if(res<=0) {
+		/* close or error */
+		goto failure;
+	}
+	DEBUG("%s():res=%zu\n", __func__, res);
+	buffer_emit(&cl->input, (unsigned)res);
 
-	DEBUG("Client %d(%s):received %d bytes\n", fd, cl->name, res);
+	DEBUG("Client %d(%s):received %d bytes (used=%zu)\n", fd, cl->name, res, cl->input.used);
 
+	/* TODO: getline should trigger a special IAC parser that stops at a line */
+	while((line=buffer_getline(&cl->input, &consumed))) {
+		DEBUG("client line: '%s'\n", line);
+		buffer_consume(&cl->input, consumed);
+	}
 	socketio_readready(fd); /* only call this if the client wasn't closed earlier */
+	return;
+failure:
+	/* close the socket and free the client */
+	REFCOUNT_PUT(cl, socketio_ll_client_free);
+	return; /* client was (or will be) closed */
 }
 /******************************************************************************
  * Main - Option parsing and initialization
