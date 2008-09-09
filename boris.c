@@ -184,13 +184,17 @@
 # define VERBOSE(...) fprintf(stderr, __VA_ARGS__)
 # ifdef NDEBUG
 #  define DEBUG(...) /* DEBUG disabled */
+#  define HEXDUMP(data, len, ...) /* HEXDUMP disabled */
 # else
 #  define DEBUG(...) fprintf(stderr, __VA_ARGS__)
+#  define HEXDUMP(data, len, ...) do { fprintf(stderr, __VA_ARGS__); hexdump(stderr, data, len); } while(0)
 # endif
 # ifdef NTRACE
 #  define TRACE(...) /* TRACE disabled */
+#  define HEXDUMP_TRACE(data, len, ...) /* HEXDUMP_TRACE disabled */
 # else
 #  define TRACE(...) fprintf(stderr, __VA_ARGS__)
+#  define HEXDUMP_TRACE(data, len, ...) HEXDUMP(data, len, __VA_ARGS__)
 # endif
 #else
 /* TODO: prepare a solution for C89 */
@@ -294,6 +298,20 @@ static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
     return o;
 }
 
+static void hexdump(FILE *f, const void *data, int len) {
+	fprintf(f, "[%d]", len);
+	while(len>0) {
+		unsigned char ch=*(unsigned char*)data;
+		if(isprint(ch)) {
+			fprintf(f, " '%c'", ch);
+		} else {
+			fprintf(f, " 0x%02hhx", ch);
+		}
+		len--;
+		data=((unsigned char*)data)+1;
+	}
+	fprintf(f, "\n");
+}
 #endif
 
 /******************************************************************************
@@ -1788,8 +1806,59 @@ EXPORT struct object_base *object_iscached(unsigned id) {
 }
 
 /******************************************************************************
+ * Telnet protocol constants
+ ******************************************************************************/
+/* TODO: prefix these to clean up the namespace */
+#define IAC '\377'
+#define DONT '\376'
+#define DO '\375'
+#define WONT '\374'
+#define WILL '\373'
+#define SB '\372'
+#define GA '\371'
+#define EL '\370'
+#define EC '\367'
+#define AYT '\366'
+#define AO '\365'
+#define IP '\364'
+#define BREAK '\363'
+#define DM '\362'
+#define NOP '\361'
+#define SE '\360'
+#define EOR '\357'
+#define ABORT '\356'
+#define SUSP '\355'
+#define xEOF '\354' /* this is what BSD arpa/telnet.h calls the EOF */
+#define SYNCH '\362'
+
+#define TELOPT_ECHO 1
+#define TELOPT_SGA 3
+#define TELOPT_TTYPE 24		/* terminal type - rfc1091 */
+#define TELOPT_NAWS 31		/* negotiate about window size - rfc1073 */
+#define TELOPT_LINEMODE 34	/* line mode option - rfc1116 */
+
+/* generic sub-options */
+#define TELQUAL_IS 0
+#define TELQUAL_SEND 1
+#define TELQUAL_INFO 2
+
+/** Linemode sub-options **/
+#define	LM_MODE 1
+#define	LM_FORWARDMASK 2
+#define	LM_SLC 3
+
+#define	MODE_EDIT 1
+#define	MODE_TRAPSIG 2
+#define	MODE_ACK 4
+#define MODE_SOFT_TAB 8
+#define MODE_LIT_ECHO 16
+
+#define	MODE_MASK 31
+
+/******************************************************************************
  * Socket Buffers
  ******************************************************************************/
+
 struct buffer {
 	char *data;
 	size_t used, max;
@@ -1956,7 +2025,7 @@ EXPORT char *buffer_load(struct buffer *b, size_t *len) {
 /* returns the remaining data in the buffer */
 EXPORT unsigned buffer_consume(struct buffer *b, size_t len) {
 	assert(b != NULL);
-	TRACE("len=%zu used=%zu rem=%zu\n", len, b->used, b->max-b->used);
+	DEBUG("len=%zu used=%zu rem=%zu\n", len, b->used, b->max-b->used);
 	assert(len <= b->used);
 	if(len>b->used) {
 		fprintf(stderr, "WARNING:attempted ovewflow of output buffer %p\n", (void*)b);
@@ -1980,11 +2049,62 @@ EXPORT void buffer_emit(struct buffer *b, size_t len) {
 	}
 }
 
-EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len) {
+/*
+ * callback returns the number of items consumed
+ * if a line is incomplete (which it will be if an IAC is incomplete, then return NULL
+ */
+static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p) {
+	size_t res, tmplen;
+
+	assert(d != NULL);
+	assert(len != NULL);
+
+	/* just look for newlines if we aren't processing IACs */
+	if(!iac_process) {
+		return memchr(d, '\n', *len);
+	}
+
+	/* look for IACs and newlines */
+
+	assert((int)*len>=0);
+	for(tmplen=*len;tmplen;) {
+		TRACE("%s():%d: len=%d tmplen=%d\n", __func__, __LINE__, *len, tmplen);
+		assert((int)tmplen>0);
+		if(*d==IAC) {
+			assert(iac_process != NULL);
+			res=iac_process(d, *len, p);
+			if(!res) {
+				/* incomplete IAC sequence, wait for more data */
+				DEBUG("Incomplete IAC sequence, wait for more data\n");
+				return NULL;
+			}
+			DEBUG("Telnet control data processed (%d bytes)\n", res);
+			TRACE("%s():%d: res=%d len=%d tmplen=%d\n", __func__, __LINE__, res, *len, tmplen);
+			assert((int)res<=(int)*len);
+			assert((int)tmplen>0);
+			assert((int)res<=(int)tmplen);
+			tmplen-=res;
+			*len-=res; /* the overall length was just reduced */
+			assert((int)tmplen>=0);
+			memmove(d, d+res, tmplen);
+			continue;
+		}
+		if(*d=='\n') {
+			return d;
+		}
+		tmplen--;
+		d++;
+		assert((int)tmplen>=0);
+	}
+
+	return NULL; /* not found */
+}
+
+EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p) {
 	char *d;
 	assert(b != NULL);
 	assert(consumed_len != NULL);
-	d=memchr(b->data, '\n', b->used);
+	d=buffer_findnl(b->data, &b->used, iac_process, p);
 	if(!d) {
 		/* no newline found */
 		return NULL;
@@ -2032,6 +2152,10 @@ struct socketio_client {
 	void (*write_event)(struct socketio_client *cl, SOCKET fd);
 	void (*read_event)(struct socketio_client *cl, SOCKET fd);
 	struct buffer output, input;
+	struct terminal {
+		int width, height;
+		char name[32];
+	} terminal;
 };
 
 struct socketio_server {
@@ -2495,6 +2619,8 @@ static struct socketio_client *socketio_ll_newclient(SOCKET fd, const char *name
 	socketio_writeready(fd); /* do first write event as a connection notification */
 	buffer_init(&ret->output, CLIENT_OUTPUT_BUFFER_SZ);
 	buffer_init(&ret->input, CLIENT_INPUT_BUFFER_SZ);
+	ret->terminal.width=ret->terminal.height=-1;
+	strcpy(ret->terminal.name, "");
 	return ret;
 failure:
 	return NULL;
@@ -2600,6 +2726,14 @@ EXPORT int socketio_dispatch(long msec) {
 	for(clientcurr=LIST_TOP(socketio_client_list);nr>0 && clientcurr;clientcurr=clientnext) {
 		SOCKET fd=clientcurr->fd;
 
+		/* TODO: use a setjmp() to deal with freeing of the current connection.
+		 * this is needed because the filling the input or output buffers can trigger
+		 * a socketio_ll_client_free(). perhaps it would be better to just ignore the
+		 * overflowing of a buffer and check an error flag in the current client first
+		 *
+		 * or possibly stop using the refcount code and just have a simple delete flag that
+		 * is checked in the loops, and possibly before select()
+		 */
 		TRACE("Checking client %s\n", clientcurr->name);
 		REFCOUNT_TAKE(clientcurr);
 		assert(fd!=INVALID_SOCKET); /* verify consistency of datastructure */
@@ -2742,50 +2876,25 @@ int game_init(void) {
 }
 
 /******************************************************************************
- * Telnet protocol constants
- ******************************************************************************/
-/* TODO: prefix these to clean up the namespace */
-#define IAC '\377'
-#define DONT '\376'
-#define DO '\375'
-#define WONT '\374'
-#define WILL '\373'
-#define SB '\372'
-#define GA '\371'
-#define EL '\370'
-#define EC '\367'
-#define AYT '\366'
-#define AO '\365'
-#define IP '\364'
-#define BREAK '\363'
-#define DM '\362'
-#define NOP '\361'
-#define SE '\360'
-#define EOR '\357'
-#define ABORT '\356'
-#define SUSP '\355'
-#define xEOF '\354' /* this is what BSD arpa/telnet.h calls the EOF */
-#define SYNCH '\362'
-
-#define TELOPT_ECHO 1
-#define TELOPT_LINEMODE 34
-
-/** Linemode sub-options **/
-#define	LM_MODE 1
-#define	LM_FORWARDMASK 2
-#define	LM_SLC 3
-
-#define	MODE_EDIT 1
-#define	MODE_TRAPSIG 2
-#define	MODE_ACK 4
-#define MODE_SOFT_TAB 8
-#define MODE_LIT_ECHO 16
-
-#define	MODE_MASK 31
-
-/******************************************************************************
  * Client - handles client connections
  ******************************************************************************/
+/* posts telnet protocol necessary to begin negotiation of options */
+static int client_telnet_init(struct socketio_client *cl) {
+	const char support[] = {
+		IAC, DO, TELOPT_LINEMODE,
+		IAC, DO, TELOPT_NAWS,		/* window size events */
+		IAC, DO, TELOPT_TTYPE,		/* accept terminal-type infomation */
+		IAC, SB, TELOPT_TTYPE, TELQUAL_SEND, IAC, SE, /* ask the terminal type */
+	};
+	if(buffer_write_noexpand(&cl->output, support, sizeof support)<0) {
+		DEBUG("%s():write failured\n", __func__);
+		REFCOUNT_PUT(cl, socketio_ll_client_free);
+		return 0; /* failure */
+	}
+
+	return 1; /* success */
+}
+
 static int client_echomode(struct socketio_client *cl, int mode) {
 	static const char echo_off[] = { IAC, WILL, TELOPT_ECHO }; /* OFF */
 	static const char echo_on[] = { IAC, WONT, TELOPT_ECHO }; /* ON */
@@ -2808,9 +2917,6 @@ static int client_echomode(struct socketio_client *cl, int mode) {
 }
 
 static int client_linemode(struct socketio_client *cl, int mode) {
-	const char support[] = {
-		IAC, DO, TELOPT_LINEMODE,
-	};
 	const char enable[] = {
 		IAC, SB, TELOPT_LINEMODE, LM_MODE, MODE_EDIT|MODE_TRAPSIG, IAC, SE
 	};
@@ -2828,7 +2934,7 @@ static int client_linemode(struct socketio_client *cl, int mode) {
 		len=sizeof disable;
 	}
 
-	if(buffer_write_noexpand(&cl->output, support, sizeof support)<0 || buffer_write_noexpand(&cl->output, s, len)<0) {
+	if(buffer_write_noexpand(&cl->output, s, len)<0) {
 		DEBUG("%s():write failured\n", __func__);
 		REFCOUNT_PUT(cl, socketio_ll_client_free);
 		return 0; /* failure */
@@ -2861,7 +2967,7 @@ EXPORT void client_write_event(struct socketio_client *cl, SOCKET fd) {
 
 /* the first write event happens right after a new connection */
 EXPORT void client_new_event(struct socketio_client *cl, SOCKET fd) {
-	if(!client_linemode(cl, 1) || !client_echomode(cl, 1)) {
+	if(!client_telnet_init(cl) || !client_linemode(cl, 1) || !client_echomode(cl, 1)) {
 		return; /* failure, the client would have been deleted */
 	}
 
@@ -2871,6 +2977,124 @@ EXPORT void client_new_event(struct socketio_client *cl, SOCKET fd) {
 
 	cl->write_event=client_write_event;
 	client_write_event(cl, fd); /* chain to the real event */
+}
+
+/* for processing IAC SB */
+static void client_iac_process_sb(const char *iac, size_t len, struct socketio_client *cl) {
+	assert(cl != NULL);
+	assert(iac[0] == IAC);
+	assert(iac[1] == SB);
+	if(!iac) return;
+	if(!cl) return;
+
+	switch(iac[2]) {
+		case TELOPT_TTYPE:
+			if(iac[3]==TELQUAL_IS) {
+				if(len<9) {
+					fprintf(stderr, "WARNING: short IAC SB TTYPE IS .. IAC SE\n");
+					return;
+				}
+				snprintf(cl->terminal.name, sizeof cl->terminal.name, "%.*s", len-4-2, iac+4);
+				DEBUG("Client terminal type is now \"%s\"\n", cl->terminal.name);
+				buffer_printf(&cl->output, "Terminal type: %s\n", cl->terminal.name);
+				socketio_writeready(cl->fd);
+			}
+			break;
+		case TELOPT_NAWS: {
+			if(len<9) {
+				fprintf(stderr, "WARNING: short IAC SB NAWS .. IAC SE\n");
+				return;
+			}
+			assert(len==9);
+			cl->terminal.width=RD_BE16(iac, 3);
+			cl->terminal.height=RD_BE16(iac, 5);
+			DEBUG("Client display size is now %ux%u\n", cl->terminal.width, cl->terminal.height);
+			buffer_printf(&cl->output, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
+			socketio_writeready(cl->fd);
+			break;
+		}
+	}
+}
+
+/* return: 0 means "incomplete" data for this function */
+static size_t client_iac_process(const char *iac, size_t len, void *p) {
+	struct socketio_client *cl=p;
+	const char *endptr;
+
+	assert(iac != NULL);
+	assert(iac[0] == IAC);
+
+	if(iac[0]!=IAC) {
+		fprintf(stderr, "ERROR:%s() called on non-telnet data\n", __func__);
+		return 0;
+	}
+
+	switch(iac[1]) {
+		case IAC:
+			return 1; /* consume the first IAC and leave the second behind */
+		case WILL:
+			if(len>=3) {
+				DEBUG("%s():IAC WILL %hhu\n", __func__, iac[2]);
+				return 3; /* 3-byte operations*/
+			} else {
+				return 0; /* not enough data */
+			}
+		case WONT:
+			if(len>=3) {
+				DEBUG("%s():IAC WONT %hhu\n", __func__, iac[2]);
+				return 3; /* 3-byte operations*/
+			} else {
+				return 0; /* not enough data */
+			}
+		case DO:
+			if(len>=3) {
+				DEBUG("%s():IAC DO %hhu\n", __func__, iac[2]);
+				return 3; /* 3-byte operations*/
+			} else {
+				return 0; /* not enough data */
+			}
+		case DONT:
+			if(len>=3) {
+				DEBUG("%s():IAC DONT %hhu\n", __func__, iac[2]);
+				return 3; /* 3-byte operations*/
+			} else {
+				return 0; /* not enough data */
+			}
+		case SB:
+			/* look for IAC SE */
+			TRACE("IAC SB %hhu found\n", iac[2]);
+			endptr=iac+2;
+			while((endptr=memchr(endptr, IAC, len-(endptr-iac)))) {
+				assert(endptr[0] == IAC);
+				TRACE("found IAC %hhu\n", endptr[1]);
+				endptr++;
+				if((endptr-iac)>=(ptrdiff_t)len) {
+					DEBUG("Unterminated IAC SB sequence\n");
+					return 0; /* unterminated */
+				}
+				if(endptr[0]==SE) {
+					endptr++;
+					// DEBUG("%s():IAC SB %hhu ... IAC SE\n", __func__, iac[2]);
+					HEXDUMP(iac, endptr-iac, "%s():IAC SB %hhu: ", __func__, iac[2]);
+					client_iac_process_sb(iac, (size_t)(endptr-iac), cl);
+					return endptr-iac;
+				} else if(endptr[0]==IAC) {
+					TRACE("Found IAC IAC in IAC SB block\n");
+					endptr++;
+				}
+			}
+			return 0; /* unterminated IAC SB sequence */
+		case SE:
+			fprintf(stderr, "ERROR:found IAC SE without IAC SB, ignoring it.\n");
+		default:
+			if(len>=3)
+				return 2; /* treat anything we don't know about as a 2-byte operation */
+			else
+				return 0; /* not enough data */
+	}
+
+	/* we should never get to this point */
+
 }
 
 /* */
@@ -2896,7 +3120,7 @@ EXPORT void client_read_event(struct socketio_client *cl, SOCKET fd) {
 	DEBUG("Client %d(%s):received %d bytes (used=%zu)\n", fd, cl->name, res, cl->input.used);
 
 	/* TODO: getline should trigger a special IAC parser that stops at a line */
-	while((line=buffer_getline(&cl->input, &consumed))) {
+	while((line=buffer_getline(&cl->input, &consumed, client_iac_process, cl))) {
 		DEBUG("client line: '%s'\n", line);
 		buffer_consume(&cl->input, consumed);
 	}
