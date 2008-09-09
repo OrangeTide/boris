@@ -2078,7 +2078,7 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 				DEBUG("Incomplete IAC sequence, wait for more data\n");
 				return NULL;
 			}
-			DEBUG("Telnet control data processed (%d bytes)\n", res);
+			DEBUG("Telnet control data processed (%zd bytes)\n", res);
 			TRACE("%s():%d: res=%d len=%d tmplen=%d\n", __func__, __LINE__, res, *len, tmplen);
 			assert((int)res<=(int)*len);
 			assert((int)tmplen>0);
@@ -2994,7 +2994,7 @@ static void client_iac_process_sb(const char *iac, size_t len, struct socketio_c
 					fprintf(stderr, "WARNING: short IAC SB TTYPE IS .. IAC SE\n");
 					return;
 				}
-				snprintf(cl->terminal.name, sizeof cl->terminal.name, "%.*s", len-4-2, iac+4);
+				snprintf(cl->terminal.name, sizeof cl->terminal.name, "%.*s", (int)len-4-2, iac+4);
 				DEBUG("Client terminal type is now \"%s\"\n", cl->terminal.name);
 				buffer_printf(&cl->output, "Terminal type: %s\n", cl->terminal.name);
 				socketio_writeready(cl->fd);
@@ -3114,7 +3114,7 @@ EXPORT void client_read_event(struct socketio_client *cl, SOCKET fd) {
 		/* close or error */
 		goto failure;
 	}
-	DEBUG("%s():res=%zu\n", __func__, res);
+	DEBUG("%s():res=%u\n", __func__, res);
 	buffer_emit(&cl->input, (unsigned)res);
 
 	DEBUG("Client %d(%s):received %d bytes (used=%zu)\n", fd, cl->name, res, cl->input.used);
