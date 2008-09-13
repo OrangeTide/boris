@@ -267,10 +267,17 @@ struct bidb_extent {
 /******************************************************************************
  * Globals
  ******************************************************************************/
+static struct menuinfo gamemenu_login;
 
 /******************************************************************************
  * Prototypes
  ******************************************************************************/
+struct client;
+struct socketio_handle;
+struct menuinfo;
+
+static void client_free(struct socketio_handle *sh);
+EXPORT void menu_show(struct client *cl, struct menuinfo *mi);
 
 /******************************************************************************
  * Debug routines
@@ -2144,31 +2151,17 @@ EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t
 
 #define SOCKETIO_FAILON(e, reason, fail_label) do { if(e) { fprintf(stderr, "ERROR:%s:%s\n", reason, socketio_strerror()); goto fail_label; } } while(0)
 
-struct socketio_client {
-	LIST_ENTRY(struct socketio_client) list;
+struct socketio_handle {
+	LIST_ENTRY(struct socketio_handle) list;
 	SOCKET fd;
 	char *name;
 	REFCOUNT_TYPE REFCOUNT_NAME;
-	void (*write_event)(struct socketio_client *cl, SOCKET fd);
-	void (*read_event)(struct socketio_client *cl, SOCKET fd);
-	struct buffer output, input;
-	struct terminal {
-		int width, height;
-		char name[32];
-	} terminal;
+	void (*write_event)(struct socketio_handle *sh, SOCKET fd, void *p);
+	void (*read_event)(struct socketio_handle *sh, SOCKET fd, void *p);
+	void *extra;
 };
 
-struct socketio_server {
-	SOCKET fd;
-	LIST_ENTRY(struct socketio_server) list;
-	char *name;
-	REFCOUNT_TYPE REFCOUNT_NAME;
-	void (*newclient_write_event)(struct socketio_client *cl, SOCKET fd);
-	void (*newclient_read_event)(struct socketio_client *cl, SOCKET fd);
-};
-
-static LIST_HEAD(struct socketio_server_list, struct socketio_server) socketio_server_list;
-static LIST_HEAD(struct socketio_client_list, struct socketio_client) socketio_client_list;
+static LIST_HEAD(struct socketio_handle_list, struct socketio_handle) socketio_handle_list;
 static fd_set *socketio_readfds, *socketio_writefds;
 static unsigned socketio_fdset_sz; /* number of bits allocated */
 #if defined(USE_WIN32_SOCKETS)
@@ -2307,8 +2300,9 @@ EXPORT int socketio_close(SOCKET *fd) {
 	return res;
 }
 
-/* checks the maximum count and updates socketio_fdmax */
-static int socketio_check_count(SOCKET fd) {
+/* You should call this whenever opening a new socket
+ * checks the maximum count and updates socketio_fdmax */
+EXPORT int socketio_check_count(SOCKET fd) {
 	assert(fd!=INVALID_SOCKET);
 #if defined(USE_WIN32_SOCKETS)
 	if(socketio_socket_count>=socketio_fdset_sz) {
@@ -2399,157 +2393,28 @@ failure:
 	return 0;
 }
 
-static int socketio_listen_bind(struct addrinfo *ai, void (*newclient_write_event)(struct socketio_client *cl, SOCKET fd), void (*newclient_read_event)(struct socketio_client *cl, SOCKET fd)) {
-	SOCKET fd;
-	int res;
-	char buf[64];
-	struct socketio_server *newserv;
-
-	const int yes=1;
-	assert(ai!=NULL);
-	if(!ai || !ai->ai_addr) {
-		fprintf(stderr, "ERROR:empty socket address\n");
-		return 0;
-	}
-	fd=socket(ai->ai_family, ai->ai_socktype, 0);
-	SOCKETIO_FAILON(fd==INVALID_SOCKET, "creating socket", failure_clean);
-
-#if defined(USE_WIN32_SOCKETS)
-	socketio_socket_count++; /* track number of open sockets for filling fd_set */
-#endif
-	if(!socketio_check_count(fd)) {
-		fprintf(stderr, "ERROR:too many open sockets. refusing new server!\n");
-		goto failure;
-	}
-
-	if(ai->ai_family==AF_INET || ai->ai_family==AF_INET6) {
-		SOCKETIO_FAILON(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&yes, sizeof yes)!=0, "setting SO_REUSEADDR", failure);
-	}
-
-	SOCKETIO_FAILON(bind(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen)!=0, "binding to port", failure);
-
-	if(!socketio_nonblock(fd)) {
-		goto failure;
-	}
-
-	res=listen(fd, SOCKETIO_LISTEN_QUEUE);
-	SOCKETIO_FAILON(res!=0, "forming listening socket", failure);
-
-	if(!socketio_sockname(ai->ai_addr, (socklen_t)ai->ai_addrlen, buf, sizeof buf)) {
-		strcpy(buf, "<UNKNOWN>");
-	}
-
-	/* add server to a list */
-	newserv=calloc(1, sizeof *newserv);
-	newserv->fd=fd;
-	newserv->name=strdup(buf);
-	REFCOUNT_INIT(newserv);
-	REFCOUNT_TAKE(newserv);
-	newserv->newclient_write_event=newclient_write_event;
-	newserv->newclient_read_event=newclient_read_event;
-	LIST_INSERT_HEAD(&socketio_server_list, newserv, list);
-
-	socketio_readready(newserv->fd); /* be ready for accept() */
-
-	DEBUG("Bind success: %s %s\n", ai->ai_family==AF_INET ? "IPv4" : ai->ai_family==AF_INET6 ? "IPv6" : "Unknown", buf);
-
-	return 1; /* success */
-
-failure:
-	socketio_close(&fd);
-failure_clean:
-	return 0;
-}
-
-static void socketio_ll_client_free(struct socketio_client *client) {
-	assert(client!=NULL);
-	if(!client)
+static void socketio_ll_handle_free(struct socketio_handle *sh) {
+	assert(sh!=NULL);
+	if(!sh)
 		return;
-	DEBUG("freeing client '%s'\n", client->name);
-	if(client->fd!=INVALID_SOCKET) {
-		socketio_close(&client->fd);
+	DEBUG("freeing socket handle '%s'\n", sh->name);
+
+	if(sh->extra) {
+		DEBUG("WARNING:extra data for socket handle is being leaked\n");
 	}
 
-	LIST_REMOVE(client, list);
+	if(sh->fd!=INVALID_SOCKET) {
+		socketio_close(&sh->fd);
+	}
 
-	free(client->name);
-	buffer_free(&client->output);
-	buffer_free(&client->input);
-	/* TODO: free any other data structures associated with client */
+	LIST_REMOVE(sh, list);
+
+	free(sh->name);
+
 #ifndef NDEBUG
-	memset(client, 0xBB, sizeof *client); /* fill with fake data before freeing */
+	memset(sh, 0xBB, sizeof *sh); /* fill with fake data before freeing */
 #endif
-	free(client);
-}
-
-static void socketio_ll_server_free(struct socketio_server *serv) {
-	assert(serv!=NULL);
-	if(!serv)
-		return;
-	DEBUG("freeing server '%s'\n", serv->name);
-	if(serv->fd!=INVALID_SOCKET) {
-		socketio_close(&serv->fd);
-	}
-
-	LIST_REMOVE(serv, list);
-
-	free(serv->name);
-	/* TODO: free any other data structures associated with serv */
-#ifndef NDEBUG
-	memset(serv, 0xBB, sizeof *serv); /* fill with fake data before freeing */
-#endif
-	free(serv);
-}
-
-/*
- * family : 0 or AF_INET or AF_INET6
- * socktype: SOCK_STREAM or SOCK_DGRAM
- */
-EXPORT int socketio_listen(int family, int socktype, const char *host, const char *port, void (*newclient_write_event)(struct socketio_client *cl, SOCKET fd), void (*newclient_read_event)(struct socketio_client *cl, SOCKET fd)) {
-	int res;
-	struct addrinfo *ai_res, *curr;
-	struct addrinfo ai_hints;
-
-	assert(port!=NULL);
-	assert(family==0 || family==AF_INET || family==AF_INET6);
-	assert(socktype==SOCK_STREAM || socktype==SOCK_DGRAM);
-
-	memset(&ai_hints, 0, sizeof ai_hints);
-	ai_hints.ai_flags=AI_PASSIVE;
-	ai_hints.ai_family=family;
-	ai_hints.ai_socktype=socktype;
-
-	res=getaddrinfo(host, port, &ai_hints, &ai_res);
-
-	if(res!=0) {
-		fprintf(stderr, "ERROR:hostname parsing error:%s\n", gai_strerror(res));
-		return 0;
-	}
-
-	/* looks for the first AF_INET or AF_INET6 entry */
-	for(curr=ai_res;curr;curr=curr->ai_next) {
-		TRACE("getaddrinfo():family=%d type=%d\n", curr->ai_family, curr->ai_socktype);
-		if(curr->ai_family==AF_INET6 || curr->ai_family==AF_INET) {
-			break;
-		}
-	}
-
-	if(!curr) {
-		freeaddrinfo(ai_res);
-		fprintf(stderr, "Could not find interface for %s:%s\n", host ? host : "*", port);
-		return 0; /* failure */
-	}
-
-	assert(socktype==SOCK_STREAM || socktype==SOCK_DGRAM);
-
-	if(!socketio_listen_bind(curr, newclient_write_event, newclient_read_event)) {
-		freeaddrinfo(ai_res);
-		fprintf(stderr, "Could bind socket for %s:%s\n", host ? host : "*", port);
-		return 0; /* failure */
-	}
-
-	freeaddrinfo(ai_res);
-	return 1; /* success */
+	free(sh);
 }
 
 EXPORT int socketio_send(SOCKET fd, const void *data, size_t len) {
@@ -2604,70 +2469,34 @@ static void socketio_fdset_copy(fd_set *dst, const fd_set *src) {
 
 }
 
-static struct socketio_client *socketio_ll_newclient(SOCKET fd, const char *name, void (*newclient_write_event)(struct socketio_client *cl, SOCKET fd), void (*newclient_read_event)(struct socketio_client *cl, SOCKET fd)) {
-	struct socketio_client *ret;
+static struct socketio_handle *socketio_ll_newhandle(SOCKET fd, const char *name, void (*write_event)(struct socketio_handle *sh, SOCKET fd, void *p), void (*read_event)(struct socketio_handle *sh, SOCKET fd, void *p)) {
+	struct socketio_handle *ret;
+
+	assert(fd != INVALID_SOCKET);
+
+	if(!socketio_check_count(fd)) {
+		fprintf(stderr, "ERROR:too many open sockets. closing new connection!\n");
+		socketio_toomany(fd); /* send a message to the socket */
+		return NULL; /* failure */
+	}
+
 	ret=calloc(1, sizeof *ret);
 	FAILON(!ret, "malloc()", failure);
 	ret->name=strdup(name);
 	ret->fd=fd;
 	REFCOUNT_INIT(ret);
 	REFCOUNT_TAKE(ret);
-	ret->read_event=newclient_read_event;
-	ret->write_event=newclient_write_event;
-	LIST_INSERT_HEAD(&socketio_client_list, ret, list);
+	ret->read_event=read_event;
+	ret->write_event=write_event;
+	LIST_INSERT_HEAD(&socketio_handle_list, ret, list);
 	socketio_readready(fd); /* default to being ready for reads */
-	socketio_writeready(fd); /* do first write event as a connection notification */
-	buffer_init(&ret->output, CLIENT_OUTPUT_BUFFER_SZ);
-	buffer_init(&ret->input, CLIENT_INPUT_BUFFER_SZ);
-	ret->terminal.width=ret->terminal.height=-1;
-	strcpy(ret->terminal.name, "");
 	return ret;
 failure:
 	return NULL;
 }
 
-static int socketio_accept(struct socketio_server *servcurr) {
-	struct sockaddr_storage ss;
-	socklen_t sslen;
-	struct socketio_client *newclient;
-	SOCKET fd;
-	char buf[64];
-	assert(servcurr!=NULL);
-	assert(servcurr->fd!=INVALID_SOCKET);
-	sslen=sizeof ss;
-	fd=accept(servcurr->fd, (struct sockaddr*)&ss, &sslen);
-	SOCKETIO_FAILON(fd==INVALID_SOCKET, "accept()", failure);
-
-#if defined(USE_WIN32_SOCKETS)
-	socketio_socket_count++; /* track number of open sockets for filling fd_set */
-#endif
-
-	if(!socketio_check_count(fd)) {
-		fprintf(stderr, "ERROR:too many open sockets. closing new connection!\n");
-		socketio_toomany(fd); /* send a message to the socket */
-		goto failure;
-	}
-
-	if(!socketio_sockname((struct sockaddr*)&ss, sslen, buf, sizeof buf)) {
-		strcpy(buf, "<UNKNOWN>");
-	}
-	newclient=socketio_ll_newclient(fd, buf, servcurr->newclient_write_event, servcurr->newclient_read_event);
-	if(!newclient) {
-		fprintf(stderr, "ERROR:could not allocate client, closing connection '%s'\n", buf);
-		socketio_close(&fd);
-		return 0; /* failure */
-	}
-
-	DEBUG("Accepted connection %s\n", newclient->name);
-	socketio_readready(servcurr->fd); /* be ready for next accept() */
-	return 1;
-failure:
-	return 0;
-}
-
 EXPORT int socketio_dispatch(long msec) {
-	struct socketio_server *servcurr, *servnext;
-	struct socketio_client *clientcurr, *clientnext;
+	struct socketio_handle *curr, *next;
 	struct timeval timeout, *to;
 	int nr;	/* number of sockets to process */
 	fd_set out_readfds, out_writefds;
@@ -2682,7 +2511,7 @@ EXPORT int socketio_dispatch(long msec) {
 		to=&timeout;
 	}
 
-	if(!LIST_TOP(socketio_server_list) && !LIST_TOP(socketio_client_list)) {
+	if(!LIST_TOP(socketio_handle_list)) {
 		fprintf(stderr, "No more sockets to watch\n");
 		return 0;
 	}
@@ -2704,38 +2533,20 @@ EXPORT int socketio_dispatch(long msec) {
 
 	/* TODO: if fds_bits is available then base the loop on the fd_set and look up entries on the client list. */
 
-	/* check servers */
-	for(servcurr=LIST_TOP(socketio_server_list);nr>0 && servcurr;servcurr=servnext) {
-		TRACE("Checking server %s\n", servcurr->name);
-		REFCOUNT_TAKE(servcurr);
-		if(FD_ISSET(servcurr->fd, &out_readfds)) {
-			SOCKET fd=servcurr->fd;
-			assert(fd!=INVALID_SOCKET);
-			assert((unsigned)fd < socketio_fdset_sz);
-			FD_CLR(fd, socketio_readfds); /* always disable an actived entry */
-			FD_CLR(fd, socketio_writefds); /* listeners should never set */
-			/* ignore the write bits because listeners won't set them */
-			DEBUG("Connection on %s\n", servcurr->name);
-			socketio_accept(servcurr); /* new clients would set fd_set entries, and trigger in the following if we didn't use two fd_sets */
-			nr--;
-		}
-		servnext=LIST_NEXT(servcurr, list);
-		REFCOUNT_PUT(servcurr, socketio_ll_server_free); /* this cannot allow any other servers to be removed, else servnext could point to nowwhere */
-	}
-	/* check clients */
-	for(clientcurr=LIST_TOP(socketio_client_list);nr>0 && clientcurr;clientcurr=clientnext) {
-		SOCKET fd=clientcurr->fd;
+	/* check all sockets */
+	for(curr=LIST_TOP(socketio_handle_list);nr>0 && curr;curr=next) {
+		SOCKET fd=curr->fd;
 
 		/* TODO: use a setjmp() to deal with freeing of the current connection.
 		 * this is needed because the filling the input or output buffers can trigger
-		 * a socketio_ll_client_free(). perhaps it would be better to just ignore the
+		 * a client_free(). perhaps it would be better to just ignore the
 		 * overflowing of a buffer and check an error flag in the current client first
 		 *
 		 * or possibly stop using the refcount code and just have a simple delete flag that
 		 * is checked in the loops, and possibly before select()
 		 */
-		TRACE("Checking client %s\n", clientcurr->name);
-		REFCOUNT_TAKE(clientcurr);
+		TRACE("Checking client %s\n", curr->name);
+		REFCOUNT_TAKE(curr);
 		assert(fd!=INVALID_SOCKET); /* verify consistency of datastructure */
 
 		if(FD_ISSET(fd, &out_writefds)) {
@@ -2743,10 +2554,10 @@ EXPORT int socketio_dispatch(long msec) {
 			assert(fd!=INVALID_SOCKET);
 			assert((unsigned)fd < socketio_fdset_sz);
 			FD_CLR(fd, socketio_writefds);
-			DEBUG("Write-ready %s\n", clientcurr->name);
+			DEBUG("Write-ready %s\n", curr->name);
 			/* perform the write handler */
-			if(clientcurr->write_event) {
-				clientcurr->write_event(clientcurr, fd);
+			if(curr->write_event) {
+				curr->write_event(curr, fd, curr->extra);
 			}
 			nr--;
 		}
@@ -2756,15 +2567,15 @@ EXPORT int socketio_dispatch(long msec) {
 			assert(fd!=INVALID_SOCKET);
 			assert((unsigned)fd < socketio_fdset_sz);
 			FD_CLR(fd, socketio_readfds);
-			DEBUG("Read-ready %s\n", clientcurr->name);
+			DEBUG("Read-ready %s\n", curr->name);
 			/* perform the read handler */
-			if(clientcurr->read_event) {
-				clientcurr->read_event(clientcurr, fd);
+			if(curr->read_event) {
+				curr->read_event(curr, fd, curr->extra);
 			}
 			nr--;
 		}
-		clientnext=LIST_NEXT(clientcurr, list);
-		REFCOUNT_PUT(clientcurr, socketio_ll_client_free); /* this cannot allow any other clients to be removed, else clientnext could point to nowwhere */
+		next=LIST_NEXT(curr, list);
+		REFCOUNT_PUT(curr, client_free); /* this cannot allow any other clients to be removed, else next could point to nowwhere */
 
 	}
 	if(nr>0) {
@@ -2779,107 +2590,216 @@ failure:
 }
 
 /******************************************************************************
- * Client - handles client connections
+ * Server
  ******************************************************************************/
-struct menuitem {
-	LIST_ENTRY(struct menuitem) item;
-	char *name;
-	char key;
-	void (*action_func)(void *extra1, long extra2, void *object);
-	void *extra1;
-	long extra2;
+struct server {
+	void (*newclient)(struct socketio_handle *new_sh);
 };
 
-struct menuinfo {
-	LIST_HEAD(struct, struct menuitem) items;
-	char *title;
-	size_t title_width;
-	struct menuitem *tail;
-};
+EXPORT void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p) {
+	struct sockaddr_storage ss;
+	socklen_t sslen;
+	struct server *serv=p;
+	struct socketio_handle *newclient;
+	char buf[64];
+	assert(sh!=NULL);
+	assert(sh->fd!=INVALID_SOCKET);
+	sslen=sizeof ss;
+	fd=accept(sh->fd, (struct sockaddr*)&ss, &sslen);
+	SOCKETIO_FAILON(fd==INVALID_SOCKET, "accept()", failure);
 
-EXPORT void menu_create(struct menuinfo *mi, const char *title) {
-	assert(mi!=NULL);
-	LIST_INIT(&mi->items);
-	mi->title_width=strlen(title);
-	mi->title=malloc(mi->title_width+1);
-	FAILON(!mi->title, "malloc()", failed);
-	strcpy(mi->title, title);
-	mi->tail=NULL;
-failed:
+#if defined(USE_WIN32_SOCKETS)
+	socketio_socket_count++; /* track number of open sockets for filling fd_set */
+#endif
+
+	if(!socketio_sockname((struct sockaddr*)&ss, sslen, buf, sizeof buf)) {
+		strcpy(buf, "<UNKNOWN>");
+	}
+
+	newclient=socketio_ll_newhandle(fd, buf, NULL, NULL);
+	if(!newclient) {
+		fprintf(stderr, "ERROR:could not allocate client, closing connection '%s'\n", buf);
+		socketio_close(&fd);
+		return; /* failure */
+	}
+	serv->newclient(newclient);
+	assert(newclient->write_event!=NULL || newclient->read_event!=NULL);
+
+	DEBUG("Accepted connection %s\n", newclient->name);
+	socketio_readready(sh->fd); /* be ready for next accept() */
+	return;
+failure:
 	return;
 }
 
-EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*,long,void*), void *extra1, long extra2) {
-	struct menuitem *newitem;
-	newitem=malloc(sizeof *newitem);
-	newitem->name=strdup(name);
-	newitem->key=ch; /* TODO: check for duplicate keys */
-	newitem->action_func=func;
-	newitem->extra1=extra1;
-	newitem->extra2=extra2;
-	if(mi->tail) {
-		LIST_INSERT_AFTER(mi->tail, newitem, item);
-	} else {
-		LIST_INSERT_HEAD(&mi->items, newitem, item);
+static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct socketio_handle *new_sh)) {
+	SOCKET fd;
+	int res;
+	char buf[64];
+	struct socketio_handle *newserv;
+	struct server *servdata;
+
+	const int yes=1;
+	assert(ai!=NULL);
+	if(!ai || !ai->ai_addr) {
+		fprintf(stderr, "ERROR:empty socket address\n");
+		return 0;
 	}
-	mi->tail=newitem;
+	fd=socket(ai->ai_family, ai->ai_socktype, 0);
+	SOCKETIO_FAILON(fd==INVALID_SOCKET, "creating socket", failure_clean);
+
+#if defined(USE_WIN32_SOCKETS)
+	socketio_socket_count++; /* track number of open sockets for filling fd_set */
+#endif
+	if(!socketio_check_count(fd)) {
+		fprintf(stderr, "ERROR:too many open sockets. refusing new server!\n");
+		goto failure;
+	}
+
+	if(ai->ai_family==AF_INET || ai->ai_family==AF_INET6) {
+		SOCKETIO_FAILON(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&yes, sizeof yes)!=0, "setting SO_REUSEADDR", failure);
+	}
+
+	SOCKETIO_FAILON(bind(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen)!=0, "binding to port", failure);
+
+	if(!socketio_nonblock(fd)) {
+		goto failure;
+	}
+
+	res=listen(fd, SOCKETIO_LISTEN_QUEUE);
+	SOCKETIO_FAILON(res!=0, "forming listening socket", failure);
+
+	if(!socketio_sockname(ai->ai_addr, (socklen_t)ai->ai_addrlen, buf, sizeof buf)) {
+		strcpy(buf, "<UNKNOWN>");
+	}
+
+	/* add server to a list */
+	newserv=socketio_ll_newhandle(fd, buf, NULL, server_read_event);
+	if(!newserv) {
+		fprintf(stderr, "ERROR:could not allocate server, closing socket '%s'\n", buf);
+		socketio_close(&fd);
+		return 0; /* failure */
+	}
+
+	servdata=calloc(1, sizeof *servdata);
+	servdata->newclient=newclient;
+
+	newserv->extra=servdata;
+
+	DEBUG("Bind success: %s %s\n", ai->ai_family==AF_INET ? "IPv4" : ai->ai_family==AF_INET6 ? "IPv6" : "Unknown", buf);
+
+	return 1; /* success */
+
+failure:
+	socketio_close(&fd);
+failure_clean:
+	return 0;
 }
 
-/* draw a little box around the string */
-static void menu_titledraw(struct socketio_client *cl, const char *title, size_t len) {
-	char buf[len+2];
-	memset(buf, '=', len);
-	buf[len]='\n';
-	buf[len+1]=0;
-	if(cl)
-		buffer_puts(&cl->output, buf);
-	DEBUG("%s", buf);
-	if(cl)
-		buffer_printf(&cl->output, "%s\n", title);
-	DEBUG("%s\n", title);
-	if(cl)
-		buffer_puts(&cl->output, buf);
-	DEBUG("%s", buf);
-}
+/*
+ * family : 0 or AF_INET or AF_INET6
+ * socktype: SOCK_STREAM or SOCK_DGRAM
+ */
+EXPORT int socketio_listen(int family, int socktype, const char *host, const char *port, void (*newclient)(struct socketio_handle *sh)) {
+	int res;
+	struct addrinfo *ai_res, *curr;
+	struct addrinfo ai_hints;
 
-EXPORT void menu_show(struct socketio_client *cl, struct menuinfo *mi) {
-	struct menuitem *curr;
+	assert(port!=NULL);
+	assert(family==0 || family==AF_INET || family==AF_INET6);
+	assert(socktype==SOCK_STREAM || socktype==SOCK_DGRAM);
 
-	assert(mi != NULL);
-	menu_titledraw(cl, mi->title, mi->title_width);
-	for(curr=LIST_TOP(mi->items);curr;curr=LIST_NEXT(curr, item)) {
-		if(curr->key) {
-			if(cl)
-				buffer_printf(&cl->output, "%c. %s\n", curr->key, curr->name);
-			DEBUG("%c. %s\n", curr->key, curr->name);
-		} else {
-			if(cl)
-				buffer_printf(&cl->output, "%s\n", curr->name);
-			DEBUG("%s\n", curr->name);
+	memset(&ai_hints, 0, sizeof ai_hints);
+	ai_hints.ai_flags=AI_PASSIVE;
+	ai_hints.ai_family=family;
+	ai_hints.ai_socktype=socktype;
+
+	res=getaddrinfo(host, port, &ai_hints, &ai_res);
+
+	if(res!=0) {
+		fprintf(stderr, "ERROR:hostname parsing error:%s\n", gai_strerror(res));
+		return 0;
+	}
+
+	/* looks for the first AF_INET or AF_INET6 entry */
+	for(curr=ai_res;curr;curr=curr->ai_next) {
+		TRACE("getaddrinfo():family=%d type=%d\n", curr->ai_family, curr->ai_socktype);
+		if(curr->ai_family==AF_INET6 || curr->ai_family==AF_INET) {
+			break;
 		}
 	}
-}
 
-/******************************************************************************
- * Game - game logic
- ******************************************************************************/
-static struct menuinfo gamemenu_login;
-int game_init(void) {
+	if(!curr) {
+		freeaddrinfo(ai_res);
+		fprintf(stderr, "Could not find interface for %s:%s\n", host ? host : "*", port);
+		return 0; /* failure */
+	}
 
-	/* */
-	menu_create(&gamemenu_login, "Login Menu");
-	menu_additem(&gamemenu_login, 'E', "Enter the game", NULL, NULL, 0);
-	menu_additem(&gamemenu_login, 'C', "Create account", NULL, NULL, 0);
-	menu_additem(&gamemenu_login, 'Q', "Disconnect", NULL, NULL, 0);
+	assert(socktype==SOCK_STREAM || socktype==SOCK_DGRAM);
 
-	return 1;
+	if(!socketio_listen_bind(curr, newclient)) {
+		freeaddrinfo(ai_res);
+		fprintf(stderr, "Could bind socket for %s:%s\n", host ? host : "*", port);
+		return 0; /* failure */
+	}
+
+	freeaddrinfo(ai_res);
+	return 1; /* success */
 }
 
 /******************************************************************************
  * Client - handles client connections
  ******************************************************************************/
+struct client {
+	struct socketio_handle *sh;
+	struct buffer output, input;
+	struct terminal {
+		int width, height;
+		char name[32];
+	} terminal;
+};
+
+static void client_free(struct socketio_handle *sh) {
+	struct client *client=sh->extra;
+	assert(client!=NULL);
+	if(!client)
+		return;
+	DEBUG("freeing client '%s'\n", sh->name);
+	if(sh->fd!=INVALID_SOCKET) {
+		socketio_close(&sh->fd);
+	}
+
+	client->sh->extra=NULL;
+	socketio_ll_handle_free(client->sh);
+	client->sh=NULL;
+
+	buffer_free(&client->output);
+	buffer_free(&client->input);
+	/* TODO: free any other data structures associated with client */
+#ifndef NDEBUG
+	memset(client, 0xBB, sizeof *client); /* fill with fake data before freeing */
+#endif
+	free(client);
+}
+
+static struct client *client_newclient(struct socketio_handle *sh) {
+	struct client *cl;
+	cl=malloc(sizeof *cl);
+	FAILON(!cl, "malloc()", failed);
+	buffer_init(&cl->output, CLIENT_OUTPUT_BUFFER_SZ);
+	buffer_init(&cl->input, CLIENT_INPUT_BUFFER_SZ);
+	cl->terminal.width=cl->terminal.height=-1;
+	strcpy(cl->terminal.name, "");
+	cl->sh=sh;
+
+	sh->extra=cl;
+	return cl;
+failed:
+	return NULL;
+}
+
 /* posts telnet protocol necessary to begin negotiation of options */
-static int client_telnet_init(struct socketio_client *cl) {
+static int client_telnet_init(struct client *cl) {
 	const char support[] = {
 		IAC, DO, TELOPT_LINEMODE,
 		IAC, DO, TELOPT_NAWS,		/* window size events */
@@ -2888,14 +2808,14 @@ static int client_telnet_init(struct socketio_client *cl) {
 	};
 	if(buffer_write_noexpand(&cl->output, support, sizeof support)<0) {
 		DEBUG("%s():write failured\n", __func__);
-		REFCOUNT_PUT(cl, socketio_ll_client_free);
+		REFCOUNT_PUT(cl->sh, client_free);
 		return 0; /* failure */
 	}
 
 	return 1; /* success */
 }
 
-static int client_echomode(struct socketio_client *cl, int mode) {
+static int client_echomode(struct client *cl, int mode) {
 	static const char echo_off[] = { IAC, WILL, TELOPT_ECHO }; /* OFF */
 	static const char echo_on[] = { IAC, WONT, TELOPT_ECHO }; /* ON */
 	const char *s;
@@ -2910,13 +2830,13 @@ static int client_echomode(struct socketio_client *cl, int mode) {
 
 	if(buffer_write_noexpand(&cl->output, s, len)<0) {
 		DEBUG("%s():write failured\n", __func__);
-		REFCOUNT_PUT(cl, socketio_ll_client_free);
+		REFCOUNT_PUT(cl->sh, client_free);
 		return 0; /* failure */
 	}
 	return 1; /* success */
 }
 
-static int client_linemode(struct socketio_client *cl, int mode) {
+static int client_linemode(struct client *cl, int mode) {
 	const char enable[] = {
 		IAC, SB, TELOPT_LINEMODE, LM_MODE, MODE_EDIT|MODE_TRAPSIG, IAC, SE
 	};
@@ -2936,16 +2856,17 @@ static int client_linemode(struct socketio_client *cl, int mode) {
 
 	if(buffer_write_noexpand(&cl->output, s, len)<0) {
 		DEBUG("%s():write failured\n", __func__);
-		REFCOUNT_PUT(cl, socketio_ll_client_free);
+		REFCOUNT_PUT(cl->sh, client_free);
 		return 0; /* failure */
 	}
 	return 1; /* success */
 }
 
-EXPORT void client_write_event(struct socketio_client *cl, SOCKET fd) {
+EXPORT void client_write_event(struct socketio_handle *sh, SOCKET fd, void *p) {
 	const char *data;
 	size_t len;
 	int res;
+	struct client *cl=p;
 
 	/* only call this if the client wasn't closed and we have data in our buffer */
 	assert(cl != NULL);
@@ -2953,7 +2874,7 @@ EXPORT void client_write_event(struct socketio_client *cl, SOCKET fd) {
 	data=buffer_data(&cl->output, &len);
 	res=socketio_send(fd, data, len);
 	if(res<0) {
-		REFCOUNT_PUT(cl, socketio_ll_client_free);
+		REFCOUNT_PUT(cl->sh, client_free);
 		return; /* client write failure */
 	}
 	TRACE("%s():len=%zu res=%zu\n", __func__, len, res);
@@ -2965,22 +2886,8 @@ EXPORT void client_write_event(struct socketio_client *cl, SOCKET fd) {
 	}
 }
 
-/* the first write event happens right after a new connection */
-EXPORT void client_new_event(struct socketio_client *cl, SOCKET fd) {
-	if(!client_telnet_init(cl) || !client_linemode(cl, 1) || !client_echomode(cl, 1)) {
-		return; /* failure, the client would have been deleted */
-	}
-
-	fprintf(stderr, "*** Connection %d: %s\n", fd, cl->name);
-	buffer_printf(&cl->output, "Welcome %d %d %d\n", 1, 2, 3);
-	menu_show(cl, &gamemenu_login);
-
-	cl->write_event=client_write_event;
-	client_write_event(cl, fd); /* chain to the real event */
-}
-
 /* for processing IAC SB */
-static void client_iac_process_sb(const char *iac, size_t len, struct socketio_client *cl) {
+static void client_iac_process_sb(const char *iac, size_t len, struct client *cl) {
 	assert(cl != NULL);
 	assert(iac[0] == IAC);
 	assert(iac[1] == SB);
@@ -2997,7 +2904,7 @@ static void client_iac_process_sb(const char *iac, size_t len, struct socketio_c
 				snprintf(cl->terminal.name, sizeof cl->terminal.name, "%.*s", (int)len-4-2, iac+4);
 				DEBUG("Client terminal type is now \"%s\"\n", cl->terminal.name);
 				buffer_printf(&cl->output, "Terminal type: %s\n", cl->terminal.name);
-				socketio_writeready(cl->fd);
+				socketio_writeready(cl->sh->fd);
 			}
 			break;
 		case TELOPT_NAWS: {
@@ -3010,7 +2917,7 @@ static void client_iac_process_sb(const char *iac, size_t len, struct socketio_c
 			cl->terminal.height=RD_BE16(iac, 5);
 			DEBUG("Client display size is now %ux%u\n", cl->terminal.width, cl->terminal.height);
 			buffer_printf(&cl->output, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
-			socketio_writeready(cl->fd);
+			socketio_writeready(cl->sh->fd);
 			break;
 		}
 	}
@@ -3018,7 +2925,7 @@ static void client_iac_process_sb(const char *iac, size_t len, struct socketio_c
 
 /* return: 0 means "incomplete" data for this function */
 static size_t client_iac_process(const char *iac, size_t len, void *p) {
-	struct socketio_client *cl=p;
+	struct client *cl=p;
 	const char *endptr;
 
 	assert(iac != NULL);
@@ -3098,15 +3005,16 @@ static size_t client_iac_process(const char *iac, size_t len, void *p) {
 }
 
 /* */
-EXPORT void client_read_event(struct socketio_client *cl, SOCKET fd) {
+EXPORT void client_read_event(struct socketio_handle *sh, SOCKET fd, void *extra) {
 	const char *line;
 	char *data;
 	size_t len, consumed;
 	int res;
+	struct client *cl=extra;
 
 	data=buffer_load(&cl->input, &len);
 	if(len==0) {
-		fprintf(stderr, "WARNING:input buffer full, closing connection %s\n", cl->name);
+		fprintf(stderr, "WARNING:input buffer full, closing connection %s\n", sh->name);
 		goto failure;
 	}
 	res=socketio_recv(fd, data, len);
@@ -3117,7 +3025,7 @@ EXPORT void client_read_event(struct socketio_client *cl, SOCKET fd) {
 	DEBUG("%s():res=%u\n", __func__, res);
 	buffer_emit(&cl->input, (unsigned)res);
 
-	DEBUG("Client %d(%s):received %d bytes (used=%zu)\n", fd, cl->name, res, cl->input.used);
+	DEBUG("Client %d(%s):received %d bytes (used=%zu)\n", fd, sh->name, res, cl->input.used);
 
 	/* TODO: getline should trigger a special IAC parser that stops at a line */
 	while((line=buffer_getline(&cl->input, &consumed, client_iac_process, cl))) {
@@ -3128,9 +3036,128 @@ EXPORT void client_read_event(struct socketio_client *cl, SOCKET fd) {
 	return;
 failure:
 	/* close the socket and free the client */
-	REFCOUNT_PUT(cl, socketio_ll_client_free);
+	REFCOUNT_PUT(sh, client_free);
 	return; /* client was (or will be) closed */
 }
+
+EXPORT void client_new_event(struct socketio_handle *sh) {
+	struct client *cl;
+
+	cl=client_newclient(sh);
+	if(!cl) {
+		return; /* failure */
+	}
+
+	sh->write_event=client_write_event;
+	sh->read_event=client_read_event;
+
+	if(!client_telnet_init(cl) || !client_linemode(cl, 1) || !client_echomode(cl, 1)) {
+		return; /* failure, the client would have been deleted */
+	}
+
+	fprintf(stderr, "*** Connection %d: %s\n", sh->fd, sh->name);
+	buffer_printf(&cl->output, "Welcome %d %d %d\n", 1, 2, 3);
+	menu_show(cl, &gamemenu_login);
+
+	socketio_writeready(sh->fd);
+}
+
+/******************************************************************************
+ * Menus
+ ******************************************************************************/
+struct menuitem {
+	LIST_ENTRY(struct menuitem) item;
+	char *name;
+	char key;
+	void (*action_func)(void *extra1, long extra2, void *object);
+	void *extra1;
+	long extra2;
+};
+
+struct menuinfo {
+	LIST_HEAD(struct, struct menuitem) items;
+	char *title;
+	size_t title_width;
+	struct menuitem *tail;
+};
+
+EXPORT void menu_create(struct menuinfo *mi, const char *title) {
+	assert(mi!=NULL);
+	LIST_INIT(&mi->items);
+	mi->title_width=strlen(title);
+	mi->title=malloc(mi->title_width+1);
+	FAILON(!mi->title, "malloc()", failed);
+	strcpy(mi->title, title);
+	mi->tail=NULL;
+failed:
+	return;
+}
+
+EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*,long,void*), void *extra1, long extra2) {
+	struct menuitem *newitem;
+	newitem=malloc(sizeof *newitem);
+	newitem->name=strdup(name);
+	newitem->key=ch; /* TODO: check for duplicate keys */
+	newitem->action_func=func;
+	newitem->extra1=extra1;
+	newitem->extra2=extra2;
+	if(mi->tail) {
+		LIST_INSERT_AFTER(mi->tail, newitem, item);
+	} else {
+		LIST_INSERT_HEAD(&mi->items, newitem, item);
+	}
+	mi->tail=newitem;
+}
+
+/* draw a little box around the string */
+static void menu_titledraw(struct client *cl, const char *title, size_t len) {
+	char buf[len+2];
+	memset(buf, '=', len);
+	buf[len]='\n';
+	buf[len+1]=0;
+	if(cl)
+		buffer_puts(&cl->output, buf);
+	DEBUG("%s", buf);
+	if(cl)
+		buffer_printf(&cl->output, "%s\n", title);
+	DEBUG("%s\n", title);
+	if(cl)
+		buffer_puts(&cl->output, buf);
+	DEBUG("%s", buf);
+}
+
+EXPORT void menu_show(struct client *cl, struct menuinfo *mi) {
+	struct menuitem *curr;
+
+	assert(mi != NULL);
+	menu_titledraw(cl, mi->title, mi->title_width);
+	for(curr=LIST_TOP(mi->items);curr;curr=LIST_NEXT(curr, item)) {
+		if(curr->key) {
+			if(cl)
+				buffer_printf(&cl->output, "%c. %s\n", curr->key, curr->name);
+			DEBUG("%c. %s\n", curr->key, curr->name);
+		} else {
+			if(cl)
+				buffer_printf(&cl->output, "%s\n", curr->name);
+			DEBUG("%s\n", curr->name);
+		}
+	}
+}
+
+/******************************************************************************
+ * Game - game logic
+ ******************************************************************************/
+int game_init(void) {
+
+	/* */
+	menu_create(&gamemenu_login, "Login Menu");
+	menu_additem(&gamemenu_login, 'E', "Enter the game", NULL, NULL, 0);
+	menu_additem(&gamemenu_login, 'C', "Create account", NULL, NULL, 0);
+	menu_additem(&gamemenu_login, 'Q', "Disconnect", NULL, NULL, 0);
+
+	return 1;
+}
+
 /******************************************************************************
  * Main - Option parsing and initialization
  ******************************************************************************/
@@ -3164,7 +3191,7 @@ static int process_flag(int ch, const char *next_arg) {
 			return 0;
 		case 'p':
 			need_parameter(ch, next_arg);
-			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, client_new_event, client_read_event)) {
+			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, client_new_event)) {
 				usage();
 			}
 			return 1; /* uses next arg */
