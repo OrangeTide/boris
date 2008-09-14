@@ -5,20 +5,30 @@
  * Design Documentation
  *
  * components:
- * 	recordcache - loads records into memory and caches them
  * 	bidb - low level file access fuctions. manages blocks for recordcache
- * 	object_base - a generic object type
- * 	object_xxx - free/load/save routines for objects
- * 	bitmap - manages large bitmaps
  * 	bitfield - manages small staticly sized bitmaps
+ * 	bitmap - manages large bitmaps
+ *  buffer - manages an i/o buffer
  * 	freelist - allocate ranges of numbers from a pool
+ *  game_logic
+ *  hash
+ *  heapqueue - priority queue for implementing timers
+ *  menu - draws menus to a telnetclient
+ * 	object_base - a generic object type
+ *  object_cache - interface to recordcache for objects
+ * 	object_xxx - free/load/save routines for objects
+ * 	recordcache - loads records into memory and caches them
+ * 	refcount - macros to provide reference counting
+ *  server - accepts new connections
+ *  shvar - process $() macros
  * 	socketio - manages network sockets
+ *  telnetclient - processes data from a socket for Telnet protocol
  *
  * dependency:
  *  recordcache - uses bitfield to track dirty blocks
  *  bidb - uses freelist to track free blocks
  *  records - uses freelist to track record numbers (reserve first 100 records)
- *  clients - uses ref counts to determine when to free linked lists items
+ *  socketio_handles - uses ref counts to determine when to free linked lists items
  *
  * types of records:
  *  objects - base objects for room, mob, or item
@@ -65,8 +75,8 @@
 
 /* number of connections that can be queues waiting for accept() */
 #define SOCKETIO_LISTEN_QUEUE 10
-#define CLIENT_OUTPUT_BUFFER_SZ 4096
-#define CLIENT_INPUT_BUFFER_SZ 256
+#define TELNETCLIENT_OUTPUT_BUFFER_SZ 4096
+#define TELNETCLIENT_INPUT_BUFFER_SZ 256
 
 /* database file */
 #define BIDB_FILE "boris.bidb"
@@ -272,12 +282,12 @@ static struct menuinfo gamemenu_login;
 /******************************************************************************
  * Prototypes
  ******************************************************************************/
-struct client;
+struct telnetclient;
 struct socketio_handle;
 struct menuinfo;
 
-static void client_free(struct socketio_handle *sh);
-EXPORT void menu_show(struct client *cl, struct menuinfo *mi);
+static void telnetclient_free(struct socketio_handle *sh);
+EXPORT void menu_show(struct telnetclient *cl, struct menuinfo *mi);
 
 /******************************************************************************
  * Debug routines
@@ -2539,7 +2549,7 @@ EXPORT int socketio_dispatch(long msec) {
 
 		/* TODO: use a setjmp() to deal with freeing of the current connection.
 		 * this is needed because the filling the input or output buffers can trigger
-		 * a client_free(). perhaps it would be better to just ignore the
+		 * a telnetclient_free(). perhaps it would be better to just ignore the
 		 * overflowing of a buffer and check an error flag in the current client first
 		 *
 		 * or possibly stop using the refcount code and just have a simple delete flag that
@@ -2575,7 +2585,7 @@ EXPORT int socketio_dispatch(long msec) {
 			nr--;
 		}
 		next=LIST_NEXT(curr, list);
-		REFCOUNT_PUT(curr, client_free); /* this cannot allow any other clients to be removed, else next could point to nowwhere */
+		REFCOUNT_PUT(curr, telnetclient_free); /* this cannot allow any other clients to be removed, else next could point to nowwhere */
 
 	}
 	if(nr>0) {
@@ -2750,7 +2760,7 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 /******************************************************************************
  * Client - handles client connections
  ******************************************************************************/
-struct client {
+struct telnetclient {
 	struct socketio_handle *sh;
 	struct buffer output, input;
 	struct terminal {
@@ -2759,8 +2769,11 @@ struct client {
 	} terminal;
 };
 
-static void client_free(struct socketio_handle *sh) {
-	struct client *client=sh->extra;
+EXPORT void telnetclient_read_event(struct socketio_handle *sh, SOCKET fd, void *extra);
+EXPORT void telnetclient_read_event_gamemenu_login(struct socketio_handle *sh, SOCKET fd, void *extra);
+
+static void telnetclient_free(struct socketio_handle *sh) {
+	struct telnetclient *client=sh->extra;
 	assert(client!=NULL);
 	if(!client)
 		return;
@@ -2782,12 +2795,12 @@ static void client_free(struct socketio_handle *sh) {
 	free(client);
 }
 
-static struct client *client_newclient(struct socketio_handle *sh) {
-	struct client *cl;
+static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh) {
+	struct telnetclient *cl;
 	cl=malloc(sizeof *cl);
 	FAILON(!cl, "malloc()", failed);
-	buffer_init(&cl->output, CLIENT_OUTPUT_BUFFER_SZ);
-	buffer_init(&cl->input, CLIENT_INPUT_BUFFER_SZ);
+	buffer_init(&cl->output, TELNETCLIENT_OUTPUT_BUFFER_SZ);
+	buffer_init(&cl->input, TELNETCLIENT_INPUT_BUFFER_SZ);
 	cl->terminal.width=cl->terminal.height=-1;
 	strcpy(cl->terminal.name, "");
 	cl->sh=sh;
@@ -2799,7 +2812,7 @@ failed:
 }
 
 /* posts telnet protocol necessary to begin negotiation of options */
-static int client_telnet_init(struct client *cl) {
+static int telnetclient_telnet_init(struct telnetclient *cl) {
 	const char support[] = {
 		IAC, DO, TELOPT_LINEMODE,
 		IAC, DO, TELOPT_NAWS,		/* window size events */
@@ -2808,14 +2821,14 @@ static int client_telnet_init(struct client *cl) {
 	};
 	if(buffer_write_noexpand(&cl->output, support, sizeof support)<0) {
 		DEBUG("%s():write failured\n", __func__);
-		REFCOUNT_PUT(cl->sh, client_free);
+		REFCOUNT_PUT(cl->sh, telnetclient_free);
 		return 0; /* failure */
 	}
 
 	return 1; /* success */
 }
 
-static int client_echomode(struct client *cl, int mode) {
+static int telnetclient_echomode(struct telnetclient *cl, int mode) {
 	static const char echo_off[] = { IAC, WILL, TELOPT_ECHO }; /* OFF */
 	static const char echo_on[] = { IAC, WONT, TELOPT_ECHO }; /* ON */
 	const char *s;
@@ -2830,13 +2843,13 @@ static int client_echomode(struct client *cl, int mode) {
 
 	if(buffer_write_noexpand(&cl->output, s, len)<0) {
 		DEBUG("%s():write failured\n", __func__);
-		REFCOUNT_PUT(cl->sh, client_free);
+		REFCOUNT_PUT(cl->sh, telnetclient_free);
 		return 0; /* failure */
 	}
 	return 1; /* success */
 }
 
-static int client_linemode(struct client *cl, int mode) {
+static int telnetclient_linemode(struct telnetclient *cl, int mode) {
 	const char enable[] = {
 		IAC, SB, TELOPT_LINEMODE, LM_MODE, MODE_EDIT|MODE_TRAPSIG, IAC, SE
 	};
@@ -2856,17 +2869,17 @@ static int client_linemode(struct client *cl, int mode) {
 
 	if(buffer_write_noexpand(&cl->output, s, len)<0) {
 		DEBUG("%s():write failured\n", __func__);
-		REFCOUNT_PUT(cl->sh, client_free);
+		REFCOUNT_PUT(cl->sh, telnetclient_free);
 		return 0; /* failure */
 	}
 	return 1; /* success */
 }
 
-EXPORT void client_write_event(struct socketio_handle *sh, SOCKET fd, void *p) {
+EXPORT void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void *p) {
 	const char *data;
 	size_t len;
 	int res;
-	struct client *cl=p;
+	struct telnetclient *cl=p;
 
 	/* only call this if the client wasn't closed and we have data in our buffer */
 	assert(cl != NULL);
@@ -2874,7 +2887,7 @@ EXPORT void client_write_event(struct socketio_handle *sh, SOCKET fd, void *p) {
 	data=buffer_data(&cl->output, &len);
 	res=socketio_send(fd, data, len);
 	if(res<0) {
-		REFCOUNT_PUT(cl->sh, client_free);
+		REFCOUNT_PUT(cl->sh, telnetclient_free);
 		return; /* client write failure */
 	}
 	TRACE("%s():len=%zu res=%zu\n", __func__, len, res);
@@ -2887,7 +2900,7 @@ EXPORT void client_write_event(struct socketio_handle *sh, SOCKET fd, void *p) {
 }
 
 /* for processing IAC SB */
-static void client_iac_process_sb(const char *iac, size_t len, struct client *cl) {
+static void telnetclient_iac_process_sb(const char *iac, size_t len, struct telnetclient *cl) {
 	assert(cl != NULL);
 	assert(iac[0] == IAC);
 	assert(iac[1] == SB);
@@ -2924,8 +2937,8 @@ static void client_iac_process_sb(const char *iac, size_t len, struct client *cl
 }
 
 /* return: 0 means "incomplete" data for this function */
-static size_t client_iac_process(const char *iac, size_t len, void *p) {
-	struct client *cl=p;
+static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
+	struct telnetclient *cl=p;
 	const char *endptr;
 
 	assert(iac != NULL);
@@ -2983,7 +2996,7 @@ static size_t client_iac_process(const char *iac, size_t len, void *p) {
 					endptr++;
 					// DEBUG("%s():IAC SB %hhu ... IAC SE\n", __func__, iac[2]);
 					HEXDUMP(iac, endptr-iac, "%s():IAC SB %hhu: ", __func__, iac[2]);
-					client_iac_process_sb(iac, (size_t)(endptr-iac), cl);
+					telnetclient_iac_process_sb(iac, (size_t)(endptr-iac), cl);
 					return endptr-iac;
 				} else if(endptr[0]==IAC) {
 					TRACE("Found IAC IAC in IAC SB block\n");
@@ -3004,20 +3017,17 @@ static size_t client_iac_process(const char *iac, size_t len, void *p) {
 
 }
 
-/* */
-EXPORT void client_read_event(struct socketio_handle *sh, SOCKET fd, void *extra) {
-	const char *line;
+static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl) {
 	char *data;
-	size_t len, consumed;
+	size_t len;
 	int res;
-	struct client *cl=extra;
 
 	data=buffer_load(&cl->input, &len);
 	if(len==0) {
 		fprintf(stderr, "WARNING:input buffer full, closing connection %s\n", sh->name);
 		goto failure;
 	}
-	res=socketio_recv(fd, data, len);
+	res=socketio_recv(sh->fd, data, len);
 	if(res<=0) {
 		/* close or error */
 		goto failure;
@@ -3025,39 +3035,102 @@ EXPORT void client_read_event(struct socketio_handle *sh, SOCKET fd, void *extra
 	DEBUG("%s():res=%u\n", __func__, res);
 	buffer_emit(&cl->input, (unsigned)res);
 
-	DEBUG("Client %d(%s):received %d bytes (used=%zu)\n", fd, sh->name, res, cl->input.used);
+	DEBUG("Client %d(%s):received %d bytes (used=%zu)\n", sh->fd, sh->name, res, cl->input.used);
+	return 1;
+failure:
+	/* close the socket and free the client */
+	REFCOUNT_PUT(sh, telnetclient_free);
+	return 0;
+}
 
-	/* TODO: getline should trigger a special IAC parser that stops at a line */
-	while((line=buffer_getline(&cl->input, &consumed, client_iac_process, cl))) {
-		DEBUG("client line: '%s'\n", line);
+/* enter the login menu state */
+static void telnetclient_start_gamemenu_login(struct telnetclient *cl) {
+	menu_show(cl, &gamemenu_login);
+	buffer_puts(&cl->output, "Selection: ");
+	socketio_writeready(cl->sh->fd);
+	cl->sh->read_event=telnetclient_read_event_gamemenu_login;
+}
+
+/* enter the login state */
+static void telnetclient_start_login(struct telnetclient *cl) {
+	buffer_puts(&cl->output, "Username: ");
+	socketio_writeready(cl->sh->fd);
+	cl->sh->read_event=telnetclient_read_event;
+}
+
+/* */
+EXPORT void telnetclient_read_event(struct socketio_handle *sh, SOCKET fd, void *extra) {
+	const char *line;
+	size_t consumed;
+	struct telnetclient *cl=extra;
+
+	if(!telnetclient_recv(sh, cl)) {
+		return; /* failure */
+	}
+
+	/* getline triggers a special IAC parser that stops at a line */
+	while((line=buffer_getline(&cl->input, &consumed, telnetclient_iac_process, cl))) {
+		DEBUG("client line:%s(): '%s'\n", __func__, line);
 		buffer_consume(&cl->input, consumed);
 	}
 	socketio_readready(fd); /* only call this if the client wasn't closed earlier */
 	return;
-failure:
-	/* close the socket and free the client */
-	REFCOUNT_PUT(sh, client_free);
-	return; /* client was (or will be) closed */
 }
 
-EXPORT void client_new_event(struct socketio_handle *sh) {
-	struct client *cl;
+/* */
+EXPORT void telnetclient_read_event_gamemenu_login(struct socketio_handle *sh, SOCKET fd, void *extra) {
+	const char *line;
+	size_t consumed;
+	struct telnetclient *cl=extra;
 
-	cl=client_newclient(sh);
+	if(!telnetclient_recv(sh, cl)) {
+		return; /* failure */
+	}
+
+	/* getline triggers a special IAC parser that stops at a line */
+	while((line=buffer_getline(&cl->input, &consumed, telnetclient_iac_process, cl))) {
+		DEBUG("client line:%s(): '%s'\n", __func__, line);
+		while(*line && isspace(*line)) line++;
+		switch(*line) {
+			case 'e': case 'E':
+				telnetclient_start_login(cl);
+				return; /* we cannot process further data in this state */
+			case 'c': case 'C':
+				buffer_puts(&cl->output, "Not supported\n");
+				socketio_writeready(fd);
+				break;
+			case 'q': case 'Q':
+				break;
+			default:
+				buffer_puts(&cl->output, "Invalid selection\n");
+				socketio_writeready(fd);
+				telnetclient_start_gamemenu_login(cl);
+				break;
+		}
+		buffer_consume(&cl->input, consumed);
+	}
+	socketio_readready(fd); /* only call this if the client wasn't closed earlier */
+	return;
+}
+
+EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
+	struct telnetclient *cl;
+
+	cl=telnetclient_newclient(sh);
 	if(!cl) {
 		return; /* failure */
 	}
 
-	sh->write_event=client_write_event;
-	sh->read_event=client_read_event;
+	sh->write_event=telnetclient_write_event;
+	sh->read_event=NULL;
 
-	if(!client_telnet_init(cl) || !client_linemode(cl, 1) || !client_echomode(cl, 1)) {
+	if(!telnetclient_telnet_init(cl) || !telnetclient_linemode(cl, 1) || !telnetclient_echomode(cl, 1)) {
 		return; /* failure, the client would have been deleted */
 	}
 
 	fprintf(stderr, "*** Connection %d: %s\n", sh->fd, sh->name);
 	buffer_printf(&cl->output, "Welcome %d %d %d\n", 1, 2, 3);
-	menu_show(cl, &gamemenu_login);
+	telnetclient_start_gamemenu_login(cl);
 
 	socketio_writeready(sh->fd);
 }
@@ -3110,7 +3183,7 @@ EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*f
 }
 
 /* draw a little box around the string */
-static void menu_titledraw(struct client *cl, const char *title, size_t len) {
+static void menu_titledraw(struct telnetclient *cl, const char *title, size_t len) {
 	char buf[len+2];
 	memset(buf, '=', len);
 	buf[len]='\n';
@@ -3126,7 +3199,7 @@ static void menu_titledraw(struct client *cl, const char *title, size_t len) {
 	DEBUG("%s", buf);
 }
 
-EXPORT void menu_show(struct client *cl, struct menuinfo *mi) {
+EXPORT void menu_show(struct telnetclient *cl, struct menuinfo *mi) {
 	struct menuitem *curr;
 
 	assert(mi != NULL);
@@ -3191,7 +3264,7 @@ static int process_flag(int ch, const char *next_arg) {
 			return 0;
 		case 'p':
 			need_parameter(ch, next_arg);
-			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, client_new_event)) {
+			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, telnetclient_new_event)) {
 				usage();
 			}
 			return 1; /* uses next arg */
