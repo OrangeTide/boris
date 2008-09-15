@@ -2162,10 +2162,11 @@ EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t
 #define SOCKETIO_FAILON(e, reason, fail_label) do { if(e) { fprintf(stderr, "ERROR:%s:%s\n", reason, socketio_strerror()); goto fail_label; } } while(0)
 
 struct socketio_handle {
+	unsigned type; /* 0 = server, 1 = telnetclient */
 	LIST_ENTRY(struct socketio_handle) list;
 	SOCKET fd;
 	char *name;
-	REFCOUNT_TYPE REFCOUNT_NAME;
+	unsigned delete_flag:1; /* if set, then this entry should be deleted */
 	void (*write_event)(struct socketio_handle *sh, SOCKET fd, void *p);
 	void (*read_event)(struct socketio_handle *sh, SOCKET fd, void *p);
 	void *extra;
@@ -2479,7 +2480,7 @@ static void socketio_fdset_copy(fd_set *dst, const fd_set *src) {
 
 }
 
-static struct socketio_handle *socketio_ll_newhandle(SOCKET fd, const char *name, void (*write_event)(struct socketio_handle *sh, SOCKET fd, void *p), void (*read_event)(struct socketio_handle *sh, SOCKET fd, void *p)) {
+static struct socketio_handle *socketio_ll_newhandle(SOCKET fd, const char *name, unsigned type, void (*write_event)(struct socketio_handle *sh, SOCKET fd, void *p), void (*read_event)(struct socketio_handle *sh, SOCKET fd, void *p)) {
 	struct socketio_handle *ret;
 
 	assert(fd != INVALID_SOCKET);
@@ -2492,10 +2493,10 @@ static struct socketio_handle *socketio_ll_newhandle(SOCKET fd, const char *name
 
 	ret=calloc(1, sizeof *ret);
 	FAILON(!ret, "malloc()", failure);
+	ret->type=type;
 	ret->name=strdup(name);
 	ret->fd=fd;
-	REFCOUNT_INIT(ret);
-	REFCOUNT_TAKE(ret);
+	ret->delete_flag=0;
 	ret->read_event=read_event;
 	ret->write_event=write_event;
 	LIST_INSERT_HEAD(&socketio_handle_list, ret, list);
@@ -2555,8 +2556,17 @@ EXPORT int socketio_dispatch(long msec) {
 		 * or possibly stop using the refcount code and just have a simple delete flag that
 		 * is checked in the loops, and possibly before select()
 		 */
-		TRACE("Checking client %s\n", curr->name);
-		REFCOUNT_TAKE(curr);
+		TRACE("Checking socket %s\n", curr->name);
+
+		if(curr->delete_flag) {
+			/* this entry must be deleted */
+			DEBUG("Deleting %s\n", curr->name);
+			socketio_close(&curr->fd);
+			next=LIST_NEXT(curr, list);
+			socketio_ll_handle_free(curr);
+			continue; /* try again at curr=next */
+		}
+
 		assert(fd!=INVALID_SOCKET); /* verify consistency of datastructure */
 
 		if(FD_ISSET(fd, &out_writefds)) {
@@ -2585,8 +2595,6 @@ EXPORT int socketio_dispatch(long msec) {
 			nr--;
 		}
 		next=LIST_NEXT(curr, list);
-		REFCOUNT_PUT(curr, telnetclient_free); /* this cannot allow any other clients to be removed, else next could point to nowwhere */
-
 	}
 	if(nr>0) {
 		fprintf(stderr, "ERROR:there were %d unhandled socket events\n", nr);
@@ -2626,7 +2634,7 @@ EXPORT void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p) {
 		strcpy(buf, "<UNKNOWN>");
 	}
 
-	newclient=socketio_ll_newhandle(fd, buf, NULL, NULL);
+	newclient=socketio_ll_newhandle(fd, buf, 1, NULL, NULL);
 	if(!newclient) {
 		fprintf(stderr, "ERROR:could not allocate client, closing connection '%s'\n", buf);
 		socketio_close(&fd);
@@ -2684,7 +2692,7 @@ static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct so
 	}
 
 	/* add server to a list */
-	newserv=socketio_ll_newhandle(fd, buf, NULL, server_read_event);
+	newserv=socketio_ll_newhandle(fd, buf, 0, NULL, server_read_event);
 	if(!newserv) {
 		fprintf(stderr, "ERROR:could not allocate server, closing socket '%s'\n", buf);
 		socketio_close(&fd);
@@ -2772,6 +2780,27 @@ struct telnetclient {
 EXPORT void telnetclient_read_event(struct socketio_handle *sh, SOCKET fd, void *extra);
 EXPORT void telnetclient_read_event_gamemenu_login(struct socketio_handle *sh, SOCKET fd, void *extra);
 
+EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str) {
+	int res;
+	assert(cl != NULL);
+	assert(cl->sh != NULL);
+	res=buffer_puts(&cl->output, str);
+	socketio_writeready(cl->sh->fd);
+	return res;
+}
+
+EXPORT int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...) {
+	va_list ap;
+	int res;
+	assert(cl != NULL);
+	assert(cl->sh != NULL);
+	va_start(ap, fmt);
+	res=buffer_vprintf(&cl->output, fmt, ap);
+	va_end(ap);
+	socketio_writeready(cl->sh->fd);
+	return res;
+}
+
 static void telnetclient_free(struct socketio_handle *sh) {
 	struct telnetclient *client=sh->extra;
 	assert(client!=NULL);
@@ -2820,8 +2849,8 @@ static int telnetclient_telnet_init(struct telnetclient *cl) {
 		IAC, SB, TELOPT_TTYPE, TELQUAL_SEND, IAC, SE, /* ask the terminal type */
 	};
 	if(buffer_write_noexpand(&cl->output, support, sizeof support)<0) {
-		DEBUG("%s():write failured\n", __func__);
-		REFCOUNT_PUT(cl->sh, telnetclient_free);
+		DEBUG("%s():write failure\n", __func__);
+		cl->sh->delete_flag=1;
 		return 0; /* failure */
 	}
 
@@ -2842,8 +2871,8 @@ static int telnetclient_echomode(struct telnetclient *cl, int mode) {
 	}
 
 	if(buffer_write_noexpand(&cl->output, s, len)<0) {
-		DEBUG("%s():write failured\n", __func__);
-		REFCOUNT_PUT(cl->sh, telnetclient_free);
+		DEBUG("%s():write failure\n", __func__);
+		cl->sh->delete_flag=1;
 		return 0; /* failure */
 	}
 	return 1; /* success */
@@ -2868,8 +2897,8 @@ static int telnetclient_linemode(struct telnetclient *cl, int mode) {
 	}
 
 	if(buffer_write_noexpand(&cl->output, s, len)<0) {
-		DEBUG("%s():write failured\n", __func__);
-		REFCOUNT_PUT(cl->sh, telnetclient_free);
+		DEBUG("%s():write failure\n", __func__);
+		cl->sh->delete_flag=1;
 		return 0; /* failure */
 	}
 	return 1; /* success */
@@ -2881,13 +2910,15 @@ EXPORT void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void
 	int res;
 	struct telnetclient *cl=p;
 
+	assert(cl->sh->delete_flag == 0); /* we should never be called if already deleted */
+
 	/* only call this if the client wasn't closed and we have data in our buffer */
 	assert(cl != NULL);
 
 	data=buffer_data(&cl->output, &len);
 	res=socketio_send(fd, data, len);
 	if(res<0) {
-		REFCOUNT_PUT(cl->sh, telnetclient_free);
+		cl->sh->delete_flag=1;
 		return; /* client write failure */
 	}
 	TRACE("%s():len=%zu res=%zu\n", __func__, len, res);
@@ -2916,8 +2947,7 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 				}
 				snprintf(cl->terminal.name, sizeof cl->terminal.name, "%.*s", (int)len-4-2, iac+4);
 				DEBUG("Client terminal type is now \"%s\"\n", cl->terminal.name);
-				buffer_printf(&cl->output, "Terminal type: %s\n", cl->terminal.name);
-				socketio_writeready(cl->sh->fd);
+				telnetclient_printf(cl, "Terminal type: %s\n", cl->terminal.name);
 			}
 			break;
 		case TELOPT_NAWS: {
@@ -2929,8 +2959,7 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 			cl->terminal.width=RD_BE16(iac, 3);
 			cl->terminal.height=RD_BE16(iac, 5);
 			DEBUG("Client display size is now %ux%u\n", cl->terminal.width, cl->terminal.height);
-			buffer_printf(&cl->output, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
-			socketio_writeready(cl->sh->fd);
+			telnetclient_printf(cl, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
 			break;
 		}
 	}
@@ -3039,7 +3068,7 @@ static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl
 	return 1;
 failure:
 	/* close the socket and free the client */
-	REFCOUNT_PUT(sh, telnetclient_free);
+	cl->sh->delete_flag=1;
 	return 0;
 }
 
@@ -3094,7 +3123,7 @@ EXPORT void telnetclient_read_event_gamemenu_login(struct socketio_handle *sh, S
 		switch(*line) {
 			case 'e': case 'E':
 				telnetclient_start_login(cl);
-				return; /* we cannot process further data in this state */
+				break;
 			case 'c': case 'C':
 				buffer_puts(&cl->output, "Not supported\n");
 				socketio_writeready(fd);
@@ -3129,10 +3158,8 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 	}
 
 	fprintf(stderr, "*** Connection %d: %s\n", sh->fd, sh->name);
-	buffer_printf(&cl->output, "Welcome %d %d %d\n", 1, 2, 3);
+	telnetclient_printf(cl, "Welcome %d %d %d\n", 1, 2, 3);
 	telnetclient_start_gamemenu_login(cl);
-
-	socketio_writeready(sh->fd);
 }
 
 /******************************************************************************
@@ -3192,7 +3219,7 @@ static void menu_titledraw(struct telnetclient *cl, const char *title, size_t le
 		buffer_puts(&cl->output, buf);
 	DEBUG("%s", buf);
 	if(cl)
-		buffer_printf(&cl->output, "%s\n", title);
+		telnetclient_printf(cl, "%s\n", title);
 	DEBUG("%s\n", title);
 	if(cl)
 		buffer_puts(&cl->output, buf);
@@ -3207,11 +3234,11 @@ EXPORT void menu_show(struct telnetclient *cl, struct menuinfo *mi) {
 	for(curr=LIST_TOP(mi->items);curr;curr=LIST_NEXT(curr, item)) {
 		if(curr->key) {
 			if(cl)
-				buffer_printf(&cl->output, "%c. %s\n", curr->key, curr->name);
+				telnetclient_printf(cl, "%c. %s\n", curr->key, curr->name);
 			DEBUG("%c. %s\n", curr->key, curr->name);
 		} else {
 			if(cl)
-				buffer_printf(&cl->output, "%s\n", curr->name);
+				telnetclient_printf(cl, "%s\n", curr->name);
 			DEBUG("%s\n", curr->name);
 		}
 	}
