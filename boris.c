@@ -2826,9 +2826,182 @@ int game_init(void) {
 }
 
 /******************************************************************************
+ * Config loader
+ ******************************************************************************/
+struct config;
+
+struct config_watcher {
+	LIST_ENTRY(struct config_watcher) list;
+	char *mask;
+	int (*func)(struct config *cfg, void *extra, const char *id, const char *value);
+	void *extra;
+};
+
+struct config {
+	LIST_HEAD(struct, struct config_watcher) watchers;
+};
+
+#define CONFIG_FNM_NOMATCH 1
+#define CONFIG_FNM_CASEFOLD 16	/* case insensitive matches */
+
+/* clone of the fnmatch() function */
+int config_fnmatch(const char *pattern, const char *string, int flags) {
+	char c;
+
+	while((c=*pattern++)) switch(c) {
+		/* TODO: support [] and \ */
+		case '?':
+			if(*string++==0) return CONFIG_FNM_NOMATCH;
+			break;
+		case '*':
+			if(!*pattern) return 0; /* success */
+			for(;*string;string++) { 
+				/* trace out any paths that match the first character */
+			if(((flags&CONFIG_FNM_CASEFOLD) ?  tolower(*string)==tolower(*pattern) : *string==*pattern) && config_fnmatch(pattern, string, flags)==0) {
+					return 0; /* recursive check matched */
+				}
+			}
+			return CONFIG_FNM_NOMATCH; /* none of the tested paths worked */
+			break;
+		default:
+			if((flags&CONFIG_FNM_CASEFOLD) ? tolower(*string++)!=tolower(c) : *string++!=c) return CONFIG_FNM_NOMATCH;
+	}
+	if(*string) return CONFIG_FNM_NOMATCH;
+	return 0; /* success */
+}
+
+void config_setup(struct config *cfg) {
+	LIST_INIT(&cfg->watchers);
+}
+
+void config_free(struct config *cfg) {
+	struct config_watcher *curr;
+	assert(cfg != NULL);
+	while((curr=LIST_TOP(cfg->watchers))) {
+		LIST_REMOVE(curr, list);
+		free(curr->mask);
+		free(curr);
+	}
+}
+
+void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value), void *extra) {
+	struct config_watcher *w;
+	assert(mask != NULL);
+	assert(cfg != NULL);
+	w=malloc(sizeof *w);
+	w->mask=strdup(mask);
+	w->func=func;
+	w->extra=extra;
+	LIST_INSERT_HEAD(&cfg->watchers, w, list);
+}
+
+int config_load(const char *filename, struct config *cfg) {
+	char buf[1024];
+	FILE *f;
+	char *e, *value;
+	unsigned line;
+	char quote;
+	struct config_watcher *curr;
+
+	f=fopen(filename, "r");
+	if(!f) {
+		perror(filename);
+		return 0;
+	}
+	line=0;
+	while(line++,fgets(buf, sizeof buf, f)) {
+		/* strip comments - honors '' and "" quoting */
+		for(e=buf,quote=0;*e;e++) {
+			if(!quote && *e=='"')
+				quote=*e;
+			else if(!quote && *e=='\'')
+				quote=*e;
+			else if(quote=='\'' && *e=='\'')
+				quote=0;
+			else if(quote=='"' && *e=='"')
+				quote=0;
+			else if(!quote && ( *e=='#' || (*e=='/' && e[1]=='/' ))) {
+				*e=0; /* found a comment */
+				break;
+			}
+		}
+
+		/* strip trailing white space */
+		e=buf+strlen(buf);
+		while(e>buf && isspace(*--e)) {
+			*e=0;
+		}
+
+		/* ignore blank lines */
+		if(*buf==0) {
+			TRACE("%s:%d:ignoring blank line\n", filename, line);
+			continue;
+		}
+
+		e=strchr(buf, '=');
+		if(!e) {
+			/* invalid directive */
+			fprintf(stderr, "%s:%d:invalid directive\n", filename, line);
+			goto failure;
+		}
+
+		/* move through the leading space of the value part */
+		value=e+1;
+		while(isspace(*value)) value++;
+
+		/* strip trailing white space from id part */
+		*e=0; /* null terminate the id part */
+		while(e>buf && isspace(*--e)) {
+			*e=0;
+		}
+
+		/* TODO: dequote the value part */
+
+		/* printf("id='%s' value='%s'\n", buf, value); */
+
+		/* check the masks */
+		for(curr=LIST_TOP(cfg->watchers);curr;curr=LIST_NEXT(curr, list)) {
+			if(!config_fnmatch(curr->mask, buf, CONFIG_FNM_CASEFOLD) && curr->func) {
+				if(!curr->func(cfg, curr->extra, buf, value)) {
+					break; /* return 0 from the callback will terminate the list */
+				}
+			}
+		}
+	}
+	fclose(f);
+	return 1; /* success */
+failure:
+	fclose(f);
+	return 0; /* failure */
+}
+
+#ifndef NDEBUG
+static int show(struct config *cfg, void *extra, const char *id, const char *value) {
+	printf("SHOW: %s=%s\n", id, value);
+	return 1;
+}
+
+void config_test(void) {
+	struct config cfg;
+	config_setup(&cfg);
+	config_watch(&cfg, "s*er.*", show, 0);
+	config_load("test.cfg", &cfg);
+	config_free(&cfg);
+}
+#endif
+
+/******************************************************************************
  * Main - Option parsing and initialization
  ******************************************************************************/
 static int fl_default_family=0;
+
+/* handles the 'server.port' property */
+static int do_config_port(struct config *cfg, void *extra, const char *id, const char *value) {
+	if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
+		fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
+	}
+	return 1;
+}
 
 static void usage(void) {
 	fprintf(stderr,
@@ -2891,8 +3064,10 @@ static void process_args(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+	struct config cfg;
 #ifndef NDEBUG
 	/*
+	config_test();
 	bitmap_test();
 	freelist_test();
 	heapqueue_test();
@@ -2905,6 +3080,14 @@ int main(int argc, char **argv) {
 	atexit(socketio_shutdown);
 
 	process_args(argc, argv);
+
+	config_setup(&cfg);
+	config_watch(&cfg, "server.port", do_config_port, 0);
+#ifndef NDEBUG
+	config_watch(&cfg, "*", show, 0);
+#endif
+	config_load("boris.cfg", &cfg);
+	config_free(&cfg);
 
 	if(!game_init()) {
 		fprintf(stderr, "ERROR: could not start game\n");
