@@ -5,7 +5,6 @@
  * Design Documentation
  *
  * components:
- * 	bidb - low level file access fuctions. manages blocks for recordcache
  * 	bitfield - manages small staticly sized bitmaps
  * 	bitmap - manages large bitmaps
  *  buffer - manages an i/o buffer
@@ -26,7 +25,6 @@
  *
  * dependency:
  *  recordcache - uses bitfield to track dirty blocks
- *  bidb - uses freelist to track free blocks
  *  records - uses freelist to track record numbers (reserve first 100 records)
  *  socketio_handles - uses ref counts to determine when to free linked lists items
  *
@@ -77,13 +75,6 @@
 #define SOCKETIO_LISTEN_QUEUE 10
 #define TELNETCLIENT_OUTPUT_BUFFER_SZ 4096
 #define TELNETCLIENT_INPUT_BUFFER_SZ 256
-
-/* database file */
-#define BIDB_FILE "boris.bidb"
-
-#define BIDB_DEFAULT_MAX_RECORDS 131072
-#define BIDB_MAX_BLOCKS 4194304
-#define BIDB_GROW_BLOCKS 256 /* number of blocks to grow by */
 
 /******************************************************************************
  * Headers
@@ -262,16 +253,11 @@
 /******************************************************************************
  * Types and data structures
  ******************************************************************************/
-typedef long bidb_blockofs_t;
 
 struct lru_entry {
 	void (*free)(void *p);	/* function to free the item */
 	void *data;
 	LIST_ENTRY(struct lru_entry) queue;
-};
-
-struct bidb_extent {
-	unsigned length, offset; /* both are in block-sized units */
 };
 
 /******************************************************************************
@@ -653,10 +639,14 @@ EXPORT void heapqueue_test(void) {
 /* bucket number to use for overflows */
 #define FREELIST_OVERFLOW_BUCKET(flp) (NR((flp)->buckets)-1)
 
+struct freelist_extent {
+	unsigned length, offset; /* both are in block-sized units */
+};
+
 struct freelist_entry {
 	LIST_ENTRY(struct freelist_entry) global; /* global list */
 	LIST_ENTRY(struct freelist_entry) bucket; /* bucket list */
-	struct bidb_extent extent;
+	struct freelist_extent extent;
 };
 
 LIST_HEAD(struct freelist_listhead, struct freelist_entry);
@@ -725,7 +715,7 @@ static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsi
 }
 
 /* returns true if a bridge is detected */
-static int freelist_ll_isbridge(struct bidb_extent *prev_ext, unsigned ofs, unsigned count, struct bidb_extent *next_ext) {
+static int freelist_ll_isbridge(struct freelist_extent *prev_ext, unsigned ofs, unsigned count, struct freelist_extent *next_ext) {
 	/*
 	DEBUG("testing for bridge:\n"
 			"  last:%6d+%d curr:%6d+%d ofs:%6d+%d\n",
@@ -1318,429 +1308,6 @@ EXPORT int recordcache_init(unsigned max_entries) {
 	recordcache_table_mask=recordcache_table_nr-1;
 	DEBUG("hash table size is %zu\n", recordcache_table_nr);
 	return 1;
-}
-
-/******************************************************************************
- * Binary Database
- ******************************************************************************/
-
-/*
- * Binary database
- * ===============
- * block size=1024. everything is in multiples of a block
- *
- * extents are 32-bits values. 22-bit offset, 10-bit length
- *
- * extent length is 1 to 1024. (0 is not a valid encoding)
- *
- * [ON-DISK]
- *
- * superblock
- * 	magic
- * 	record table extents [16]
- *
- * record table
- * 	record extent [n]
- *
- * [IN-MEMORY]
- *
- * max records
- * record table extents
- * hash table for id to extent
- * freelist
- * block bitmap
- *
- * [TYPES OF RECORDS]
- *
- * object_base/object_mob/object_item/object_room
- * sparse integer to record number table
- * string to record number table
- * sparse record number to string table
- *
- */
-
-#define BIDB_BLOCK_SZ 1024
-#define BIDB_SUPERBLOCK_SZ	1 /* size in blocks */
-
-/* macros for manipulating extent descriptors */
-#define BIDB_EXTENT_LENGTH_BITS 10U
-#define BIDB_EXTENT_OFFSET_BITS (32U-BIDB_EXTENT_LENGTH_BITS)
-#define BIDB_EXTENT(o,l) (((o)<<BIDB_EXTENT_LENGTH_BITS)|((l)-1))
-#define BIDB_EXTENT_NONE 0U		/* this value means at block 0 you must be at least 2 blocks long */
-#define BIDB_EXTENT_LENGTH(e)	(((e)&((1<<BIDB_EXTENT_LENGTH_BITS)-1))+1)
-#define BIDB_EXTENT_OFFSET(e)	((uint_least32_t)(e)>>BIDB_EXTENT_LENGTH_BITS)
-/* an extent is a 32 bit value */
-#define BIDB_EXTENTPTR_SZ (32/CHAR_BIT)
-/* size of a record pointer (1 extent) */
-#define BIDB_RECPTR_SZ BIDB_EXTENTPTR_SZ
-#define BIDB_RECORDS_PER_BLOCK (BIDB_BLOCK_SZ/BIDB_RECPTR_SZ)
-#define BIDB_RECORDS_PER_EXTENT (BIDB_RECORDS_PER_BLOCK<<BIDB_EXTENT_LENGTH_BITS)
-
-static struct {
-	struct bidb_extent record_extents[16];
-	unsigned record_dirty_blocks[BITFIELD(16<<BIDB_EXTENT_LENGTH_BITS,unsigned)]; /* one bit per block - 2Kbyte of bits total */
-	unsigned record_max, block_max;
-	struct bidb_stats {
-		unsigned records_used;
-	} stats;
-	struct freelist freelist;
-	FILE *file;
-	char *filename;
-} bidb_superblock;
-
-EXPORT void bidb_close(void) {
-#ifndef NDEBUG
-	freelist_dump(&bidb_superblock.freelist);
-#endif
-	freelist_free(&bidb_superblock.freelist);
-	if(bidb_superblock.file) {
-		fclose(bidb_superblock.file);
-		bidb_superblock.file=0;
-	}
-	free(bidb_superblock.filename);
-	bidb_superblock.filename=0;
-}
-
-/* block_offset starts AFTER superblock */
-static int bidb_read_blocks(unsigned char *data, bidb_blockofs_t block_offset, unsigned block_count) {
-	size_t res;
-	if(fseek(bidb_superblock.file, (block_offset+BIDB_SUPERBLOCK_SZ)*BIDB_BLOCK_SZ, SEEK_SET)) {
-		perror(bidb_superblock.filename);
-		return 0; /* failure */
-	}
-	res=fread(data, BIDB_BLOCK_SZ, block_count, bidb_superblock.file);
-	if(res!=block_count) {
-		if(ferror(bidb_superblock.file)) {
-			perror(bidb_superblock.filename);
-		}
-		return 0; /* failure */
-	}
-	return 1; /* success */
-}
-
-/* block_offset starts AFTER superblock */
-static int bidb_write_blocks(const unsigned char *data, bidb_blockofs_t block_offset, unsigned block_count) {
-	size_t res;
-
-	if(fseek(bidb_superblock.file, (block_offset+BIDB_SUPERBLOCK_SZ)*BIDB_BLOCK_SZ, SEEK_SET)) {
-		perror(bidb_superblock.filename);
-		return 0; /* failure */
-	}
-	res=fwrite(data, BIDB_BLOCK_SZ, block_count, bidb_superblock.file);
-	if(res!=block_count) {
-		if(ferror(bidb_superblock.file)) {
-			perror(bidb_superblock.filename);
-		}
-		return 0; /* failure */
-	}
-	return 1; /* success */
-}
-
-static struct bidb_extent bidb_allocblocks(unsigned nr_blocks) {
-	struct bidb_extent ret;
-	long ofs;
-	unsigned newlen;
-
-	assert(nr_blocks>0);
-	ofs=freelist_alloc(&bidb_superblock.freelist, nr_blocks);
-	if(ofs==-1) {
-		/* grow */
-		if(BIDB_GROW_BLOCKS<nr_blocks) {
-			newlen=bidb_superblock.block_max+nr_blocks+BIDB_GROW_BLOCKS;
-		} else {
-			newlen=bidb_superblock.block_max+BIDB_GROW_BLOCKS;
-		}
-		fprintf(stderr, "%s:growing file to %u blocks from %u blocks maximum.\n", bidb_superblock.filename, newlen, bidb_superblock.block_max);
-		freelist_pool(&bidb_superblock.freelist, bidb_superblock.block_max, newlen-bidb_superblock.block_max);
-		bidb_superblock.block_max=newlen;
-		ofs=freelist_alloc(&bidb_superblock.freelist, nr_blocks);
-		assert(ofs!=-1);
-	}
-	ret.offset=ofs;
-	ret.length=nr_blocks;
-	return ret;
-}
-
-/* check extent to see if it is in range of nr_blocks */
-static int bidb_check_extent(struct bidb_extent *e, unsigned nr_blocks) {
-	unsigned end;
-	assert(e!=NULL);
-	if(!e)
-		return 1; /* ignore */
-	if(e->length==0) {
-		return 1; /* zero length extents don't exist */
-	}
-	end=(e->length+e->offset); /* end is last+1 */
-	DEBUG("end:%u blocks:%u\n", end, nr_blocks);
-	return (end<=nr_blocks);
-}
-
-static int bidb_load_superblock(void) {
-	unsigned char data[BIDB_BLOCK_SZ*BIDB_SUPERBLOCK_SZ];
-	uint_least32_t tmp;
-	unsigned i, total_record_length;
-	long filesize;
-	int empty_fl;
-
-	/* get the file size and check it */
-	fseek(bidb_superblock.file, 0, SEEK_END);
-	filesize=ftell(bidb_superblock.file);
-	if((filesize%BIDB_BLOCK_SZ)!=0) {
-		fprintf(stderr, "%s:database file is not a multiple of %u bytes\n", bidb_superblock.filename, BIDB_BLOCK_SZ);
-		return 0;
-	}
-	bidb_superblock.block_max=filesize/BIDB_BLOCK_SZ;
-	if(bidb_superblock.block_max>0) {
-		bidb_superblock.block_max--; /* do not count the superblock */
-	}
-
-	if(bidb_read_blocks(data, -BIDB_SUPERBLOCK_SZ, BIDB_SUPERBLOCK_SZ)) {
-		if(memcmp("BiDB", data, 4)) {
-			fprintf(stderr, "%s:not a data file\n", bidb_superblock.filename);
-			return 0; /* failure : invalid magic */
-		}
-		bidb_superblock.stats.records_used=0;
-
-		memset(&bidb_superblock.record_dirty_blocks, 0, sizeof bidb_superblock.record_dirty_blocks);
-
-		for(i=0,total_record_length=0;i<NR(bidb_superblock.record_extents);i++) {
-			tmp=RD_BE32(data, 4+4*i);
-
-			if(tmp==BIDB_EXTENT_NONE) { /* empty extent */
-				bidb_superblock.record_extents[i].offset=0;
-				bidb_superblock.record_extents[i].length=0;
-			} else {
-				bidb_superblock.record_extents[i].offset=BIDB_EXTENT_OFFSET(tmp);
-				bidb_superblock.record_extents[i].length=BIDB_EXTENT_LENGTH(tmp);
-			}
-			total_record_length+=bidb_superblock.record_extents[i].length;
-		}
-		bidb_superblock.record_max=BIDB_BLOCK_SZ/BIDB_RECPTR_SZ*total_record_length;
-
-		/** sanity checks **/
-
-		for(i=0, empty_fl=0;i<NR(bidb_superblock.record_extents);i++) {
-			if(bidb_superblock.record_extents[i].length==0) { /* empty extent */
-				empty_fl=1;
-			} else if(empty_fl) {
-				fprintf(stderr, "%s:record table extent list has holes in it\n", bidb_superblock.filename);
-				return 0;
-			}
-		}
-
-		for(i=0;i<NR(bidb_superblock.record_extents);i++) {
-			if(!bidb_check_extent(&bidb_superblock.record_extents[i], filesize/(unsigned)BIDB_BLOCK_SZ-BIDB_SUPERBLOCK_SZ)) {
-				fprintf(stderr, "%s:record table %u extent exceeds file size\n", bidb_superblock.filename, i);
-				return 0;
-			}
-		}
-
-		return 1; /* success */
-	}
-	fprintf(stderr, "%s:could not load superblock\n", bidb_superblock.filename);
-	return 0; /* failure : could not read superblock */
-}
-
-static int bidb_save_superblock(void) {
-	unsigned char data[BIDB_BLOCK_SZ];
-	uint_least32_t tmp;
-	unsigned i;
-
-	fprintf(stderr, "%s:saving superblock\n", bidb_superblock.filename);
-
-	memset(data, 0, sizeof data);
-	memcpy(data, "BiDB", 4);
-
-	for(i=0;i<NR(bidb_superblock.record_extents);i++) {
-		if(bidb_superblock.record_extents[i].length==0) { /* empty extent */
-			tmp=BIDB_EXTENT_NONE;
-		} else {
-			tmp=BIDB_EXTENT(bidb_superblock.record_extents[i].offset, bidb_superblock.record_extents[i].length);
-		}
-		WR_BE32(data, 4+4*i, tmp);
-	}
-
-	if(!bidb_write_blocks(data, -BIDB_SUPERBLOCK_SZ, 1)) {
-		fprintf(stderr, "%s:could not write superblock\n", bidb_superblock.filename);
-		return 0; /* failure */
-	}
-	return 1; /* success */
-}
-
-static int bidb_save_record_table(void) {
-	unsigned char data[BIDB_BLOCK_SZ];
-	unsigned i, j, ofs;
-	fprintf(stderr, "Saving record table\n");
-	/* uses bitarray to save only blocks with dirty entries */
-	for(i=0,ofs=0;i<NR(bidb_superblock.record_extents);i++) {
-		for(j=0;j<bidb_superblock.record_extents[i].length;j++,ofs++) {
-			if(BITTEST(bidb_superblock.record_dirty_blocks, ofs)) {
-				/*
-				DEBUG("%s:writing record block %d\n", bidb_superblock.filename, ofs);
-				*/
-				BITCLR(bidb_superblock.record_dirty_blocks, ofs);
-				memset(data, 0, sizeof data); /* TODO: fill with record data */
-				if(!bidb_write_blocks(data, (signed)(bidb_superblock.record_extents[i].offset+j), 1)) {
-					DEBUG("%s:could not write record table\n", bidb_superblock.filename);
-					return 0; /* failure */
-				}
-			}
-		}
-	}
-	return 1;
-}
-
-static int bidb_create_record_table(void) {
-	unsigned i, total, extentblks;
-	assert(bidb_superblock.record_extents[0].offset==0); /* only safe to call if we have no table */
-
-	/* create the record table on disk */
-	fprintf(stderr, "Creating new record table\n");
-
-	bidb_superblock.record_max=BIDB_DEFAULT_MAX_RECORDS;
-
-	/* create all the extents necessary */
-	for(i=0,total=0;i<NR(bidb_superblock.record_extents) && total<bidb_superblock.record_max;i++, total++) {
-		extentblks=ROUNDUP((bidb_superblock.record_max-total)*BIDB_RECPTR_SZ, BIDB_BLOCK_SZ)/BIDB_BLOCK_SZ;
-		if(extentblks>1U<<(BIDB_EXTENT_LENGTH_BITS)) {
-			extentblks=1<<BIDB_EXTENT_LENGTH_BITS;
-		}
-
-		bidb_superblock.record_extents[i]=bidb_allocblocks(extentblks);
-
-		DEBUG("%s:Record table allocating extent #%u @ %u+%u\n", bidb_superblock.filename, i, bidb_superblock.record_extents[i].offset, bidb_superblock.record_extents[i].length);
-
-		total+=extentblks*BIDB_RECORDS_PER_BLOCK;
-	}
-
-	/* mark all the blocks for these new extents as dirty */
-	for(i=0;i<bidb_superblock.record_max/BIDB_RECORDS_PER_BLOCK;i++) {
-		BITSET(bidb_superblock.record_dirty_blocks, i);
-	}
-
-	bidb_save_record_table();
-
-	/* updated the superblock with the record table */
-	if(!bidb_save_superblock()) {
-		bidb_close();
-		return 0; /* failure */
-	}
-
-	return 1; /* success */
-}
-
-/* load a record table form disk */
-static int bidb_load_record_table(void) {
-	if(!recordcache_init(bidb_superblock.record_max)) {
-		fprintf(stderr, "%s:could not initialize record table\n", bidb_superblock.filename);
-		return 0;
-	}
-	if(bidb_superblock.record_extents[0].length==0) { /* no record table found .. create it */
-		if(!bidb_create_record_table()) {
-			return 0;
-		}
-	} else {
-		/* TODO: read in record table entries */
-		/* TODO: reserve entries */
-	}
-	return 1; /* */
-}
-
-/* mark a record as dirty due to modification */
-EXPORT void bidb_record_dirty(unsigned record_number) {
-	unsigned blknum;
-
-	blknum=record_number/BIDB_RECORDS_PER_BLOCK;
-
-	if(!BITRANGE(bidb_superblock.record_dirty_blocks, blknum)) {
-		fprintf(stderr, "%s:Dirty block %u not in range!\n", bidb_superblock.filename, blknum);
-		return;
-	}
-
-	DEBUG("%s:Dirty block %u\n", bidb_superblock.filename, blknum);
-	BITSET(bidb_superblock.record_dirty_blocks, blknum);
-}
-
-/* create_fl will create if the superblock does not exist */
-EXPORT int bidb_open(const char *filename) {
-	int create_fl=0;
-	if(bidb_superblock.file)
-		bidb_close();
-	bidb_superblock.file=fopen(filename, "r+b");
-	if(!bidb_superblock.file) {
-		fprintf(stderr, "%s:creating a new file\n", filename);
-		bidb_superblock.file=fopen(filename, "w+b");
-		if(!bidb_superblock.file) {
-			perror(filename);
-			return 0; /* failure */
-		}
-		create_fl=1;
-	}
-	bidb_superblock.filename=strdup(filename);
-
-	if(create_fl) {
-		fprintf(stderr, "%s:creating new superblock\n", bidb_superblock.filename);
-		bidb_superblock.stats.records_used=0;
-		bidb_superblock.record_max=0;
-		bidb_superblock.block_max=0;
-		if(!bidb_save_superblock()) {
-			bidb_close();
-			return 0; /* failure */
-		}
-	}
-
-	if(!bidb_load_superblock()) {
-		bidb_close();
-		return 0; /* failure */
-	}
-
-	freelist_init(&bidb_superblock.freelist, 1<<BIDB_EXTENT_LENGTH_BITS);
-	if(bidb_superblock.block_max>0) {
-		freelist_pool(&bidb_superblock.freelist, 0, bidb_superblock.block_max);
-	}
-
-	if(!bidb_load_record_table()) {
-		fprintf(stderr, "%s:could not load record table\n", bidb_superblock.filename);
-		bidb_close();
-		return 0; /* failure */
-	}
-	return 1; /* success */
-}
-
-EXPORT void bidb_show_info(void) {
-#define BIDB_HIGHEST_RECORD
-#define BIDB_HIGHEST_BLOCK
-	const uint_least32_t
-		max_extent_size=(BIDB_BLOCK_SZ<<BIDB_EXTENT_LENGTH_BITS)-1U,
-		records_per_block=BIDB_BLOCK_SZ/BIDB_RECPTR_SZ,
-		records_per_extent=records_per_block<<BIDB_EXTENT_LENGTH_BITS,
-		max_records=NR(bidb_superblock.record_extents)*records_per_extent;
-
-	printf(
-		"BiDB configuration info:\n"
-		"  block size: %u bytes\n"
-		"  max extent size: %u blocks (%" PRIu32 " bytes)\n"
-		"  records per block: %" PRIu32 " records\n"
-		"  records per extent: %" PRIu32 " records\n"
-		"  number of record extents: %zu extents\n"
-		"  max number of record: %" PRIu32 " records\n"
-		"  max total size for all records: %" PRIu64 " bytes\n"
-		"  max blocks: %lu blocks (%" PRIu64 " bytes)\n",
-		BIDB_BLOCK_SZ,
-		1<<BIDB_EXTENT_LENGTH_BITS,
-		max_extent_size,
-		records_per_block,
-		records_per_extent,
-		NR(bidb_superblock.record_extents),
-		max_records,
-		(uint_least64_t)max_records<<BIDB_EXTENT_LENGTH_BITS,
-		1L<<BIDB_EXTENT_OFFSET_BITS,
-		(uint_least64_t)BIDB_BLOCK_SZ<<BIDB_EXTENT_OFFSET_BITS
-	);
-	printf(
-		"  memory bytes for dirty records bitmap: %zu\n",
-		sizeof bidb_superblock.record_dirty_blocks
-	);
 }
 
 /******************************************************************************
@@ -3328,7 +2895,6 @@ int main(int argc, char **argv) {
 	/*
 	bitmap_test();
 	freelist_test();
-	bidb_show_info();
 	heapqueue_test();
 	*/
 #endif
@@ -3339,12 +2905,6 @@ int main(int argc, char **argv) {
 	atexit(socketio_shutdown);
 
 	process_args(argc, argv);
-
-	if(!bidb_open(BIDB_FILE)) {
-		printf("Failed\n");
-		return EXIT_FAILURE;
-	}
-	atexit(bidb_close);
 
 	if(!game_init()) {
 		fprintf(stderr, "ERROR: could not start game\n");
