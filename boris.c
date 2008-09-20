@@ -250,6 +250,17 @@
 	} while(0)
 /******* TODO TODO TODO : write unit test for LIST_xxx macros *******/
 
+/*=* Compiler macros *=*/
+#ifdef __GNUC__
+/* using GCC, enable special GCC options */
+#define GCC_ONLY(x) x
+#else
+/* not using GCC */
+#define GCC_ONLY(x)
+#endif
+
+#define UNUSED GCC_ONLY(__attribute__((unused)))
+
 /******************************************************************************
  * Types and data structures
  ******************************************************************************/
@@ -273,7 +284,8 @@ struct socketio_handle;
 struct menuinfo;
 
 static void telnetclient_free(struct socketio_handle *sh);
-EXPORT void menu_show(struct telnetclient *cl, struct menuinfo *mi);
+EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
+EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 
 /******************************************************************************
  * Debug routines
@@ -2342,10 +2354,10 @@ struct telnetclient {
 		int width, height;
 		char name[32];
 	} terminal;
+	const char *prompt_string;
+	const struct menuinfo *menu; /* current menu */
+	void (*line_input)(struct telnetclient *cl, const char *line);
 };
-
-EXPORT void telnetclient_read_event(struct socketio_handle *sh, SOCKET fd, void *extra);
-EXPORT void telnetclient_read_event_gamemenu_login(struct socketio_handle *sh, SOCKET fd, void *extra);
 
 EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str) {
 	int res;
@@ -2481,11 +2493,12 @@ EXPORT void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void
 
 	/* only call this if the client wasn't closed and we have data in our buffer */
 	assert(cl != NULL);
+	assert(sh == cl->sh);
 
 	data=buffer_data(&cl->output, &len);
 	res=socketio_send(fd, data, len);
 	if(res<0) {
-		cl->sh->delete_flag=1;
+		sh->delete_flag=1;
 		return; /* client write failure */
 	}
 	TRACE("%s():len=%zu res=%zu\n", __func__, len, res);
@@ -2613,6 +2626,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 
 }
 
+/* pull data from socket into buffer */
 static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl) {
 	char *data;
 	size_t len;
@@ -2639,27 +2653,14 @@ failure:
 	return 0;
 }
 
-/* enter the login menu state */
-static void telnetclient_start_gamemenu_login(struct telnetclient *cl) {
-	menu_show(cl, &gamemenu_login);
-	buffer_puts(&cl->output, "Selection: ");
-	socketio_writeready(cl->sh->fd);
-	cl->sh->read_event=telnetclient_read_event_gamemenu_login;
-}
-
-/* enter the login state */
-static void telnetclient_start_login(struct telnetclient *cl) {
-	buffer_puts(&cl->output, "Username: ");
-	socketio_writeready(cl->sh->fd);
-	cl->sh->read_event=telnetclient_read_event;
-}
-
 /* */
-EXPORT void telnetclient_read_event(struct socketio_handle *sh, SOCKET fd, void *extra) {
+EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, void *extra) {
 	const char *line;
 	size_t consumed;
 	struct telnetclient *cl=extra;
+	void (*line_input)(struct telnetclient *cl, const char *line);
 
+	/* pull data from socket into buffer */
 	if(!telnetclient_recv(sh, cl)) {
 		return; /* failure */
 	}
@@ -2667,46 +2668,46 @@ EXPORT void telnetclient_read_event(struct socketio_handle *sh, SOCKET fd, void 
 	/* getline triggers a special IAC parser that stops at a line */
 	while((line=buffer_getline(&cl->input, &consumed, telnetclient_iac_process, cl))) {
 		DEBUG("client line:%s(): '%s'\n", __func__, line);
-		buffer_consume(&cl->input, consumed);
-	}
-	socketio_readready(fd); /* only call this if the client wasn't closed earlier */
-	return;
-}
+		line_input=cl->line_input;
 
-/* */
-EXPORT void telnetclient_read_event_gamemenu_login(struct socketio_handle *sh, SOCKET fd, void *extra) {
-	const char *line;
-	size_t consumed;
-	struct telnetclient *cl=extra;
-
-	if(!telnetclient_recv(sh, cl)) {
-		return; /* failure */
-	}
-
-	/* getline triggers a special IAC parser that stops at a line */
-	while((line=buffer_getline(&cl->input, &consumed, telnetclient_iac_process, cl))) {
-		DEBUG("client line:%s(): '%s'\n", __func__, line);
-		while(*line && isspace(*line)) line++;
-		switch(*line) {
-			case 'e': case 'E':
-				telnetclient_start_login(cl);
-				break;
-			case 'c': case 'C':
-				buffer_puts(&cl->output, "Not supported\n");
-				socketio_writeready(fd);
-				break;
-			case 'q': case 'Q':
-				break;
-			default:
-				buffer_puts(&cl->output, "Invalid selection\n");
-				socketio_writeready(fd);
-				telnetclient_start_gamemenu_login(cl);
-				break;
+		if(line_input) {
+			line_input(cl, line);
 		}
+
 		buffer_consume(&cl->input, consumed);
+
+		if(sh->read_event!=telnetclient_rdev_lineinput) break;
+
+		if(line_input==cl->line_input) {
+			/* send the prompt, but only if the handler hasn't changed
+			 * the starting routines send the prompt out before read events, so this
+			 * puts is not necessary in those cases */
+			buffer_puts(&cl->output, cl->prompt_string);
+		}
+
+		socketio_writeready(cl->sh->fd);
 	}
 	socketio_readready(fd); /* only call this if the client wasn't closed earlier */
 	return;
+}
+
+static void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt) {
+	assert(cl != NULL);
+	cl->prompt_string=prompt?prompt:"? ";
+	buffer_puts(&cl->output, cl->prompt_string);
+	socketio_writeready(cl->sh->fd);
+	cl->line_input=line_input;
+	cl->sh->read_event=telnetclient_rdev_lineinput;
+}
+
+static void menu_lineinput(struct telnetclient *cl, const char *line) {
+	menu_input(cl, cl->menu, line);
+}
+
+static void telnetclient_start_menuinput(struct telnetclient *cl, struct menuinfo *menu) {
+	cl->menu=menu;
+	menu_show(cl, cl->menu);
+	telnetclient_start_lineinput(cl, menu_lineinput, "Selection: ");
 }
 
 EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
@@ -2726,7 +2727,7 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 
 	fprintf(stderr, "*** Connection %d: %s\n", sh->fd, sh->name);
 	telnetclient_printf(cl, "Welcome %d %d %d\n", 1, 2, 3);
-	telnetclient_start_gamemenu_login(cl);
+	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
 /******************************************************************************
@@ -2736,9 +2737,9 @@ struct menuitem {
 	LIST_ENTRY(struct menuitem) item;
 	char *name;
 	char key;
-	void (*action_func)(void *extra1, long extra2, void *object);
-	void *extra1;
+	void (*action_func)(void *p, long extra2, void *extra3);
 	long extra2;
+	void *extra3;
 };
 
 struct menuinfo {
@@ -2760,14 +2761,14 @@ failed:
 	return;
 }
 
-EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*,long,void*), void *extra1, long extra2) {
+EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*, long, void*), long extra2, void *extra3) {
 	struct menuitem *newitem;
 	newitem=malloc(sizeof *newitem);
 	newitem->name=strdup(name);
 	newitem->key=ch; /* TODO: check for duplicate keys */
 	newitem->action_func=func;
-	newitem->extra1=extra1;
 	newitem->extra2=extra2;
+	newitem->extra3=extra3;
 	if(mi->tail) {
 		LIST_INSERT_AFTER(mi->tail, newitem, item);
 	} else {
@@ -2784,17 +2785,17 @@ static void menu_titledraw(struct telnetclient *cl, const char *title, size_t le
 	buf[len+1]=0;
 	if(cl)
 		buffer_puts(&cl->output, buf);
-	DEBUG("%s", buf);
+	DEBUG("%s>>%s", cl?cl->sh->name:"", buf);
 	if(cl)
 		telnetclient_printf(cl, "%s\n", title);
-	DEBUG("%s\n", title);
+	DEBUG("%s>>%s\n", cl?cl->sh->name:"", title);
 	if(cl)
 		buffer_puts(&cl->output, buf);
-	DEBUG("%s", buf);
+	DEBUG("%s>>%s", cl?cl->sh->name:"", buf);
 }
 
-EXPORT void menu_show(struct telnetclient *cl, struct menuinfo *mi) {
-	struct menuitem *curr;
+EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi) {
+	const struct menuitem *curr;
 
 	assert(mi != NULL);
 	menu_titledraw(cl, mi->title, mi->title_width);
@@ -2802,13 +2803,87 @@ EXPORT void menu_show(struct telnetclient *cl, struct menuinfo *mi) {
 		if(curr->key) {
 			if(cl)
 				telnetclient_printf(cl, "%c. %s\n", curr->key, curr->name);
-			DEBUG("%c. %s\n", curr->key, curr->name);
+			DEBUG("%s>>%c. %s\n", cl?cl->sh->name:"", curr->key, curr->name);
 		} else {
 			if(cl)
 				telnetclient_printf(cl, "%s\n", curr->name);
-			DEBUG("%s\n", curr->name);
+			DEBUG("%s>>%s\n", cl?cl->sh->name:"", curr->name);
 		}
 	}
+}
+
+EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line) {
+	const struct menuitem *curr;
+	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+	for(curr=LIST_TOP(mi->items);curr;curr=LIST_NEXT(curr, item)) {
+		if(tolower(*line)==tolower(curr->key)) {
+			if(curr->action_func) {
+				curr->action_func(cl, curr->extra2, curr->extra3);
+			} else {
+				buffer_puts(&cl->output, "\nNot supported!\n");
+				menu_show(cl, mi);
+				socketio_writeready(cl->sh->fd);
+			}
+			return;
+		}
+	}
+	buffer_puts(&cl->output, "\nInvalid selection!\n");
+	menu_show(cl, mi);
+	socketio_writeready(cl->sh->fd);
+}
+
+/* used as a generic starting point for menus */
+static void menu_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+	struct telnetclient *cl=p;
+	struct menuinfo *mi=unused3;
+	telnetclient_start_menuinput(cl, mi);
+}
+
+/******************************************************************************
+ * command - handles the command processing
+ ******************************************************************************/
+static void command_lineinput(struct telnetclient *cl, const char *line) {
+	assert(cl != NULL);
+	assert(cl->sh != NULL);
+	/* TODO: do something with the command */
+	DEBUG("%s:entered command '%s'\n", cl->sh->name, line);
+}
+
+static void command_start_lineinput(struct telnetclient *cl) {
+	telnetclient_start_lineinput(cl, command_lineinput, "> ");
+}
+
+/******************************************************************************
+ * login - handles the login process
+ ******************************************************************************/
+static void login_password_lineinput(struct telnetclient *cl, const char *line) {
+	assert(line != NULL);
+
+	/* TODO: do something with the password */
+
+	command_start_lineinput(cl);
+}
+
+static void login_password_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+	struct telnetclient *cl=p;
+	telnetclient_start_lineinput(cl, login_password_lineinput, "Password: ");
+}
+
+static void login_username_lineinput(struct telnetclient *cl, const char *line) {
+	assert(line != NULL);
+	if(!*line) {
+		buffer_puts(&cl->output, "\nInvalid username!\n");
+		socketio_writeready(cl->sh->fd);
+	}
+
+	/* TODO: do something with the username */
+
+	login_password_start(cl, 0, 0);
+}
+
+static void login_username_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+	struct telnetclient *cl=p;
+	telnetclient_start_lineinput(cl, login_username_lineinput, "Username: ");
 }
 
 /******************************************************************************
@@ -2818,9 +2893,10 @@ int game_init(void) {
 
 	/* */
 	menu_create(&gamemenu_login, "Login Menu");
-	menu_additem(&gamemenu_login, 'E', "Enter the game", NULL, NULL, 0);
-	menu_additem(&gamemenu_login, 'C', "Create account", NULL, NULL, 0);
-	menu_additem(&gamemenu_login, 'Q', "Disconnect", NULL, NULL, 0);
+	/* TODO: setup functions for these */
+	menu_additem(&gamemenu_login, 'E', "Enter the game", login_username_start, 0, NULL);
+	menu_additem(&gamemenu_login, 'C', "Create account", NULL, 0, NULL);
+	menu_additem(&gamemenu_login, 'Q', "Disconnect", menu_start, 0, &gamemenu_login);
 
 	return 1;
 }
@@ -2855,7 +2931,7 @@ int config_fnmatch(const char *pattern, const char *string, int flags) {
 			break;
 		case '*':
 			if(!*pattern) return 0; /* success */
-			for(;*string;string++) { 
+			for(;*string;string++) {
 				/* trace out any paths that match the first character */
 			if(((flags&CONFIG_FNM_CASEFOLD) ?  tolower(*string)==tolower(*pattern) : *string==*pattern) && config_fnmatch(pattern, string, flags)==0) {
 					return 0; /* recursive check matched */
@@ -2976,7 +3052,7 @@ failure:
 }
 
 #ifndef NDEBUG
-static int show(struct config *cfg, void *extra, const char *id, const char *value) {
+static int show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	printf("SHOW: %s=%s\n", id, value);
 	return 1;
 }
@@ -2996,7 +3072,7 @@ void config_test(void) {
 static int fl_default_family=0;
 
 /* handles the 'server.port' property */
-static int do_config_port(struct config *cfg, void *extra, const char *id, const char *value) {
+static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
 		fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
 	}
