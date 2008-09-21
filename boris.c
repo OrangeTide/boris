@@ -264,6 +264,9 @@
 /******************************************************************************
  * Types and data structures
  ******************************************************************************/
+struct telnetclient;
+struct socketio_handle;
+struct menuinfo;
 
 struct lru_entry {
 	void (*free)(void *p);	/* function to free the item */
@@ -271,21 +274,41 @@ struct lru_entry {
 	LIST_ENTRY(struct lru_entry) queue;
 };
 
+struct formitem {
+	LIST_ENTRY(struct formitem) item;
+	char *name;
+	char *user_value;
+	unsigned flags;
+	int (*form_check)(struct telnetclient *cl, const char *str);
+};
+
+struct form {
+	LIST_HEAD(struct, struct formitem) items;
+	struct formitem *tail;
+	char *form_title;
+	struct formitem *curr;
+	int done;
+	void (*form_close)(struct telnetclient *cl, struct form *f);
+};
+
 /******************************************************************************
  * Globals
  ******************************************************************************/
 static struct menuinfo gamemenu_login;
 
+static struct mud_config {
+	char *menu_prompt;
+	char *form_prompt;
+	char *command_prompt;
+} mud_config;
+
 /******************************************************************************
  * Prototypes
  ******************************************************************************/
-struct telnetclient;
-struct socketio_handle;
-struct menuinfo;
-
 static void telnetclient_free(struct socketio_handle *sh);
 EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
 EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
+static void form_menu_lineinput(struct telnetclient *cl, const char *line);
 
 /******************************************************************************
  * Debug routines
@@ -2140,6 +2163,16 @@ EXPORT int socketio_dispatch(long msec) {
 		if(curr->delete_flag) {
 			/* this entry must be deleted */
 			DEBUG("Deleting %s\n", curr->name);
+
+			if(FD_ISSET(fd, &out_writefds)) {
+				/* ignore events for this deleted socket */
+				nr--;
+			}
+			if(FD_ISSET(fd, &out_readfds)) {
+				/* ignore events for this deleted socket */
+				nr--;
+			}
+
 			socketio_close(&curr->fd);
 			next=LIST_NEXT(curr, list);
 			socketio_ll_handle_free(curr);
@@ -2355,8 +2388,19 @@ struct telnetclient {
 		char name[32];
 	} terminal;
 	const char *prompt_string;
-	const struct menuinfo *menu; /* current menu */
 	void (*line_input)(struct telnetclient *cl, const char *line);
+	void (*state_free)(struct telnetclient *cl);
+	union state_data {
+		struct login_state {
+			char username[16];
+		} login;
+		struct form_state {
+			struct form form;
+		} form;
+		struct menu_state {
+			const struct menuinfo *menu; /* current menu */
+		} menu;
+	} state;
 };
 
 EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str) {
@@ -2380,26 +2424,42 @@ EXPORT int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...) {
 	return res;
 }
 
+static void telnetclient_clear_statedata(struct telnetclient *cl) {
+	if(cl->state_free) {
+		cl->state_free(cl);
+		cl->state_free=NULL;
+	}
+	memset(&cl->state, 0, sizeof cl->state);
+}
+
 static void telnetclient_free(struct socketio_handle *sh) {
 	struct telnetclient *client=sh->extra;
 	assert(client!=NULL);
 	if(!client)
 		return;
 	DEBUG("freeing client '%s'\n", sh->name);
+
 	if(sh->fd!=INVALID_SOCKET) {
-		socketio_close(&sh->fd);
+		/* only call this if the client wasn't closed earlier */
+		socketio_readready(sh->fd);
 	}
 
+	sh->delete_flag=1; /* cause deletetion later */
+
+	telnetclient_clear_statedata(client); /* free data associated with current state */
+
 	client->sh->extra=NULL;
-	socketio_ll_handle_free(client->sh);
 	client->sh=NULL;
 
 	buffer_free(&client->output);
 	buffer_free(&client->input);
+
 	/* TODO: free any other data structures associated with client */
+
 #ifndef NDEBUG
 	memset(client, 0xBB, sizeof *client); /* fill with fake data before freeing */
 #endif
+
 	free(client);
 }
 
@@ -2411,6 +2471,10 @@ static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh) {
 	buffer_init(&cl->input, TELNETCLIENT_INPUT_BUFFER_SZ);
 	cl->terminal.width=cl->terminal.height=-1;
 	strcpy(cl->terminal.name, "");
+	cl->state_free=NULL;
+	telnetclient_clear_statedata(cl);
+	cl->line_input=NULL;
+	cl->prompt_string=NULL;
 	cl->sh=sh;
 
 	sh->extra=cl;
@@ -2526,8 +2590,10 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 					return;
 				}
 				snprintf(cl->terminal.name, sizeof cl->terminal.name, "%.*s", (int)len-4-2, iac+4);
-				DEBUG("Client terminal type is now \"%s\"\n", cl->terminal.name);
+				DEBUG("%s:Client terminal type is now \"%s\"\n", cl->sh->name, cl->terminal.name);
+				/*
 				telnetclient_printf(cl, "Terminal type: %s\n", cl->terminal.name);
+				*/
 			}
 			break;
 		case TELOPT_NAWS: {
@@ -2538,8 +2604,10 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 			assert(len==9);
 			cl->terminal.width=RD_BE16(iac, 3);
 			cl->terminal.height=RD_BE16(iac, 5);
-			DEBUG("Client display size is now %ux%u\n", cl->terminal.width, cl->terminal.height);
+			DEBUG("%s:Client display size is now %ux%u\n", cl->sh->name, cl->terminal.width, cl->terminal.height);
+			/*
 			telnetclient_printf(cl, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
+			*/
 			break;
 		}
 	}
@@ -2649,7 +2717,7 @@ static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl
 	return 1;
 failure:
 	/* close the socket and free the client */
-	cl->sh->delete_flag=1;
+	telnetclient_free(sh);
 	return 0;
 }
 
@@ -2658,7 +2726,7 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 	const char *line;
 	size_t consumed;
 	struct telnetclient *cl=extra;
-	void (*line_input)(struct telnetclient *cl, const char *line);
+	const char *prompt_string;
 
 	/* pull data from socket into buffer */
 	if(!telnetclient_recv(sh, cl)) {
@@ -2668,46 +2736,46 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 	/* getline triggers a special IAC parser that stops at a line */
 	while((line=buffer_getline(&cl->input, &consumed, telnetclient_iac_process, cl))) {
 		DEBUG("client line:%s(): '%s'\n", __func__, line);
-		line_input=cl->line_input;
 
-		if(line_input) {
-			line_input(cl, line);
+		prompt_string=cl->prompt_string;
+		if(cl->line_input) {
+			cl->line_input(cl, line);
 		}
 
 		buffer_consume(&cl->input, consumed);
 
 		if(sh->read_event!=telnetclient_rdev_lineinput) break;
 
-		if(line_input==cl->line_input) {
-			/* send the prompt, but only if the handler hasn't changed
-			 * the starting routines send the prompt out before read events, so this
-			 * puts is not necessary in those cases */
-			buffer_puts(&cl->output, cl->prompt_string);
+		/* TODO: I don't like how we decide to redraw the prompt. we should use a flag? */
+		if(prompt_string==cl->prompt_string) {
+			/* send the prompt, but only if the prompt pointer has not been updated */
+			telnetclient_puts(cl, cl->prompt_string);
 		}
-
-		socketio_writeready(cl->sh->fd);
 	}
 	socketio_readready(fd); /* only call this if the client wasn't closed earlier */
 	return;
 }
 
+static void telnetclient_setprompt(struct telnetclient *cl, const char *prompt) {
+	cl->prompt_string=prompt?prompt:"? ";
+	telnetclient_puts(cl, cl->prompt_string);
+}
+
 static void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt) {
 	assert(cl != NULL);
-	cl->prompt_string=prompt?prompt:"? ";
-	buffer_puts(&cl->output, cl->prompt_string);
-	socketio_writeready(cl->sh->fd);
+	telnetclient_setprompt(cl, prompt);
 	cl->line_input=line_input;
 	cl->sh->read_event=telnetclient_rdev_lineinput;
 }
 
 static void menu_lineinput(struct telnetclient *cl, const char *line) {
-	menu_input(cl, cl->menu, line);
+	menu_input(cl, cl->state.menu.menu, line);
 }
 
 static void telnetclient_start_menuinput(struct telnetclient *cl, struct menuinfo *menu) {
-	cl->menu=menu;
-	menu_show(cl, cl->menu);
-	telnetclient_start_lineinput(cl, menu_lineinput, "Selection: ");
+	cl->state.menu.menu=menu;
+	menu_show(cl, cl->state.menu.menu);
+	telnetclient_start_lineinput(cl, menu_lineinput, mud_config.menu_prompt);
 }
 
 EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
@@ -2784,13 +2852,13 @@ static void menu_titledraw(struct telnetclient *cl, const char *title, size_t le
 	buf[len]='\n';
 	buf[len+1]=0;
 	if(cl)
-		buffer_puts(&cl->output, buf);
+		telnetclient_puts(cl, buf);
 	DEBUG("%s>>%s", cl?cl->sh->name:"", buf);
 	if(cl)
 		telnetclient_printf(cl, "%s\n", title);
 	DEBUG("%s>>%s\n", cl?cl->sh->name:"", title);
 	if(cl)
-		buffer_puts(&cl->output, buf);
+		telnetclient_puts(cl, buf);
 	DEBUG("%s>>%s", cl?cl->sh->name:"", buf);
 }
 
@@ -2820,16 +2888,14 @@ EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const
 			if(curr->action_func) {
 				curr->action_func(cl, curr->extra2, curr->extra3);
 			} else {
-				buffer_puts(&cl->output, "\nNot supported!\n");
+				telnetclient_puts(cl, "\nNot supported!\n");
 				menu_show(cl, mi);
-				socketio_writeready(cl->sh->fd);
 			}
 			return;
 		}
 	}
-	buffer_puts(&cl->output, "\nInvalid selection!\n");
+	telnetclient_puts(cl, "\nInvalid selection!\n");
 	menu_show(cl, mi);
-	socketio_writeready(cl->sh->fd);
 }
 
 /* used as a generic starting point for menus */
@@ -2850,17 +2916,23 @@ static void command_lineinput(struct telnetclient *cl, const char *line) {
 }
 
 static void command_start_lineinput(struct telnetclient *cl) {
-	telnetclient_start_lineinput(cl, command_lineinput, "> ");
+	telnetclient_printf(cl, "Terminal type: %s\n", cl->terminal.name);
+	telnetclient_printf(cl, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
+	telnetclient_start_lineinput(cl, command_lineinput, mud_config.command_prompt);
 }
 
 /******************************************************************************
  * login - handles the login process
  ******************************************************************************/
 static void login_password_lineinput(struct telnetclient *cl, const char *line) {
+	assert(cl != NULL);
 	assert(line != NULL);
+	assert(cl->state.login.username[0] != '\0'); /* must have a valid username */
 
-	/* TODO: do something with the password */
+	/* TODO: do something with the password and username */
+	DEBUG("Username='%s'\n", cl->state.login.username);
 
+	/* TODO: failed logins go back to the main menu or disconnect */
 	command_start_lineinput(cl);
 }
 
@@ -2871,12 +2943,18 @@ static void login_password_start(void *p, long unused2 UNUSED, void *unused3 UNU
 
 static void login_username_lineinput(struct telnetclient *cl, const char *line) {
 	assert(line != NULL);
+
+	telnetclient_clear_statedata(cl); /* this is a fresh state */
+	cl->state_free=0; /* this state does not require anything special to free */
+
+	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+
 	if(!*line) {
-		buffer_puts(&cl->output, "\nInvalid username!\n");
-		socketio_writeready(cl->sh->fd);
+		telnetclient_puts(cl, "\nInvalid username!\n");
 	}
 
-	/* TODO: do something with the username */
+	/* store the username for the password state to use */
+	snprintf(cl->state.login.username, sizeof cl->state.login.username, "%s", line);
 
 	login_password_start(cl, 0, 0);
 }
@@ -2887,16 +2965,207 @@ static void login_username_start(void *p, long unused2 UNUSED, void *unused3 UNU
 }
 
 /******************************************************************************
+ * form - handles processing input forms
+ ******************************************************************************/
+EXPORT void form_init(struct form *f, const char *title, void (*form_close)(struct telnetclient *cl, struct form *f)) {
+	LIST_INIT(&f->items);
+	f->form_title=strdup(title);
+	f->tail=NULL;
+	f->curr=NULL;
+	f->done=0;
+	f->form_close=form_close;
+}
+
+EXPORT void form_free(struct form *f) {
+	struct formitem *curr;
+
+	free(f->form_title);
+	f->form_title=NULL;
+
+	while((curr=LIST_TOP(f->items))) {
+		LIST_REMOVE(curr, item);
+		free(curr->name);
+		if(curr->user_value) {
+			size_t len; /* carefully erase the data from the heap, it may be private */
+			len=strlen(curr->user_value);
+			memset(curr->user_value, 0, len);
+			free(curr->user_value);
+		}
+#ifndef NDEBUG
+		memset(curr, 0x55, sizeof *curr); /* fill with fake data before freeing */
+#endif
+		free(curr);
+	}
+	memset(f, 0x55, sizeof *f); /* fill with fake data before freeing */
+}
+
+EXPORT void form_additem(struct form *f, unsigned flags, const char *name, int (*form_check)(struct telnetclient *cl, const char *str)) {
+	struct formitem *newitem;
+	newitem=malloc(sizeof *newitem);
+	newitem->name=strdup(name);
+	newitem->user_value=NULL;
+	newitem->flags=flags;
+	newitem->form_check=form_check;
+
+	if(f->tail) {
+		LIST_INSERT_AFTER(f->tail, newitem, item);
+	} else {
+		LIST_INSERT_HEAD(&f->items, newitem, item);
+	}
+	f->tail=newitem;
+}
+
+static void form_menu_show(struct telnetclient *cl, struct form *f) {
+	struct formitem *curr;
+	unsigned i;
+
+	menu_titledraw(cl, f->form_title, strlen(f->form_title));
+
+	for(i=1,curr=LIST_TOP(f->items);curr;curr=LIST_NEXT(curr, item),i++) {
+		const char *user_value=curr->user_value ? curr->user_value : "";
+		if((curr->flags&1)==1) {
+			user_value="<hidden>";
+		}
+		telnetclient_printf(cl, "%d. %s %s\n", i, curr->name, user_value);
+	}
+	telnetclient_printf(cl, "A. accept\n");
+	socketio_writeready(cl->sh->fd);
+}
+
+static void form_lineinput(struct telnetclient *cl, const char *line) {
+	struct form *f=&cl->state.form.form;
+
+	assert(f != NULL);
+	assert(f->curr != NULL);
+
+	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+
+	if(*line) {
+		/* check the input */
+		if(f->curr->form_check && !f->curr->form_check(cl, line)) {
+			DEBUG("%s:Invalid form input\n", cl->sh->name);
+			telnetclient_puts(cl, "\nTry again!\n");
+			return;
+		}
+		if(f->curr->user_value) {
+			free(f->curr->user_value);
+		}
+		f->curr->user_value=strdup(line);
+		f->curr=LIST_NEXT(f->curr, item);
+		if(f->curr && !f->done) {
+			telnetclient_setprompt(cl, f->curr->name);
+		} else {
+			f->done=1; /* causes form entry to bounce back to form menu */
+			/* a menu for verifying the form */
+			form_menu_show(cl, f);
+			telnetclient_start_lineinput(cl, form_menu_lineinput, mud_config.form_prompt);
+		}
+	}
+}
+
+static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
+	struct form *f=&cl->state.form.form;
+	char *endptr;
+
+	assert(cl != NULL);
+	assert(line != NULL);
+
+	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+
+	if(tolower(*line)=='a') { /* accept */
+		/* TODO: callback to close out the form */
+		if(f->form_close) {
+			/* this callback must return to a different state */
+			f->form_close(cl, f);
+		} else {
+			/* fallback */
+			DEBUG("%s():%s:ERROR:going to main menu\n", __func__, cl->sh->name);
+			telnetclient_puts(cl, "ERROR: going to main menu\n");
+			telnetclient_start_menuinput(cl, &gamemenu_login);
+		}
+		return; /* success */
+	} else {
+		long i;
+		i=strtol(line, &endptr, 10);
+		if(endptr!=line && i>0) {
+			for(f->curr=LIST_TOP(f->items);f->curr;f->curr=LIST_NEXT(f->curr, item)) {
+				if(--i==0) {
+					telnetclient_start_lineinput(cl, form_lineinput, f->curr->name);
+					return; /* success */
+				}
+			}
+		}
+	}
+
+	/* invalid_selection */
+	telnetclient_puts(cl, "\nInvalid selection!\n");
+	form_menu_show(cl, f);
+	return;
+}
+
+static void form_state_free(struct telnetclient *cl) {
+	DEBUG("%s():%s:freeing state\n", __func__, cl->sh->name);
+	form_free(&cl->state.form.form);
+}
+
+static int form_createaccount_username_check(struct telnetclient *cl, const char *str) {
+	int res;
+	size_t len;
+	len=strlen(str);
+	if(len<3) {
+		telnetclient_puts(cl, "Username must contain at least 3 characters!\n");
+		return 0;
+	}
+
+	for(res=isalpha(*str);*str;str++) {
+		res=res&&isalnum(*str);
+		if(!res) {
+			telnetclient_puts(cl, "Username must only contain alphanumeric characters and must start with a letter!\n");
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
+static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
+	DEBUG("%s:TODO: create account...\n", cl->sh->name);
+
+	/* TODO: for approvable based systems, disconnect the user with a friendly message */
+	telnetclient_start_menuinput(cl, &gamemenu_login);
+}
+
+static void form_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+	struct telnetclient *cl=p;
+	struct form *f=&cl->state.form.form;
+	void (*form_close)(struct telnetclient *cl, struct form *f)=form_createaccount_close;
+
+	cl->state_free=form_state_free;
+
+	form_init(f, "New User Application", form_close);
+	form_additem(f, 0, "Username: ", form_createaccount_username_check);
+	form_additem(f, 1, "Password: ", NULL);
+	form_additem(f, 0, "Email: ", NULL);
+	f->curr=LIST_TOP(f->items);
+
+	menu_titledraw(cl, f->form_title, strlen(f->form_title));
+
+	telnetclient_start_lineinput(cl, form_lineinput, f->curr->name);
+}
+
+/******************************************************************************
  * Game - game logic
  ******************************************************************************/
-int game_init(void) {
+EXPORT int game_init(void) {
 
 	/* */
 	menu_create(&gamemenu_login, "Login Menu");
 	/* TODO: setup functions for these */
 	menu_additem(&gamemenu_login, 'E', "Enter the game", login_username_start, 0, NULL);
-	menu_additem(&gamemenu_login, 'C', "Create account", NULL, 0, NULL);
+	menu_additem(&gamemenu_login, 'C', "Create account", form_start, 0, NULL);
+	/*
 	menu_additem(&gamemenu_login, 'Q', "Disconnect", menu_start, 0, &gamemenu_login);
+	*/
 
 	return 1;
 }
@@ -3071,6 +3340,28 @@ void config_test(void) {
  ******************************************************************************/
 static int fl_default_family=0;
 
+static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
+	char **target;
+	size_t len;
+
+	if(!strcmp(id, "prompt.menu")) {
+		target=&mud_config.menu_prompt;
+	} else if(!strcmp(id, "prompt.form")) {
+		target=&mud_config.form_prompt;
+	} else if(!strcmp(id, "prompt.command")) {
+		target=&mud_config.command_prompt;
+	} else {
+		fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
+		return 0; /* failure */
+	}
+
+	free(*target);
+	len=strlen(value)+2; /* leave room for a space */
+	*target=malloc(len);
+	snprintf(*target, len, "%s ", value);
+	return 1;
+}
+
 /* handles the 'server.port' property */
 static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
@@ -3155,10 +3446,15 @@ int main(int argc, char **argv) {
 	}
 	atexit(socketio_shutdown);
 
+	mud_config.menu_prompt=strdup("Selection: ");
+	mud_config.form_prompt=strdup("Selection: ");
+	mud_config.command_prompt=strdup("> ");
+
 	process_args(argc, argv);
 
 	config_setup(&cfg);
 	config_watch(&cfg, "server.port", do_config_port, 0);
+	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
 #ifndef NDEBUG
 	config_watch(&cfg, "*", show, 0);
 #endif
