@@ -3562,7 +3562,7 @@ struct config {
 #define CONFIG_FNM_CASEFOLD 16	/* case insensitive matches */
 
 /* clone of the fnmatch() function */
-int config_fnmatch(const char *pattern, const char *string, int flags) {
+EXPORT int config_fnmatch(const char *pattern, const char *string, int flags) {
 	char c;
 
 	while((c=*pattern++)) switch(c) {
@@ -3587,11 +3587,11 @@ int config_fnmatch(const char *pattern, const char *string, int flags) {
 	return 0; /* success */
 }
 
-void config_setup(struct config *cfg) {
+EXPORT void config_setup(struct config *cfg) {
 	LIST_INIT(&cfg->watchers);
 }
 
-void config_free(struct config *cfg) {
+EXPORT void config_free(struct config *cfg) {
 	struct config_watcher *curr;
 	assert(cfg != NULL);
 	while((curr=LIST_TOP(cfg->watchers))) {
@@ -3601,7 +3601,7 @@ void config_free(struct config *cfg) {
 	}
 }
 
-void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value), void *extra) {
+EXPORT void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value), void *extra) {
 	struct config_watcher *w;
 	assert(mask != NULL);
 	assert(cfg != NULL);
@@ -3612,7 +3612,7 @@ void config_watch(struct config *cfg, const char *mask, int (*func)(struct confi
 	LIST_INSERT_HEAD(&cfg->watchers, w, list);
 }
 
-int config_load(const char *filename, struct config *cfg) {
+EXPORT int config_load(const char *filename, struct config *cfg) {
 	char buf[1024];
 	FILE *f;
 	char *e, *value;
@@ -3693,15 +3693,15 @@ failure:
 }
 
 #ifndef NDEBUG
-static int show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
+static int config_test_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	printf("SHOW: %s=%s\n", id, value);
 	return 1;
 }
 
-void config_test(void) {
+static void config_test(void) {
 	struct config cfg;
 	config_setup(&cfg);
-	config_watch(&cfg, "s*er.*", show, 0);
+	config_watch(&cfg, "s*er.*", config_test_show, 0);
 	config_load("test.cfg", &cfg);
 	config_free(&cfg);
 }
@@ -3833,7 +3833,7 @@ int main(int argc, char **argv) {
 	config_watch(&cfg, "server.port", do_config_port, 0);
 	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
 #ifndef NDEBUG
-	config_watch(&cfg, "*", show, 0);
+	config_watch(&cfg, "*", config_test_show, 0);
 #endif
 	config_load("boris.cfg", &cfg);
 	config_free(&cfg);
