@@ -1041,6 +1041,244 @@ static uint_least32_t hash_uint64(uint_least64_t key) {
 }
 
 /******************************************************************************
+ * map
+ ******************************************************************************/
+struct map_entry {
+	LIST_ENTRY(struct map_entry) list;
+	void *key;	/* key can point inside of data (and usually should) */
+	void *data;
+};
+
+struct map {
+	void (*free_entry)(void *key, void *data);
+	uint_least32_t (*hash)(const void *key);
+	uint_least32_t table_mask;
+	int (*compare)(const void *key1, const void *key2);
+	LIST_HEAD(struct, struct map_entry) *table;
+	long count;
+};
+
+EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entry)(void *key, void *data), uint_least32_t (*hash)(const void *key), int (*compare)(const void *key1, const void *key2)) {
+	unsigned i;
+
+	assert(initial_size_bits < 32); /* 2^32 hash entries will break this init function */
+
+	/* calculate the table mask */
+	m->table_mask=0;
+	while(initial_size_bits--) {
+		m->table_mask=(m->table_mask<<1)&1;
+	}
+
+	m->table=calloc(sizeof *m->table, m->table_mask+1);
+	for(i=0;i<=m->table_mask;i++) {
+		LIST_INIT(&m->table[i]);
+	}
+
+	m->count=0;
+	m->free_entry=free_entry;
+	m->hash=hash;
+	m->compare=compare;
+}
+
+/* adds an entry, and refuses to add more than one
+ * exclusive prevents the same key from being added more than once
+ * replace causes the old entry to be removed
+ */
+EXPORT int map_replace(struct map *m, void *key, void *data, int replace, int exclusive) {
+	struct map_entry *e;
+	uint_least32_t h;
+
+	assert(m != NULL);
+	assert(key != NULL);
+	assert(m->compare != NULL);
+
+	h=m->hash(key);
+	
+	if(exclusive) {
+		/* look for a duplicate key and refuse to overwrite it */
+		for(e=LIST_TOP(m->table[h&m->table_mask]);e;e=LIST_NEXT(e, list)) {
+			assert(e->key != NULL);
+			if(m->compare(key, e->key)==0) {
+				if(replace) {
+					LIST_REMOVE(e, list);
+					m->free_entry(e->key, e->data);
+					free(e);
+					m->count--;
+					/* this will continue freeing ALL matching entries */
+				} else {
+					return 0; /* duplicate key found */
+				}
+			}
+		}
+	}
+
+	e=malloc(sizeof *e);
+	if(!e) {
+		perror("malloc()");
+		return 0;
+	}
+	e->key=key;
+	e->data=data;
+	LIST_INSERT_HEAD(&m->table[h&m->table_mask], e, list);
+	m->count++;
+
+	return 1;
+}
+
+/* refuses to add more than one copy of the same key */
+EXPORT int map_add(struct map *m, void *key, void *data) {
+	return map_replace(m, key, data, 0, 1);
+}
+
+/* returns first matching entry */
+EXPORT void *map_lookup(struct map *m, const void *key) {
+	struct map_entry *e;
+	uint_least32_t h;
+
+	assert(m != NULL);
+	assert(key != NULL);
+	assert(m->hash != NULL);
+	assert(m->compare != NULL);
+
+	h=m->hash(key);
+
+	/* look for a duplicate key and refuse to overwrite it */
+	for(e=LIST_TOP(m->table[h&m->table_mask]);e;e=LIST_NEXT(e, list)) {
+		assert(e->key != NULL);
+		if(m->compare(key, e->key)==0) {
+			return e->data;
+		}
+	}
+	return NULL;
+}
+
+/* frees the entry */
+EXPORT int map_remove(struct map *m, void *key) {
+	struct map_entry *e, *tmp;
+	uint_least32_t h;
+	int res=0;
+
+	assert(m != NULL);
+	assert(key != NULL);
+	assert(m->hash != NULL);
+	assert(m->compare != NULL);
+
+	h=m->hash(key);
+
+	/* look for a duplicate key and refuse to overwrite it */
+	for(e=LIST_TOP(m->table[h&m->table_mask]);e;) {
+		assert(e->key != NULL);
+		if(m->compare(key, e->key)==0) {
+			tmp=LIST_NEXT(e, list);
+			LIST_REMOVE(e, list);
+			m->free_entry(e->key, e->data);
+			memset(e, 0x99, sizeof *e);
+			free(e);
+			m->count--;
+			/* this will continue freeing ALL matching entries */
+			res=1; /* freed an entry */
+			e=tmp;
+		} else {
+			e=LIST_NEXT(e, list);
+		}
+	}
+
+	return res; /* not found */
+}
+
+EXPORT void map_free(struct map *m) {
+	struct map_entry *e;
+	unsigned i;
+
+	for(i=0;i<=m->table_mask;i++) {
+		while((e=LIST_TOP(m->table[i]))) {
+			LIST_REMOVE(e, list);
+			m->free_entry(e->key, e->data);
+			free(e);
+			m->count--;
+		}
+	}
+	m->table_mask=0;
+	free(m->table);
+	m->table=NULL;
+#ifndef NDEBUG
+	memset(m, 0x55, sizeof *m); /* fill with fake data before freeing */
+#endif
+}
+
+#ifndef NDEBUG
+struct map_test_entry {
+	char *str;
+	unsigned value;
+};
+
+static void map_test_free(void *key, void *data) {
+	struct map_test_entry *e=data;
+	free(e->str);
+	free(e);
+}
+
+static int map_test_compare(const void *key1, const void *key2) {
+	return strcmp(key1, key2);
+}
+
+static struct map_test_entry *map_test_alloc(const char *str, unsigned value) {
+	struct map_test_entry *e;
+	e=malloc(sizeof *e);
+	e->str=strdup(str);
+	e->value=value;
+	return e;
+}
+
+EXPORT void map_test(void) {
+	struct map m;
+	struct map_test_entry *e;
+	unsigned i;
+	const char *test[] = {
+		"foo", 
+		"bar",
+		"",
+		"z",
+		"hi",
+	};
+
+	map_init(&m, 4, map_test_free, (uint_least32_t(*)(const void*))hash_string32, map_test_compare);
+
+	for(i=0;i<NR(test);i++) {
+		e=map_test_alloc(test[i], 5*i);
+		if(!map_add(&m, e->str, e)) {
+			printf("map_add() failed\n");
+		}
+	}
+
+	if(!map_remove(&m, "bar")) {
+		printf("map_remove() failed\n");
+	}
+
+	for(i=0;i<NR(test);i++) {
+		e=map_lookup(&m, test[i]);
+		if(!e) {
+			printf("map_lookup() failed\n");	
+		} else {
+			printf("found '%s' -> '%s' %u\n", test[i], e->str, e->value);
+		}
+	}
+
+	printf("removing 'foo'\n");
+	if(!map_remove(&m, "foo")) {
+		printf("map_remove() failed\n");
+	}
+
+	printf("removing 'hi'\n");
+	if(!map_remove(&m, "hi")) {
+		printf("map_remove() failed\n");
+	}
+
+	map_free(&m);
+}
+#endif
+
+/******************************************************************************
  * Bitmap API
  ******************************************************************************/
 
@@ -3434,6 +3672,7 @@ int main(int argc, char **argv) {
 	struct config cfg;
 #ifndef NDEBUG
 	/*
+	map_test();
 	config_test();
 	bitmap_test();
 	freelist_test();
