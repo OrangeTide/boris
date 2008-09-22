@@ -978,6 +978,19 @@ EXPORT void freelist_test(void) {
  * Hashing Functions
  ******************************************************************************/
 
+/* a hash that ignores case */
+static uint_least32_t hash_stringignorecase32(const char *key) {
+	uint_least32_t h=0;
+
+	while(*key) {
+		h=h*65599+tolower(*key++);
+		/* this might be faster on some systems with fast shifts and slow mult:
+		 * h=(h<<6)+(h<<16)-h+tolower(*key++);
+		 */
+	}
+	return h;
+}
+
 /* creates a 32-bit hash of a null terminated string */
 static uint_least32_t hash_string32(const char *key) {
 	uint_least32_t h=0;
@@ -1057,6 +1070,22 @@ struct map {
 	LIST_HEAD(struct, struct map_entry) *table;
 	long count;
 };
+
+EXPORT uint_least32_t map_hash_stringignorecase(const void *key) {
+	return hash_string32(key);
+}
+
+EXPORT uint_least32_t map_hash_string(const void *key) {
+	return hash_stringignorecase32(key);
+}
+
+EXPORT int map_compare_stringignorecase(const void *key1, const void *key2) {
+	return strcasecmp(key1, key2);
+}
+
+EXPORT int map_compare_string(const void *key1, const void *key2) {
+	return strcmp(key1, key2);
+}
 
 EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entry)(void *key, void *data), uint_least32_t (*hash)(const void *key), int (*compare)(const void *key1, const void *key2)) {
 	unsigned i;
@@ -1145,6 +1174,7 @@ EXPORT void *map_lookup(struct map *m, const void *key) {
 	/* look for a duplicate key and refuse to overwrite it */
 	for(e=LIST_TOP(m->table[h&m->table_mask]);e;e=LIST_NEXT(e, list)) {
 		assert(e->key != NULL);
+		/* DEBUG("%s():comparing '%s' '%s'\n", __func__, key, e->key); */
 		if(m->compare(key, e->key)==0) {
 			return e->data;
 		}
@@ -1218,10 +1248,6 @@ static void map_test_free(void *key UNUSED, void *data) {
 	free(e);
 }
 
-static int map_test_compare(const void *key1, const void *key2) {
-	return strcmp(key1, key2);
-}
-
 static struct map_test_entry *map_test_alloc(const char *str, unsigned value) {
 	struct map_test_entry *e;
 	e=malloc(sizeof *e);
@@ -1242,7 +1268,7 @@ EXPORT void map_test(void) {
 		"hi",
 	};
 
-	map_init(&m, 4, map_test_free, (uint_least32_t(*)(const void*))hash_string32, map_test_compare);
+	map_init(&m, 4, map_test_free, map_hash_stringignorecase, map_compare_stringignorecase);
 
 	for(i=0;i<NR(test);i++) {
 		e=map_test_alloc(test[i], 5*i);
@@ -1558,9 +1584,9 @@ static void acs_init(struct acs_info *ai, unsigned level, unsigned flags) {
 	ai->flags=flags;
 }
 
-static int acs_testflag(struct acs_info *ai, char flag) {
+static int acs_testflag(struct acs_info *ai, unsigned flag) {
 	unsigned i;
-	flag=tolower(flag);
+	flag=tolower((char)flag);
 	if(flag>='a' && flag<='z') {
 		i=flag-'a';
 	} else if(flag>='0' && flag<='9') {
@@ -1587,7 +1613,7 @@ retry:
 			s=endptr;
 			break;
 		case 'f':
-			if(!acs_testflag(ai, *s)) goto did_not_pass;
+			if(!acs_testflag(ai, (unsigned)*s)) goto did_not_pass;
 			s++;
 			break;
 		case '|':
@@ -1654,85 +1680,6 @@ EXPORT int recordcache_init(unsigned max_entries) {
 	recordcache_table_mask=recordcache_table_nr-1;
 	DEBUG("hash table size is %zu\n", recordcache_table_nr);
 	return 1;
-}
-
-/******************************************************************************
- * Objects
- ******************************************************************************/
-
-/* defines an object's class */
-struct object_controller {
-	char *type_name;		/* identifies the class of record */
-	void (*load)(FILE *f);
-	void (*save)(FILE *f, void *data);
-	void (*free)(void *);			/* for freeing an object */
-};
-
-struct object_base {
-	unsigned id;
-	const struct object_controller *con;
-};
-
-struct object_mob {
-	struct object_base base;
-};
-
-struct object_room {
-	struct object_base base;
-};
-
-struct object_item {
-	struct object_base base;
-};
-
-/* converts a mob to a base object */
-EXPORT struct object_base *mob_to_base(struct object_mob *mob) {
-	assert(mob!=NULL);
-	return &mob->base;
-}
-
-/* converts a room to a base object */
-EXPORT struct object_base *room_to_base(struct object_room *room) {
-	assert(room!=NULL);
-	return &room->base;
-}
-
-/* converts an item to a base object */
-EXPORT struct object_base *item_to_base(struct object_item *item) {
-	assert(item!=NULL);
-	return &item->base;
-}
-
-/* frees an object of any type */
-EXPORT void object_free(struct object_base *obj) {
-	assert(obj!=NULL);
-	assert(obj->con!=NULL);
-	if(!obj)
-		return; /* ignore NULL */
-	if(obj->con->free) {
-		obj->con->free(obj);
-	} else {
-		free(obj);
-	}
-}
-
-/******************************************************************************
- * Object Cache
- ******************************************************************************/
-
-EXPORT struct object_base *object_load(unsigned id) {
-	abort();
-	return 0;
-}
-
-EXPORT struct object_base *object_save(unsigned id) {
-	abort();
-	return 0;
-}
-
-EXPORT struct object_base *object_iscached(unsigned id) {
-	abort();
-	return 0;
 }
 
 /******************************************************************************
@@ -3084,6 +3031,7 @@ static void menu_lineinput(struct telnetclient *cl, const char *line) {
 }
 
 static void telnetclient_start_menuinput(struct telnetclient *cl, struct menuinfo *menu) {
+	telnetclient_clear_statedata(cl); /* this is a fresh state */
 	cl->state.menu.menu=menu;
 	menu_show(cl, cl->state.menu.menu);
 	telnetclient_start_lineinput(cl, menu_lineinput, mud_config.menu_prompt);
@@ -3107,6 +3055,66 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 	fprintf(stderr, "*** Connection %d: %s\n", sh->fd, sh->name);
 	telnetclient_printf(cl, "Welcome %d %d %d\n", 1, 2, 3);
 	telnetclient_start_menuinput(cl, &gamemenu_login);
+}
+
+/******************************************************************************
+ * user - handles user accounts
+ ******************************************************************************/
+struct user {
+	char *username;
+	char *password_crypt;
+	char *email;
+};
+
+static struct map user_index;
+
+static void user_ll_free(void *key, void *data) {
+	struct user *u=data;
+	assert(data != NULL);
+	assert(key == u->username);
+	if(u) {
+		free(u->username);
+		free(u->password_crypt);
+		free(u->email);
+		free(u);
+	}
+}
+
+EXPORT void user_init(void) {
+	map_init(&user_index, 4, user_ll_free, map_hash_stringignorecase, map_compare_stringignorecase);
+}
+
+EXPORT void user_shutdown(void) {
+	/* TODO: flush unwritten entries to disk */
+	map_free(&user_index);
+}
+
+EXPORT struct user *user_get(const char *username) {
+	struct user *u;
+	assert(username != NULL);
+	DEBUG("looking for '%s'\n", username);
+	u=map_lookup(&user_index, username);
+	if(u) {
+		DEBUG("Found username '%s'\n", u->username);
+	} else {
+		DEBUG("Did not find username\n");
+	}
+	return u;
+}
+
+EXPORT struct user *user_create(const char *username, const char *password, const char *email) {
+	struct user *u;
+	u=malloc(sizeof *u);
+	u->username=strdup(username);
+	u->password_crypt=strdup("TODO");
+	u->email=strdup(email);
+	if(!map_add(&user_index, u->username, u)) {
+		user_ll_free(u->username, u);
+		fprintf(stderr, "User '%s' could not be added\n", username);
+		return 0;
+	}
+	DEBUG("User '%s' added\n", username);
+	return u;
 }
 
 /******************************************************************************
@@ -3236,12 +3244,22 @@ static void command_start_lineinput(struct telnetclient *cl) {
  * login - handles the login process
  ******************************************************************************/
 static void login_password_lineinput(struct telnetclient *cl, const char *line) {
+	struct user *u;
+
 	assert(cl != NULL);
 	assert(line != NULL);
 	assert(cl->state.login.username[0] != '\0'); /* must have a valid username */
 
-	/* TODO: do something with the password and username */
-	DEBUG("Username='%s'\n", cl->state.login.username);
+	/* TODO: complete login process */
+	DEBUG("Login attempt: Username='%s'\n", cl->state.login.username);
+
+	u=user_get(cl->state.login.username);
+	if(u) {
+		telnetclient_printf(cl, "Hello, %s.\n", u->username);
+	} else {
+		telnetclient_puts(cl, "Invalid account\n");
+		/* TODO: kick out back to the menu */
+	}
 
 	/* TODO: failed logins go back to the main menu or disconnect */
 	command_start_lineinput(cl);
@@ -3289,6 +3307,8 @@ EXPORT void form_init(struct form *f, const char *title, void (*form_close)(stru
 
 EXPORT void form_free(struct form *f) {
 	struct formitem *curr;
+
+	TRACE("*** %s() ***\n", __func__);
 
 	free(f->form_title);
 	f->form_title=NULL;
@@ -3386,7 +3406,7 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 	if(tolower(*line)=='a') { /* accept */
 		/* TODO: callback to close out the form */
 		if(f->form_close) {
-			/* this callback must return to a different state */
+			/* this call will switch states on success */
 			f->form_close(cl, f);
 		} else {
 			/* fallback */
@@ -3420,27 +3440,66 @@ static void form_state_free(struct telnetclient *cl) {
 }
 
 static int form_createaccount_username_check(struct telnetclient *cl, const char *str) {
+	struct user *u;
 	int res;
 	size_t len;
+	const char *s;
+
 	len=strlen(str);
 	if(len<3) {
 		telnetclient_puts(cl, "Username must contain at least 3 characters!\n");
 		return 0;
 	}
 
-	for(res=isalpha(*str);*str;str++) {
-		res=res&&isalnum(*str);
+	for(s=str,res=isalpha(*s);*s;s++) {
+		res=res&&isalnum(*s);
 		if(!res) {
 			telnetclient_puts(cl, "Username must only contain alphanumeric characters and must start with a letter!\n");
 			return 0;
 		}
 	}
 
+	u=user_get(str);
+	if(u) {
+		telnetclient_puts(cl, "Username already exists!\n");
+		return 0;
+	}
+
 	return 1;
 }
 
 static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
-	DEBUG("%s:TODO: create account...\n", cl->sh->name);
+	const char *username, *password, *email;
+	struct user *u;
+	struct formitem *curr;
+
+	curr=LIST_TOP(f->items);
+	assert(curr != NULL);
+	username=curr->user_value;
+
+	curr=LIST_NEXT(curr, item);
+	assert(curr != NULL);
+	password=curr->user_value;
+
+	curr=LIST_NEXT(curr, item);
+	assert(curr != NULL);
+	email=curr->user_value;
+
+	DEBUG("%s:create account: '%s'\n", cl->sh->name, username);
+
+	u=user_get(username);
+	if(u) {
+		telnetclient_puts(cl, "Username already exists!\n");
+		return;
+	}
+
+	u=user_create(username, password, email);
+	if(!u) {
+		telnetclient_printf(cl, "Could not create user named '%s'\n", username);
+		return;
+	}
+
+	telnetclient_puts(cl, "Account sucessfully created!\n");
 
 	/* TODO: for approvable based systems, disconnect the user with a friendly message */
 	telnetclient_start_menuinput(cl, &gamemenu_login);
@@ -3450,6 +3509,8 @@ static void form_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 	struct telnetclient *cl=p;
 	struct form *f=&cl->state.form.form;
 	void (*form_close)(struct telnetclient *cl, struct form *f)=form_createaccount_close;
+
+	telnetclient_clear_statedata(cl); /* this is a fresh state */
 
 	cl->state_free=form_state_free;
 
@@ -3758,6 +3819,9 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	atexit(socketio_shutdown);
+
+	user_init();
+	atexit(user_shutdown);
 
 	mud_config.menu_prompt=strdup("Selection: ");
 	mud_config.form_prompt=strdup("Selection: ");
