@@ -1093,7 +1093,7 @@ EXPORT int map_replace(struct map *m, void *key, void *data, int replace, int ex
 	assert(m->compare != NULL);
 
 	h=m->hash(key);
-	
+
 	if(exclusive) {
 		/* look for a duplicate key and refuse to overwrite it */
 		for(e=LIST_TOP(m->table[h&m->table_mask]);e;e=LIST_NEXT(e, list)) {
@@ -1212,7 +1212,7 @@ struct map_test_entry {
 	unsigned value;
 };
 
-static void map_test_free(void *key, void *data) {
+static void map_test_free(void *key UNUSED, void *data) {
 	struct map_test_entry *e=data;
 	free(e->str);
 	free(e);
@@ -1235,7 +1235,7 @@ EXPORT void map_test(void) {
 	struct map_test_entry *e;
 	unsigned i;
 	const char *test[] = {
-		"foo", 
+		"foo",
 		"bar",
 		"",
 		"z",
@@ -1258,7 +1258,7 @@ EXPORT void map_test(void) {
 	for(i=0;i<NR(test);i++) {
 		e=map_lookup(&m, test[i]);
 		if(!e) {
-			printf("map_lookup() failed\n");	
+			printf("map_lookup() failed\n");
 		} else {
 			printf("found '%s' -> '%s' %u\n", test[i], e->str, e->value);
 		}
@@ -1541,6 +1541,79 @@ EXPORT void bitmap_test(void) {
 	printf("next set should return -1 = %d\n", bitmap_next_set(&bitmap, 0));
 
 	bitmap_free(&bitmap);
+}
+#endif
+
+/******************************************************************************
+ * acs - access control string
+ ******************************************************************************/
+#include <limits.h>
+struct acs_info {
+	unsigned char level;
+	unsigned flags;
+};
+
+static void acs_init(struct acs_info *ai, unsigned level, unsigned flags) {
+	ai->level=level<=UCHAR_MAX?level:UCHAR_MAX;
+	ai->flags=flags;
+}
+
+static int acs_testflag(struct acs_info *ai, char flag) {
+	unsigned i;
+	flag=tolower(flag);
+	if(flag>='a' && flag<='z') {
+		i=flag-'a';
+	} else if(flag>='0' && flag<='9') {
+		i=flag-'0'+26;
+	} else {
+		fprintf(stderr, "unknown flag '%c'\n", flag);
+		return 0;
+	}
+	return ((ai->flags>>i)&1)==1;
+}
+
+static int acs_check(struct acs_info *ai, const char *acsstring) {
+	const char *s=acsstring;
+	const char *endptr;
+	unsigned long level;
+retry:
+	while(*s) switch(*s++) {
+		case 's':
+			level=strtoul(s, (char**)&endptr, 10);
+			if(endptr==acsstring) {
+				goto parse_failure;
+			}
+			if(ai->level<level) goto did_not_pass;
+			s=endptr;
+			break;
+		case 'f':
+			if(!acs_testflag(ai, *s)) goto did_not_pass;
+			s++;
+			break;
+		case '|':
+			return 1; /* short circuit the OR */
+		default:
+			goto parse_failure;
+	}
+	return 1; /* everything matched */
+did_not_pass:
+	while(*s) if(*s++=='|') goto retry; /* look for an | */
+	return 0;
+parse_failure:
+	fprintf(stderr, "acs parser failure '%s' (off=%d)\n", acsstring, s-acsstring);
+	return 0;
+}
+
+#ifndef NDEBUG
+void acs_test(void) {
+	struct acs_info ai_test;
+
+	acs_init(&ai_test, 4, 0);
+
+	printf("acs_check() %d\n", acs_check(&ai_test, "s6fA"));
+	printf("acs_check() %d\n", acs_check(&ai_test, "s2"));
+	printf("acs_check() %d\n", acs_check(&ai_test, "s2fA"));
+	printf("acs_check() %d\n", acs_check(&ai_test, "s8|s2"));
 }
 #endif
 
@@ -3672,6 +3745,7 @@ int main(int argc, char **argv) {
 	struct config cfg;
 #ifndef NDEBUG
 	/*
+	acs_test();
 	map_test();
 	config_test();
 	bitmap_test();
