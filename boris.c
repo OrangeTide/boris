@@ -300,6 +300,16 @@ static struct mud_config {
 	char *menu_prompt;
 	char *form_prompt;
 	char *command_prompt;
+	char *msg_errormain;
+	char *msg_invalidselection;
+	char *msg_invalidusername;
+	char *msg_noaccount;
+	char *msg_tryagain;
+	char *msg_unsupported;
+	char *msg_useralphanumeric;
+	char *msg_usercreatesuccess;
+	char *msg_userexists;
+	char *msg_usermin3;
 } mud_config;
 
 /******************************************************************************
@@ -317,23 +327,23 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line);
 static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 	static char number_buffer[65];
 	static char tab[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-";
-    char *o; /* output */
+	char *o; /* output */
 	size_t len;
-    if(base<2) base=2;
+	if(base<2) base=2;
 	if(base>sizeof tab) base=sizeof tab;
-    o=number_buffer+sizeof number_buffer;
-    *--o=0;
-    do {
-        *--o=tab[n%base];
-        n/=base;
-    } while(n);
+	o=number_buffer+sizeof number_buffer;
+	*--o=0;
+	do {
+		*--o=tab[n%base];
+		n/=base;
+	} while(n);
 	len=number_buffer+sizeof number_buffer-1-o;
 	if(pad && len<pad) {
 		for(pad=pad-len;pad;pad--) {
 			*--o=tab[0];
 		}
 	}
-    return o;
+	return o;
 }
 
 static void hexdump(FILE *f, const void *data, int len) {
@@ -3207,13 +3217,13 @@ EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const
 			if(curr->action_func) {
 				curr->action_func(cl, curr->extra2, curr->extra3);
 			} else {
-				telnetclient_puts(cl, "\nNot supported!\n");
+				telnetclient_puts(cl, mud_config.msg_unsupported);
 				menu_show(cl, mi);
 			}
 			return;
 		}
 	}
-	telnetclient_puts(cl, "\nInvalid selection!\n");
+	telnetclient_puts(cl, mud_config.msg_invalidselection);
 	menu_show(cl, mi);
 }
 
@@ -3257,7 +3267,7 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 	if(u) {
 		telnetclient_printf(cl, "Hello, %s.\n", u->username);
 	} else {
-		telnetclient_puts(cl, "Invalid account\n");
+		telnetclient_puts(cl, mud_config.msg_noaccount);
 		/* TODO: kick out back to the menu */
 	}
 
@@ -3279,7 +3289,7 @@ static void login_username_lineinput(struct telnetclient *cl, const char *line) 
 	while(*line && isspace(*line)) line++; /* ignore leading spaces */
 
 	if(!*line) {
-		telnetclient_puts(cl, "\nInvalid username!\n");
+		telnetclient_puts(cl, mud_config.msg_invalidusername);
 	}
 
 	/* store the username for the password state to use */
@@ -3375,7 +3385,7 @@ static void form_lineinput(struct telnetclient *cl, const char *line) {
 		/* check the input */
 		if(f->curr->form_check && !f->curr->form_check(cl, line)) {
 			DEBUG("%s:Invalid form input\n", cl->sh->name);
-			telnetclient_puts(cl, "\nTry again!\n");
+			telnetclient_puts(cl, mud_config.msg_tryagain);
 			return;
 		}
 		if(f->curr->user_value) {
@@ -3411,7 +3421,7 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 		} else {
 			/* fallback */
 			DEBUG("%s():%s:ERROR:going to main menu\n", __func__, cl->sh->name);
-			telnetclient_puts(cl, "ERROR: going to main menu\n");
+			telnetclient_puts(cl, mud_config.msg_errormain);
 			telnetclient_start_menuinput(cl, &gamemenu_login);
 		}
 		return; /* success */
@@ -3429,7 +3439,7 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 	}
 
 	/* invalid_selection */
-	telnetclient_puts(cl, "\nInvalid selection!\n");
+	telnetclient_puts(cl, mud_config.msg_invalidselection);
 	form_menu_show(cl, f);
 	return;
 }
@@ -3447,21 +3457,21 @@ static int form_createaccount_username_check(struct telnetclient *cl, const char
 
 	len=strlen(str);
 	if(len<3) {
-		telnetclient_puts(cl, "Username must contain at least 3 characters!\n");
+		telnetclient_puts(cl, mud_config.msg_usermin3);
 		return 0;
 	}
 
 	for(s=str,res=isalpha(*s);*s;s++) {
 		res=res&&isalnum(*s);
 		if(!res) {
-			telnetclient_puts(cl, "Username must only contain alphanumeric characters and must start with a letter!\n");
+			telnetclient_puts(cl, mud_config.msg_useralphanumeric);
 			return 0;
 		}
 	}
 
 	u=user_get(str);
 	if(u) {
-		telnetclient_puts(cl, "Username already exists!\n");
+		telnetclient_puts(cl, mud_config.msg_userexists);
 		return 0;
 	}
 
@@ -3489,7 +3499,7 @@ static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
 
 	u=user_get(username);
 	if(u) {
-		telnetclient_puts(cl, "Username already exists!\n");
+		telnetclient_puts(cl, mud_config.msg_userexists);
 		return;
 	}
 
@@ -3499,7 +3509,7 @@ static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
 		return;
 	}
 
-	telnetclient_puts(cl, "Account sucessfully created!\n");
+	telnetclient_puts(cl, mud_config.msg_usercreatesuccess);
 
 	/* TODO: for approvable based systems, disconnect the user with a friendly message */
 	telnetclient_start_menuinput(cl, &gamemenu_login);
@@ -3734,6 +3744,38 @@ static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const
 	return 1;
 }
 
+static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
+	size_t len;
+	unsigned i;
+	const struct {
+		const char *id;
+		char **target;
+	} info[] = {
+		{ "msg.unsupported", &mud_config.msg_unsupported },
+		{ "msg.invalidselection", &mud_config.msg_invalidselection },
+		{ "msg.noaccount", &mud_config.msg_noaccount },
+		{ "msg.invalidusername", &mud_config.msg_invalidusername },
+		{ "msg.tryagain", &mud_config.msg_tryagain },
+		{ "msg.errormain", &mud_config.msg_errormain },
+		{ "msg.usermin3", &mud_config.msg_usermin3 },
+		{ "msg.useralphanumeric", &mud_config.msg_useralphanumeric },
+		{ "msg.userexists", &mud_config.msg_userexists },
+		{ "msg.usercreatesuccess", &mud_config.msg_usercreatesuccess },
+	};
+
+	for(i=0;i<NR(info);i++) {
+		if(!strcmp(id, info[i].id)) {
+			free(*info[i].target);
+			len=strlen(value)+2; /* leave room for a newline */
+			*info[i].target=malloc(len);
+			snprintf(*info[i].target, len, "%s\n", value);
+			return 1;
+		}
+	}
+	fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
+	return 0; /* failure */
+}
+
 /* handles the 'server.port' property */
 static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
@@ -3826,12 +3868,23 @@ int main(int argc, char **argv) {
 	mud_config.menu_prompt=strdup("Selection: ");
 	mud_config.form_prompt=strdup("Selection: ");
 	mud_config.command_prompt=strdup("> ");
+	mud_config.msg_errormain=strdup("ERROR: going back to main menu!\n");
+	mud_config.msg_invalidselection=strdup("Invalid selection!\n");
+	mud_config.msg_invalidusername=strdup("Invalid username\n");
+	mud_config.msg_noaccount=strdup("Invalid account!\n");
+	mud_config.msg_tryagain=strdup("Try again!\n");
+	mud_config.msg_unsupported=strdup("Not supported!\n");
+	mud_config.msg_useralphanumeric=strdup("Username must only contain alphanumeric characters and must start with a letter!\n");
+	mud_config.msg_usercreatesuccess=strdup("Account successfully created!\n");
+	mud_config.msg_userexists=strdup("Username already exists!\n");
+	mud_config.msg_usermin3=strdup("Username must contain at least 3 characters!\n");
 
 	process_args(argc, argv);
 
 	config_setup(&cfg);
 	config_watch(&cfg, "server.port", do_config_port, 0);
 	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
+	config_watch(&cfg, "msg.*", do_config_msg, 0);
 #ifndef NDEBUG
 	config_watch(&cfg, "*", config_test_show, 0);
 #endif
