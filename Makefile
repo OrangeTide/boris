@@ -4,13 +4,15 @@
 # universal settings for all platforms and architectures
 ##############################################################################
 
-CFLAGS:=-Wall -Wextra -Wuninitialized -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -Wstrict-aliasing -Wpointer-arith -Wcast-align  -Wold-style-definition -Wredundant-decls -Wnested-externs -std=gnu99 -pedantic 
+CFLAGS:=-Wall -Wextra -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -Wstrict-aliasing -Wpointer-arith -Wcast-align  -Wold-style-definition -Wredundant-decls -Wnested-externs -std=gnu99 -pedantic 
 # debugging
-CFLAGS+=-g -O1
+CFLAGS+=-g
+# Uninitialized/clobbered variable warning
+#CFLAGS+=-Wuninitialized -O1
 # profiling
-# CFLAGS+=-pg
+#CFLAGS+=-pg
 # optimization
-# CFLAGS+=-Os 
+#CFLAGS+=-Os 
 # enable the following for dead code elimination
 #CFLAGS+=-ffunction-sections -fdata-sections -Wl,--gc-sections
 
