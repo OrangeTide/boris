@@ -3611,6 +3611,8 @@ EXPORT void config_free(struct config *cfg) {
 	}
 }
 
+/* adds a watcher with a shell style mask
+ * func can return 0 to end the chain, or return 1 if the operation should continue on */
 EXPORT void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value), void *extra) {
 	struct config_watcher *w;
 	assert(mask != NULL);
@@ -3704,7 +3706,7 @@ failure:
 
 #ifndef NDEBUG
 static int config_test_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
-	printf("SHOW: %s=%s\n", id, value);
+	printf("CONFIG SHOW: %s=%s\n", id, value);
 	return 1;
 }
 
@@ -3734,14 +3736,14 @@ static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const
 		target=&mud_config.command_prompt;
 	} else {
 		fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
-		return 0; /* failure */
+		return 1; /* failure - continue looking for matches */
 	}
 
 	free(*target);
 	len=strlen(value)+2; /* leave room for a space */
 	*target=malloc(len);
 	snprintf(*target, len, "%s ", value);
-	return 1;
+	return 0; /* success - terminate the callback chain */
 }
 
 static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
@@ -3769,19 +3771,20 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 			len=strlen(value)+2; /* leave room for a newline */
 			*info[i].target=malloc(len);
 			snprintf(*info[i].target, len, "%s\n", value);
-			return 1;
+			return 0; /* success - terminate the callback chain */
 		}
 	}
 	fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
-	return 0; /* failure */
+	return 1; /* failure - continue looking for matches */
 }
 
 /* handles the 'server.port' property */
 static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
 		fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
+		return 1; /* failure - continue looking for matches */
 	}
-	return 1;
+	return 0; /* success - terminate the callback chain */
 }
 
 static void usage(void) {
