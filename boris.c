@@ -321,6 +321,38 @@ EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const
 static void form_menu_lineinput(struct telnetclient *cl, const char *line);
 
 /******************************************************************************
+ * Util - utility routines
+ ******************************************************************************/
+#define UTIL_FNM_NOMATCH 1
+#define UTIL_FNM_CASEFOLD 16	/* case insensitive matches */
+
+/* clone of the fnmatch() function */
+EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
+	char c;
+
+	while((c=*pattern++)) switch(c) {
+		/* TODO: support [] and \ */
+		case '?':
+			if(*string++==0) return UTIL_FNM_NOMATCH;
+			break;
+		case '*':
+			if(!*pattern) return 0; /* success */
+			for(;*string;string++) {
+				/* trace out any paths that match the first character */
+			if(((flags&UTIL_FNM_CASEFOLD) ?  tolower(*string)==tolower(*pattern) : *string==*pattern) && util_fnmatch(pattern, string, flags)==0) {
+					return 0; /* recursive check matched */
+				}
+			}
+			return UTIL_FNM_NOMATCH; /* none of the tested paths worked */
+			break;
+		default:
+			if((flags&UTIL_FNM_CASEFOLD) ? tolower(*string++)!=tolower(c) : *string++!=c) return UTIL_FNM_NOMATCH;
+	}
+	if(*string) return UTIL_FNM_NOMATCH;
+	return 0; /* success */
+}
+
+/******************************************************************************
  * Debug routines
  ******************************************************************************/
 #ifndef NDEBUG
@@ -3568,35 +3600,6 @@ struct config {
 	LIST_HEAD(struct, struct config_watcher) watchers;
 };
 
-#define CONFIG_FNM_NOMATCH 1
-#define CONFIG_FNM_CASEFOLD 16	/* case insensitive matches */
-
-/* clone of the fnmatch() function */
-EXPORT int config_fnmatch(const char *pattern, const char *string, int flags) {
-	char c;
-
-	while((c=*pattern++)) switch(c) {
-		/* TODO: support [] and \ */
-		case '?':
-			if(*string++==0) return CONFIG_FNM_NOMATCH;
-			break;
-		case '*':
-			if(!*pattern) return 0; /* success */
-			for(;*string;string++) {
-				/* trace out any paths that match the first character */
-			if(((flags&CONFIG_FNM_CASEFOLD) ?  tolower(*string)==tolower(*pattern) : *string==*pattern) && config_fnmatch(pattern, string, flags)==0) {
-					return 0; /* recursive check matched */
-				}
-			}
-			return CONFIG_FNM_NOMATCH; /* none of the tested paths worked */
-			break;
-		default:
-			if((flags&CONFIG_FNM_CASEFOLD) ? tolower(*string++)!=tolower(c) : *string++!=c) return CONFIG_FNM_NOMATCH;
-	}
-	if(*string) return CONFIG_FNM_NOMATCH;
-	return 0; /* success */
-}
-
 EXPORT void config_setup(struct config *cfg) {
 	LIST_INIT(&cfg->watchers);
 }
@@ -3690,7 +3693,7 @@ EXPORT int config_load(const char *filename, struct config *cfg) {
 
 		/* check the masks */
 		for(curr=LIST_TOP(cfg->watchers);curr;curr=LIST_NEXT(curr, list)) {
-			if(!config_fnmatch(curr->mask, buf, CONFIG_FNM_CASEFOLD) && curr->func) {
+			if(!util_fnmatch(curr->mask, buf, UTIL_FNM_CASEFOLD) && curr->func) {
 				if(!curr->func(cfg, curr->extra, buf, value)) {
 					break; /* return 0 from the callback will terminate the list */
 				}
