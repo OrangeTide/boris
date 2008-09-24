@@ -3313,6 +3313,7 @@ static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct so
 	char buf[64];
 	struct socketio_handle *newserv;
 	struct server *servdata;
+	struct linger li;
 
 	const int yes=1;
 	assert(ai!=NULL);
@@ -3333,6 +3334,9 @@ static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct so
 
 	if(ai->ai_family==AF_INET || ai->ai_family==AF_INET6) {
 		SOCKETIO_FAILON(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&yes, sizeof yes)!=0, "setting SO_REUSEADDR", failure);
+		li.l_onoff=0; /* disable linger, except for exit() */
+		li.l_linger=10; /* 10 seconds */
+		SOCKETIO_FAILON(setsockopt(fd, SOL_SOCKET, SO_LINGER, (const void*)&li, sizeof li)!=0, "setting SO_LINGER", failure);
 	}
 
 	SOCKETIO_FAILON(bind(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen)!=0, "binding to port", failure);
