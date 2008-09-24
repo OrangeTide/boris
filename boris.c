@@ -2406,7 +2406,7 @@ EXPORT int sjdb_load(struct sjdb_handle *db) {
 	long currpos;
 
 	currpos=ftell(db->f);
-	TRACE(stderr, "%s:currpos=%ld\n", db->filename, currpos);
+	TRACE("%s:currpos=%ld\n", db->filename, currpos);
 
 	if(currpos!=SJDB_HEADER_SIZE) {
 		/* seek to the start of data this will fail if there is no data in the file */
