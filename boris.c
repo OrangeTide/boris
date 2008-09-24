@@ -82,14 +82,19 @@
 
 #include <assert.h>
 #include <ctype.h>
-#include <inttypes.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef NDEBUG
+#include <math.h>
+#endif
 
 /******************************************************************************
  * Macros
@@ -142,11 +147,39 @@
 		(dest)[(offset)+1]=VAR(tmp)%256; \
 	} while(0)
 
+/* WRite Big-Endian 64-bit value */
+#define WR_BE64(dest, offset, value) do { \
+		unsigned long long VAR(tmp)=value; \
+		(dest)[offset]=((VAR(tmp))>>56)&255; \
+		(dest)[(offset)+1]=((VAR(tmp))>>48)&255; \
+		(dest)[(offset)+2]=((VAR(tmp))>>40)&255; \
+		(dest)[(offset)+3]=((VAR(tmp))>>32)&255; \
+		(dest)[(offset)+4]=((VAR(tmp))>>24)&255; \
+		(dest)[(offset)+5]=((VAR(tmp))>>16)&255; \
+		(dest)[(offset)+6]=((VAR(tmp))>>8)&255; \
+		(dest)[(offset)+7]=(VAR(tmp))&255; \
+	} while(0)
+
 /* ReaD Big-Endian 16-bit value */
-#define RD_BE16(src, offset) (((src)[offset]*256)|(src)[(offset)+1])
+#define RD_BE16(src, offset) ((((src)[offset]&255u)<<8)|((src)[(offset)+1]&255u))
 
 /* ReaD Big-Endian 32-bit value */
-#define RD_BE32(src, offset) (((src)[offset]*16777216L)|((src)[(offset)+1]*65536L)|((src)[(offset)+2]*256)|(src)[(offset)+3])
+#define RD_BE32(src, offset) (\
+	(((src)[offset]&255ul)<<24) \
+	|(((src)[(offset)+1]&255ul)<<16) \
+	|(((src)[(offset)+2]&255ul)<<8) \
+	|((src)[(offset)+3]&255ul))
+
+/* ReaD Big-Endian 64-bit value */
+#define RD_BE64(src, offset) (\
+		(((src)[offset]&255ull)<<56) \
+		|(((src)[(offset)+1]&255ull)<<48) \
+		|(((src)[(offset)+2]&255ull)<<40) \
+		|(((src)[(offset)+3]&255ull)<<32) \
+		|(((src)[(offset)+4]&255ull)<<24) \
+		|(((src)[(offset)+5]&255ull)<<16) \
+		|(((src)[(offset)+6]&255ull)<<8) \
+		|((src)[(offset)+7]&255ull))
 
 /*=* Rotate operations *=*/
 #define ROL8(a,b) (((uint_least8_t)(a)<<(b))|((uint_least8_t)(a)>>(8-(b))))
@@ -310,6 +343,8 @@ static struct mud_config {
 	char *msg_usercreatesuccess;
 	char *msg_userexists;
 	char *msg_usermin3;
+	char *db_filename;
+	char *db_filename_timestamp;
 } mud_config;
 
 /******************************************************************************
@@ -319,6 +354,52 @@ static void telnetclient_free(struct socketio_handle *sh);
 EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
 EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 static void form_menu_lineinput(struct telnetclient *cl, const char *line);
+
+/******************************************************************************
+ * Mud Config
+ ******************************************************************************/
+EXPORT void mud_config_init(void) {
+	mud_config.menu_prompt=strdup("Selection: ");
+	mud_config.form_prompt=strdup("Selection: ");
+	mud_config.command_prompt=strdup("> ");
+	mud_config.msg_errormain=strdup("ERROR: going back to main menu!\n");
+	mud_config.msg_invalidselection=strdup("Invalid selection!\n");
+	mud_config.msg_invalidusername=strdup("Invalid username\n");
+	mud_config.msg_noaccount=strdup("Invalid account!\n");
+	mud_config.msg_tryagain=strdup("Try again!\n");
+	mud_config.msg_unsupported=strdup("Not supported!\n");
+	mud_config.msg_useralphanumeric=strdup("Username must only contain alphanumeric characters and must start with a letter!\n");
+	mud_config.msg_usercreatesuccess=strdup("Account successfully created!\n");
+	mud_config.msg_userexists=strdup("Username already exists!\n");
+	mud_config.msg_usermin3=strdup("Username must contain at least 3 characters!\n");
+	mud_config.db_filename=strdup("boris.sjdb");
+	mud_config.db_filename_timestamp=strdup("%y%m%d");
+}
+
+EXPORT void mud_config_shutdown(void) {
+	char **targets[] = {
+	    &mud_config.menu_prompt,
+	    &mud_config.form_prompt,
+	    &mud_config.command_prompt,
+	    &mud_config.msg_errormain,
+	    &mud_config.msg_invalidselection,
+	    &mud_config.msg_invalidusername,
+	    &mud_config.msg_noaccount,
+	    &mud_config.msg_tryagain,
+	    &mud_config.msg_unsupported,
+	    &mud_config.msg_useralphanumeric,
+	    &mud_config.msg_usercreatesuccess,
+	    &mud_config.msg_userexists,
+	    &mud_config.msg_usermin3,
+	    &mud_config.db_filename,
+	    &mud_config.db_filename_timestamp,
+	};
+	unsigned i;
+	for(i=0;i<NR(targets);i++) {
+		free(*targets[i]);
+		*targets[i]=NULL;
+	}
+}
 
 /******************************************************************************
  * Util - utility routines
@@ -1121,12 +1202,21 @@ EXPORT uint_least32_t map_hash_string(const void *key) {
 	return hash_stringignorecase32(key);
 }
 
+EXPORT uint_least32_t map_hash_unsigned(const void *key) {
+	return hash_uint32(*(unsigned*)key);
+}
+
 EXPORT int map_compare_stringignorecase(const void *key1, const void *key2) {
 	return strcasecmp(key1, key2);
 }
 
 EXPORT int map_compare_string(const void *key1, const void *key2) {
 	return strcmp(key1, key2);
+}
+
+EXPORT int map_compare_unsigned(const void *key1, const void *key2) {
+	unsigned a=*(unsigned*)key1 ,b=*(unsigned*)key2;
+	return a<b?-1:a>b?1:0;
 }
 
 EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entry)(void *key, void *data), uint_least32_t (*hash)(const void *key), int (*compare)(const void *key1, const void *key2)) {
@@ -1686,8 +1776,663 @@ void acs_test(void) {
 #endif
 
 /******************************************************************************
+ * ieee754 doubles
+ ******************************************************************************/
+
+EXPORT void ieee754_encode64be(void *dest, double f) {
+	const unsigned
+		bits=64,
+		expbits=11,
+		sigbits=bits-expbits-1;
+	const int bias=(1<<(expbits-1))-1;
+	double norm;
+	int shift;
+	unsigned sign, exponent;
+	unsigned long long sig;
+
+	sign=f<0;
+	norm=fabs(f);
+	for(shift=0;norm>=2.;norm/=2.,shift++) ;
+	for(;norm<1.;norm*=2.,shift--) ;
+	norm-=1.;
+	sig=norm*((1ll<<sigbits)+.5);
+	exponent=shift+bias;
+
+	sig|=((unsigned long long)sign<<(bits-1))|((unsigned long long)exponent<<sigbits);
+	WR_BE64((unsigned char*)dest, 0, sig);
+}
+
+EXPORT double ieee754_decode64be(void *src) {
+	const unsigned
+		bits=64,
+		expbits=11,
+		sigbits=bits-expbits-1;
+	const int bias=(1<<(expbits-1))-1;
+	unsigned long long i;
+	int shift;
+	double res;
+	i=RD_BE64((unsigned char*)src, 0);
+	if(i==0) return 0.;
+	/* printf("hex=0x%llX i=0x%llX\n", *(long long*)src, i); */
+	res=i&((1LL<<sigbits)-1); /* mask off significant */	
+	/* printf("res=%f hex=0x%llX\n", res, *(long long*)&res); */
+	res/=(1LL<<sigbits);
+	res+=1.;
+	shift=((i>>sigbits)&((1LL<<expbits)-1))-bias;
+	/* printf("shift=%d res=%f hex=0x%llX\n", shift, res, *(long long*)&res); */
+	while(shift>0) { res*=2.0; shift--; }
+	while(shift<0) { res/=2.0; shift++; }
+	if(i>>(bits-1)) {
+		res=-res;
+	}
+	return res;
+}
+
+#ifndef NDEBUG
+static void ieee754_test(void) {
+	char buf[8];
+	double tmp, pi;
+
+	ieee754_encode64be(buf, pi=M_PI);
+	tmp=ieee754_decode64be(buf);
+	fprintf(stderr, "%s():in=%f hex=0x%llX out=%f hex=0x%llX buf=0x%llX ok? %d\n", __func__, pi, *(long long*)&pi, tmp, *(long long*)&tmp, *(long long*)buf, tmp==pi);
+}
+#endif
+
+/******************************************************************************
+ * 
+ ******************************************************************************/
+/* template for the format parser
+ * variables:
+ * width - 0 means unset
+ * precision - -1 means unspecified
+ * format:
+ * u	- 32-bit unsigned integer
+ * hu	- 16-bit unsigned integer
+ * llu	- 64-bit unsigned
+ * f	- 64-bit IEEE double
+ * c    - 8-bit unsigned integer
+ * s	- null terminated string
+ * return:
+ * -1 on failure
+ *  new offset on success
+ */
+#define RECORD_FORMAT_PARSER(c_action, hu_action, u_action, llu_action, f_action, lf_action, s_action) do { \
+		va_list ap; \
+		va_start(ap, fmt); \
+	out: \
+		while(*fmt) { \
+			if(*fmt=='%') { \
+				char *endptr; \
+				int width=0, precision=-1; \
+				int longness=0; \
+				fmt++; \
+				if(*fmt=='*') { \
+					width=va_arg(ap, int); \
+					fmt++; \
+				} else if(isdigit(*fmt) || (*fmt=='-' && isdigit(fmt[1]))) { \
+					width=strtol(fmt, &endptr, 10); \
+					assert(endptr!=fmt); \
+					fmt=endptr; \
+				} \
+				if(*fmt=='.') { \
+					fmt++; \
+					if(*fmt=='*') { \
+						precision=va_arg(ap, int); \
+						fmt++; \
+					} else if(isdigit(fmt[1])) { \
+						precision=strtoul(fmt+1, &endptr, 10); \
+						assert(endptr!=fmt); \
+						fmt=endptr; \
+					} \
+				} \
+				while(*fmt) switch(*fmt) { \
+					case 0: abort(); \
+					case 'h': \
+						fmt++; \
+						longness--; \
+						break; \
+					case 'L': \
+						fmt++; \
+						longness+=2; \
+						break; \
+					case 'l': \
+						fmt++; \
+						longness++; \
+						break; \
+					case 'c': \
+						if(offset+1>len) goto out_of_data; \
+						c_action; \
+						offset++; \
+						fmt++; \
+						goto out; \
+					case 'u': \
+						/* printf("width=%d precision=%d\n", width, precision); */ \
+						if(longness==0) { \
+							if(offset+4>len) goto out_of_data; \
+							u_action; \
+							offset+=4; \
+						} else if(longness==2) { \
+							if(offset+8>len) goto out_of_data; \
+							llu_action; \
+							offset+=8; \
+						} else if(longness==-1) { \
+							if(offset+2>len) goto out_of_data; \
+							hu_action; \
+							offset+=2; \
+						} else { \
+							fprintf(stderr, "invalid type specifier for format tag '%c'\n", *fmt); \
+							goto bad_format; \
+						} \
+						fmt++; \
+						goto out; \
+					case 'a': case 'A': case 'e': case 'E': \
+					case 'g': case 'G': case 'f': case 'F': /* process double and floats */ \
+						switch(longness) { \
+							case 0: \
+								f_action; break; \
+							case 1: \
+								lf_action; break; \
+							case 2: \
+								fprintf(stderr, "long double not supported\n"); \
+							default: \
+								goto bad_format; \
+						} \
+						goto out; \
+					case 's': \
+						s_action; goto out; \
+					default: \
+						fprintf(stderr, "Unknown format code '%c'\n", *fmt); \
+						goto bad_format; \
+				} \
+			} else { \
+				/* printf("*fmt='%c'\n", *fmt); */ \
+				fmt++; \
+			} \
+		} \
+		va_end(ap); \
+		return offset; /* success */ \
+	out_of_data: \
+		fprintf(stderr, "format exceeds data available\n"); \
+		va_end(ap); \
+		return -1; /* failure */ \
+	bad_format: \
+		fprintf(stderr, "invalid format code\n"); \
+		va_end(ap); \
+		return -1; /* failure */ \
+	} while(0)
+
+GCC_ONLY(EXPORT int record_read(const void *data, size_t len, size_t offset, const const char *fmt, ...) __attribute__ ((format (scanf, 4, 5))));
+EXPORT int record_read(const void *data, size_t len, size_t offset, const const char *fmt, ...) {
+	RECORD_FORMAT_PARSER(
+		*va_arg(ap, uint8_t*)=((char*)data)[offset],
+		*va_arg(ap, uint_least16_t*)=RD_BE16((char*)data, offset),
+		*va_arg(ap, uint_least32_t*)=RD_BE32((char*)data, offset),
+		*va_arg(ap, uint_least64_t*)=RD_BE64((char*)data, offset),
+		{
+		fprintf(stderr, "float format unsupported\n");
+		goto bad_format;
+		},
+		{ /* doubles */
+		if(offset+8>len) goto out_of_data;
+		*va_arg(ap, double*)=ieee754_decode64be((char*)data+offset);
+		offset+=8;
+		},
+		{ /* string - the width paramter controls the amount of consumed data */
+			/* NOTE: precision/width are used differnetly in record_write */
+			const char *tmp;
+			char *dest;
+			size_t max=len-offset;
+			dest=va_arg(ap, char *);
+			if(width>0 && (unsigned)width-1<max) {
+				max=width-1;
+			}
+			tmp=memchr((char*)data+offset, 0, max);
+			if(!tmp) {
+				fprintf(stderr, "could not find null terminated string in buffer.\n");
+				goto out_of_data;
+			}
+			max=tmp-((char*)data+offset);
+			memcpy(dest, (char*)data+offset, max+1); /* include null terminator */
+			offset+=max+1;
+		}
+	);
+}
+
+GCC_ONLY(EXPORT int record_write(const void *data, size_t len, size_t offset, const const char *fmt, ...) __attribute__ ((format (printf, 4, 5))));
+EXPORT int record_write(const void *data, size_t len, size_t offset, const const char *fmt, ...) {
+	RECORD_FORMAT_PARSER(
+		((uint8_t*)data)[offset]=va_arg(ap, unsigned),
+		WR_BE16((char*)data, offset, va_arg(ap, unsigned)),
+		WR_BE32((char*)data, offset, va_arg(ap, uint_least32_t)),
+		WR_BE64((char*)data, offset, va_arg(ap, uint_least64_t)),
+		{ /* doubles */
+			if(offset+8>len) goto out_of_data;
+			ieee754_encode64be((char*)data+offset, va_arg(ap, double));
+			offset+=8;
+		},
+		goto bad_format,
+		{ /* string - precision is max number of characters, not including null terminator */
+			/* NOTE: precision/width are used differnetly in record_read */
+			const char *s;
+			const char *tmp;
+			s=va_arg(ap, const char *);
+			if(precision==-1) {
+				tmp=s+strlen(s);
+			} else {
+				tmp=memchr(s, 0, (size_t)precision);
+				if(!tmp) {
+					tmp=s+precision;
+				}
+			}
+			if(offset+(tmp-s)+1>len) goto out_of_data;
+			memcpy((char*)data+offset, s, (size_t)(tmp-s));
+			((char*)data)[offset+(tmp-s)]=0;
+			offset+=(tmp-s)+1;
+		}
+	);
+}
+
+#ifndef NDEBUG
+static int record_test(void) {
+	char data[31];
+	uint_least32_t a;
+	uint_least64_t b;
+	uint_least16_t c, d;
+	uint8_t e;
+	char buf[8];
+	double f;
+	int res;
+
+	res=record_write(data, sizeof data, 0, "%u%llu%hu%hu%c%f%s", 0x1020304, 0x5060708090a0b0cll, 0xd0e, 0xf10, 42, 1.3e9, "Hello");
+	if(res==-1) {
+		printf("error\n");
+		return 0;
+	}
+	printf("ofs=%d\n", res);
+
+	res=record_read(data, sizeof data, 0, "%u%llu%hu%hu%c%lf%8s", &a, &b, &c, &d, &e, &f, buf);
+	if(res==-1) {
+		printf("error\n");
+		return 0;
+	}
+	printf("ofs=%d %#x %#llx %#x %#x %hhd %g '%s'\n", res, a, b, c, d, e, f, buf);
+	return 1; /* success */
+}
+#endif
+
+/******************************************************************************
+ * adler32
+ ******************************************************************************/
+#define ADLER32_INITIAL 0x00000001ul
+
+EXPORT uint_least32_t adler32(uint_least32_t ck, const void *data, size_t len) {
+	unsigned a, b;
+	size_t sublen;
+
+	a=ck&0xffff;
+	b=(ck>>16)&0xffff;
+	
+	while(len>0) {
+		sublen=len>5552?5552:len;
+		len-=sublen;
+		while(sublen--) {
+			a+=*(char*)data;
+			data=(char*)data+1;
+			b+=a;
+		}
+		a%=65521;
+		b%=65521;
+	}
+	return ((uint_least32_t)b<<16)|a;
+}
+
+#ifndef NDEBUG
+/* test code */
+static int adler32_test(void) {
+	struct {
+		char *s;
+		size_t len;
+		uint_least32_t a32;
+	} test[] = {
+		{ "Hotdog", 6, 0x8220266 },
+		{ "Hello World", 11, 0x180b041d },
+	};
+	uint_least32_t ck;
+	unsigned i;
+
+	for(i=0;i<NR(test);i++) {
+		ck=ADLER32_INITIAL;
+		ck=adler32(ck, test[i].s, test[i].len);
+		if(ck!=test[i].a32) {
+			fprintf(stderr, "%s():failed\n", __func__);
+			return 0;
+		}
+	}
+	fprintf(stderr, "%s():passed\n", __func__);
+	return 1;
+}
+#endif
+
+/******************************************************************************
+ * sjdb - Small Journaling DataBase
+ ******************************************************************************/
+/* HEADER:
+ * 4 magic = "SjDb"
+ * 4 version = "V0.0"
+ * 4 application = 0x00000001 for boris.c
+ * 4 generation - increments every time journal is compacted
+ * 4 adler32 of header
+ *
+ * RECORD:
+ * 1 record type
+ *         0 - reserved for sjdb control records
+ *         U - user account
+ *         P - player character
+ *         C - container
+ *         Z - zone
+ *         R - room
+ *         I - item
+ * 3 record id - treat as a 4 byte id (record_type is the top byte)
+ * 1 action
+ *         E - erase (length must be 0)
+ *         U - update
+ * 3 length - treat as a 4 byte id (atin is the top byte)
+ * . data (only for Update mode)
+ * 4 adler32 of header and data
+ * 4 global adler32 of entire file up to this point
+ */
+
+#define SJDB_WATCHER_HASH_SIZE 5
+#define SJDB_MAGIC "SjDb"
+#define SJDB_VERSION "V0.0"
+#define SJDB_HEADER_SIZE 20
+
+
+/* the big buffer, used to hold incoming data */
+static void *sjdb_buffer;
+static size_t sjdb_buffer_max;
+
+struct sjdb_watcher {
+	unsigned record_type; /* should be a single char */
+	int (*update)(unsigned id, size_t len, void *data);
+	int (*erase)(unsigned id);
+};
+
+struct sjdb_handle {
+	FILE *f;
+	char *filename;
+	struct map watchers;
+	uint_least32_t global_ck; /* global checksum used while adding records */
+};
+
+/* expands the buffer, if necessary.
+ * does not erase the old data, it is used by record processing code to read in header plus data */
+static void *sjdb_grab_buffer(size_t needed) {
+	void *tmp;
+	if(needed>sjdb_buffer_max) {
+		needed=ROUNDUP(needed, 64);
+		tmp=realloc(sjdb_buffer, needed);
+		if(!tmp) {
+			perror(__func__);
+			return 0;
+		}	
+		sjdb_buffer=tmp;
+		sjdb_buffer_max=needed;
+	}
+	return sjdb_buffer;
+}
+
+static void sjdb_watcher_free(void *key UNUSED, void *data UNUSED) {
+	/* do nothing */
+}
+
+static int sjdb_write_header(struct sjdb_handle *db, uint_least32_t application, uint_least32_t generation) {
+	char header[SJDB_HEADER_SIZE];
+	size_t res;
+	uint_least32_t ck;
+
+	assert(db != NULL);
+	
+	DEBUG("%s():writing '%s'\n", __func__, db->filename);
+	memset(header, 'X', sizeof header);
+
+	memcpy(header, SJDB_MAGIC, 4);
+	memcpy(header+4, SJDB_VERSION, 4);
+	record_write(header, sizeof header - 4, 8, "%u%u", application, generation);
+
+	/* apply checksum */
+	ck=adler32(ADLER32_INITIAL, header, sizeof header - 4);
+	WR_BE32(header, 16, ck);
+
+	res=fwrite(header, 1, sizeof header, db->f);
+	if(res!=sizeof header) {
+		if(ferror(db->f)) {
+			perror(db->filename);
+		}
+		fprintf(stderr, "%s:could not write header\n", db->filename);
+		return 0;
+	}
+
+	return 1;
+}
+
+static int sjdb_read_header(struct sjdb_handle *db, uint_least32_t *application, uint_least32_t *generation) {
+	char header[SJDB_HEADER_SIZE];
+	size_t res;
+	uint_least32_t ck, original_ck;
+
+	assert(db != NULL);
+
+	if(fseek(db->f, SEEK_SET, 0)<0) {
+		perror(db->filename);
+		/* TODO: free the structure */
+		return 0;
+	}
+
+	res=fread(header, 1, sizeof header, db->f);
+	if(res==0 && feof(db->f)) { /* new file, create the header */
+		/* create the header - this can only be called on a 0 length file */
+		return sjdb_write_header(db, 1, 0); /* TODO: accept an application parameter */
+	} else if(res==0 && ferror(db->f)) {
+		perror(db->filename);
+		fprintf(stderr, "%s:could not read file\n", db->filename);
+		return 0;
+	} else if(res<sizeof header || memcmp(header, SJDB_MAGIC, 4) || memcmp(header+4, SJDB_VERSION, 4)) { 
+		fprintf(stderr, "%s:not a '%.4s' file\n", db->filename, SJDB_MAGIC);
+		return 0;
+	}
+
+	assert(res == SJDB_HEADER_SIZE);
+
+	if(application) {
+		*application=RD_BE32(header, 8);
+	}
+
+	if(generation) {
+		*generation=RD_BE32(header, 12);
+	}
+
+	original_ck=RD_BE32(header, 16);
+
+	/* checksum the first 4 words */
+	ck=adler32(ADLER32_INITIAL, header, res-4);
+
+	if(ck!=original_ck) {
+		fprintf(stderr, "%s:header checksum failed (calc=0x%08x orig=0x%08x)\n", db->filename, ck, original_ck);
+		return 0;
+	}
+
+	return 1;
+}
+
+EXPORT int sjdb_open(struct sjdb_handle *db, const char *filename) {
+	uint_least32_t generation, application;
+
+	assert(db != NULL);
+	assert(filename != NULL);
+	db->f=fopen(filename, "a+b");
+	if(!db->f) {
+		perror(filename);
+		return 0; /* failure */
+	}
+	db->filename=strdup(filename);	
+	map_init(&db->watchers, SJDB_WATCHER_HASH_SIZE, sjdb_watcher_free, map_hash_unsigned, map_compare_unsigned);
+
+	/* read the header */
+	if(!sjdb_read_header(db, &application, &generation)) {
+		fprintf(stderr, "%s:missing header\n", db->filename);
+		/* TODO: free the structure */
+		return 0;
+	}
+
+	db->global_ck=ADLER32_INITIAL;
+
+	return 1;
+}
+
+void sjdb_close(struct sjdb_handle *db) {
+	assert(db != NULL);
+	fclose(db->f);
+	db->f=NULL;
+	free(db->filename);
+	db->filename=NULL;
+}
+
+EXPORT int sjdb_addwatcher(struct sjdb_handle *db, unsigned record_type, int (*update)(unsigned id, size_t len, void *data), int (*erase)(unsigned id)) {
+	struct sjdb_watcher *new;
+	new=malloc(sizeof *new);
+	if((record_type&~255u)) {
+		fprintf(stderr, "%s:Could not add for record_type=%d (out of range)\n", __func__, record_type);
+		return 0;
+	}
+	new->record_type=record_type&255;
+	new->erase=erase;
+	new->update=update;
+	if(!map_add(&db->watchers, &new->record_type, new)) {
+		fprintf(stderr, "%s:Could not add for record_type='%c'\n", __func__, record_type);
+		return 0;
+	}
+	return 1; /* success */
+}
+
+/* return 0 on error
+ * return 1 on success
+ * return -1 on EOF
+ */
+static int sjdb_ll_read_entry(struct sjdb_handle *db) {
+	const size_t header_len=8;
+	char *buffer;
+	uint_least32_t id, length, ck, calc_ck;
+	size_t res;
+	unsigned char type, action;
+
+	buffer=sjdb_grab_buffer(header_len);
+	if(!buffer) {
+		/* TODO: log file offset with error message */
+		fprintf(stderr, "%s:could not allocate buffer\n", db->filename);
+		return 0; /* error */
+	}
+
+	res=fread(buffer, 1, header_len, db->f);
+	if(res==0) {
+		return -1; /* no more records */
+	} else if(res!=header_len) {
+		/* TODO: log file offset with error message */
+		if(ferror(db->f)) {
+			perror(db->filename);
+		}
+		fprintf(stderr, "%s:short record\n", db->filename);
+		return 0; /* error */
+	}
+
+	assert(res == header_len);
+
+	record_read(buffer, header_len, 0, "%u%u", &id, &length);
+
+	/* decode our funny 3 byte + 1 byte fields */
+	type=(id>>24)&255;
+	id&=0xffffffu;
+
+	action=(length>>24)&255;
+	length&=0xffffffu;
+
+	if(action!='E' && action!='U') {
+		/* TODO: log file offset with error message */
+		fprintf(stderr, "%s:unknown record action 0x%02x\n", db->filename, action);
+		return 0; /* error */
+	}
+
+	if(action=='E' && length!=0) {
+		/* TODO: log file offset with error message */
+		fprintf(stderr, "%s:record action '%c' must have 0 length\n", db->filename, action);
+		return 0; /* error */
+	}
+	
+	buffer=sjdb_grab_buffer(length+header_len+4); /* include adler32 with read */
+	if(!buffer) {
+		/* TODO: log file offset with error message */
+		fprintf(stderr, "%s:could not allocate buffer\n", db->filename);
+		return 0; /* error */
+	}
+
+	res=fread(buffer+header_len, 1, length+4, db->f);
+	if(res!=length+4) {
+		if(ferror(db->f)) {
+			perror(db->filename);
+		}
+		/* TODO: log file offset with error message */
+		fprintf(stderr, "%s:short record\n", db->filename);
+		return 0; /* error */
+	}
+
+	/* TODO: check checksum */
+	ck=RD_BE32(buffer, header_len+length);
+
+	calc_ck=adler32(ADLER32_INITIAL, buffer, length+header_len);
+
+	if(calc_ck!=ck) {
+		/* TODO: log file offset with error message */
+		fprintf(stderr, "%s:record checksum failed (calc=0x%08x orig=0x%08x)\n", db->filename, calc_ck, ck);
+		return 0;
+	}
+
+	/* TODO: process record */
+	return 1;
+}
+
+/* process all records */
+EXPORT int sjdb_load(struct sjdb_handle *db) {
+	long currpos;
+
+	currpos=ftell(db->f);
+	TRACE(stderr, "%s:currpos=%ld\n", db->filename, currpos);
+
+	if(currpos!=SJDB_HEADER_SIZE) {
+		/* seek to the start of data this will fail if there is no data in the file */
+		if(fseek(db->f, SEEK_SET, SJDB_HEADER_SIZE)<0) {
+			perror(db->filename);
+			fprintf(stderr, "%s:Could not load data\n", db->filename);
+			/* TODO: free the structure */
+			return 0;
+		}
+	}
+	
+	/* TODO: read in all records */
+	while(sjdb_ll_read_entry(db)>0) {
+		DEBUG("%s:found a record\n", db->filename);
+		/* TODO: read global checksum */
+		/* TODO: process */
+	}
+	
+	return 1; /* success */
+}
+
+/******************************************************************************
  * Record Cacheing - look up records and automatically load them
  ******************************************************************************/
+
+static struct sjdb_handle recordcache_sjdb;
 
 struct recordcache_entry {
 	unsigned id;
@@ -3102,6 +3847,9 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 /******************************************************************************
  * user - handles user accounts
  ******************************************************************************/
+#define USER_RECORD_TYPE 'U'
+#define USER_HASH_SIZE 4
+
 struct user {
 	char *username;
 	char *password_crypt;
@@ -3123,7 +3871,7 @@ static void user_ll_free(void *key, void *data) {
 }
 
 EXPORT void user_init(void) {
-	map_init(&user_index, 4, user_ll_free, map_hash_stringignorecase, map_compare_stringignorecase);
+	map_init(&user_index, USER_HASH_SIZE, user_ll_free, map_hash_stringignorecase, map_compare_stringignorecase);
 }
 
 EXPORT void user_shutdown(void) {
@@ -3157,6 +3905,29 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 	}
 	DEBUG("User '%s' added\n", username);
 	return u;
+}
+
+EXPORT int user_sjdb_update(unsigned id, size_t len, void *data) {
+	abort();
+}
+
+EXPORT int user_sjdb_erase(unsigned id) {
+	abort();
+}
+
+EXPORT void *user_sjdb_read(unsigned id, size_t len, const void *in_buffer) {
+	abort();
+}
+
+/* callback
+ * returns:
+ * 	0 on failure
+ *  pointer to outbuffer allocated with malloc()
+ * updates out_len with length of output buffer
+ */
+EXPORT void *user_sjdb_write(unsigned id, size_t *out_len, const void *in_object) {
+	void *out_buffer;	
+	abort();
 }
 
 /******************************************************************************
@@ -3781,6 +4552,16 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 	return 1; /* failure - continue looking for matches */
 }
 
+static int do_config_string(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
+	char **target=extra;
+	assert(value != NULL);
+	assert(target != NULL);
+
+	free(*target);
+	*target=strdup(value);
+	return 0; /* success - terminate the callback chain */
+}
+
 /* handles the 'server.port' property */
 static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
@@ -3854,6 +4635,8 @@ int main(int argc, char **argv) {
 	struct config cfg;
 #ifndef NDEBUG
 	/*
+	adler32_test();
+	ieee754_test();
 	acs_test();
 	map_test();
 	config_test();
@@ -3871,19 +4654,8 @@ int main(int argc, char **argv) {
 	user_init();
 	atexit(user_shutdown);
 
-	mud_config.menu_prompt=strdup("Selection: ");
-	mud_config.form_prompt=strdup("Selection: ");
-	mud_config.command_prompt=strdup("> ");
-	mud_config.msg_errormain=strdup("ERROR: going back to main menu!\n");
-	mud_config.msg_invalidselection=strdup("Invalid selection!\n");
-	mud_config.msg_invalidusername=strdup("Invalid username\n");
-	mud_config.msg_noaccount=strdup("Invalid account!\n");
-	mud_config.msg_tryagain=strdup("Try again!\n");
-	mud_config.msg_unsupported=strdup("Not supported!\n");
-	mud_config.msg_useralphanumeric=strdup("Username must only contain alphanumeric characters and must start with a letter!\n");
-	mud_config.msg_usercreatesuccess=strdup("Account successfully created!\n");
-	mud_config.msg_userexists=strdup("Username already exists!\n");
-	mud_config.msg_usermin3=strdup("Username must contain at least 3 characters!\n");
+	mud_config_init();
+	atexit(mud_config_shutdown);
 
 	process_args(argc, argv);
 
@@ -3891,11 +4663,27 @@ int main(int argc, char **argv) {
 	config_watch(&cfg, "server.port", do_config_port, 0);
 	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
 	config_watch(&cfg, "msg.*", do_config_msg, 0);
-#ifndef NDEBUG
+	config_watch(&cfg, "db.filename", do_config_string, &mud_config.db_filename);
+	config_watch(&cfg, "db.filename.timestamp", do_config_string, &mud_config.db_filename_timestamp);
+#if !defined(NDEBUG) && !defined(NTRACE)
 	config_watch(&cfg, "*", config_test_show, 0);
 #endif
 	config_load("boris.cfg", &cfg);
 	config_free(&cfg);
+
+	/** sets up database **/
+	if(!sjdb_open(&recordcache_sjdb, mud_config.db_filename)) {
+		fprintf(stderr, "ERROR: could not load database\n");
+		return 0;
+	}
+
+	if(!sjdb_addwatcher(&recordcache_sjdb, USER_RECORD_TYPE, user_sjdb_update, user_sjdb_erase)) {
+	}
+
+	if(!sjdb_load(&recordcache_sjdb)) {
+		fprintf(stderr, "ERROR: could not load\n");
+		return 0;
+	}
 
 	if(!game_init()) {
 		fprintf(stderr, "ERROR: could not start game\n");
@@ -3906,6 +4694,7 @@ int main(int argc, char **argv) {
 	while(socketio_dispatch(-1)) {
 		fprintf(stderr, "Tick\n");
 	}
+
 	return 0;
 }
 
