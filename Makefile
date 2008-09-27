@@ -4,9 +4,7 @@
 # universal settings for all platforms and architectures
 ##############################################################################
 
-CFLAGS:=-Wall -Wextra -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -Wstrict-aliasing -Wpointer-arith -Wcast-align  -Wold-style-definition -Wredundant-decls -Wnested-externs -std=gnu99 -pedantic 
-# debugging
-CFLAGS+=-g
+CFLAGS:=-Wall -Wextra -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -Wstrict-aliasing -Wpointer-arith -Wcast-align  -Wold-style-definition -Wredundant-decls -Wnested-externs -std=gnu99 -pedantic -g
 # Uninitialized/clobbered variable warning
 #CFLAGS+=-Wuninitialized -O1
 # profiling
@@ -24,12 +22,28 @@ CPPFLAGS+=-DNTRACE
 
 # LDLIBS:=
 
-all : boris
+all : boris.stripped
+
+boris.stripped : boris
 
 boris : boris.c
 
 clean ::
-	$(RM) boris
+	$(RM) boris boris.stripped
+
+# creates executables that are stripped
+%.stripped : %
+	strip -s -p -R .comment -o $@ $^
+
+#makes objects useful for tracing/debugging
+#%.debug.o : CPPFLAGS:=$(filter-out -DNDEBUG,$(CPPFLAGS))
+#%.debug.o : %.c
+#	$(CC) $(CFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c -o $@ $<
+# creates executables that have debug symbols
+#%.debug : CPPFLAGS:=$(filter-out -DNDEBUG,$(CPPFLAGS))
+#%.debug : %.c
+#	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(TARGET_ARCH) $^ $(LOADLIBES) $(LDLIBS) -o $@
+
 
 ## 
 # Windows build
