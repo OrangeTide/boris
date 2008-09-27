@@ -439,7 +439,7 @@ EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
 #ifndef NDEBUG
 static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 	static char number_buffer[65];
-	static char tab[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-";
+	static const char tab[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-";
 	char *o; /* output */
 	size_t len;
 	if(base<2) base=2;
