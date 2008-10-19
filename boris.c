@@ -85,16 +85,13 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifndef NDEBUG
-#include <math.h>
-#endif
 
 /******************************************************************************
  * Macros
@@ -300,12 +297,6 @@
 struct telnetclient;
 struct socketio_handle;
 struct menuinfo;
-
-struct lru_entry {
-	void (*free)(void *p);	/* function to free the item */
-	void *data;
-	LIST_ENTRY(struct lru_entry) queue;
-};
 
 struct formitem {
 	LIST_ENTRY(struct formitem) item;
@@ -819,8 +810,12 @@ struct freelist {
 
 static unsigned freelist_ll_bucketnr(struct freelist *fl, unsigned count) {
 	unsigned ret;
-	ret=count/(fl->nr_buckets-1);
-	if(ret>=fl->nr_buckets) {
+	if(fl->nr_buckets>1) {
+		ret=count/(fl->nr_buckets-1);
+		if(ret>=fl->nr_buckets) {
+			ret=FREELIST_OVERFLOW_BUCKET(fl);
+		}
+	} else {
 		ret=FREELIST_OVERFLOW_BUCKET(fl);
 	}
 	return ret;
@@ -2147,7 +2142,11 @@ static int adler32_test(void) {
 #define SJDB_MAGIC "SjDb"
 #define SJDB_VERSION "V0.0"
 #define SJDB_HEADER_SIZE 20
+#define SJDB_ACTION_UPDATE 'U'
+#define SJDB_ACTION_ERASE 'E'
 
+#define SJDB_RECORD_HEADER_SZ 8
+#define SJDB_RECORD_TRAILER_SZ 8
 
 /* the big buffer, used to hold incoming data */
 static void *sjdb_buffer;
@@ -2166,9 +2165,21 @@ struct sjdb_handle {
 	uint_least32_t global_ck; /* global checksum used while adding records */
 };
 
+/* reports error messages for SJDB */
+GCC_ONLY(static void sjdb_errorf(struct sjdb_handle *h, const char *func, const char *fmt, ...) __attribute__ ((format (printf, 3, 4))));
+static void sjdb_errorf(struct sjdb_handle *h, const char *func, const char *fmt, ...) {
+	va_list ap;
+	assert(h != NULL);
+	/* TODO: log file offset with error message */
+	fprintf(stderr, "%s:%s:", h->filename, func);
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+}
+
 /* expands the buffer, if necessary.
  * does not erase the old data, it is used by record processing code to read in header plus data */
-static void *sjdb_grab_buffer(size_t needed) {
+static void *sjdb_ll_grab_buffer(size_t needed) {
 	void *tmp;
 	if(needed>sjdb_buffer_max) {
 		needed=ROUNDUP(needed, 64);
@@ -2183,6 +2194,11 @@ static void *sjdb_grab_buffer(size_t needed) {
 	return sjdb_buffer;
 }
 
+/* makes room for header and adler32 */
+EXPORT void *sjdb_grab_buffer(size_t needed) {
+	return (char*)sjdb_ll_grab_buffer(SJDB_RECORD_HEADER_SZ+needed+SJDB_RECORD_TRAILER_SZ)+SJDB_RECORD_HEADER_SZ;
+}
+
 static void sjdb_watcher_free(void *key UNUSED, void *data UNUSED) {
 	/* do nothing */
 }
@@ -2195,7 +2211,9 @@ static int sjdb_write_header(struct sjdb_handle *db, uint_least32_t application,
 	assert(db != NULL);
 	
 	DEBUG("%s():writing '%s'\n", __func__, db->filename);
+#ifndef NDEBUG
 	memset(header, 'X', sizeof header);
+#endif
 
 	memcpy(header, SJDB_MAGIC, 4);
 	memcpy(header+4, SJDB_VERSION, 4);
@@ -2210,7 +2228,7 @@ static int sjdb_write_header(struct sjdb_handle *db, uint_least32_t application,
 		if(ferror(db->f)) {
 			perror(db->filename);
 		}
-		fprintf(stderr, "%s:could not write header\n", db->filename);
+		sjdb_errorf(db, __func__, "could not write header\n");
 		return 0;
 	}
 
@@ -2236,10 +2254,10 @@ static int sjdb_read_header(struct sjdb_handle *db, uint_least32_t *application,
 		return sjdb_write_header(db, 1, 0); /* TODO: accept an application parameter */
 	} else if(res==0 && ferror(db->f)) {
 		perror(db->filename);
-		fprintf(stderr, "%s:could not read file\n", db->filename);
+		sjdb_errorf(db, __func__, "could not read file\n");
 		return 0;
 	} else if(res<sizeof header || memcmp(header, SJDB_MAGIC, 4) || memcmp(header+4, SJDB_VERSION, 4)) { 
-		fprintf(stderr, "%s:not a '%.4s' file\n", db->filename, SJDB_MAGIC);
+		sjdb_errorf(db, __func__, "not a '%.4s' file\n", SJDB_MAGIC);
 		return 0;
 	}
 
@@ -2259,7 +2277,7 @@ static int sjdb_read_header(struct sjdb_handle *db, uint_least32_t *application,
 	ck=adler32(ADLER32_INITIAL, header, res-4);
 
 	if(ck!=original_ck) {
-		fprintf(stderr, "%s:header checksum failed (calc=0x%08x orig=0x%08x)\n", db->filename, ck, original_ck);
+		sjdb_errorf(db, __func__, "header checksum failed (calc=0x%08x orig=0x%08x)\n", ck, original_ck); 
 		return 0;
 	}
 
@@ -2276,12 +2294,18 @@ EXPORT int sjdb_open(struct sjdb_handle *db, const char *filename) {
 		perror(filename);
 		return 0; /* failure */
 	}
+	if(setvbuf(db->f, NULL, _IONBF, 0)!=0) {
+		perror(filename);
+		fclose(db->f);
+		db->f=NULL;
+		return 0; /* failure */
+	}
 	db->filename=strdup(filename);	
 	map_init(&db->watchers, SJDB_WATCHER_HASH_SIZE, sjdb_watcher_free, map_hash_unsigned, map_compare_unsigned);
 
 	/* read the header */
 	if(!sjdb_read_header(db, &application, &generation)) {
-		fprintf(stderr, "%s:missing header\n", db->filename);
+		sjdb_errorf(db, __func__, "missing header\n");
 		/* TODO: free the structure */
 		return 0;
 	}
@@ -2303,14 +2327,14 @@ EXPORT int sjdb_addwatcher(struct sjdb_handle *db, unsigned record_type, int (*u
 	struct sjdb_watcher *new;
 	new=malloc(sizeof *new);
 	if((record_type&~255u)) {
-		fprintf(stderr, "%s:Could not add for record_type=%d (out of range)\n", __func__, record_type);
+		sjdb_errorf(db, __func__, "Could not add handler for record_type=%d (out of range)\n", record_type);
 		return 0;
 	}
 	new->record_type=record_type&255;
 	new->erase=erase;
 	new->update=update;
 	if(!map_add(&db->watchers, &new->record_type, new)) {
-		fprintf(stderr, "%s:Could not add for record_type='%c'\n", __func__, record_type);
+		sjdb_errorf(db, __func__, "Could not add handler for record_type='%c'\n", record_type);
 		return 0;
 	}
 	return 1; /* success */
@@ -2321,34 +2345,32 @@ EXPORT int sjdb_addwatcher(struct sjdb_handle *db, unsigned record_type, int (*u
  * return -1 on EOF
  */
 static int sjdb_ll_read_entry(struct sjdb_handle *db) {
-	const size_t header_len=8;
 	char *buffer;
-	uint_least32_t id, length, ck, calc_ck;
+	uint_least32_t id, length, ck, calc_ck, gck;
 	size_t res;
 	unsigned char type, action;
 
-	buffer=sjdb_grab_buffer(header_len);
+	buffer=sjdb_ll_grab_buffer(SJDB_RECORD_HEADER_SZ);
 	if(!buffer) {
-		/* TODO: log file offset with error message */
-		fprintf(stderr, "%s:could not allocate buffer\n", db->filename);
+		sjdb_errorf(db, __func__, "could not allocate buffer\n");
 		return 0; /* error */
 	}
 
-	res=fread(buffer, 1, header_len, db->f);
+	res=fread(buffer, 1, SJDB_RECORD_HEADER_SZ, db->f);
 	if(res==0) {
 		return -1; /* no more records */
-	} else if(res!=header_len) {
-		/* TODO: log file offset with error message */
+	} else if(res!=SJDB_RECORD_HEADER_SZ) {
 		if(ferror(db->f)) {
-			perror(db->filename);
+			sjdb_errorf(db, __func__, "%s\n", strerror(errno));
+		} else {
+			sjdb_errorf(db, __func__, "short record\n");
 		}
-		fprintf(stderr, "%s:short record\n", db->filename);
 		return 0; /* error */
 	}
 
-	assert(res == header_len);
+	assert(res == SJDB_RECORD_HEADER_SZ);
 
-	record_read(buffer, header_len, 0, "%u%u", &id, &length);
+	record_read(buffer, SJDB_RECORD_HEADER_SZ, 0, "%u%u", &id, &length);
 
 	/* decode our funny 3 byte + 1 byte fields */
 	type=(id>>24)&255;
@@ -2357,43 +2379,40 @@ static int sjdb_ll_read_entry(struct sjdb_handle *db) {
 	action=(length>>24)&255;
 	length&=0xffffffu;
 
-	if(action!='E' && action!='U') {
-		/* TODO: log file offset with error message */
-		fprintf(stderr, "%s:unknown record action 0x%02x\n", db->filename, action);
+	if(action!=SJDB_ACTION_ERASE && action!=SJDB_ACTION_UPDATE) {
+		sjdb_errorf(db, __func__, "unknown record action 0x%02x\n", action);
 		return 0; /* error */
 	}
 
-	if(action=='E' && length!=0) {
-		/* TODO: log file offset with error message */
-		fprintf(stderr, "%s:record action '%c' must have 0 length\n", db->filename, action);
+	if(action==SJDB_ACTION_ERASE && length!=0) {
+		sjdb_errorf(db, __func__, "record action '%c' must have 0 length\n", action);
 		return 0; /* error */
 	}
 	
-	buffer=sjdb_grab_buffer(length+header_len+4); /* include adler32 with read */
+	buffer=sjdb_ll_grab_buffer(length+SJDB_RECORD_HEADER_SZ+SJDB_RECORD_TRAILER_SZ);
 	if(!buffer) {
-		/* TODO: log file offset with error message */
-		fprintf(stderr, "%s:could not allocate buffer\n", db->filename);
+		sjdb_errorf(db, __func__, "could not allocate buffer\n");
 		return 0; /* error */
 	}
 
-	res=fread(buffer+header_len, 1, length+4, db->f);
-	if(res!=length+4) {
+	res=fread(buffer+SJDB_RECORD_HEADER_SZ, 1, length+SJDB_RECORD_TRAILER_SZ, db->f);
+	if(res!=length+SJDB_RECORD_TRAILER_SZ) {
 		if(ferror(db->f)) {
-			perror(db->filename);
+			sjdb_errorf(db, __func__, "i/o error:%s\n", strerror(errno));
 		}
-		/* TODO: log file offset with error message */
-		fprintf(stderr, "%s:short record\n", db->filename);
+		sjdb_errorf(db, __func__, "short record\n");
 		return 0; /* error */
 	}
 
-	/* TODO: check checksum */
-	ck=RD_BE32(buffer, header_len+length);
+	ck=RD_BE32(buffer, SJDB_RECORD_HEADER_SZ+length);
+	gck=RD_BE32(buffer, SJDB_RECORD_HEADER_SZ+length+4);
 
-	calc_ck=adler32(ADLER32_INITIAL, buffer, length+header_len);
+	/* TODO: check global checksum */
+
+	calc_ck=adler32(ADLER32_INITIAL, buffer, length+SJDB_RECORD_HEADER_SZ);
 
 	if(calc_ck!=ck) {
-		/* TODO: log file offset with error message */
-		fprintf(stderr, "%s:record checksum failed (calc=0x%08x orig=0x%08x)\n", db->filename, calc_ck, ck);
+		sjdb_errorf(db, __func__, "record checksum failed (calc=0x%08x orig=0x%08x)\n", calc_ck, ck);
 		return 0;
 	}
 
@@ -2412,7 +2431,7 @@ EXPORT int sjdb_load(struct sjdb_handle *db) {
 		/* seek to the start of data this will fail if there is no data in the file */
 		if(fseek(db->f, SEEK_SET, SJDB_HEADER_SIZE)<0) {
 			perror(db->filename);
-			fprintf(stderr, "%s:Could not load data\n", db->filename);
+			sjdb_errorf(db, __func__, "Could not load data\n");
 			/* TODO: free the structure */
 			return 0;
 		}
@@ -2428,47 +2447,186 @@ EXPORT int sjdb_load(struct sjdb_handle *db) {
 	return 1; /* success */
 }
 
+static int sjdb_write_update(struct sjdb_handle *db, size_t len, uint_least32_t id, void *data) {
+	uint_least32_t calc_ck;
+	char *buf;
+	int res;
+
+	buf=sjdb_ll_grab_buffer(SJDB_RECORD_HEADER_SZ+len+SJDB_RECORD_TRAILER_SZ); /* adler32 on the end, plus 8 byte header */
+
+	res=record_write(buf, SJDB_RECORD_HEADER_SZ, 0, "%u%u", id, len|((unsigned)SJDB_ACTION_UPDATE<<24));
+	if((unsigned)res!=SJDB_RECORD_HEADER_SZ) {
+		sjdb_errorf(db, __func__, "Could not write entry\n");
+		return 0; /* failure */
+	}
+
+	calc_ck=adler32(ADLER32_INITIAL, buf, SJDB_RECORD_HEADER_SZ);
+	calc_ck=adler32(calc_ck, data, len);
+	memcpy(buf+SJDB_RECORD_HEADER_SZ, data, len);
+	res=record_write(buf, SJDB_RECORD_HEADER_SZ+len+SJDB_RECORD_TRAILER_SZ, SJDB_RECORD_HEADER_SZ+len, "%u", calc_ck);
+
+	res=fwrite(buf, 1, SJDB_RECORD_HEADER_SZ+len+SJDB_RECORD_TRAILER_SZ, db->f);
+	if((unsigned)res!=SJDB_RECORD_HEADER_SZ+len+SJDB_RECORD_TRAILER_SZ) {
+		if(ferror(db->f)) {
+			sjdb_errorf(db, __func__, "i/o error:%s\n", strerror(errno));
+		} else {
+			sjdb_errorf(db, __func__, "short write\n");
+		}
+		return 0; /* failure */
+	}
+	DEBUG("%s:Wrote record (res=%d)\n", db->filename, res);
+
+	return 1; /* success */
+}
+
 /******************************************************************************
  * Record Cacheing - look up records and automatically load them
  ******************************************************************************/
-
-static struct sjdb_handle recordcache_sjdb;
+#define RECORDCACHE_HASH_SIZE 8
 
 struct recordcache_entry {
+	LIST_ENTRY(struct recordcache_entry) queue;
 	unsigned id;
-	struct lru_entry lru; /* if data is not NULL, then the data is loaded */
+	void (*free)(void *data); /* function to free the item */
+	int (*flush)(void *data);	/* function to write the item to the journal */
+	unsigned dirty:1; /* flag to indicate there is unwritten data */
+	void *data;
+	REFCOUNT_TYPE REFCOUNT_NAME;
 };
 
-static struct recordcache_entry **recordcache_table;
-static size_t recordcache_table_nr, recordcache_table_mask;
+static struct sjdb_handle recordcache_sjdb;
+static struct map recordcache_table;
+static LIST_HEAD(struct recordcache_head, struct recordcache_entry) recordcache_queue;
 
-/* rounds up 0 to 1 */
-static size_t roundup2(size_t val) {
-	size_t n;
-	for(n=1;n<val;n<<=1) ;
-	return n;
+static int recordcache_entry_ll_flush(struct recordcache_entry *e) {
+	int res;
+
+	assert(e!=NULL);
+	if(!e->flush) {
+		fprintf(stderr, "%s():called on object that does not have a flush function (id=0x%x)\n", __func__, e->id);
+		return 0; /* no flush function */
+	}
+	
+	fprintf(stderr, "Flushing id=0x%x\n", e->id);
+	res=e->flush(e->data);
+	if(res) {
+		e->dirty=0; /* successfully flushed */
+	}
+	return res;
 }
 
-EXPORT int recordcache_init(unsigned max_entries) {
-	struct recordcache_entry **tmp;
-	assert(recordcache_table==NULL);
-	if(recordcache_table) {
-		fprintf(stderr, "hash table already initialized\n");
-		return 0; /* failure */
+static void recordcache_entry_ll_free(struct recordcache_entry *e) {
+	assert(e!=NULL);
+	if(!e) return; /* failure - NULL pointer */
+	if(e->dirty) {
+		if(!recordcache_entry_ll_flush(e)) {
+			DEBUG("%s():refusing to free an unflushed entry\n", __func__);
+			return; /* failure - could not flush */
+		}
 	}
-	max_entries=roundup2(max_entries);
-	tmp=calloc(sizeof *tmp, max_entries);
-	if(!tmp) {
-		perror("malloc()");
-		return 0; /* failure */
+
+	if(!e->free) {
+		fprintf(stderr, "%s():called on object that does not have a free function (id=0x%x)\n", __func__, e->id);
+		return; /* failure - no free function */
 	}
-	recordcache_table=tmp;
-	recordcache_table_nr=max_entries;
-	recordcache_table_mask=recordcache_table_nr-1;
-	DEBUG("hash table size is %zu\n", recordcache_table_nr);
+
+	if(e->REFCOUNT_NAME>0) {
+		fprintf(stderr, "%s():cannot free object that still has references (id=0x%x)\n", __func__, e->id);
+		return; /* failure - refcount */
+	}
+
+	assert(e->REFCOUNT_NAME==0);
+
+	LIST_REMOVE(e, queue);
+
+	e->free(e->data);
+
+#ifndef NDEBUG
+	memset(e, 'Y', sizeof *e);
+#endif
+
+	free(e);
+}
+
+static void recordcache_entry_ll_put(void *key UNUSED, void *data) {
+	struct recordcache_entry *e=data;
+	REFCOUNT_PUT(e, recordcache_entry_ll_free);
+}
+
+EXPORT int recordcache_entry_flush(unsigned id) {
+	struct recordcache_entry *e;
+
+	e=map_lookup(&recordcache_table, &id);
+	if(!e) {
+		fprintf(stderr, "%s():called on object that does not exist (id=0x%x)\n", __func__, id);
+		return 0; /* failure */
+	}	
+
+	return recordcache_entry_ll_flush(e);
+}
+
+EXPORT int recordcache_entry_put(unsigned id) {
+	struct recordcache_entry *e;
+	e=map_lookup(&recordcache_table, &id);
+	if(e) {
+		fprintf(stderr, "%s():called on object that does not exist (id=0x%x)\n", __func__, id);
+		return 0;
+	}
+	recordcache_entry_ll_put(&e->id, e);
 	return 1;
 }
 
+EXPORT int recordcache_init(void) {
+	map_init(&recordcache_table, RECORDCACHE_HASH_SIZE, recordcache_entry_ll_put, map_hash_unsigned, map_compare_unsigned);
+	return 1;
+}
+
+EXPORT void recordcache_shutdown(void) {
+	DEBUG("%s()\n", __func__);
+	map_free(&recordcache_table);
+}
+
+/* set dirty if this data is new */
+EXPORT int recordcache_add(unsigned id, void *data, int dirty, void (*record_free)(void *), int (*record_flush)(void *)) {
+	struct recordcache_entry *new;
+	new=malloc(sizeof *new);
+	new->id=id;
+	new->data=data;
+	new->free=record_free;
+	new->flush=record_flush;
+	new->dirty=dirty;
+	REFCOUNT_INIT(new);
+	LIST_ENTRY_INIT(new, queue);
+	if(!map_add(&recordcache_table, &new->id, new)) {
+		free(new);
+		return 0; /* failure */
+	}
+	LIST_INSERT_HEAD(&recordcache_queue, new, queue);
+	return 1; /* success */
+}
+
+/* return NULL if not found in the cache */
+EXPORT void *recordcache_get(unsigned id) {
+	struct recordcache_entry *e;
+
+	e=map_lookup(&recordcache_table, &id);
+	if(e) return e->data; /* success */
+
+	return 0; /* not in cache */
+}
+
+/* gets a record and marks it as dirty */
+EXPORT void *recordcache_dirty(unsigned id) {
+	struct recordcache_entry *e;
+
+	e=map_lookup(&recordcache_table, &id);
+	if(e) {
+		e->dirty=1;
+		return e->data; /* success */
+	}
+
+	return 0; /* not in cache */
+}
 /******************************************************************************
  * Telnet protocol constants
  ******************************************************************************/
@@ -3853,20 +4011,56 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
  ******************************************************************************/
 #define USER_RECORD_TYPE 'U'
 #define USER_HASH_SIZE 4
+#define USER_MAX 32768 /* maximum number of user accounts (totally arbitrary, real limit is 16M) */
+#define USER_ID_TO_RECORD(id) ((id)|((unsigned)USER_RECORD_TYPE<<24))
 
 struct user {
+	unsigned id;
 	char *username;
 	char *password_crypt;
 	char *email;
 };
 
-static struct map user_index;
+struct user_cache {
+	unsigned id;
+	char *username;
+};
+
+static struct freelist user_id_freelist;
+static struct map user_cache_index;
+
+static void user_cache_ll_free(void *key, void *data) {
+	struct user_cache *uc=data;
+	assert(data != NULL);
+	assert(key == uc->username);
+	if(uc) {
+		free(uc->username);
+		free(uc);
+	}
+}
+
+static int user_cache_add(struct user *u) {
+	struct user_cache *uc;
+	assert(u != NULL);
+	assert(u->username != NULL);
+	if(!u || !u->username) return 0;
+	uc=malloc(sizeof *uc);
+	uc->username=strdup(u->username);
+	uc->id=u->id;
+	if(!map_add(&user_cache_index, uc->username, uc)) {
+		user_cache_ll_free(uc->username, uc);
+		fprintf(stderr, "User '%s' could not be added to cache\n", u->username);
+		return 0; /* failure - probably already exists */
+	}
+	return 1; /* success */
+}
 
 static void user_ll_free(void *key, void *data) {
 	struct user *u=data;
 	assert(data != NULL);
 	assert(key == u->username);
 	if(u) {
+		freelist_pool(&user_id_freelist, u->id, 1);
 		free(u->username);
 		free(u->password_crypt);
 		free(u->email);
@@ -3874,64 +4068,120 @@ static void user_ll_free(void *key, void *data) {
 	}
 }
 
+/* callback for recordcache system */
+static void user_record_free(void *data) {
+	fprintf(stderr, "%s():TODO!\n", __func__);
+}
+
+/* callback for recordcache system 
+ * writes a record to sjdb */
+static int user_record_flush(void *data) {
+	struct user *u=data;
+	char *buf;
+	size_t buf_len;
+	int res;
+
+	buf=malloc(buf_len=1024);
+	if(!buf) {
+		return 0; /* failure */
+	}
+	res=record_write(buf, buf_len, 0, "%u%s%s%s", 
+		u->id,
+		u->username,
+		u->password_crypt,
+		u->email
+	);
+	assert(res > 0);
+
+	res=sjdb_write_update(&recordcache_sjdb, (unsigned)res, USER_ID_TO_RECORD(u->id), buf);
+	free(buf);
+	DEBUG("Wrote user '%s' (res=%d)\n", u->username, res);
+	return res;
+}
+
 EXPORT void user_init(void) {
-	map_init(&user_index, USER_HASH_SIZE, user_ll_free, map_hash_stringignorecase, map_compare_stringignorecase);
+	freelist_init(&user_id_freelist, 0);
+	freelist_pool(&user_id_freelist, 0, USER_MAX);
+	map_init(&user_cache_index, USER_HASH_SIZE, user_cache_ll_free, map_hash_stringignorecase, map_compare_stringignorecase);
 }
 
 EXPORT void user_shutdown(void) {
 	/* TODO: flush unwritten entries to disk */
-	map_free(&user_index);
+	map_free(&user_cache_index);
+	freelist_free(&user_id_freelist);
+}
+
+/* returns true if the username already exists */
+EXPORT int user_exists(const char *username) {
+	struct user_cache *uc;
+	assert(username != NULL);
+	uc=map_lookup(&user_cache_index, username);
+	return uc!=NULL;
 }
 
 EXPORT struct user *user_get(const char *username) {
 	struct user *u;
+	struct user_cache *uc;
 	assert(username != NULL);
-	DEBUG("looking for '%s'\n", username);
-	u=map_lookup(&user_index, username);
+
+	DEBUG("%s():looking for '%s'\n", __func__, username);
+
+	uc=map_lookup(&user_cache_index, username);
+	if(uc) {
+		DEBUG("Found username '%s'\n", uc->username);
+	} else {
+		DEBUG("Did not find username\n");
+		return 0;
+	}
+
+	u=recordcache_get(uc->id);
 	if(u) {
 		DEBUG("Found username '%s'\n", u->username);
 	} else {
 		DEBUG("Did not find username\n");
 	}
+
 	return u;
 }
 
 EXPORT struct user *user_create(const char *username, const char *password, const char *email) {
+	struct user_cache *uc; /* TODO: use this */
 	struct user *u;
+	int id;
+	id=freelist_alloc(&user_id_freelist, 1);
+	if(id<0) {
+		fprintf(stderr, "User '%s' could not be added (no more ids available)\n", username);
+		return 0;
+	}
 	u=malloc(sizeof *u);
+	u->id=id;
 	u->username=strdup(username);
 	u->password_crypt=strdup("TODO");
 	u->email=strdup(email);
-	if(!map_add(&user_index, u->username, u)) {
+	if(!user_cache_add(u)) {
 		user_ll_free(u->username, u);
 		fprintf(stderr, "User '%s' could not be added\n", username);
 		return 0;
 	}
 	DEBUG("User '%s' added\n", username);
+	fprintf(stderr, "user:created '%s' with id %u\n", u->username, u->id);
+	
+	/* add to recordcache */
+	recordcache_add(USER_ID_TO_RECORD(u->id), u, 1, user_record_free, user_record_flush);
+	recordcache_entry_flush(USER_ID_TO_RECORD(u->id));
 	return u;
 }
 
+/* callback for sjdb
+ * reads a new user record */
 EXPORT int user_sjdb_update(unsigned id, size_t len, void *data) {
-	abort();
+	abort(); /* TODO: implement this */
 }
 
+/* callback for sjdb 
+ * erases a user */
 EXPORT int user_sjdb_erase(unsigned id) {
-	abort();
-}
-
-EXPORT void *user_sjdb_read(unsigned id, size_t len, const void *in_buffer) {
-	abort();
-}
-
-/* callback
- * returns:
- * 	0 on failure
- *  pointer to outbuffer allocated with malloc()
- * updates out_len with length of output buffer
- */
-EXPORT void *user_sjdb_write(unsigned id, size_t *out_len, const void *in_object) {
-	void *out_buffer;	
-	abort();
+	abort(); /* TODO: implement this */
 }
 
 /******************************************************************************
@@ -4257,7 +4507,6 @@ static void form_state_free(struct telnetclient *cl) {
 }
 
 static int form_createaccount_username_check(struct telnetclient *cl, const char *str) {
-	struct user *u;
 	int res;
 	size_t len;
 	const char *s;
@@ -4276,8 +4525,7 @@ static int form_createaccount_username_check(struct telnetclient *cl, const char
 		}
 	}
 
-	u=user_get(str);
-	if(u) {
+	if(user_exists(str)) {
 		telnetclient_puts(cl, mud_config.msg_userexists);
 		return 0;
 	}
@@ -4654,6 +4902,9 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	atexit(socketio_shutdown);
+
+	recordcache_init();
+	atexit(recordcache_shutdown);
 
 	user_init();
 	atexit(user_shutdown);
