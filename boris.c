@@ -321,6 +321,7 @@ struct form {
 static struct menuinfo gamemenu_login;
 
 static struct mud_config {
+	char *config_filename;
 	char *menu_prompt;
 	char *form_prompt;
 	char *command_prompt;
@@ -345,52 +346,6 @@ static void telnetclient_free(struct socketio_handle *sh);
 EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
 EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 static void form_menu_lineinput(struct telnetclient *cl, const char *line);
-
-/******************************************************************************
- * Mud Config
- ******************************************************************************/
-EXPORT void mud_config_init(void) {
-	mud_config.menu_prompt=strdup("Selection: ");
-	mud_config.form_prompt=strdup("Selection: ");
-	mud_config.command_prompt=strdup("> ");
-	mud_config.msg_errormain=strdup("ERROR: going back to main menu!\n");
-	mud_config.msg_invalidselection=strdup("Invalid selection!\n");
-	mud_config.msg_invalidusername=strdup("Invalid username\n");
-	mud_config.msg_noaccount=strdup("Invalid account!\n");
-	mud_config.msg_tryagain=strdup("Try again!\n");
-	mud_config.msg_unsupported=strdup("Not supported!\n");
-	mud_config.msg_useralphanumeric=strdup("Username must only contain alphanumeric characters and must start with a letter!\n");
-	mud_config.msg_usercreatesuccess=strdup("Account successfully created!\n");
-	mud_config.msg_userexists=strdup("Username already exists!\n");
-	mud_config.msg_usermin3=strdup("Username must contain at least 3 characters!\n");
-	mud_config.db_filename=strdup("boris.sjdb");
-	mud_config.db_filename_timestamp=strdup("%y%m%d");
-}
-
-EXPORT void mud_config_shutdown(void) {
-	char **targets[] = {
-	    &mud_config.menu_prompt,
-	    &mud_config.form_prompt,
-	    &mud_config.command_prompt,
-	    &mud_config.msg_errormain,
-	    &mud_config.msg_invalidselection,
-	    &mud_config.msg_invalidusername,
-	    &mud_config.msg_noaccount,
-	    &mud_config.msg_tryagain,
-	    &mud_config.msg_unsupported,
-	    &mud_config.msg_useralphanumeric,
-	    &mud_config.msg_usercreatesuccess,
-	    &mud_config.msg_userexists,
-	    &mud_config.msg_usermin3,
-	    &mud_config.db_filename,
-	    &mud_config.db_filename_timestamp,
-	};
-	unsigned i;
-	for(i=0;i<NR(targets);i++) {
-		free(*targets[i]);
-		*targets[i]=NULL;
-	}
-}
 
 /******************************************************************************
  * Util - utility routines
@@ -2138,7 +2093,6 @@ static int adler32_test(void) {
  * 4 global adler32 of entire file up to this point
  */
 
-#define SJDB_WATCHER_HASH_SIZE 5
 #define SJDB_MAGIC "SjDb"
 #define SJDB_VERSION "V0.0"
 #define SJDB_HEADER_SIZE 20
@@ -2152,16 +2106,9 @@ static int adler32_test(void) {
 static void *sjdb_buffer;
 static size_t sjdb_buffer_max;
 
-struct sjdb_watcher {
-	unsigned record_type; /* should be a single char */
-	int (*update)(unsigned id, size_t len, void *data);
-	int (*erase)(unsigned id);
-};
-
 struct sjdb_handle {
 	FILE *f;
 	char *filename;
-	struct map watchers;
 	uint_least32_t global_ck; /* global checksum used while adding records */
 };
 
@@ -2197,10 +2144,6 @@ static void *sjdb_ll_grab_buffer(size_t needed) {
 /* makes room for header and adler32 */
 EXPORT void *sjdb_grab_buffer(size_t needed) {
 	return (char*)sjdb_ll_grab_buffer(SJDB_RECORD_HEADER_SZ+needed+SJDB_RECORD_TRAILER_SZ)+SJDB_RECORD_HEADER_SZ;
-}
-
-static void sjdb_watcher_free(void *key UNUSED, void *data UNUSED) {
-	/* do nothing */
 }
 
 static int sjdb_write_header(struct sjdb_handle *db, uint_least32_t application, uint_least32_t generation) {
@@ -2301,7 +2244,6 @@ EXPORT int sjdb_open(struct sjdb_handle *db, const char *filename) {
 		return 0; /* failure */
 	}
 	db->filename=strdup(filename);	
-	map_init(&db->watchers, SJDB_WATCHER_HASH_SIZE, sjdb_watcher_free, map_hash_unsigned, map_compare_unsigned);
 
 	/* read the header */
 	if(!sjdb_read_header(db, &application, &generation)) {
@@ -2321,23 +2263,6 @@ void sjdb_close(struct sjdb_handle *db) {
 	db->f=NULL;
 	free(db->filename);
 	db->filename=NULL;
-}
-
-EXPORT int sjdb_addwatcher(struct sjdb_handle *db, unsigned record_type, int (*update)(unsigned id, size_t len, void *data), int (*erase)(unsigned id)) {
-	struct sjdb_watcher *new;
-	new=malloc(sizeof *new);
-	if((record_type&~255u)) {
-		sjdb_errorf(db, __func__, "Could not add handler for record_type=%d (out of range)\n", record_type);
-		return 0;
-	}
-	new->record_type=record_type&255;
-	new->erase=erase;
-	new->update=update;
-	if(!map_add(&db->watchers, &new->record_type, new)) {
-		sjdb_errorf(db, __func__, "Could not add handler for record_type='%c'\n", record_type);
-		return 0;
-	}
-	return 1; /* success */
 }
 
 /* return 0 on error
@@ -2416,7 +2341,7 @@ static int sjdb_ll_read_entry(struct sjdb_handle *db) {
 		return 0;
 	}
 
-	/* TODO: process record */
+	/* TODO: place record in the hash table */
 	return 1;
 }
 
@@ -4103,6 +4028,8 @@ EXPORT void user_init(void) {
 	freelist_init(&user_id_freelist, 0);
 	freelist_pool(&user_id_freelist, 0, USER_MAX);
 	map_init(&user_cache_index, USER_HASH_SIZE, user_cache_ll_free, map_hash_stringignorecase, map_compare_stringignorecase);
+
+	/* TODO: scan sjdb hash for user records */
 }
 
 EXPORT void user_shutdown(void) {
@@ -4746,7 +4673,7 @@ static void config_test(void) {
 #endif
 
 /******************************************************************************
- * Main - Option parsing and initialization
+ * Mud Config
  ******************************************************************************/
 static int fl_default_family=0;
 
@@ -4823,6 +4750,72 @@ static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const c
 	return 0; /* success - terminate the callback chain */
 }
 
+EXPORT void mud_config_init(void) {
+	mud_config.config_filename=strdup("boris.cfg");
+	mud_config.menu_prompt=strdup("Selection: ");
+	mud_config.form_prompt=strdup("Selection: ");
+	mud_config.command_prompt=strdup("> ");
+	mud_config.msg_errormain=strdup("ERROR: going back to main menu!\n");
+	mud_config.msg_invalidselection=strdup("Invalid selection!\n");
+	mud_config.msg_invalidusername=strdup("Invalid username\n");
+	mud_config.msg_noaccount=strdup("Invalid account!\n");
+	mud_config.msg_tryagain=strdup("Try again!\n");
+	mud_config.msg_unsupported=strdup("Not supported!\n");
+	mud_config.msg_useralphanumeric=strdup("Username must only contain alphanumeric characters and must start with a letter!\n");
+	mud_config.msg_usercreatesuccess=strdup("Account successfully created!\n");
+	mud_config.msg_userexists=strdup("Username already exists!\n");
+	mud_config.msg_usermin3=strdup("Username must contain at least 3 characters!\n");
+	mud_config.db_filename=strdup("boris.sjdb");
+	mud_config.db_filename_timestamp=strdup("%y%m%d");
+}
+
+EXPORT void mud_config_shutdown(void) {
+	char **targets[] = {
+	    &mud_config.menu_prompt,
+	    &mud_config.form_prompt,
+	    &mud_config.command_prompt,
+	    &mud_config.msg_errormain,
+	    &mud_config.msg_invalidselection,
+	    &mud_config.msg_invalidusername,
+	    &mud_config.msg_noaccount,
+	    &mud_config.msg_tryagain,
+	    &mud_config.msg_unsupported,
+	    &mud_config.msg_useralphanumeric,
+	    &mud_config.msg_usercreatesuccess,
+	    &mud_config.msg_userexists,
+	    &mud_config.msg_usermin3,
+	    &mud_config.db_filename,
+	    &mud_config.db_filename_timestamp,
+	};
+	unsigned i;
+	for(i=0;i<NR(targets);i++) {
+		free(*targets[i]);
+		*targets[i]=NULL;
+	}
+}
+
+EXPORT int mud_config_process(void) {
+	struct config cfg;
+	config_setup(&cfg);
+	config_watch(&cfg, "server.port", do_config_port, 0);
+	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
+	config_watch(&cfg, "msg.*", do_config_msg, 0);
+	config_watch(&cfg, "db.filename", do_config_string, &mud_config.db_filename);
+	config_watch(&cfg, "db.filename.timestamp", do_config_string, &mud_config.db_filename_timestamp);
+#if !defined(NDEBUG) && !defined(NTRACE)
+	config_watch(&cfg, "*", config_test_show, 0);
+#endif
+	if(!config_load(mud_config.config_filename, &cfg)) {
+		config_free(&cfg);
+		return 0; /* failure */
+	}
+	config_free(&cfg);
+	return 1; /* success */
+}
+
+/******************************************************************************
+ * Main - Option parsing and initialization
+ ******************************************************************************/
 static void usage(void) {
 	fprintf(stderr,
 		"usage: boris [-h46] [-p port]\n"
@@ -4849,6 +4842,11 @@ static int process_flag(int ch, const char *next_arg) {
 		case '6':
 			fl_default_family=AF_INET6; /* default to IPv6 */
 			return 0;
+		case 'c':
+			need_parameter(ch, next_arg);
+			free(mud_config.config_filename);
+			mud_config.config_filename=strdup(next_arg);
+			return 1; /* uses next arg */
 		case 'p':
 			need_parameter(ch, next_arg);
 			if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, telnetclient_new_event)) {
@@ -4884,7 +4882,6 @@ static void process_args(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-	struct config cfg;
 #ifndef NDEBUG
 	/*
 	adler32_test();
@@ -4903,28 +4900,18 @@ int main(int argc, char **argv) {
 	}
 	atexit(socketio_shutdown);
 
-	recordcache_init();
-	atexit(recordcache_shutdown);
-
-	user_init();
-	atexit(user_shutdown);
-
+	/* load default configuration into mud_config global */
 	mud_config_init();
 	atexit(mud_config_shutdown);
 
+	/* parse options and load into mud_config global */
 	process_args(argc, argv);
 
-	config_setup(&cfg);
-	config_watch(&cfg, "server.port", do_config_port, 0);
-	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
-	config_watch(&cfg, "msg.*", do_config_msg, 0);
-	config_watch(&cfg, "db.filename", do_config_string, &mud_config.db_filename);
-	config_watch(&cfg, "db.filename.timestamp", do_config_string, &mud_config.db_filename_timestamp);
-#if !defined(NDEBUG) && !defined(NTRACE)
-	config_watch(&cfg, "*", config_test_show, 0);
-#endif
-	config_load("boris.cfg", &cfg);
-	config_free(&cfg);
+	/* process configuration file and load into mud_config global */
+	if(!mud_config_process()) {
+		fprintf(stderr, "ERROR: could not load configuration\n");
+		return 0;
+	}
 
 	/** sets up database **/
 	if(!sjdb_open(&recordcache_sjdb, mud_config.db_filename)) {
@@ -4932,13 +4919,16 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	if(!sjdb_addwatcher(&recordcache_sjdb, USER_RECORD_TYPE, user_sjdb_update, user_sjdb_erase)) {
-	}
-
 	if(!sjdb_load(&recordcache_sjdb)) {
 		fprintf(stderr, "ERROR: could not load\n");
 		return 0;
 	}
+
+	recordcache_init();
+	atexit(recordcache_shutdown);
+
+	user_init();
+	atexit(user_shutdown);
 
 	if(!game_init()) {
 		fprintf(stderr, "ERROR: could not start game\n");
