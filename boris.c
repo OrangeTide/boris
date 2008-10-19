@@ -430,7 +430,7 @@ EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
 #ifndef NDEBUG
 static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 	static char number_buffer[65];
-	static char tab[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-";
+	static const char tab[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-";
 	char *o; /* output */
 	size_t len;
 	if(base<2) base=2;
@@ -3033,10 +3033,10 @@ static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds) {
 	fprintf(stderr, "socketio_socket_count=%d\n", socketio_socket_count);
 	for(i=0;i<readfds->fd_count && i<writefds->fd_count;i++) {
 		if(i<readfds->fd_count) {
-			fprintf(stderr, "READ: fd=%u  ", readfds->fd_array[i]);
+			fprintf(stderr, "%s():READ:fd=%u  ", __func__, readfds->fd_array[i]);
 		}
 		if(i<writefds->fd_count) {
-			fprintf(stderr, "WRITE: fd=%u", writefds->fd_array[i]);
+			fprintf(stderr, "%s():WRITE:fd=%u", __func__, writefds->fd_array[i]);
 		}
 		fprintf(stderr, "\n");
 	}
@@ -3046,7 +3046,7 @@ static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds) {
 	for(i=0;i<=socketio_fdmax;i++) {
 		unsigned r=FD_ISSET(i, readfds), w=FD_ISSET(i, writefds);
 		if(r||w) {
-			fprintf(stderr, "fd=%d (%c%c)\n", i, r?'r':'-', w?'w':'-');
+			fprintf(stderr, "%s():fd=%d (%c%c)\n", __func__, i, r?'r':'-', w?'w':'-');
 		}
 	}
 #endif
