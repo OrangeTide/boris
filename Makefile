@@ -33,7 +33,7 @@ clean ::
 
 # creates executables that are stripped
 %.stripped : %
-	strip -s -p -R .comment -o $@ $^
+	$(STRIP) -o $@ $^
 
 #makes objects useful for tracing/debugging
 #%.debug.o : CPPFLAGS:=$(filter-out -DNDEBUG,$(CPPFLAGS))
@@ -44,6 +44,15 @@ clean ::
 #%.debug : %.c
 #	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(TARGET_ARCH) $^ $(LOADLIBES) $(LDLIBS) -o $@
 
+##############################################################################
+# OS specific settings
+##############################################################################
+OS:=$(shell uname -s)
+ifeq (${OS},Linux)
+STRIP:=strip -s -p -R .comment
+else
+STRIP:=strip -S
+endif
 
 ## 
 # Windows build

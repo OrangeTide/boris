@@ -92,6 +92,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _XOPEN_SOURCE
+#include <strings.h>
+#endif
 
 /******************************************************************************
  * Macros
