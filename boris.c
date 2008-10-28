@@ -2230,44 +2230,6 @@ static int sjdb_read_header(struct sjdb_handle *db, uint_least32_t *application,
 	return 1;
 }
 
-EXPORT int sjdb_open(struct sjdb_handle *db, const char *filename) {
-	uint_least32_t generation, application;
-
-	assert(db != NULL);
-	assert(filename != NULL);
-	db->f=fopen(filename, "a+b");
-	if(!db->f) {
-		perror(filename);
-		return 0; /* failure */
-	}
-	if(setvbuf(db->f, NULL, _IONBF, 0)!=0) {
-		perror(filename);
-		fclose(db->f);
-		db->f=NULL;
-		return 0; /* failure */
-	}
-	db->filename=strdup(filename);	
-
-	/* read the header */
-	if(!sjdb_read_header(db, &application, &generation)) {
-		sjdb_errorf(db, __func__, "missing header\n");
-		/* TODO: free the structure */
-		return 0;
-	}
-
-	db->global_ck=ADLER32_INITIAL;
-
-	return 1;
-}
-
-void sjdb_close(struct sjdb_handle *db) {
-	assert(db != NULL);
-	fclose(db->f);
-	db->f=NULL;
-	free(db->filename);
-	db->filename=NULL;
-}
-
 /* return 0 on error
  * return 1 on success
  * return -1 on EOF
@@ -2348,8 +2310,8 @@ static int sjdb_ll_read_entry(struct sjdb_handle *db) {
 	return 1;
 }
 
-/* process all records */
-EXPORT int sjdb_load(struct sjdb_handle *db) {
+/* create an index from all records */
+static int sjdb_load(struct sjdb_handle *db) {
 	long currpos;
 
 	currpos=ftell(db->f);
@@ -2373,6 +2335,49 @@ EXPORT int sjdb_load(struct sjdb_handle *db) {
 	}
 	
 	return 1; /* success */
+}
+
+EXPORT int sjdb_open(struct sjdb_handle *db, const char *filename) {
+	uint_least32_t generation, application;
+
+	assert(db != NULL);
+	assert(filename != NULL);
+	db->f=fopen(filename, "a+b");
+	if(!db->f) {
+		perror(filename);
+		return 0; /* failure */
+	}
+	if(setvbuf(db->f, NULL, _IONBF, 0)!=0) {
+		perror(filename);
+		fclose(db->f);
+		db->f=NULL;
+		return 0; /* failure */
+	}
+	db->filename=strdup(filename);	
+
+	/* read the header */
+	if(!sjdb_read_header(db, &application, &generation)) {
+		sjdb_errorf(db, __func__, "missing header\n");
+		/* TODO: free the structure */
+		return 0;
+	}
+
+	db->global_ck=ADLER32_INITIAL;
+
+	/* index all records */
+	if(!sjdb_load(db)) {
+		return 0;
+	}
+
+	return 1;
+}
+
+void sjdb_close(struct sjdb_handle *db) {
+	assert(db != NULL);
+	fclose(db->f);
+	db->f=NULL;
+	free(db->filename);
+	db->filename=NULL;
 }
 
 static int sjdb_write_update(struct sjdb_handle *db, size_t len, uint_least32_t id, void *data) {
@@ -4919,11 +4924,6 @@ int main(int argc, char **argv) {
 	/** sets up database **/
 	if(!sjdb_open(&recordcache_sjdb, mud_config.db_filename)) {
 		fprintf(stderr, "ERROR: could not load database\n");
-		return 0;
-	}
-
-	if(!sjdb_load(&recordcache_sjdb)) {
-		fprintf(stderr, "ERROR: could not load\n");
 		return 0;
 	}
 
