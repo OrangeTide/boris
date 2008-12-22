@@ -344,6 +344,7 @@ static struct mud_config {
 	char *msg_usercreatesuccess;
 	char *msg_userexists;
 	char *msg_usermin3;
+	char *msgfile_welcome;
 	char *db_filename;
 	char *db_filename_timestamp;
 } mud_config;
@@ -386,6 +387,66 @@ EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
 	}
 	if(*string) return UTIL_FNM_NOMATCH;
 	return 0; /* success */
+}
+
+/**
+ * read the contents of a text file into an allocated string
+ */
+char *util_textfile_load(const char *filename) {
+	FILE *f;
+	char *ret;
+	long len;
+	size_t res;
+	
+	f=fopen(filename, "r");
+	if(!f) {
+		perror(filename);
+		goto failure0;
+	}
+
+	if(fseek(f, 0l, SEEK_END)!=0) {
+		perror(filename);
+		goto failure1;
+	}
+
+	len=ftell(f);
+	if(len==EOF) {
+		perror(filename);
+		goto failure1;
+	}
+
+	assert(len>=0); /* len must not be negative */
+
+	if(fseek(f, 0l, SEEK_SET)!=0) {
+		perror(filename);
+		goto failure1;
+	}
+
+	ret=malloc((unsigned)len+1);
+	if(!ret) {
+		perror(filename);
+		goto failure1;
+	}
+
+	res=fread(ret, 1, (unsigned)len, f);
+	if(ferror(f)) {
+		perror(filename);
+		goto failure2;
+	}
+
+	ret[len]=0; /* null terminate the string */
+
+	DEBUG("%s:loaded %ld bytes\n", filename, len);
+
+	fclose(f);
+	return ret;
+
+failure2:
+	free(ret);
+failure1:
+	fclose(f);
+failure0:
+	return 0; /* failure */
 }
 
 /******************************************************************************
@@ -4118,7 +4179,7 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 	}
 
 	fprintf(stderr, "*** Connection %d: %s\n", sh->fd, sh->name);
-	telnetclient_printf(cl, "Welcome %d %d %d\n", 1, 2, 3);
+	telnetclient_puts(cl, mud_config.msgfile_welcome);
 	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
@@ -4932,6 +4993,33 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 	return 1; /* failure - continue looking for matches */
 }
 
+static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
+	unsigned i;
+	const struct {
+		const char *id;
+		char **target;
+	} info[] = {
+		{ "msgfile.welcome", &mud_config.msgfile_welcome },
+	};
+
+	for(i=0;i<NR(info);i++) {
+		if(!strcmp(id, info[i].id)) {
+			free(*info[i].target);
+			*info[i].target=util_textfile_load(value);
+
+			/* if we could not load the file, install a fake message */
+			if(!*info[i].target) {
+				char buf[128];
+				snprintf(buf, sizeof buf, "<<fileNotFound:%s>>\n", value);
+				*info[i].target=strdup(buf);
+			}
+			return 0; /* success - terminate the callback chain */
+		}
+	}
+	fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
+	return 1; /* failure - continue looking for matches */
+}
+
 static int do_config_string(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
 	char **target=extra;
 	assert(value != NULL);
@@ -5001,6 +5089,7 @@ EXPORT int mud_config_process(void) {
 	config_watch(&cfg, "server.port", do_config_port, 0);
 	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
 	config_watch(&cfg, "msg.*", do_config_msg, 0);
+	config_watch(&cfg, "msgfile.*", do_config_msgfile, 0);
 	config_watch(&cfg, "db.filename", do_config_string, &mud_config.db_filename);
 	config_watch(&cfg, "db.filename.timestamp", do_config_string, &mud_config.db_filename_timestamp);
 #if !defined(NDEBUG) && !defined(NTRACE)
