@@ -218,9 +218,11 @@
 # define VERBOSE(...) fprintf(stderr, __VA_ARGS__)
 # ifdef NDEBUG
 #  define DEBUG(...) /* DEBUG disabled */
+#  define DEBUG_MSG(msg) /* DEBUG_MSG disabled */
 #  define HEXDUMP(data, len, ...) /* HEXDUMP disabled */
 # else
-#  define DEBUG(...) fprintf(stderr, __VA_ARGS__)
+#  define DEBUG(msg, ...) fprintf(stderr, "DEBUG:%s():%d:" msg, __func__, __LINE__, ## __VA_ARGS__);
+#  define DEBUG_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
 #  define HEXDUMP(data, len, ...) do { fprintf(stderr, __VA_ARGS__); hexdump(stderr, data, len); } while(0)
 # endif
 # ifdef NTRACE
@@ -230,10 +232,14 @@
 #  define TRACE(...) fprintf(stderr, __VA_ARGS__)
 #  define HEXDUMP_TRACE(data, len, ...) HEXDUMP(data, len, __VA_ARGS__)
 # endif
+# define ERROR_FMT(msg, ...) fprintf(stderr, "ERROR:%s():%d:" msg, __func__, __LINE__, __VA_ARGS__);
 #else
 /* TODO: prepare a solution for C89 */
 # error Requires C99.
 #endif
+
+#define ERROR_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
+#define TODO(msg) fprintf(stderr, "TODO:%s():%d:" msg "\n", __func__, __LINE__);
 #define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
 #define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
 #define FAILON(e, reason, label) do { if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
@@ -933,6 +939,7 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 
 		if(ofs==curr->extent.offset) {
 			fprintf(stderr, "overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
+			TODO("make something out of this");
 			abort(); /* TODO: make something out of this */
 		} else if(last && freelist_ll_isbridge(&last->extent, ofs, count, &curr->extent)) {
 			/* |......|XXX|.......|		bridge */
@@ -965,6 +972,7 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 		} else if(ofs<curr->extent.offset) {
 			if(ofs+count>curr->extent.offset) {
 				fprintf(stderr, "overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
+				TODO("make something out of this");
 				abort(); /* TODO: make something out of this */
 			}
 			DEBUG("|.....|_XXX_|......|		normal new=%u+%u\n", ofs, count);
@@ -1132,14 +1140,21 @@ static uint_least32_t hash_uint64(uint_least64_t key) {
 /******************************************************************************
  * map
  ******************************************************************************/
+union map_data {
+	void *ptr;
+	fpos_t pos;
+	intptr_t i;
+	uintptr_t u;
+};
+
 struct map_entry {
 	LIST_ENTRY(struct map_entry) list;
 	void *key;	/* key can point inside of data (and usually should) */
-	void *data;
+	union map_data data;
 };
 
 struct map {
-	void (*free_entry)(void *key, void *data);
+	void (*free_entry)(void *key, union map_data *data);
 	uint_least32_t (*hash)(const void *key);
 	uint_least32_t table_mask;
 	int (*compare)(const void *key1, const void *key2);
@@ -1159,6 +1174,10 @@ EXPORT uint_least32_t map_hash_unsigned(const void *key) {
 	return hash_uint32(*(unsigned*)key);
 }
 
+EXPORT uint_least32_t map_hash_uintptr(const void *key) {
+	return hash_uint32((uintptr_t)key);
+}
+
 EXPORT int map_compare_stringignorecase(const void *key1, const void *key2) {
 	return strcasecmp(key1, key2);
 }
@@ -1168,11 +1187,18 @@ EXPORT int map_compare_string(const void *key1, const void *key2) {
 }
 
 EXPORT int map_compare_unsigned(const void *key1, const void *key2) {
-	unsigned a=*(unsigned*)key1 ,b=*(unsigned*)key2;
+	unsigned a=*(unsigned*)key1, b=*(unsigned*)key2;
 	return a<b?-1:a>b?1:0;
 }
 
-EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entry)(void *key, void *data), uint_least32_t (*hash)(const void *key), int (*compare)(const void *key1, const void *key2)) {
+/** 
+ * treat argument as an unsigned instead of as a pointer */
+EXPORT int map_compare_uintptr(const void *key1, const void *key2) {
+	uintptr_t a=(uintptr_t)key1, b=(uintptr_t)key2;
+	return a<b?-1:a>b?1:0;
+}
+
+EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entry)(void *key, union map_data *data), uint_least32_t (*hash)(const void *key), int (*compare)(const void *key1, const void *key2)) {
 	unsigned i;
 
 	assert(initial_size_bits < 32); /* 2^32 hash entries will break this init function */
@@ -1198,7 +1224,7 @@ EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entr
  * exclusive prevents the same key from being added more than once
  * replace causes the old entry to be removed
  */
-EXPORT int map_replace(struct map *m, void *key, void *data, int replace, int exclusive) {
+EXPORT int map_replace(struct map *m, void *key, const union map_data *data, int replace, int exclusive) {
 	struct map_entry *e;
 	uint_least32_t h;
 
@@ -1215,7 +1241,7 @@ EXPORT int map_replace(struct map *m, void *key, void *data, int replace, int ex
 			if(m->compare(key, e->key)==0) {
 				if(replace) {
 					LIST_REMOVE(e, list);
-					m->free_entry(e->key, e->data);
+					m->free_entry(e->key, &e->data);
 					free(e);
 					m->count--;
 					/* this will continue freeing ALL matching entries */
@@ -1232,7 +1258,7 @@ EXPORT int map_replace(struct map *m, void *key, void *data, int replace, int ex
 		return 0;
 	}
 	e->key=key;
-	e->data=data;
+	e->data=*data;
 	LIST_INSERT_HEAD(&m->table[h&m->table_mask], e, list);
 	m->count++;
 
@@ -1240,12 +1266,22 @@ EXPORT int map_replace(struct map *m, void *key, void *data, int replace, int ex
 }
 
 /* refuses to add more than one copy of the same key */
-EXPORT int map_add(struct map *m, void *key, void *data) {
-	return map_replace(m, key, data, 0, 1);
+EXPORT int map_add_ptr(struct map *m, void *key, void *ptr) {
+	const union map_data data={.ptr=ptr};
+	return map_replace(m, key, &data, 0, 1);
+}
+
+/**
+ * if key matches then replace
+ */
+EXPORT int map_replace_fpos(struct map *m, uintptr_t key, const fpos_t *pos) {
+	const union map_data data={.pos=*pos};
+	DEBUG("key=%d\n", key);
+	return map_replace(m, (void*)key, &data, 1, 1);
 }
 
 /* returns first matching entry */
-EXPORT void *map_lookup(struct map *m, const void *key) {
+EXPORT union map_data *map_lookup(struct map *m, const void *key) {
 	struct map_entry *e;
 	uint_least32_t h;
 
@@ -1261,10 +1297,37 @@ EXPORT void *map_lookup(struct map *m, const void *key) {
 		assert(e->key != NULL);
 		/* DEBUG("%s():comparing '%s' '%s'\n", __func__, key, e->key); */
 		if(m->compare(key, e->key)==0) {
-			return e->data;
+			return &e->data;
 		}
 	}
 	return NULL;
+}
+
+EXPORT fpos_t *map_lookup_fpos(struct map *m, const void *key) {
+	union map_data *data;
+	data=map_lookup(m, key);
+	return data ? &data->pos : NULL;
+}
+
+EXPORT void *map_lookup_ptr(struct map *m, const void *key) {
+	const union map_data *data;
+	data=map_lookup(m, key);
+	return data ? data->ptr : NULL;
+}
+
+EXPORT void map_foreach(struct map *m, void *p, void (*callback)(void *p, void *key, union map_data *data)) {
+	unsigned i;
+	struct map_entry *curr;
+	assert(callback != NULL);
+	TODO("Does this function work?");
+	TRACE("table_mask=%d\n", m->table_mask);
+	for(i=0;i<=m->table_mask;i++) {
+		TRACE("i=%u mask=%u\n", i, m->table_mask);
+		for(curr=LIST_TOP(m->table[i]);curr;curr=LIST_NEXT(curr, list)) {
+			TRACE("curr=%p\n", curr);
+			callback(p, curr->key, &curr->data);
+		}
+	}
 }
 
 /* frees the entry */
@@ -1286,7 +1349,7 @@ EXPORT int map_remove(struct map *m, void *key) {
 		if(m->compare(key, e->key)==0) {
 			tmp=LIST_NEXT(e, list);
 			LIST_REMOVE(e, list);
-			m->free_entry(e->key, e->data);
+			m->free_entry(e->key, &e->data);
 			memset(e, 0x99, sizeof *e);
 			free(e);
 			m->count--;
@@ -1308,7 +1371,7 @@ EXPORT void map_free(struct map *m) {
 	for(i=0;i<=m->table_mask;i++) {
 		while((e=LIST_TOP(m->table[i]))) {
 			LIST_REMOVE(e, list);
-			m->free_entry(e->key, e->data);
+			m->free_entry(e->key, &e->data);
 			free(e);
 			m->count--;
 		}
@@ -1327,8 +1390,8 @@ struct map_test_entry {
 	unsigned value;
 };
 
-static void map_test_free(void *key UNUSED, void *data) {
-	struct map_test_entry *e=data;
+static void map_test_free(void *key UNUSED, union map_data *data) {
+	struct map_test_entry *e=data->ptr;
 	free(e->str);
 	free(e);
 }
@@ -1357,8 +1420,8 @@ EXPORT void map_test(void) {
 
 	for(i=0;i<NR(test);i++) {
 		e=map_test_alloc(test[i], 5*i);
-		if(!map_add(&m, e->str, e)) {
-			printf("map_add() failed\n");
+		if(!map_add_ptr(&m, e->str, e)) {
+			printf("map_add_ptr() failed\n");
 		}
 	}
 
@@ -1367,7 +1430,7 @@ EXPORT void map_test(void) {
 	}
 
 	for(i=0;i<NR(test);i++) {
-		e=map_lookup(&m, test[i]);
+		e=map_lookup_ptr(&m, test[i]);
 		if(!e) {
 			printf("map_lookup() failed\n");
 		} else {
@@ -1519,6 +1582,7 @@ EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 	assert(bitmap != NULL);
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
 	/* TODO: check the head */
+	TODO("check the head"); /* I don't remember what these TODO's are for */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
 		if(bitmap->bitmap[i]!=0) {
 			/* found a set bit - scan the word to find the position */
@@ -1527,6 +1591,7 @@ EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 		}
 	}
 	/* TODO: check the tail */
+	TODO("check the tail"); /* I don't remember what these TODO's are for */
 	return -1; /* outside of the range */
 }
 
@@ -1537,6 +1602,7 @@ EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 	assert(bitmap != NULL);
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
 	/* TODO: check the head */
+	TODO("check the head"); /* I don't remember what these TODO's are for */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
 		if(bitmap->bitmap[i]!=~0U) {
 			/* found a set bit - scan the word to find the position */
@@ -1545,6 +1611,7 @@ EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 		}
 	}
 	/* TODO: check the tail */
+	TODO("check the tail"); /* I don't remember what these TODO's are for */
 	return -1; /* outside of the range */
 }
 
@@ -2070,6 +2137,13 @@ static int adler32_test(void) {
 /******************************************************************************
  * sjdb - Small Journaling DataBase
  ******************************************************************************/
+/* Purpose:
+ * + Convert an id to a file offset, using map hashtables.
+ * + read a recorder header and load it into a buffer.
+ * + the low level abstraction used by the recordcache component.
+ *
+ */
+
 /* HEADER:
  * 4 magic = "SjDb"
  * 4 version = "V0.0"
@@ -2105,6 +2179,11 @@ static int adler32_test(void) {
 #define SJDB_RECORD_HEADER_SZ 8
 #define SJDB_RECORD_TRAILER_SZ 8
 
+/* number of bits for the id to file offset table */
+#define SJDB_HASH_SIZE 12
+
+typedef uint_least32_t sjdb_id_t;
+
 /* the big buffer, used to hold incoming data */
 static void *sjdb_buffer;
 static size_t sjdb_buffer_max;
@@ -2113,6 +2192,7 @@ struct sjdb_handle {
 	FILE *f;
 	char *filename;
 	uint_least32_t global_ck; /* global checksum used while adding records */
+	struct map id_table; /* convert an id to a file offset */
 };
 
 /* reports error messages for SJDB */
@@ -2121,6 +2201,7 @@ static void sjdb_errorf(struct sjdb_handle *h, const char *func, const char *fmt
 	va_list ap;
 	assert(h != NULL);
 	/* TODO: log file offset with error message */
+	TODO("Log file offset with error message");
 	fprintf(stderr, "%s:%s:", h->filename, func);
 	va_start(ap, fmt);
 	vfprintf(stderr, fmt, ap);
@@ -2191,6 +2272,7 @@ static int sjdb_read_header(struct sjdb_handle *db, uint_least32_t *application,
 	if(fseek(db->f, SEEK_SET, 0)<0) {
 		perror(db->filename);
 		/* TODO: free the structure */
+		TODO("free the structure");
 		return 0;
 	}
 
@@ -2234,16 +2316,25 @@ static int sjdb_read_header(struct sjdb_handle *db, uint_least32_t *application,
  * return 1 on success
  * return -1 on EOF
  */
-static int sjdb_ll_read_entry(struct sjdb_handle *db) {
+static int sjdb_read_and_index_entry(struct sjdb_handle *db) {
 	char *buffer;
-	uint_least32_t id, length, ck, calc_ck, gck;
+	sjdb_id_t id; /* raw id */
+	unsigned record_id;
+	uint_least32_t length, ck, calc_ck, gck;
 	size_t res;
 	unsigned char type, action;
+	fpos_t pos;
 
 	buffer=sjdb_ll_grab_buffer(SJDB_RECORD_HEADER_SZ);
 	if(!buffer) {
 		sjdb_errorf(db, __func__, "could not allocate buffer\n");
 		return 0; /* error */
+	}
+
+	/* save the position for this reocrd */
+	if(fgetpos(db->f, &pos)!=0) {
+		perror(db->filename);
+		return 0; /* failure */
 	}
 
 	res=fread(buffer, 1, SJDB_RECORD_HEADER_SZ, db->f);
@@ -2260,15 +2351,18 @@ static int sjdb_ll_read_entry(struct sjdb_handle *db) {
 
 	assert(res == SJDB_RECORD_HEADER_SZ);
 
+	assert(sizeof id == sizeof(uint_least32_t)); /* we're using a 32-bit value for id right now */
+
 	record_read(buffer, SJDB_RECORD_HEADER_SZ, 0, "%u%u", &id, &length);
 
 	/* decode our funny 3 byte + 1 byte fields */
 	type=(id>>24)&255;
-	id&=0xffffffu;
+	record_id=id&0xffffffu;
 
 	action=(length>>24)&255;
 	length&=0xffffffu;
 
+	DEBUG("%s:found record type=0x%02x record_id=%d action=0x%02x length=%d\n", db->filename, type, record_id, action, length);
 	if(action!=SJDB_ACTION_ERASE && action!=SJDB_ACTION_UPDATE) {
 		sjdb_errorf(db, __func__, "unknown record action 0x%02x\n", action);
 		return 0; /* error */
@@ -2298,6 +2392,7 @@ static int sjdb_ll_read_entry(struct sjdb_handle *db) {
 	gck=RD_BE32(buffer, SJDB_RECORD_HEADER_SZ+length+4);
 
 	/* TODO: check global checksum */
+	TODO("check global checksum");
 
 	calc_ck=adler32(ADLER32_INITIAL, buffer, length+SJDB_RECORD_HEADER_SZ);
 
@@ -2306,7 +2401,13 @@ static int sjdb_ll_read_entry(struct sjdb_handle *db) {
 		return 0;
 	}
 
-	/* TODO: place record in the hash table */
+	/* place record in the hash table as id and position */
+	if(!map_replace_fpos(&db->id_table, id, &pos)) {
+		ERROR_FMT("map_replace_fpos() failed (id=0x%08x\n", id);
+		return 0; /* failure */
+	}
+
+	DEBUG("%s:found a record while loading. id=0x%08x\n", db->filename, id);
 	return 1;
 }
 
@@ -2323,17 +2424,34 @@ static int sjdb_load(struct sjdb_handle *db) {
 			perror(db->filename);
 			sjdb_errorf(db, __func__, "Could not load data\n");
 			/* TODO: free the structure */
+			TODO("free the structure");
 			return 0;
 		}
 	}
 	
-	/* TODO: read in all records */
-	while(sjdb_ll_read_entry(db)>0) {
-		DEBUG("%s:found a record\n", db->filename);
-		/* TODO: read global checksum */
-		/* TODO: process */
+	/* read in all records, record the position and verify the checksums */
+	while(sjdb_read_and_index_entry(db)>0) {
+		TODO("Should we do something here?");
 	}
 	
+	return 1; /* success */
+}
+
+/* go to the start of an entry */
+EXPORT int sjdb_goto(struct sjdb_handle *db, sjdb_id_t id) {
+	const fpos_t *pos;
+
+	pos=map_lookup_fpos(&db->id_table, &id);
+	if(!pos) {
+		DEBUG_MSG("No entry found");
+		return 0; /* failure - no entry found */
+	}
+
+	if(fsetpos(db->f, pos)!=0) {
+		perror(db->filename);
+		return 0; /* failure - could not seek */
+	}
+
 	return 1; /* success */
 }
 
@@ -2359,10 +2477,14 @@ EXPORT int sjdb_open(struct sjdb_handle *db, const char *filename) {
 	if(!sjdb_read_header(db, &application, &generation)) {
 		sjdb_errorf(db, __func__, "missing header\n");
 		/* TODO: free the structure */
+		TODO("free the structure");
 		return 0;
 	}
 
 	db->global_ck=ADLER32_INITIAL;
+
+	TODO("should we have a free function on the map entries?");
+	map_init(&db->id_table, SJDB_HASH_SIZE, NULL, map_hash_uintptr, map_compare_uintptr);
 
 	/* index all records */
 	if(!sjdb_load(db)) {
@@ -2378,15 +2500,23 @@ void sjdb_close(struct sjdb_handle *db) {
 	db->f=NULL;
 	free(db->filename);
 	db->filename=NULL;
+	map_free(&db->id_table);
 }
 
-static int sjdb_write_update(struct sjdb_handle *db, size_t len, uint_least32_t id, void *data) {
+/**
+ * sjdb_write_update
+ *
+ * writes a new 'U' update record to the journal
+ *
+ */
+static int sjdb_write_update(struct sjdb_handle *db, size_t len, sjdb_id_t id, void *data) {
 	uint_least32_t calc_ck;
 	char *buf;
 	int res;
 
 	buf=sjdb_ll_grab_buffer(SJDB_RECORD_HEADER_SZ+len+SJDB_RECORD_TRAILER_SZ); /* adler32 on the end, plus 8 byte header */
 
+	DEBUG("%s:new record id=0x%08x len=%d\n", db->filename, id, len);
 	res=record_write(buf, SJDB_RECORD_HEADER_SZ, 0, "%u%u", id, len|((unsigned)SJDB_ACTION_UPDATE<<24));
 	if((unsigned)res!=SJDB_RECORD_HEADER_SZ) {
 		sjdb_errorf(db, __func__, "Could not write entry\n");
@@ -2412,14 +2542,59 @@ static int sjdb_write_update(struct sjdb_handle *db, size_t len, uint_least32_t 
 	return 1; /* success */
 }
 
+struct _sjdb_scan_state {
+	sjdb_id_t value, mask;
+	void (*callback)(sjdb_id_t id);
+	int count;
+};
+
+static void sjdb_scan_ll_cb(void *p, void *key, union map_data *data) {
+	struct _sjdb_scan_state *st=p;
+	sjdb_id_t id;
+
+	assert(st != NULL);
+	assert(data != NULL);
+	assert(key != NULL);
+	assert(st->callback != NULL);
+
+	/* ignore values that do not match the value/mask */
+	id=(sjdb_id_t)key;
+
+	DEBUG("st->mask=0x%08x st->value=0x%08x id=0x%08x\n", st->mask, st->value, id);
+	if((id&st->mask)==st->value) {
+		st->callback(id); /* hand data->ptr */
+		st->count++;
+	}
+}
+
+/* return number of matching records */
+EXPORT int sjdb_scan(struct sjdb_handle *db, unsigned type, void (*callback)(sjdb_id_t)) {
+	struct _sjdb_scan_state st;
+
+	st.value=(sjdb_id_t)type<<24;
+	assert((sjdb_id_t)~0 > 0); /* require that sjdb_id_t is unsigned */
+	st.mask=~(((sjdb_id_t)~0)>>8); /* NOTE: requires that sjdb_id_t is unsigned */
+	st.callback=callback;
+	st.count=0;
+	
+	DEBUG("%s:id_table.table_mask=%d\n", db->filename, db->id_table.table_mask);
+	map_foreach(&db->id_table, &st, sjdb_scan_ll_cb);
+	return st.count;
+}
+
 /******************************************************************************
  * Record Cacheing - look up records and automatically load them
  ******************************************************************************/
+/* Purpose:
+ * + convert id to an in-memory buffer, if record is not loaded then load it.
+ * + provides a buffer destination for sjdb records
+ * + used by other components to access the database 
+ */
 #define RECORDCACHE_HASH_SIZE 8
 
 struct recordcache_entry {
 	LIST_ENTRY(struct recordcache_entry) queue;
-	unsigned id;
+	sjdb_id_t id;
 	void (*free)(void *data); /* function to free the item */
 	int (*flush)(void *data);	/* function to write the item to the journal */
 	unsigned dirty:1; /* flag to indicate there is unwritten data */
@@ -2481,15 +2656,15 @@ static void recordcache_entry_ll_free(struct recordcache_entry *e) {
 	free(e);
 }
 
-static void recordcache_entry_ll_put(void *key UNUSED, void *data) {
-	struct recordcache_entry *e=data;
+static void recordcache_entry_ll_put(void *key UNUSED, union map_data *data) {
+	struct recordcache_entry *e=data->ptr;
 	REFCOUNT_PUT(e, recordcache_entry_ll_free);
 }
 
-EXPORT int recordcache_entry_flush(unsigned id) {
+EXPORT int recordcache_entry_flush(sjdb_id_t id) {
 	struct recordcache_entry *e;
 
-	e=map_lookup(&recordcache_table, &id);
+	e=map_lookup_ptr(&recordcache_table, &id);
 	if(!e) {
 		fprintf(stderr, "%s():called on object that does not exist (id=0x%x)\n", __func__, id);
 		return 0; /* failure */
@@ -2498,14 +2673,17 @@ EXPORT int recordcache_entry_flush(unsigned id) {
 	return recordcache_entry_ll_flush(e);
 }
 
-EXPORT int recordcache_entry_put(unsigned id) {
+/* a way to free the entry using ref counting */
+EXPORT int recordcache_entry_put(sjdb_id_t id) {
+	union map_data data;
 	struct recordcache_entry *e;
-	e=map_lookup(&recordcache_table, &id);
+	e=map_lookup_ptr(&recordcache_table, &id);
 	if(e) {
 		fprintf(stderr, "%s():called on object that does not exist (id=0x%x)\n", __func__, id);
 		return 0;
 	}
-	recordcache_entry_ll_put(&e->id, e);
+	data.ptr=e;
+	recordcache_entry_ll_put(&e->id, &data);
 	return 1;
 }
 
@@ -2520,7 +2698,7 @@ EXPORT void recordcache_shutdown(void) {
 }
 
 /* set dirty if this data is new */
-EXPORT int recordcache_add(unsigned id, void *data, int dirty, void (*record_free)(void *), int (*record_flush)(void *)) {
+EXPORT int recordcache_add(sjdb_id_t id, void *data, int dirty, void (*record_free)(void *), int (*record_flush)(void *)) {
 	struct recordcache_entry *new;
 	new=malloc(sizeof *new);
 	new->id=id;
@@ -2530,7 +2708,7 @@ EXPORT int recordcache_add(unsigned id, void *data, int dirty, void (*record_fre
 	new->dirty=dirty;
 	REFCOUNT_INIT(new);
 	LIST_ENTRY_INIT(new, queue);
-	if(!map_add(&recordcache_table, &new->id, new)) {
+	if(!map_add_ptr(&recordcache_table, &new->id, new)) {
 		free(new);
 		return 0; /* failure */
 	}
@@ -2539,20 +2717,20 @@ EXPORT int recordcache_add(unsigned id, void *data, int dirty, void (*record_fre
 }
 
 /* return NULL if not found in the cache */
-EXPORT void *recordcache_get(unsigned id) {
+EXPORT void *recordcache_get(sjdb_id_t id) {
 	struct recordcache_entry *e;
 
-	e=map_lookup(&recordcache_table, &id);
+	e=map_lookup_ptr(&recordcache_table, &id);
 	if(e) return e->data; /* success */
 
 	return 0; /* not in cache */
 }
 
 /* gets a record and marks it as dirty */
-EXPORT void *recordcache_dirty(unsigned id) {
+EXPORT void *recordcache_dirty(sjdb_id_t id) {
 	struct recordcache_entry *e;
 
-	e=map_lookup(&recordcache_table, &id);
+	e=map_lookup_ptr(&recordcache_table, &id);
 	if(e) {
 		e->dirty=1;
 		return e->data; /* success */
@@ -2560,6 +2738,7 @@ EXPORT void *recordcache_dirty(unsigned id) {
 
 	return 0; /* not in cache */
 }
+
 /******************************************************************************
  * Telnet protocol constants
  ******************************************************************************/
@@ -2726,12 +2905,14 @@ EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap) {
 	if((unsigned)res>b->max-b->used) {
 		/* truncation occured */
 		/* TODO: grow the buffer and try again? */
+		TODO("grow the buffer and try again?");
 		DEBUG("Truncation detected in buffer %p\n", (void*)b);
 		res=b->max-b->used;
 	}
 	res=buffer_ll_expandnl(b, (unsigned)res);
 	if(res==-1) {
 		/* TODO: test this code */
+		TODO("test this code");
 		fprintf(stderr, "%s():Overflow in buffer %p\n", __func__, (void*)b);
 		return -1;
 	}
@@ -2830,7 +3011,7 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 			res=iac_process(d, *len, p);
 			if(!res) {
 				/* incomplete IAC sequence, wait for more data */
-				DEBUG("Incomplete IAC sequence, wait for more data\n");
+				DEBUG_MSG("Incomplete IAC sequence, wait for more data\n");
 				return NULL;
 			}
 			DEBUG("Telnet control data processed (%zd bytes)\n", res);
@@ -3149,7 +3330,7 @@ static void socketio_ll_handle_free(struct socketio_handle *sh) {
 	DEBUG("freeing socket handle '%s'\n", sh->name);
 
 	if(sh->extra) {
-		DEBUG("WARNING:extra data for socket handle is being leaked\n");
+		DEBUG_MSG("WARNING:extra data for socket handle is being leaked");
 	}
 
 	if(sh->fd!=INVALID_SOCKET) {
@@ -3273,7 +3454,7 @@ EXPORT int socketio_dispatch(long msec) {
 #endif
 
 	if(socketio_fdmax==INVALID_SOCKET) {
-		DEBUG("WARNING:currently not waiting on any sockets\n");
+		DEBUG_MSG("WARNING:currently not waiting on any sockets");
 	}
 	nr=select(socketio_fdmax+1, &out_readfds, &out_writefds, 0, to);
 	SOCKETIO_FAILON(nr==SOCKET_ERROR, "select()", failure);
@@ -3281,6 +3462,7 @@ EXPORT int socketio_dispatch(long msec) {
 	DEBUG("select() returned %d results\n", nr);
 
 	/* TODO: if fds_bits is available then base the loop on the fd_set and look up entries on the client list. */
+	TODO("if fds_bits is available then base the loop on the fd_set and look up entries on the client list.");
 
 	/* check all sockets */
 	for(curr=LIST_TOP(socketio_handle_list);nr>0 && curr;curr=next) {
@@ -3595,6 +3777,7 @@ static void telnetclient_free(struct socketio_handle *sh) {
 	buffer_free(&client->input);
 
 	/* TODO: free any other data structures associated with client */
+	TODO("free any other data structures associated with client"); /* be vigilant about memory leaks */
 
 #ifndef NDEBUG
 	memset(client, 0xBB, sizeof *client); /* fill with fake data before freeing */
@@ -3632,7 +3815,7 @@ static int telnetclient_telnet_init(struct telnetclient *cl) {
 		IAC, SB, TELOPT_TTYPE, TELQUAL_SEND, IAC, SE, /* ask the terminal type */
 	};
 	if(buffer_write_noexpand(&cl->output, support, sizeof support)<0) {
-		DEBUG("%s():write failure\n", __func__);
+		DEBUG_MSG("write failure");
 		cl->sh->delete_flag=1;
 		return 0; /* failure */
 	}
@@ -3654,7 +3837,7 @@ static int telnetclient_echomode(struct telnetclient *cl, int mode) {
 	}
 
 	if(buffer_write_noexpand(&cl->output, s, len)<0) {
-		DEBUG("%s():write failure\n", __func__);
+		DEBUG_MSG("write failure");
 		cl->sh->delete_flag=1;
 		return 0; /* failure */
 	}
@@ -3680,7 +3863,7 @@ static int telnetclient_linemode(struct telnetclient *cl, int mode) {
 	}
 
 	if(buffer_write_noexpand(&cl->output, s, len)<0) {
-		DEBUG("%s():write failure\n", __func__);
+		DEBUG_MSG("write failure");
 		cl->sh->delete_flag=1;
 		return 0; /* failure */
 	}
@@ -3806,7 +3989,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 				TRACE("found IAC %hhu\n", endptr[1]);
 				endptr++;
 				if((endptr-iac)>=(ptrdiff_t)len) {
-					DEBUG("Unterminated IAC SB sequence\n");
+					DEBUG_MSG("Unterminated IAC SB sequence");
 					return 0; /* unterminated */
 				}
 				if(endptr[0]==SE) {
@@ -3948,22 +4131,22 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 #define USER_ID_TO_RECORD(id) ((id)|((unsigned)USER_RECORD_TYPE<<24))
 
 struct user {
-	unsigned id;
+	sjdb_id_t id;
 	char *username;
 	char *password_crypt;
 	char *email;
 };
 
 struct user_cache {
-	unsigned id;
+	sjdb_id_t id;
 	char *username;
 };
 
 static struct freelist user_id_freelist;
 static struct map user_cache_index;
 
-static void user_cache_ll_free(void *key, void *data) {
-	struct user_cache *uc=data;
+static void user_cache_ll_free(void *key, union map_data *data) {
+	struct user_cache *uc=data->ptr;
 	assert(data != NULL);
 	assert(key == uc->username);
 	if(uc) {
@@ -3980,8 +4163,9 @@ static int user_cache_add(struct user *u) {
 	uc=malloc(sizeof *uc);
 	uc->username=strdup(u->username);
 	uc->id=u->id;
-	if(!map_add(&user_cache_index, uc->username, uc)) {
-		user_cache_ll_free(uc->username, uc);
+	if(!map_add_ptr(&user_cache_index, uc->username, uc)) {
+		union map_data data={.ptr=uc};
+		user_cache_ll_free(uc->username, &data);
 		fprintf(stderr, "User '%s' could not be added to cache\n", u->username);
 		return 0; /* failure - probably already exists */
 	}
@@ -4003,7 +4187,7 @@ static void user_ll_free(void *key, void *data) {
 
 /* callback for recordcache system */
 static void user_record_free(void *data) {
-	fprintf(stderr, "%s():TODO!\n", __func__);
+	TODO("implement this function.");
 }
 
 /* callback for recordcache system 
@@ -4032,16 +4216,23 @@ static int user_record_flush(void *data) {
 	return res;
 }
 
+static void _user_ll_index_entry(sjdb_id_t id) {
+	TODO("implement this");
+	DEBUG("Found entry for 0x%08x\n", id);
+}
+
 EXPORT void user_init(void) {
 	freelist_init(&user_id_freelist, 0);
 	freelist_pool(&user_id_freelist, 0, USER_MAX);
 	map_init(&user_cache_index, USER_HASH_SIZE, user_cache_ll_free, map_hash_stringignorecase, map_compare_stringignorecase);
 
-	/* TODO: scan sjdb hash for user records */
+	/* scan sjdb hash for user records */
+	sjdb_scan(&recordcache_sjdb, USER_RECORD_TYPE, _user_ll_index_entry);
 }
 
 EXPORT void user_shutdown(void) {
 	/* TODO: flush unwritten entries to disk */
+	TODO("flush unwritten entries to disk");
 	map_free(&user_cache_index);
 	freelist_free(&user_id_freelist);
 }
@@ -4050,7 +4241,7 @@ EXPORT void user_shutdown(void) {
 EXPORT int user_exists(const char *username) {
 	struct user_cache *uc;
 	assert(username != NULL);
-	uc=map_lookup(&user_cache_index, username);
+	uc=map_lookup_ptr(&user_cache_index, username);
 	return uc!=NULL;
 }
 
@@ -4061,11 +4252,11 @@ EXPORT struct user *user_get(const char *username) {
 
 	DEBUG("%s():looking for '%s'\n", __func__, username);
 
-	uc=map_lookup(&user_cache_index, username);
+	uc=map_lookup_ptr(&user_cache_index, username);
 	if(uc) {
 		DEBUG("Found username '%s'\n", uc->username);
 	} else {
-		DEBUG("Did not find username\n");
+		DEBUG_MSG("Did not find username");
 		return 0;
 	}
 
@@ -4073,7 +4264,7 @@ EXPORT struct user *user_get(const char *username) {
 	if(u) {
 		DEBUG("Found username '%s'\n", u->username);
 	} else {
-		DEBUG("Did not find username\n");
+		DEBUG_MSG("Did not find username");
 	}
 
 	return u;
@@ -4109,13 +4300,15 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 
 /* callback for sjdb
  * reads a new user record */
-EXPORT int user_sjdb_update(unsigned id, size_t len, void *data) {
+EXPORT int user_sjdb_update(sjdb_id_t id, size_t len, void *data) {
+	TODO("implement this");
 	abort(); /* TODO: implement this */
 }
 
 /* callback for sjdb 
  * erases a user */
-EXPORT int user_sjdb_erase(unsigned id) {
+EXPORT int user_sjdb_erase(sjdb_id_t id) {
+	TODO("implement this");
 	abort(); /* TODO: implement this */
 }
 
