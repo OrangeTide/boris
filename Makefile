@@ -10,7 +10,7 @@ CFLAGS:=-Wall -Wextra -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -
 # profiling
 #CFLAGS+=-pg
 # optimization
-#CFLAGS+=-Os 
+#CFLAGS+=-Os
 # enable the following for dead code elimination
 #CFLAGS+=-ffunction-sections -fdata-sections -Wl,--gc-sections
 
@@ -19,6 +19,7 @@ CPPFLAGS:=-D_XOPEN_SOURCE=600 -D_BSD_SOURCE
 
 #CPPFLAGS+=-DNDEBUG
 CPPFLAGS+=-DNTRACE
+CPPFLAGS+=-DNTEST
 
 # LDLIBS:=
 
@@ -54,7 +55,7 @@ else
 STRIP:=strip -S
 endif
 
-## 
+##
 # Windows build
 #
 CFLAGS_WIN32:=$(CFLAGS) -D_WIN32_WINNT=0x0501
