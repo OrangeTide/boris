@@ -16,7 +16,6 @@
  *  object_base - a generic object type
  *  object_cache - interface to recordcache for objects
  *  object_xxx - free/load/save routines for objects
- *  recordcache - loads records into memory and caches them
  *  refcount - macros to provide reference counting
  *  server - accepts new connections
  *  shvar - process $() macros
@@ -24,8 +23,6 @@
  *  telnetclient - processes data from a socket for Telnet protocol
  *
  * dependency:
- *  recordcache - uses bitfield to track dirty blocks
- *  records - uses freelist to track record numbers (reserve first 100 records)
  *  socketio_handles - uses ref counts to determine when to free linked lists items
  *
  * types of records:
@@ -37,27 +34,27 @@
  *  strings - a large string that can span multiple blocks
  *
  * objects:
- * 	base - the following types of objects are defined:
- * 		room
- * 		mob
- * 		item
- * 	instance - all instances are the same structure:
- * 		id - object id
- * 		count - all item instances are stackable 1 to 256.
- * 		flags - 24 status flags [A-HJ-KM-Z]
- * 		extra1..extra2 - control values that can be variable
+ *	base - the following types of objects are defined:
+ *		room
+ *		mob
+ *		item
+ *	instance - all instances are the same structure:
+ *		id - object id
+ *		count - all item instances are stackable 1 to 256.
+ *		flags - 24 status flags [A-HJ-KM-Z]
+ *		extra1..extra2 - control values that can be variable
  *
  * containers:
- * 	instance parameter holds a id that holds an array of up to 64 objects.
+ *	instance parameter holds a id that holds an array of up to 64 objects.
  *
  * database saves the following types of blobs:
- * 	player account
- * 	room object
- * 	mob object (also used for characters)
- * 	item object
- * 	instances
- * 	container slots
- * 	help text
+ *	player account
+ *	room object
+ *	mob object (also used for characters)
+ *	item object
+ *	instances
+ *	container slots
+ *	help text
  *
  ******************************************************************************/
 
@@ -82,6 +79,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -95,6 +93,9 @@
 #ifdef _XOPEN_SOURCE
 #include <strings.h>
 #endif
+#include <sys/stat.h>
+#include <sys/types.h>
+
 
 /******************************************************************************
  * Macros
@@ -243,6 +244,7 @@
 #define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
 #define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
 #define FAILON(e, reason, label) do { if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
+#define PERROR(msg) fprintf(stderr, "ERROR:%s():%d:%s:%s\n", __func__, __LINE__, msg, strerror(errno));
 
 /*=* reference counting macros *=*/
 #define REFCOUNT_TYPE int
@@ -307,6 +309,12 @@ struct telnetclient;
 struct socketio_handle;
 struct menuinfo;
 
+/* TODO: move config routines around so we don't need this */
+struct config_watcher;
+struct config {
+	LIST_HEAD(struct, struct config_watcher) watchers;
+};
+
 struct formitem {
 	LIST_ENTRY(struct formitem) item;
 	char *name;
@@ -345,8 +353,6 @@ static struct mud_config {
 	char *msg_userexists;
 	char *msg_usermin3;
 	char *msgfile_welcome;
-	char *db_filename;
-	char *db_filename_timestamp;
 } mud_config;
 
 /******************************************************************************
@@ -356,6 +362,10 @@ static void telnetclient_free(struct socketio_handle *sh);
 EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
 EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 static void form_menu_lineinput(struct telnetclient *cl, const char *line);
+EXPORT void config_setup(struct config *cfg);
+EXPORT void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value), void *extra);
+EXPORT int config_load(const char *filename, struct config *cfg);
+EXPORT void config_free(struct config *cfg);
 
 /******************************************************************************
  * Util - utility routines
@@ -368,7 +378,6 @@ EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
 	char c;
 
 	while((c=*pattern++)) switch(c) {
-		/* TODO: support [] and \ */
 		case '?':
 			if(*string++==0) return UTIL_FNM_NOMATCH;
 			break;
@@ -382,6 +391,8 @@ EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
 			}
 			return UTIL_FNM_NOMATCH; /* none of the tested paths worked */
 			break;
+		case '[': case ']': case '\\':
+			TODO("support [] and \\");
 		default:
 			if((flags&UTIL_FNM_CASEFOLD) ? tolower(*string++)!=tolower(c) : *string++!=c) return UTIL_FNM_NOMATCH;
 	}
@@ -400,37 +411,37 @@ char *util_textfile_load(const char *filename) {
 
 	f=fopen(filename, "r");
 	if(!f) {
-		perror(filename);
+		PERROR(filename);
 		goto failure0;
 	}
 
 	if(fseek(f, 0l, SEEK_END)!=0) {
-		perror(filename);
+		PERROR(filename);
 		goto failure1;
 	}
 
 	len=ftell(f);
 	if(len==EOF) {
-		perror(filename);
+		PERROR(filename);
 		goto failure1;
 	}
 
 	assert(len>=0); /* len must not be negative */
 
 	if(fseek(f, 0l, SEEK_SET)!=0) {
-		perror(filename);
+		PERROR(filename);
 		goto failure1;
 	}
 
 	ret=malloc((unsigned)len+1);
 	if(!ret) {
-		perror(filename);
+		PERROR(filename);
 		goto failure1;
 	}
 
 	res=fread(ret, 1, (unsigned)len, f);
 	if(ferror(f)) {
-		perror(filename);
+		PERROR(filename);
 		goto failure2;
 	}
 
@@ -447,6 +458,20 @@ failure1:
 	fclose(f);
 failure0:
 	return 0; /* failure */
+}
+
+/* removes a trailing newline if one exists */
+void trim_nl(char *line) {
+	line=strrchr(line, '\n');
+	if(line) *line=0;
+}
+
+/* remove beginning and trailing whitespace */
+char *trim_whitespace(char *line) {
+	char *tmp;
+	while(isspace(*line)) line++;
+	for(tmp=line+strlen(line)-1;line<tmp && isspace(*tmp);tmp--) *tmp=0;
+	return line;
 }
 
 /******************************************************************************
@@ -882,7 +907,7 @@ static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsi
 	new=malloc(sizeof *new);
 	assert(new!=NULL);
 	if(!new) {
-		perror("malloc()");
+		PERROR("malloc()");
 		return 0;
 	}
 	new->extent.offset=ofs;
@@ -937,12 +962,12 @@ EXPORT long freelist_alloc(struct freelist *fl, unsigned count) {
 
 	bucketnr=freelist_ll_bucketnr(fl, count);
 	bucketptr=&LIST_TOP(fl->buckets[bucketnr]);
-	/* TODO: prioritize the order of the check. 1. exact size, 2. double size 3. ? */
+
 	for(;bucketnr<=FREELIST_OVERFLOW_BUCKET(fl);bucketnr++) {
 		assert(bucketnr<=FREELIST_OVERFLOW_BUCKET(fl));
 		assert(bucketptr!=NULL);
 
-		if(*bucketptr) { /* found an entry*/
+		if(*bucketptr) { /* found an entry - cut the front of it off to alloc */
 			curr=*bucketptr;
 			DEBUG("curr->extent.length:%u count:%u\n", curr->extent.length, count);
 			assert(curr->extent.length>=count);
@@ -999,9 +1024,9 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 		*/
 
 		if(ofs==curr->extent.offset) {
-			fprintf(stderr, "overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
+			ERROR_FMT("overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
 			TODO("make something out of this");
-			abort(); /* TODO: make something out of this */
+			abort();
 		} else if(last && freelist_ll_isbridge(&last->extent, ofs, count, &curr->extent)) {
 			/* |......|XXX|.......|		bridge */
 			DEBUG("|......|XXX|.......|		bridge. last=%u+%u curr=%u+%u new=%u+%u\n", last->extent.length, last->extent.offset, curr->extent.offset, curr->extent.length, ofs, count);
@@ -1032,9 +1057,9 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 			break;
 		} else if(ofs<curr->extent.offset) {
 			if(ofs+count>curr->extent.offset) {
-				fprintf(stderr, "overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
+				ERROR_FMT("overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
 				TODO("make something out of this");
-				abort(); /* TODO: make something out of this */
+				abort();
 			}
 			DEBUG("|.....|_XXX_|......|		normal new=%u+%u\n", ofs, count);
 			/* create a new entry */
@@ -1066,7 +1091,73 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 	}
 }
 
-#ifndef NDEBUG
+/**
+ * allocates a particular range
+ * (assumes that freelist_pool assembles adjacent regions into the largest
+ * possible contigious spaces)
+ */
+EXPORT int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count) {
+	unsigned bucketnr;
+	struct freelist_entry **bucketptr, *curr;
+
+	assert(count!=0);
+
+	DEBUG("thwacking %u:%u\n", ofs, count);
+
+	bucketnr=freelist_ll_bucketnr(fl, count);
+	bucketptr=&LIST_TOP(fl->buckets[bucketnr]);
+	for(;bucketnr<=FREELIST_OVERFLOW_BUCKET(fl);bucketnr++) {
+		assert(bucketnr<=FREELIST_OVERFLOW_BUCKET(fl));
+		assert(bucketptr!=NULL);
+
+		for(curr=*bucketptr;curr;curr=LIST_NEXT(curr, global)) {
+			if(curr->extent.offset<=ofs && curr->extent.length>=count+curr->extent.offset-ofs) {
+				TRACE("Found entry to thwack at %u:%u for %u:%u\n", curr->extent.offset, curr->extent.length, ofs, count);
+
+				/* four possible cases:
+				 * 1. heads and lengths are the same - free extent
+				 * 2. heads are the same, but lengths differ - shrink and rebucket
+				 * 3. tails are the same - shrink and rebucket
+				 * 4. extent gets split into two extents
+				 */
+				if(curr->extent.offset==ofs && curr->extent.length==count) {
+					/* 1. heads and lengths are the same - free extent */
+					freelist_ll_free(curr);
+					return 1; /* success */
+				} else if(curr->extent.offset==ofs) {
+					/* 2. heads are the same, but lengths differ - shrink and rebucket */
+					curr->extent.length-=count;
+					freelist_ll_bucketize(fl, curr);
+					return 1; /* success */
+				} else if((curr->extent.offset+curr->extent.length)==(ofs+count)) {
+					/* 3. tails are the same - shrink and rebucket */
+					curr->extent.offset+=count;
+					freelist_ll_bucketize(fl, curr);
+					return 1; /* success */
+				} else { /* 4. extent gets split into two extents */
+					struct freelist_extent new; /* second part */
+
+					/* make curr the first part, and create a new one after
+					 * ofs:count for the second */
+
+					new.offset=ofs+count;
+					new.length=(curr->extent.offset+curr->extent.length)-new.offset;
+					DEBUG("ofs=%d curr.offset=%d\n", ofs, curr->extent.offset);
+					assert(ofs > curr->extent.offset);
+					curr->extent.length=ofs-curr->extent.offset;
+					freelist_ll_bucketize(fl, curr);
+					freelist_pool(fl, new.offset, new.length);
+					return 1; /* success */
+				}
+				DEBUG_MSG("Should not be possible to get here");
+				abort();
+			}
+		}
+	}
+	return 0; /* failure */
+}
+
+#ifndef NTEST
 EXPORT void freelist_dump(struct freelist *fl) {
 	struct freelist_entry *curr;
 	unsigned n;
@@ -1114,6 +1205,20 @@ EXPORT void freelist_test(void) {
 	}
 
 	freelist_dump(&fl);
+	fprintf(stderr, "<freelist should be empty>\n");
+
+	freelist_pool(&fl, 1003, 1015);
+
+	freelist_dump(&fl);
+
+	freelist_thwack(&fl, 1007, 1005);
+
+	freelist_thwack(&fl, 2012, 6);
+
+	freelist_thwack(&fl, 1003, 4);
+
+	freelist_dump(&fl);
+	fprintf(stderr, "<freelist should be empty>\n");
 
 	freelist_free(&fl);
 }
@@ -1128,7 +1233,7 @@ static uint_least32_t hash_stringignorecase32(const char *key) {
 	uint_least32_t h=0;
 
 	while(*key) {
-		h=h*65599u+(unsigned)tolower((unsigned)*key++);
+		h=h*65599u+(unsigned)tolower(*(const unsigned char*)key++);
 		/* this might be faster on some systems with fast shifts and slow mult:
 		 * h=(h<<6)+(h<<16)-h+tolower(*key++);
 		 */
@@ -1149,6 +1254,7 @@ static uint_least32_t hash_string32(const char *key) {
 	return h;
 }
 
+#if 0
 /* creates a 32-bit hash of a blob of memory */
 static uint_least32_t hash_mem32(const char *key, size_t len) {
 	uint_least32_t h=0;
@@ -1162,6 +1268,7 @@ static uint_least32_t hash_mem32(const char *key, size_t len) {
 	}
 	return h;
 }
+#endif
 
 /* creates a 32-bit hash of a 32-bit value */
 static uint_least32_t hash_uint32(uint_least32_t key) {
@@ -1185,7 +1292,6 @@ static uint_least64_t hash64_uint64(uint_least64_t key) {
 	key+=key<<31;
 	return key;
 }
-#endif
 
 /* turns a 64-bit value into a 32-bit hash */
 static uint_least32_t hash_uint64(uint_least64_t key) {
@@ -1197,6 +1303,7 @@ static uint_least32_t hash_uint64(uint_least64_t key) {
 	key^=ROR64(key, 22);
 	return (uint_least32_t)key;
 }
+#endif
 
 /******************************************************************************
  * map
@@ -1223,12 +1330,18 @@ struct map {
 	long count;
 };
 
+/**
+ * use this as a callback to init when you don't want to free
+ */
+static void _map_donotfree(void *key UNUSED, union map_data *data UNUSED) {
+}
+
 EXPORT uint_least32_t map_hash_stringignorecase(const void *key) {
-	return hash_string32(key);
+	return hash_stringignorecase32(key);
 }
 
 EXPORT uint_least32_t map_hash_string(const void *key) {
-	return hash_stringignorecase32(key);
+	return hash_string32(key);
 }
 
 EXPORT uint_least32_t map_hash_unsigned(const void *key) {
@@ -1276,7 +1389,7 @@ EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entr
 	}
 
 	m->count=0;
-	m->free_entry=free_entry;
+	m->free_entry=free_entry?free_entry:_map_donotfree;
 	m->hash=hash;
 	m->compare=compare;
 }
@@ -1315,7 +1428,7 @@ EXPORT int map_replace(struct map *m, void *key, const union map_data *data, int
 
 	e=malloc(sizeof *e);
 	if(!e) {
-		perror("malloc()");
+		PERROR("malloc()");
 		return 0;
 	}
 	e->key=key;
@@ -1330,6 +1443,12 @@ EXPORT int map_replace(struct map *m, void *key, const union map_data *data, int
 EXPORT int map_add_ptr(struct map *m, void *key, void *ptr) {
 	const union map_data data={.ptr=ptr};
 	return map_replace(m, key, &data, 0, 1);
+}
+
+/* refuses to add more than one copy of the same key */
+EXPORT int map_add_uint(struct map *m, uintptr_t key, void *ptr) {
+	const union map_data data={.ptr=ptr};
+	return map_replace(m, (void*)key, &data, 0, 1);
 }
 
 /**
@@ -1423,6 +1542,10 @@ EXPORT int map_remove(struct map *m, void *key) {
 	}
 
 	return res; /* not found */
+}
+
+EXPORT int map_remove_uint(struct map *m, uintptr_t key) {
+	return map_remove(m, (void*)key);
 }
 
 EXPORT void map_free(struct map *m) {
@@ -1546,7 +1669,7 @@ EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	DEBUG("%s():Allocating %zd bytes\n", __func__, newbits/CHAR_BIT);
 	tmp=realloc(bitmap->bitmap, newbits/CHAR_BIT);
 	if(!tmp) {
-		perror("realloc()");
+		PERROR("realloc()");
 		return 0; /* failure */
 	}
 	if(bitmap->bitmap_allocbits<newbits) {
@@ -1642,7 +1765,6 @@ EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
 	assert(bitmap != NULL);
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
-	/* TODO: check the head */
 	TODO("check the head"); /* I don't remember what these TODO's are for */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
 		if(bitmap->bitmap[i]!=0) {
@@ -1651,7 +1773,6 @@ EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 			return i*BITMAP_BITSIZE+bofs;
 		}
 	}
-	/* TODO: check the tail */
 	TODO("check the tail"); /* I don't remember what these TODO's are for */
 	return -1; /* outside of the range */
 }
@@ -1662,7 +1783,6 @@ EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
 	assert(bitmap != NULL);
 	len=bitmap->bitmap_allocbits/BITMAP_BITSIZE;
-	/* TODO: check the head */
 	TODO("check the head"); /* I don't remember what these TODO's are for */
 	for(i=ofs/BITMAP_BITSIZE;i<len;i++) {
 		if(bitmap->bitmap[i]!=~0U) {
@@ -1671,7 +1791,6 @@ EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 			return i*BITMAP_BITSIZE+bofs;
 		}
 	}
-	/* TODO: check the tail */
 	TODO("check the tail"); /* I don't remember what these TODO's are for */
 	return -1; /* outside of the range */
 }
@@ -1805,7 +1924,7 @@ static int acs_testflag(struct acs_info *ai, unsigned flag) {
 	} else if(flag>='0' && flag<='9') {
 		i=flag-'0'+26;
 	} else {
-		fprintf(stderr, "unknown flag '%c'\n", flag);
+		ERROR_FMT("unknown flag '%c'\n", flag);
 		return 0;
 	}
 	return ((ai->flags>>i)&1)==1;
@@ -1839,7 +1958,7 @@ did_not_pass:
 	while(*s) if(*s++=='|') goto retry; /* look for an | */
 	return 0;
 parse_failure:
-	fprintf(stderr, "acs parser failure '%s' (off=%d)\n", acsstring, s-acsstring);
+	ERROR_FMT("acs parser failure '%s' (off=%d)\n", acsstring, s-acsstring);
 	return 0;
 }
 
@@ -1909,7 +2028,7 @@ EXPORT double ieee754_decode64be(void *src) {
 	return res;
 }
 
-#ifndef NDEBUG
+#ifndef NTEST
 static void ieee754_test(void) {
 	char buf[8];
 	double tmp, pi;
@@ -1917,228 +2036,6 @@ static void ieee754_test(void) {
 	ieee754_encode64be(buf, pi=M_PI);
 	tmp=ieee754_decode64be(buf);
 	fprintf(stderr, "%s():in=%f hex=0x%llX out=%f hex=0x%llX buf=0x%llX ok? %d\n", __func__, pi, *(long long*)&pi, tmp, *(long long*)&tmp, *(long long*)buf, tmp==pi);
-}
-#endif
-
-/******************************************************************************
- *
- ******************************************************************************/
-/* template for the format parser
- * variables:
- * width - 0 means unset
- * precision - -1 means unspecified
- * format:
- * u	- 32-bit unsigned integer
- * hu	- 16-bit unsigned integer
- * llu	- 64-bit unsigned
- * f	- 64-bit IEEE double
- * c    - 8-bit unsigned integer
- * s	- null terminated string
- * return:
- * -1 on failure
- *  new offset on success
- */
-#define RECORD_FORMAT_PARSER(c_action, hu_action, u_action, llu_action, f_action, lf_action, s_action) do { \
-		va_list ap; \
-		va_start(ap, fmt); \
-	out: \
-		while(*fmt) { \
-			if(*fmt=='%') { \
-				char *endptr; \
-				int width=0, precision=-1; \
-				int longness=0; \
-				fmt++; \
-				if(*fmt=='*') { \
-					width=va_arg(ap, int); \
-					fmt++; \
-				} else if(isdigit(*fmt) || (*fmt=='-' && isdigit(fmt[1]))) { \
-					width=strtol(fmt, &endptr, 10); \
-					assert(endptr!=fmt); \
-					fmt=endptr; \
-				} \
-				if(*fmt=='.') { \
-					fmt++; \
-					if(*fmt=='*') { \
-						precision=va_arg(ap, int); \
-						fmt++; \
-					} else if(isdigit(fmt[1])) { \
-						precision=strtoul(fmt+1, &endptr, 10); \
-						assert(endptr!=fmt); \
-						fmt=endptr; \
-					} \
-				} \
-				while(*fmt) switch(*fmt) { \
-					case 0: abort(); \
-					case 'h': \
-						fmt++; \
-						longness--; \
-						break; \
-					case 'L': \
-						fmt++; \
-						longness+=2; \
-						break; \
-					case 'l': \
-						fmt++; \
-						longness++; \
-						break; \
-					case 'c': \
-						if(offset+1>len) goto out_of_data; \
-						c_action; \
-						offset++; \
-						fmt++; \
-						goto out; \
-					case 'u': \
-						/* printf("width=%d precision=%d\n", width, precision); */ \
-						if(longness==0) { \
-							if(offset+4>len) goto out_of_data; \
-							u_action; \
-							offset+=4; \
-						} else if(longness==2) { \
-							if(offset+8>len) goto out_of_data; \
-							llu_action; \
-							offset+=8; \
-						} else if(longness==-1) { \
-							if(offset+2>len) goto out_of_data; \
-							hu_action; \
-							offset+=2; \
-						} else { \
-							fprintf(stderr, "invalid type specifier for format tag '%c'\n", *fmt); \
-							goto bad_format; \
-						} \
-						fmt++; \
-						goto out; \
-					case 'a': case 'A': case 'e': case 'E': \
-					case 'g': case 'G': case 'f': case 'F': /* process double and floats */ \
-						switch(longness) { \
-							case 0: \
-								f_action; break; \
-							case 1: \
-								lf_action; break; \
-							case 2: \
-								fprintf(stderr, "long double not supported\n"); \
-							default: \
-								goto bad_format; \
-						} \
-						goto out; \
-					case 's': \
-						s_action; goto out; \
-					default: \
-						fprintf(stderr, "Unknown format code '%c'\n", *fmt); \
-						goto bad_format; \
-				} \
-			} else { \
-				/* printf("*fmt='%c'\n", *fmt); */ \
-				fmt++; \
-			} \
-		} \
-		va_end(ap); \
-		return offset; /* success */ \
-	out_of_data: \
-		fprintf(stderr, "format exceeds data available\n"); \
-		va_end(ap); \
-		return -1; /* failure */ \
-	bad_format: \
-		fprintf(stderr, "invalid format code\n"); \
-		va_end(ap); \
-		return -1; /* failure */ \
-	} while(0)
-
-GCC_ONLY(EXPORT int record_read(const void *data, size_t len, size_t offset, const const char *fmt, ...) __attribute__ ((format (scanf, 4, 5))));
-EXPORT int record_read(const void *data, size_t len, size_t offset, const const char *fmt, ...) {
-	RECORD_FORMAT_PARSER(
-		*va_arg(ap, uint8_t*)=((char*)data)[offset],
-		*va_arg(ap, uint_least16_t*)=RD_BE16((char*)data, offset),
-		*va_arg(ap, uint_least32_t*)=RD_BE32((char*)data, offset),
-		*va_arg(ap, uint_least64_t*)=RD_BE64((char*)data, offset),
-		{
-		fprintf(stderr, "float format unsupported\n");
-		goto bad_format;
-		},
-		{ /* doubles */
-		if(offset+8>len) goto out_of_data;
-		*va_arg(ap, double*)=ieee754_decode64be((char*)data+offset);
-		offset+=8;
-		},
-		{ /* string - the width paramter controls the amount of consumed data */
-			/* NOTE: precision/width are used differnetly in record_write */
-			const char *tmp;
-			char *dest;
-			size_t max=len-offset;
-			dest=va_arg(ap, char *);
-			if(width>0 && (unsigned)width-1<max) {
-				max=width-1;
-			}
-			tmp=memchr((char*)data+offset, 0, max);
-			if(!tmp) {
-				fprintf(stderr, "could not find null terminated string in buffer.\n");
-				goto out_of_data;
-			}
-			max=tmp-((char*)data+offset);
-			memcpy(dest, (char*)data+offset, max+1); /* include null terminator */
-			offset+=max+1;
-		}
-	);
-}
-
-GCC_ONLY(EXPORT int record_write(const void *data, size_t len, size_t offset, const const char *fmt, ...) __attribute__ ((format (printf, 4, 5))));
-EXPORT int record_write(const void *data, size_t len, size_t offset, const const char *fmt, ...) {
-	RECORD_FORMAT_PARSER(
-		((uint8_t*)data)[offset]=va_arg(ap, unsigned),
-		WR_BE16((char*)data, offset, va_arg(ap, unsigned)),
-		WR_BE32((char*)data, offset, va_arg(ap, uint_least32_t)),
-		WR_BE64((char*)data, offset, va_arg(ap, uint_least64_t)),
-		{ /* doubles */
-			if(offset+8>len) goto out_of_data;
-			ieee754_encode64be((char*)data+offset, va_arg(ap, double));
-			offset+=8;
-		},
-		goto bad_format,
-		{ /* string - precision is max number of characters, not including null terminator */
-			/* NOTE: precision/width are used differnetly in record_read */
-			const char *s;
-			const char *tmp;
-			s=va_arg(ap, const char *);
-			if(precision==-1) {
-				tmp=s+strlen(s);
-			} else {
-				tmp=memchr(s, 0, (size_t)precision);
-				if(!tmp) {
-					tmp=s+precision;
-				}
-			}
-			if(offset+(tmp-s)+1>len) goto out_of_data;
-			memcpy((char*)data+offset, s, (size_t)(tmp-s));
-			((char*)data)[offset+(tmp-s)]=0;
-			offset+=(tmp-s)+1;
-		}
-	);
-}
-
-#ifndef NDEBUG
-static int record_test(void) {
-	char data[31];
-	uint_least32_t a;
-	uint_least64_t b;
-	uint_least16_t c, d;
-	uint8_t e;
-	char buf[8];
-	double f;
-	int res;
-
-	res=record_write(data, sizeof data, 0, "%u%llu%hu%hu%c%f%s", 0x1020304, 0x5060708090a0b0cll, 0xd0e, 0xf10, 42, 1.3e9, "Hello");
-	if(res==-1) {
-		printf("error\n");
-		return 0;
-	}
-	printf("ofs=%d\n", res);
-
-	res=record_read(data, sizeof data, 0, "%u%llu%hu%hu%c%lf%8s", &a, &b, &c, &d, &e, &f, buf);
-	if(res==-1) {
-		printf("error\n");
-		return 0;
-	}
-	printf("ofs=%d %#x %#llx %#x %#x %hhd %g '%s'\n", res, a, b, c, d, e, f, buf);
-	return 1; /* success */
 }
 #endif
 
@@ -2168,7 +2065,7 @@ EXPORT uint_least32_t adler32(uint_least32_t ck, const void *data, size_t len) {
 	return ((uint_least32_t)b<<16)|a;
 }
 
-#ifndef NDEBUG
+#ifndef NTEST
 /* test code */
 static int adler32_test(void) {
 	struct {
@@ -2194,649 +2091,6 @@ static int adler32_test(void) {
 	return 1;
 }
 #endif
-
-/******************************************************************************
- * sjdb - Small Journaling DataBase
- ******************************************************************************/
-/* Purpose:
- * + Convert an id to a file offset, using map hashtables.
- * + read a recorder header and load it into a buffer.
- * + the low level abstraction used by the recordcache component.
- *
- */
-
-/* HEADER:
- * 4 magic = "SjDb"
- * 4 version = "V0.0"
- * 4 application = 0x00000001 for boris.c
- * 4 generation - increments every time journal is compacted
- * 4 adler32 of header
- *
- * RECORD:
- * 1 record type
- *         0 - reserved for sjdb control records
- *         U - user account
- *         P - player character
- *         C - container
- *         Z - zone
- *         R - room
- *         I - item
- * 3 record id - treat as a 4 byte id (record_type is the top byte)
- * 1 action
- *         E - erase (length must be 0)
- *         U - update
- * 3 length - treat as a 4 byte id (atin is the top byte)
- * . data (only for Update mode)
- * 4 adler32 of header and data
- * 4 global adler32 of entire file up to this point
- */
-
-#define SJDB_MAGIC "SjDb"
-#define SJDB_VERSION "V0.0"
-#define SJDB_HEADER_SIZE 20
-#define SJDB_ACTION_UPDATE 'U'
-#define SJDB_ACTION_ERASE 'E'
-
-#define SJDB_RECORD_HEADER_SZ 8
-#define SJDB_RECORD_TRAILER_SZ 8
-
-/* number of bits for the id to file offset table */
-#define SJDB_HASH_SIZE 12
-
-typedef uint_least32_t sjdb_id_t;
-
-/* the big buffer, used to hold incoming data */
-static void *sjdb_buffer;
-static size_t sjdb_buffer_max;
-
-struct sjdb_handle {
-	FILE *f;
-	char *filename;
-	uint_least32_t global_ck; /* global checksum used while adding records */
-	struct map id_table; /* convert an id to a file offset */
-};
-
-/* reports error messages for SJDB */
-GCC_ONLY(static void sjdb_errorf(struct sjdb_handle *h, const char *func, const char *fmt, ...) __attribute__ ((format (printf, 3, 4))));
-static void sjdb_errorf(struct sjdb_handle *h, const char *func, const char *fmt, ...) {
-	va_list ap;
-	assert(h != NULL);
-	/* TODO: log file offset with error message */
-	TODO("Log file offset with error message");
-	fprintf(stderr, "%s:%s:", h->filename, func);
-	va_start(ap, fmt);
-	vfprintf(stderr, fmt, ap);
-	va_end(ap);
-}
-
-/* expands the buffer, if necessary.
- * does not erase the old data, it is used by record processing code to read in header plus data */
-static void *sjdb_ll_grab_buffer(size_t needed) {
-	void *tmp;
-	if(needed>sjdb_buffer_max) {
-		needed=ROUNDUP(needed, 64);
-		tmp=realloc(sjdb_buffer, needed);
-		if(!tmp) {
-			perror(__func__);
-			return 0;
-		}
-		sjdb_buffer=tmp;
-		sjdb_buffer_max=needed;
-	}
-	return sjdb_buffer;
-}
-
-/* makes room for header and adler32 */
-EXPORT void *sjdb_grab_buffer(size_t needed) {
-	return (char*)sjdb_ll_grab_buffer(SJDB_RECORD_HEADER_SZ+needed+SJDB_RECORD_TRAILER_SZ)+SJDB_RECORD_HEADER_SZ;
-}
-
-static int sjdb_write_header(struct sjdb_handle *db, uint_least32_t application, uint_least32_t generation) {
-	char header[SJDB_HEADER_SIZE];
-	size_t res;
-	uint_least32_t ck;
-
-	assert(db != NULL);
-
-	DEBUG("%s():writing '%s'\n", __func__, db->filename);
-#ifndef NDEBUG
-	memset(header, 'X', sizeof header);
-#endif
-
-	memcpy(header, SJDB_MAGIC, 4);
-	memcpy(header+4, SJDB_VERSION, 4);
-	record_write(header, sizeof header - 4, 8, "%u%u", application, generation);
-
-	/* apply checksum */
-	ck=adler32(ADLER32_INITIAL, header, sizeof header - 4);
-	WR_BE32(header, 16, ck);
-
-	res=fwrite(header, 1, sizeof header, db->f);
-	if(res!=sizeof header) {
-		if(ferror(db->f)) {
-			perror(db->filename);
-		}
-		sjdb_errorf(db, __func__, "could not write header\n");
-		return 0;
-	}
-
-	return 1;
-}
-
-static int sjdb_read_header(struct sjdb_handle *db, uint_least32_t *application, uint_least32_t *generation) {
-	char header[SJDB_HEADER_SIZE];
-	size_t res;
-	uint_least32_t ck, original_ck;
-
-	assert(db != NULL);
-
-	if(fseek(db->f, SEEK_SET, 0)<0) {
-		perror(db->filename);
-		/* TODO: free the structure */
-		TODO("free the structure");
-		return 0;
-	}
-
-	res=fread(header, 1, sizeof header, db->f);
-	if(res==0 && feof(db->f)) { /* new file, create the header */
-		/* create the header - this can only be called on a 0 length file */
-		return sjdb_write_header(db, 1, 0); /* TODO: accept an application parameter */
-	} else if(res==0 && ferror(db->f)) {
-		perror(db->filename);
-		sjdb_errorf(db, __func__, "could not read file\n");
-		return 0;
-	} else if(res<sizeof header || memcmp(header, SJDB_MAGIC, 4) || memcmp(header+4, SJDB_VERSION, 4)) {
-		sjdb_errorf(db, __func__, "not a '%.4s' file\n", SJDB_MAGIC);
-		return 0;
-	}
-
-	assert(res == SJDB_HEADER_SIZE);
-
-	if(application) {
-		*application=RD_BE32(header, 8);
-	}
-
-	if(generation) {
-		*generation=RD_BE32(header, 12);
-	}
-
-	original_ck=RD_BE32(header, 16);
-
-	/* checksum the first 4 words */
-	ck=adler32(ADLER32_INITIAL, header, res-4);
-
-	if(ck!=original_ck) {
-		sjdb_errorf(db, __func__, "header checksum failed (calc=0x%08x orig=0x%08x)\n", ck, original_ck);
-		return 0;
-	}
-
-	return 1;
-}
-
-/**
- *
- * @return 0 on error; 1 on success; -1 on EOF
- */
-int sjdb_read_entry(struct sjdb_handle *db, const char **buffer, sjdb_id_t *entry_id, char *entry_action, size_t *len) {
-	char *buf;
-	sjdb_id_t id; /* raw id */
-	unsigned record_id;
-	uint_least32_t length, ck, calc_ck, gck;
-	size_t res;
-	unsigned char type, action;
-
-	assert(db != NULL);
-	assert(buffer != NULL);
-
-	*buffer=sjdb_ll_grab_buffer(SJDB_RECORD_HEADER_SZ);
-	if(!*buffer) {
-		sjdb_errorf(db, __func__, "could not allocate buffer\n");
-		return 0; /* error */
-	}
-
-	res=fread(buf, 1, SJDB_RECORD_HEADER_SZ, db->f);
-	if(res==0) {
-		return -1; /* no more records */
-	} else if(res!=SJDB_RECORD_HEADER_SZ) {
-		if(ferror(db->f)) {
-			sjdb_errorf(db, __func__, "%s\n", strerror(errno));
-		} else {
-			sjdb_errorf(db, __func__, "short record\n");
-		}
-		return 0; /* error */
-	}
-
-	assert(res == SJDB_RECORD_HEADER_SZ);
-
-	assert(sizeof id == sizeof(uint_least32_t)); /* we're using a 32-bit value for id right now */
-
-	record_read(buf, SJDB_RECORD_HEADER_SZ, 0, "%u%u", &id, &length);
-	TODO("Check return value of record_read()");
-
-	/* decode our funny 3 byte + 1 byte fields */
-	type=(id>>24)&255;
-	record_id=id&0xffffffu;
-
-	action=(length>>24)&255;
-	length&=0xffffffu;
-
-	DEBUG("%s:found record type=0x%02x record_id=%d action=0x%02x length=%d\n", db->filename, type, record_id, action, length);
-	if(action!=SJDB_ACTION_ERASE && action!=SJDB_ACTION_UPDATE) {
-		sjdb_errorf(db, __func__, "unknown record action 0x%02x\n", action);
-		return 0; /* error */
-	}
-
-	if(action==SJDB_ACTION_ERASE) {
-		if(length!=0) {
-			sjdb_errorf(db, __func__, "record action '%c' must have 0 length\n", action);
-			return 0; /* error */
-		}
-
-		TODO("handle SJDB_ACTION_ERASE");
-		abort();
-	}
-
-	buf=sjdb_ll_grab_buffer(length+SJDB_RECORD_HEADER_SZ+SJDB_RECORD_TRAILER_SZ);
-	if(!buf) {
-		sjdb_errorf(db, __func__, "could not allocate buffer\n");
-		return 0; /* error */
-	}
-
-	res=fread(buf+SJDB_RECORD_HEADER_SZ, 1, length+SJDB_RECORD_TRAILER_SZ, db->f);
-	if(res!=length+SJDB_RECORD_TRAILER_SZ) {
-		if(ferror(db->f)) {
-			sjdb_errorf(db, __func__, "i/o error:%s\n", strerror(errno));
-		}
-		sjdb_errorf(db, __func__, "short record\n");
-		return 0; /* error */
-	}
-
-	ck=RD_BE32(buf, SJDB_RECORD_HEADER_SZ+length);
-	gck=RD_BE32(buf, SJDB_RECORD_HEADER_SZ+length+4);
-
-	/* TODO: check global checksum */
-	TODO("check global checksum");
-
-	calc_ck=adler32(ADLER32_INITIAL, buf, length+SJDB_RECORD_HEADER_SZ);
-
-	if(calc_ck!=ck) {
-		sjdb_errorf(db, __func__, "record checksum failed (calc=0x%08x orig=0x%08x)\n", calc_ck, ck);
-		return 0;
-	}
-
-	/* provide data about the record to caller */
-	if(buffer) *buffer=buf;
-	if(len) *len=length;
-	if(entry_id) *entry_id=id;
-	if(entry_action) *entry_action=action;
-	return 1; /* success */
-}
-
-/* return 0 on error
- * return 1 on success
- * return -1 on EOF
- */
-static int sjdb_read_and_index_entry(struct sjdb_handle *db) {
-	const char *buffer;
-	sjdb_id_t id; /* raw id */
-	size_t len;
-	int res;
-	char action;
-	fpos_t pos;
-
-	/* save the position for this record */
-	if(fgetpos(db->f, &pos)!=0) {
-		perror(db->filename);
-		return 0; /* failure */
-	}
-
-	res=sjdb_read_entry(db, &buffer, &id, &action, &len);
-	if(res!=1) {
-		return res;
-	}
-
-	/* place record in the hash table as id and position */
-	if(!map_replace_fpos(&db->id_table, id, &pos)) {
-		ERROR_FMT("map_replace_fpos() failed (id=0x%08x\n", id);
-		return 0; /* failure */
-	}
-
-	DEBUG("%s:found a record while loading. id=0x%08x\n", db->filename, id);
-	return 1;
-}
-
-/* create an index from all records */
-static int sjdb_load(struct sjdb_handle *db) {
-	long currpos;
-
-	currpos=ftell(db->f);
-	TRACE("%s:currpos=%ld\n", db->filename, currpos);
-
-	if(currpos!=SJDB_HEADER_SIZE) {
-		/* seek to the start of data this will fail if there is no data in the file */
-		if(fseek(db->f, SEEK_SET, SJDB_HEADER_SIZE)<0) {
-			perror(db->filename);
-			sjdb_errorf(db, __func__, "Could not load data\n");
-			/* TODO: free the structure */
-			TODO("free the structure");
-			return 0;
-		}
-	}
-
-	/* read in all records, record the position and verify the checksums */
-	while(sjdb_read_and_index_entry(db)>0) {
-		TODO("Should we do something here?");
-	}
-
-	return 1; /* success */
-}
-
-/* go to the start of an entry */
-EXPORT int sjdb_goto(struct sjdb_handle *db, sjdb_id_t id) {
-	const fpos_t *pos;
-
-	pos=map_lookup_fpos(&db->id_table, id);
-	if(!pos) {
-		DEBUG_MSG("No entry found");
-		return 0; /* failure - no entry found */
-	}
-
-	if(fsetpos(db->f, pos)!=0) {
-		perror(db->filename);
-		return 0; /* failure - could not seek */
-	}
-
-	return 1; /* success */
-}
-
-EXPORT int sjdb_open(struct sjdb_handle *db, const char *filename) {
-	uint_least32_t generation, application;
-
-	assert(db != NULL);
-	assert(filename != NULL);
-	db->f=fopen(filename, "a+b");
-	if(!db->f) {
-		perror(filename);
-		return 0; /* failure */
-	}
-	if(setvbuf(db->f, NULL, _IONBF, 0)!=0) {
-		perror(filename);
-		fclose(db->f);
-		db->f=NULL;
-		return 0; /* failure */
-	}
-	db->filename=strdup(filename);
-
-	/* read the header */
-	if(!sjdb_read_header(db, &application, &generation)) {
-		sjdb_errorf(db, __func__, "missing header\n");
-		/* TODO: free the structure */
-		TODO("free the structure");
-		return 0;
-	}
-
-	db->global_ck=ADLER32_INITIAL;
-
-	TODO("should we have a free function on the map entries?");
-	map_init(&db->id_table, SJDB_HASH_SIZE, NULL, map_hash_uintptr, map_compare_uintptr);
-
-	/* index all records */
-	if(!sjdb_load(db)) {
-		return 0;
-	}
-
-	return 1;
-}
-
-void sjdb_close(struct sjdb_handle *db) {
-	assert(db != NULL);
-	fclose(db->f);
-	db->f=NULL;
-	free(db->filename);
-	db->filename=NULL;
-	map_free(&db->id_table);
-}
-
-/**
- * sjdb_write_update
- *
- * writes a new 'U' update record to the journal
- *
- */
-static int sjdb_write_update(struct sjdb_handle *db, size_t len, sjdb_id_t id, void *data) {
-	uint_least32_t calc_ck;
-	char *buf;
-	int res;
-
-	buf=sjdb_ll_grab_buffer(SJDB_RECORD_HEADER_SZ+len+SJDB_RECORD_TRAILER_SZ); /* adler32 on the end, plus 8 byte header */
-
-	DEBUG("%s:new record id=0x%08x len=%d\n", db->filename, id, len);
-	res=record_write(buf, SJDB_RECORD_HEADER_SZ, 0, "%u%u", id, len|((unsigned)SJDB_ACTION_UPDATE<<24));
-	if((unsigned)res!=SJDB_RECORD_HEADER_SZ) {
-		sjdb_errorf(db, __func__, "Could not write entry\n");
-		return 0; /* failure */
-	}
-
-	calc_ck=adler32(ADLER32_INITIAL, buf, SJDB_RECORD_HEADER_SZ);
-	calc_ck=adler32(calc_ck, data, len);
-	memcpy(buf+SJDB_RECORD_HEADER_SZ, data, len);
-	res=record_write(buf, SJDB_RECORD_HEADER_SZ+len+SJDB_RECORD_TRAILER_SZ, SJDB_RECORD_HEADER_SZ+len, "%u", calc_ck);
-
-	res=fwrite(buf, 1, SJDB_RECORD_HEADER_SZ+len+SJDB_RECORD_TRAILER_SZ, db->f);
-	if((unsigned)res!=SJDB_RECORD_HEADER_SZ+len+SJDB_RECORD_TRAILER_SZ) {
-		if(ferror(db->f)) {
-			sjdb_errorf(db, __func__, "i/o error:%s\n", strerror(errno));
-		} else {
-			sjdb_errorf(db, __func__, "short write\n");
-		}
-		return 0; /* failure */
-	}
-	DEBUG("%s:Wrote record (res=%d)\n", db->filename, res);
-
-	return 1; /* success */
-}
-
-struct _sjdb_scan_state {
-	sjdb_id_t value, mask;
-	void (*callback)(sjdb_id_t id);
-	int count;
-};
-
-static void sjdb_scan_ll_cb(void *p, void *key, union map_data *data) {
-	struct _sjdb_scan_state *st=p;
-	sjdb_id_t id;
-
-	assert(st != NULL);
-	assert(data != NULL);
-	assert(key != NULL);
-	assert(st->callback != NULL);
-
-	/* ignore values that do not match the value/mask */
-	id=(sjdb_id_t)key;
-
-	DEBUG("st->mask=0x%08x st->value=0x%08x id=0x%08x\n", st->mask, st->value, id);
-	if((id&st->mask)==st->value) {
-		st->callback(id); /* hand data->ptr */
-		st->count++;
-	}
-}
-
-/* return number of matching records */
-EXPORT int sjdb_scan(struct sjdb_handle *db, unsigned type, void (*callback)(sjdb_id_t)) {
-	struct _sjdb_scan_state st;
-
-	st.value=(sjdb_id_t)type<<24;
-	assert((sjdb_id_t)~0 > 0); /* require that sjdb_id_t is unsigned */
-	st.mask=~(((sjdb_id_t)~0)>>8); /* NOTE: requires that sjdb_id_t is unsigned */
-	st.callback=callback;
-	st.count=0;
-
-	DEBUG("%s:id_table.table_mask=%d\n", db->filename, db->id_table.table_mask);
-	map_foreach(&db->id_table, &st, sjdb_scan_ll_cb);
-	return st.count;
-}
-
-/******************************************************************************
- * Record Cacheing - look up records and automatically load them
- ******************************************************************************/
-/* Purpose:
- * + convert id to an in-memory buffer, if record is not loaded then load it.
- * + provides a buffer destination for sjdb records
- * + used by other components to access the database
- */
-#define RECORDCACHE_HASH_SIZE 8
-
-struct recordcache_entry {
-	LIST_ENTRY(struct recordcache_entry) queue;
-	sjdb_id_t id;
-	void (*free)(void *data); /* function to free the item */
-	int (*flush)(void *data); /* function to write the item to the journal */
-	unsigned dirty:1; /* flag to indicate there is unwritten data */
-	void *data;
-	REFCOUNT_TYPE REFCOUNT_NAME;
-};
-
-static struct sjdb_handle recordcache_sjdb;
-static struct map recordcache_table;
-static LIST_HEAD(struct recordcache_head, struct recordcache_entry) recordcache_queue;
-
-static int recordcache_entry_ll_flush(struct recordcache_entry *e) {
-	int res;
-
-	assert(e!=NULL);
-	if(!e->flush) {
-		fprintf(stderr, "%s():called on object that does not have a flush function (id=0x%x)\n", __func__, e->id);
-		return 0; /* no flush function */
-	}
-
-	fprintf(stderr, "Flushing id=0x%x\n", e->id);
-	res=e->flush(e->data);
-	if(res) {
-		e->dirty=0; /* successfully flushed */
-	}
-	return res;
-}
-
-static void recordcache_entry_ll_free(struct recordcache_entry *e) {
-	assert(e!=NULL);
-	if(!e) return; /* failure - NULL pointer */
-	if(e->dirty) {
-		if(!recordcache_entry_ll_flush(e)) {
-			DEBUG("%s():refusing to free an unflushed entry\n", __func__);
-			return; /* failure - could not flush */
-		}
-	}
-
-	if(!e->free) {
-		fprintf(stderr, "%s():called on object that does not have a free function (id=0x%x)\n", __func__, e->id);
-		return; /* failure - no free function */
-	}
-
-	if(e->REFCOUNT_NAME>0) {
-		fprintf(stderr, "%s():cannot free object that still has references (id=0x%x)\n", __func__, e->id);
-		return; /* failure - refcount */
-	}
-
-	assert(e->REFCOUNT_NAME==0);
-
-	LIST_REMOVE(e, queue);
-
-	e->free(e->data);
-
-#ifndef NDEBUG
-	memset(e, 'Y', sizeof *e);
-#endif
-
-	free(e);
-}
-
-static void recordcache_entry_ll_put(void *key UNUSED, union map_data *data) {
-	struct recordcache_entry *e=data->ptr;
-	REFCOUNT_PUT(e, recordcache_entry_ll_free);
-}
-
-EXPORT int recordcache_entry_flush(sjdb_id_t id) {
-	struct recordcache_entry *e;
-
-	e=map_lookup_ptr(&recordcache_table, &id);
-	if(!e) {
-		fprintf(stderr, "%s():called on object that does not exist (id=0x%x)\n", __func__, id);
-		return 0; /* failure */
-	}
-
-	return recordcache_entry_ll_flush(e);
-}
-
-/* a way to free the entry using ref counting */
-EXPORT int recordcache_entry_put(sjdb_id_t id) {
-	union map_data data;
-	struct recordcache_entry *e;
-	e=map_lookup_ptr(&recordcache_table, &id);
-	if(e) {
-		ERROR_FMT("%s():called on object that does not exist (id=0x%x)\n", __func__, id);
-		return 0;
-	}
-	data.ptr=e;
-	recordcache_entry_ll_put(&e->id, &data);
-	return 1;
-}
-
-EXPORT int recordcache_init(void) {
-	map_init(&recordcache_table, RECORDCACHE_HASH_SIZE, recordcache_entry_ll_put, map_hash_unsigned, map_compare_unsigned);
-	return 1;
-}
-
-EXPORT void recordcache_shutdown(void) {
-	DEBUG("%s()\n", __func__);
-	map_free(&recordcache_table);
-}
-
-/* set dirty if this data is new */
-EXPORT int recordcache_add(sjdb_id_t id, void *data, int dirty, void (*record_free)(void *), int (*record_flush)(void *)) {
-	struct recordcache_entry *new;
-	new=malloc(sizeof *new);
-	new->id=id;
-	new->data=data;
-	new->free=record_free;
-	TODO("Something should call (*record_free)()");
-	new->flush=record_flush;
-	new->dirty=dirty;
-	REFCOUNT_INIT(new);
-	LIST_ENTRY_INIT(new, queue);
-	if(!map_add_ptr(&recordcache_table, &new->id, new)) {
-		free(new);
-		return 0; /* failure */
-	}
-	LIST_INSERT_HEAD(&recordcache_queue, new, queue);
-	return 1; /* success */
-}
-
-/**
- * check cache for a record, if not found, load from disk
- *
- * @return NULL if not found
- */
-EXPORT void *recordcache_get(sjdb_id_t id) {
-	struct recordcache_entry *e;
-
-	e=map_lookup_ptr(&recordcache_table, &id);
-	if(e) return e->data; /* success */
-
-	return 0; /* not in cache */
-}
-
-/* gets a record and marks it as dirty */
-EXPORT void *recordcache_dirty(sjdb_id_t id) {
-	struct recordcache_entry *e;
-
-	e=map_lookup_ptr(&recordcache_table, &id);
-	if(e) {
-		e->dirty=1;
-		return e->data; /* success */
-	}
-
-	return 0; /* not in cache */
-}
 
 /******************************************************************************
  * Telnet protocol constants
@@ -2887,6 +2141,365 @@ EXPORT void *recordcache_dirty(sjdb_id_t id) {
 #define MODE_LIT_ECHO 16
 
 #define	MODE_MASK 31
+
+/******************************************************************************
+ * fdb
+ ******************************************************************************/
+
+/**
+ * creates a filename based on component and id
+ */
+void fdb_makename_str(char *fn, size_t max, const char *base, const char *id) {
+	char name[id?strlen(id)+1:6];
+	unsigned i;
+
+	if(!id) id="_nil_";
+
+	/* process id into a good filename */
+	for(i=0;i<sizeof name-1 && id[i];i++) {
+		TRACE("id='%s' i=%d\n", id, i);
+		if(isalnum(id[i])) {
+			name[i]=tolower(id[i]);
+		} else {
+			name[i]='_';
+		}
+	}
+	name[i]=0;
+	TRACE("name='%s' i=%d max=%d name_sz=%d\n", name, i, max, sizeof name);
+
+	snprintf(fn, max, "data/%s/%s", base, name);
+	TRACE("res='%s'\n", fn);
+}
+
+/**
+ * creates a filename based on component and id
+ */
+void fdb_getbasename(char *fn, size_t max, const char *base) {
+	snprintf(fn, max, "data/%s/", base);
+}
+
+/**
+ * return true if the file is a valid id filename
+ */
+int fdb_is_id(const char *filename) {
+	for(;*filename;filename++) if(!isdigit(*filename)) return 0;
+	return 1; /* success */
+}
+
+/******************************************************************************
+ * users
+ ******************************************************************************/
+/** user:types **/
+struct user {
+	unsigned id;
+	char *username;
+	char *password_crypt;
+	char *email;
+};
+
+struct user_name_map_entry {
+	unsigned id;
+	char *username;
+};
+
+/** user:globals **/
+static struct map user_name_map; /* convert username to id */
+static struct freelist user_id_freelist;
+static struct map user_cache_id_map; /* cache table for looking up by id */
+static struct map user_cache_name_map; /* cache table for looking up by username */
+
+/** user:internal functions **/
+static int user_cache_add(struct user *u) {
+	int ret=1;
+	if(!map_add_uint(&user_cache_id_map, u->id, u)) {
+		ERROR_FMT("map_add_ptr() for userid(%d) failed\n", u->id);
+		ret=0; /* failure */
+	}
+	if(!map_add_ptr(&user_cache_name_map, u->username, u)) {
+		ERROR_FMT("map_add_ptr() for username(%s) failed\n", u->username);
+		ret=0; /* failure */
+	}
+	return ret;
+}
+
+static int user_cache_remove(struct user *u) {
+	int ret=1;
+	if(!map_remove_uint(&user_cache_id_map, u->id)) {
+		ERROR_FMT("map_remove() for userid(%d) failed\n", u->id);
+		ret=0; /* failure */
+	}
+	if(!map_remove(&user_cache_name_map, u->username)) {
+		ERROR_FMT("map_remove() for username(%s) failed\n", u->username);
+		ret=0; /* failure */
+	}
+	return ret;
+}
+
+static void user_free(struct user *u) {
+	if(!u) return;
+	user_cache_remove(u);
+	free(u->username);
+	u->username=0;
+	free(u->password_crypt);
+	u->password_crypt=0;
+	free(u->email);
+	u->email=0;
+	free(u);
+}
+
+static int user_ll_load_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
+	char *endptr;
+	unsigned *uint_p=extra;
+	assert(extra != NULL);
+	if(!extra) return -1; /* error */
+
+	if(!*value) {
+		DEBUG_MSG("Empty string");
+		return -1; /* error - empty string */
+	}
+	*uint_p=strtoul(value, &endptr, 0);
+
+	if(*endptr!=0) {
+		DEBUG_MSG("Not a number");
+		return -1; /* error - empty string */
+	}
+
+	return 0; /* success - terminate the callback chain */
+}
+
+static int user_ll_load_str(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
+	char **str_p=extra;
+	assert(extra != NULL);
+	if(!extra) return -1; /* error */
+
+	if(*str_p) free(*str_p);
+	*str_p=strdup(value);
+	if(!*str_p) {
+		PERROR("strdup()");
+		return -1; /* error */
+	}
+
+	return 0; /* success - terminate the callback chain */
+}
+
+static struct user *user_load_byname(const char *username) {
+	FILE *f;
+	char filename[PATH_MAX];
+	struct user *u;
+	struct config cfg;
+
+	fdb_makename_str(filename, sizeof filename, "users", username);
+
+	config_setup(&cfg);
+
+	u=calloc(1, sizeof *u); /* unused fields need to be NULL for below */
+	if(!u) {
+		PERROR("malloc()");
+		fclose(f);
+		return 0; /* failure */
+	}
+
+	config_watch(&cfg, "id", user_ll_load_uint, &u->id);
+	config_watch(&cfg, "username", user_ll_load_str, &u->username);
+	config_watch(&cfg, "pwcrypt", user_ll_load_str, &u->password_crypt);
+	config_watch(&cfg, "email", user_ll_load_str, &u->email);
+
+	if(!config_load(filename, &cfg)) {
+		config_free(&cfg);
+		return 0; /* failure */
+	}
+
+	config_free(&cfg);
+
+	if(!freelist_thwack(&user_id_freelist, u->id, 1)) {
+		ERROR_FMT("Could not use user id %d (bad id or id already used?)\n", u->id);
+		goto failure;
+	}
+
+	return u; /* success */
+
+failure:
+	free(u->username);
+	free(u->password_crypt);
+	free(u->email);
+	free(u);
+	return 0; /* failure */
+}
+
+static int user_write(const struct user *u) {
+	FILE *f;
+	char filename[PATH_MAX];
+
+	fdb_makename_str(filename, sizeof filename, "users", u->username);
+	f=fopen(filename, "w");
+	if(!f) {
+		PERROR(filename);
+		return 0; /* failure */
+	}
+
+	if(fprintf(f,
+		"id       = %u\n"
+		"username = %s\n"
+		"pwcrypt  = %s\n"
+		"email    = %s\n", u->id, u->username, u->password_crypt, u->email
+	)<0) {
+		PERROR(filename);
+		fclose(f);
+		return 0; /* failure */
+	}
+
+	fclose(f);
+	return 1; /* success */
+}
+
+static void user_name_map_entry_free(void *key UNUSED, union map_data *data) {
+	struct user_name_map_entry *ne=data->ptr;
+	free(ne->username);
+	ne->username=NULL;
+	ne->id=0;
+	free(ne);
+}
+
+/**
+ * add a new account to username to id lookup table
+ */
+static int user_name_map_add(unsigned id, const char *username) {
+	struct user_name_map_entry *ne;
+	ne=malloc(sizeof *ne);
+	ne->id=id;
+	ne->username=strdup(username);
+	if(!map_add_ptr(&user_name_map, ne->username, ne)) {
+		ERROR_FMT("Could not add username(%s) to map\n", username);
+		free(ne->username);
+		free(ne);
+		return 0; /* failure */
+	}
+	return 1; /* success */
+}
+
+/** user:external functions **/
+EXPORT int user_exists(const char *username) {
+	union map_data *tmp;
+	struct user_name_map_entry *ne;
+	tmp=map_lookup(&user_name_map, username);
+	if(tmp && tmp->ptr) {
+		ne=tmp->ptr;
+		return ne->id;
+	}
+	return 0; /* user not found */
+}
+
+EXPORT struct user *user_get(const char *username) {
+	union map_data *tmp;
+
+	/* check cache of loaded users */
+	tmp=map_lookup(&user_cache_name_map, username);
+	if(tmp && tmp->ptr) return tmp->ptr;
+
+	/* load from disk */
+	return user_load_byname(username);
+}
+
+EXPORT struct user *user_create(const char *username, const char *password, const char *email) {
+	struct user *u;
+	long id;
+
+	if(!username) {
+		ERROR_MSG("Username was NULL");
+		return NULL; /* failure */
+	}
+
+	u=malloc(sizeof *u);
+	if(!u) {
+		PERROR("malloc()");
+		return NULL; /* failure */
+	}
+
+	id=freelist_alloc(&user_id_freelist, 1);
+	if(id<0) {
+		ERROR_FMT("Could not allocate user id for username(%s)\n", username);
+		free(u);
+		return NULL; /* failure */
+	}
+
+	assert(id>=0);
+
+	if(!user_name_map_add((unsigned)id, username)) {
+		freelist_pool(&user_id_freelist, (unsigned)id, 1);
+		free(u);
+		return NULL; /* failure */
+	}
+
+	u->id=id;
+	u->username=strdup(username);
+	u->password_crypt=strdup(":crypt:"); /* TODO: encrypt password */
+	u->email=strdup(email);
+
+	if(!user_write(u)) {
+		ERROR_FMT("Could not save account username(%s)\n", u->username);
+		user_free(u);
+	}
+
+	/* add to cache of loaded users */
+	user_cache_add(u);
+
+	return u; /* success */
+}
+
+EXPORT int user_init(void) {
+	char pathname[PATH_MAX];
+	DIR *d;
+	struct dirent *de;
+
+	map_init(&user_name_map, 6, user_name_map_entry_free, map_hash_stringignorecase, map_compare_stringignorecase);
+
+	/* the caches don't free because they share the same elements */
+	map_init(&user_cache_name_map, 6, NULL, map_hash_stringignorecase, map_compare_stringignorecase);
+	map_init(&user_cache_id_map, 6, NULL, map_hash_uintptr, map_compare_uintptr);
+
+	freelist_init(&user_id_freelist, 0);
+	freelist_pool(&user_id_freelist, 1, 32768);
+
+	fdb_getbasename(pathname, sizeof pathname, "users");
+	if(mkdir(pathname, 0777)==-1 && errno!=EEXIST) {
+		PERROR(pathname);
+		return 0;
+	}
+
+	/* scan for account files */
+	d=opendir(pathname);
+	if(!d) {
+		PERROR(pathname);
+		return 0; /* failure */
+	}
+
+	while((de=readdir(d))) {
+		if(de->d_name[0]=='.') continue; /* ignore hidden files */
+		if(fdb_is_id(de->d_name)) {
+			struct user *u;
+
+			DEBUG("Found user record '%s'\n", de->d_name);
+			/* Load user file */
+			u=user_load_byname(de->d_name);
+			if(!u) {
+				ERROR_FMT("Could not load user from file '%s'\n", de->d_name);
+				closedir(d);
+				return 0; /* failure */
+			}
+			user_name_map_add(u->id, u->username);
+			user_free(u); /* we only wanted to load the data */
+		}
+	}
+
+	closedir(d);
+
+	return 1; /* success */
+}
+
+EXPORT void user_shutdown(void) {
+	map_free(&user_name_map);
+	freelist_free(&user_id_freelist);
+}
 
 /******************************************************************************
  * Socket Buffers
@@ -3003,16 +2616,14 @@ EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap) {
 	/* snprintf does not include the null terminator in its count */
 	if((unsigned)res>b->max-b->used) {
 		/* truncation occured */
-		/* TODO: grow the buffer and try again? */
 		TODO("grow the buffer and try again?");
 		DEBUG("Truncation detected in buffer %p\n", (void*)b);
 		res=b->max-b->used;
 	}
 	res=buffer_ll_expandnl(b, (unsigned)res);
 	if(res==-1) {
-		/* TODO: test this code */
 		TODO("test this code");
-		fprintf(stderr, "%s():Overflow in buffer %p\n", __func__, (void*)b);
+		ERROR_FMT("%s():Overflow in buffer %p\n", __func__, (void*)b);
 		return -1;
 	}
 	b->used+=res;
@@ -3063,7 +2674,7 @@ EXPORT unsigned buffer_consume(struct buffer *b, size_t len) {
 	DEBUG("len=%zu used=%zu rem=%zu\n", len, b->used, b->max-b->used);
 	assert(len <= b->used);
 	if(len>b->used) {
-		fprintf(stderr, "WARNING:attempted ovewflow of output buffer %p\n", (void*)b);
+		ERROR_FMT("WARNING:attempted ovewflow of output buffer %p\n", (void*)b);
 		len=b->used;
 	}
 	b->used-=len;
@@ -3079,7 +2690,7 @@ EXPORT void buffer_emit(struct buffer *b, size_t len) {
 	assert(b->used + len <= b->max);
 	b->used+=len;
 	if(b->used>b->max) {
-		fprintf(stderr, "WARNING:attempted ovewflow of input buffer %p\n", (void*)b);
+		ERROR_FMT("WARNING:attempted ovewflow of input buffer %p\n", (void*)b);
 		b->used=b->max;
 	}
 }
@@ -3239,7 +2850,7 @@ EXPORT int socketio_wouldblock(void) {
 #endif
 }
 
-#ifndef NDEBUG
+#ifndef NTRACE
 static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds) {
 #if defined(USE_WIN32_SOCKETS)
 	unsigned i;
@@ -3318,7 +2929,7 @@ EXPORT int socketio_close(SOCKET *fd) {
 	res=close(*fd);
 #endif
 	if(res==-1) {
-		fprintf(stderr, "ERROR:close(fd=%d):%s\n", *fd, socketio_strerror());
+		ERROR_FMT("close(fd=%d):%s\n", *fd, socketio_strerror());
 	}
 
 	/* do not retain entries for closed fds */
@@ -3397,11 +3008,11 @@ EXPORT int socketio_getpeername(SOCKET fd, char *name, size_t name_len) {
 	sslen=sizeof ss;
 	res=getpeername(fd, (struct sockaddr*)&ss, &sslen);
 	if(res!=0) {
-		fprintf(stderr, "%s():%s\n", __func__, socketio_strerror());
+		ERROR_FMT("%s():%s\n", __func__, socketio_strerror());
 		return 0;
 	}
 	if(!socketio_sockname((struct sockaddr*)&ss, sslen, name, name_len)) {
-		fprintf(stderr, "Failed %s() on fd %d\n", __func__, fd);
+		ERROR_FMT("Failed %s() on fd %d\n", __func__, fd);
 		return 0;
 	}
 	DEBUG("getpeername is %s\n", name);
@@ -3504,7 +3115,7 @@ static struct socketio_handle *socketio_ll_newhandle(SOCKET fd, const char *name
 	assert(fd != INVALID_SOCKET);
 
 	if(!socketio_check_count(fd)) {
-		fprintf(stderr, "ERROR:too many open sockets. closing new connection!\n");
+		ERROR_MSG("too many open sockets. closing new connection!");
 		socketio_toomany(fd); /* send a message to the socket */
 		return NULL; /* failure */
 	}
@@ -3541,7 +3152,7 @@ EXPORT int socketio_dispatch(long msec) {
 	}
 
 	if(!LIST_TOP(socketio_handle_list)) {
-		fprintf(stderr, "No more sockets to watch\n");
+		ERROR_MSG("No more sockets to watch");
 		return 0;
 	}
 
@@ -3560,7 +3171,6 @@ EXPORT int socketio_dispatch(long msec) {
 
 	DEBUG("select() returned %d results\n", nr);
 
-	/* TODO: if fds_bits is available then base the loop on the fd_set and look up entries on the client list. */
 	TODO("if fds_bits is available then base the loop on the fd_set and look up entries on the client list.");
 
 	/* check all sockets */
@@ -3626,7 +3236,7 @@ EXPORT int socketio_dispatch(long msec) {
 		next=LIST_NEXT(curr, list);
 	}
 	if(nr>0) {
-		fprintf(stderr, "ERROR:there were %d unhandled socket events\n", nr);
+		ERROR_FMT("there were %d unhandled socket events\n", nr);
 		goto failure;
 	}
 	assert(nr==0);
@@ -3665,7 +3275,7 @@ EXPORT void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p) {
 
 	newclient=socketio_ll_newhandle(fd, buf, 1, NULL, NULL);
 	if(!newclient) {
-		fprintf(stderr, "ERROR:could not allocate client, closing connection '%s'\n", buf);
+		ERROR_FMT("could not allocate client, closing connection '%s'\n", buf);
 		socketio_close(&fd);
 		return; /* failure */
 	}
@@ -3690,7 +3300,7 @@ static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct so
 	const int yes=1;
 	assert(ai!=NULL);
 	if(!ai || !ai->ai_addr) {
-		fprintf(stderr, "ERROR:empty socket address\n");
+		ERROR_MSG("empty socket address");
 		return 0;
 	}
 	fd=socket(ai->ai_family, ai->ai_socktype, 0);
@@ -3700,7 +3310,7 @@ static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct so
 	socketio_socket_count++; /* track number of open sockets for filling fd_set */
 #endif
 	if(!socketio_check_count(fd)) {
-		fprintf(stderr, "ERROR:too many open sockets. refusing new server!\n");
+		ERROR_MSG("too many open sockets. refusing new server!");
 		goto failure;
 	}
 
@@ -3727,7 +3337,7 @@ static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct so
 	/* add server to a list */
 	newserv=socketio_ll_newhandle(fd, buf, 0, NULL, server_read_event);
 	if(!newserv) {
-		fprintf(stderr, "ERROR:could not allocate server, closing socket '%s'\n", buf);
+		ERROR_FMT("could not allocate server, closing socket '%s'\n", buf);
 		socketio_close(&fd);
 		return 0; /* failure */
 	}
@@ -3768,7 +3378,7 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 	res=getaddrinfo(host, port, &ai_hints, &ai_res);
 
 	if(res!=0) {
-		fprintf(stderr, "ERROR:hostname parsing error:%s\n", gai_strerror(res));
+		ERROR_FMT("hostname parsing error:%s\n", gai_strerror(res));
 		return 0;
 	}
 
@@ -3782,7 +3392,7 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 
 	if(!curr) {
 		freeaddrinfo(ai_res);
-		fprintf(stderr, "Could not find interface for %s:%s\n", host ? host : "*", port);
+		ERROR_FMT("Could not find interface for %s:%s\n", host ? host : "*", port);
 		return 0; /* failure */
 	}
 
@@ -3790,7 +3400,7 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 
 	if(!socketio_listen_bind(curr, newclient)) {
 		freeaddrinfo(ai_res);
-		fprintf(stderr, "Could bind socket for %s:%s\n", host ? host : "*", port);
+		ERROR_FMT("Could bind socket for %s:%s\n", host ? host : "*", port);
 		return 0; /* failure */
 	}
 
@@ -3875,7 +3485,6 @@ static void telnetclient_free(struct socketio_handle *sh) {
 	buffer_free(&client->output);
 	buffer_free(&client->input);
 
-	/* TODO: free any other data structures associated with client */
 	TODO("free any other data structures associated with client"); /* be vigilant about memory leaks */
 
 #ifndef NDEBUG
@@ -3891,7 +3500,7 @@ static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh) {
 	FAILON(!cl, "malloc()", failed);
 	buffer_init(&cl->output, TELNETCLIENT_OUTPUT_BUFFER_SZ);
 	buffer_init(&cl->input, TELNETCLIENT_INPUT_BUFFER_SZ);
-	cl->terminal.width=cl->terminal.height=-1;
+	cl->terminal.width=cl->terminal.height=0;
 	strcpy(cl->terminal.name, "");
 	cl->state_free=NULL;
 	telnetclient_clear_statedata(cl);
@@ -4008,7 +3617,7 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 		case TELOPT_TTYPE:
 			if(iac[3]==TELQUAL_IS) {
 				if(len<9) {
-					fprintf(stderr, "WARNING: short IAC SB TTYPE IS .. IAC SE\n");
+					ERROR_MSG("WARNING: short IAC SB TTYPE IS .. IAC SE");
 					return;
 				}
 				snprintf(cl->terminal.name, sizeof cl->terminal.name, "%.*s", (int)len-4-2, iac+4);
@@ -4020,7 +3629,7 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 			break;
 		case TELOPT_NAWS: {
 			if(len<9) {
-				fprintf(stderr, "WARNING: short IAC SB NAWS .. IAC SE\n");
+				ERROR_MSG("WARNING: short IAC SB NAWS .. IAC SE");
 				return;
 			}
 			assert(len==9);
@@ -4044,7 +3653,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 	assert(iac[0] == IAC);
 
 	if(iac[0]!=IAC) {
-		fprintf(stderr, "ERROR:%s() called on non-telnet data\n", __func__);
+		ERROR_FMT("%s() called on non-telnet data\n", __func__);
 		return 0;
 	}
 
@@ -4104,7 +3713,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 			}
 			return 0; /* unterminated IAC SB sequence */
 		case SE:
-			fprintf(stderr, "ERROR:found IAC SE without IAC SB, ignoring it.\n");
+			ERROR_MSG("found IAC SE without IAC SB, ignoring it.");
 		default:
 			if(len>=3)
 				return 2; /* treat anything we don't know about as a 2-byte operation */
@@ -4124,7 +3733,7 @@ static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl
 
 	data=buffer_load(&cl->input, &len);
 	if(len==0) {
-		fprintf(stderr, "WARNING:input buffer full, closing connection %s\n", sh->name);
+		ERROR_FMT("WARNING:input buffer full, closing connection %s\n", sh->name);
 		goto failure;
 	}
 	res=socketio_recv(sh->fd, data, len);
@@ -4222,277 +3831,6 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 }
 
 /******************************************************************************
- * user - handles user accounts
- ******************************************************************************/
-#define USER_RECORD_TYPE 'U'
-#define USER_HASH_SIZE 4
-#define USER_MAX 32768 /* maximum number of user accounts (totally arbitrary, real limit is 16M) */
-#define USER_ID_TO_RECORD(id) ((id)|((unsigned)USER_RECORD_TYPE<<24))
-#define USER_USERNAME_MAX 256
-#define USER_PASSWORD_CRYPT_MAX 256
-#define USER_EMAIL_MAX 256
-
-struct user {
-	sjdb_id_t id;
-	char *username;
-	char *password_crypt;
-	char *email;
-};
-
-struct user_cache {
-	sjdb_id_t id;
-	char *username;
-};
-
-static struct freelist user_id_freelist;
-static struct map user_cache_index;
-
-static void user_cache_ll_free(void *key, union map_data *data) {
-	struct user_cache *uc=data->ptr;
-	assert(data != NULL);
-	assert(key == uc->username);
-	if(uc) {
-		free(uc->username);
-		free(uc);
-	}
-}
-
-/**
- * add a user to username cache
- */
-static int user_cache_add(struct user *u) {
-	struct user_cache *uc;
-	assert(u != NULL);
-	assert(u->username != NULL);
-	if(!u || !u->username) return 0;
-	uc=malloc(sizeof *uc);
-	uc->username=strdup(u->username);
-	uc->id=u->id;
-	if(!map_add_ptr(&user_cache_index, uc->username, uc)) {
-		union map_data data={.ptr=uc};
-		user_cache_ll_free(uc->username, &data);
-		fprintf(stderr, "User '%s' could not be added to cache\n", u->username);
-		return 0; /* failure - probably already exists */
-	}
-	return 1; /* success */
-}
-
-static void user_ll_free(void *key, void *data) {
-	struct user *u=data;
-	assert(data != NULL);
-	assert(key == u->username);
-	if(u) {
-		TODO("VERY IMPORTANT:Remove from username cache\n");
-		freelist_pool(&user_id_freelist, u->id, 1);
-		free(u->username);
-		free(u->password_crypt);
-		free(u->email);
-		free(u);
-	}
-}
-
-/* callback for recordcache system */
-static void user_record_free(void *data) {
-	TODO("implement this function.");
-}
-
-/* callback for recordcache system
- * writes a record to sjdb */
-static int user_record_flush(void *data) {
-	struct user *u=data;
-	char *buf;
-	size_t buf_len;
-	int res;
-
-	buf=malloc(buf_len=1024);
-	if(!buf) {
-		return 0; /* failure */
-	}
-	TODO("remove the id field from the user record format");
-	res=record_write(buf, buf_len, 0, "%u%s%s%s",
-		u->id,
-		u->username,
-		u->password_crypt,
-		u->email
-	);
-	assert(res > 0);
-
-	res=sjdb_write_update(&recordcache_sjdb, (unsigned)res, USER_ID_TO_RECORD(u->id), buf);
-	free(buf);
-	DEBUG("Wrote user '%s' (res=%d)\n", u->username, res);
-	return res;
-}
-
-static struct user *user_ll_read(sjdb_id_t id) {
-	struct user *u;
-	const char *buf;
-	size_t buf_len;
-	sjdb_id_t id2;
-	char action;
-	int res;
-	uint_least32_t uid;
-	char username[USER_USERNAME_MAX];
-	char password_crypt[USER_PASSWORD_CRYPT_MAX];
-	char email[USER_EMAIL_MAX];
-
-	if(!sjdb_goto(&recordcache_sjdb, id)) {
-		ERROR_FMT("%s:User record id=0x%08x not found\n", recordcache_sjdb.filename, id);
-		return NULL;
-	}
-
-	DEBUG("%s:Loading record id=0x%08x from file.\n", recordcache_sjdb.filename, id);
-
-	TODO("Load the record from sjdb");
-
-	res=sjdb_read_entry(&recordcache_sjdb, &buf, &id2, &action, &buf_len);
-
-	assert(id == id2);
-	assert(action == SJDB_ACTION_UPDATE);
-
-	TODO("remove the id field from the user record format");
-
-	res=record_read(buf, buf_len, 0, "%u%255s%255s%255s",
-		&uid,
-		username,
-		password_crypt,
-		email
-	);
-
-	if(res<=0) {
-		ERROR_FMT("error reading record id=0x%08x\n", id);
-	}
-
-	// XXX FINISH - check out user_create() for ideas
-}
-
-EXPORT void *user_cache_get(sjdb_id_t id) {
-	struct user *u;
-	const char *buf;
-	size_t buf_len;
-	sjdb_id_t id2;
-	char action;
-	int res;
-
-	assert(USER_RECORD_TYPE==id>>24);
-
-	u=recordcache_get(id);
-	if(u) return u; /* success - found in cache */
-
-	/* not in cache, load it from disk */
-	u=user_ll_read(id);
-	if(u) {
-		TODO("Save to cache");
-	}
-	return u;
-}
-
-/**
- * scans database for user records, recording usernames to hash table
- */
-static void _user_ll_index_entry(sjdb_id_t id) {
-	struct user *u;
-	TODO("implement this");
-	DEBUG("Found entry for 0x%08x\n", id);
-	u=user_cache_get(id);
-	if(!u) {
-		ERROR_FMT("Scanned record 0x%08x, but could not find record, how weird!\n", id);
-		abort();
-	}
-	DEBUG("User '%s'\n", u->username);
-}
-
-EXPORT void user_init(void) {
-	freelist_init(&user_id_freelist, 0);
-	freelist_pool(&user_id_freelist, 0, USER_MAX);
-	map_init(&user_cache_index, USER_HASH_SIZE, user_cache_ll_free, map_hash_stringignorecase, map_compare_stringignorecase);
-
-	/* scan sjdb hash for user records */
-	sjdb_scan(&recordcache_sjdb, USER_RECORD_TYPE, _user_ll_index_entry);
-}
-
-EXPORT void user_shutdown(void) {
-	/* TODO: flush unwritten entries to disk */
-	TODO("flush unwritten entries to disk");
-	map_free(&user_cache_index);
-	freelist_free(&user_id_freelist);
-}
-
-/* returns true if the username already exists */
-EXPORT int user_exists(const char *username) {
-	struct user_cache *uc;
-	assert(username != NULL);
-	uc=map_lookup_ptr(&user_cache_index, username);
-	return uc!=NULL;
-}
-
-EXPORT struct user *user_get(const char *username) {
-	struct user *u;
-	struct user_cache *uc;
-	assert(username != NULL);
-
-	DEBUG("%s():looking for '%s'\n", __func__, username);
-
-	uc=map_lookup_ptr(&user_cache_index, username);
-	if(uc) {
-		DEBUG("Found username '%s'\n", uc->username);
-	} else {
-		DEBUG_MSG("Did not find username");
-		return 0;
-	}
-
-	u=recordcache_get(uc->id);
-	if(u) {
-		DEBUG("Found username '%s'\n", u->username);
-	} else {
-		DEBUG_MSG("Did not find username");
-	}
-
-	return u;
-}
-
-EXPORT struct user *user_create(const char *username, const char *password, const char *email) {
-	struct user_cache *uc; /* TODO: use this */
-	struct user *u;
-	int id;
-	id=freelist_alloc(&user_id_freelist, 1);
-	if(id<0) {
-		fprintf(stderr, "User '%s' could not be added (no more ids available)\n", username);
-		return 0;
-	}
-	u=malloc(sizeof *u);
-	u->id=id;
-	u->username=strdup(username);
-	u->password_crypt=strdup("TODO");
-	u->email=strdup(email);
-	if(!user_cache_add(u)) {
-		user_ll_free(u->username, u);
-		fprintf(stderr, "User '%s' could not be added\n", username);
-		return 0;
-	}
-	DEBUG("User '%s' added\n", username);
-	fprintf(stderr, "user:created '%s' with id %u\n", u->username, u->id);
-
-	/* add to recordcache */
-	recordcache_add(USER_ID_TO_RECORD(u->id), u, 1, user_record_free, user_record_flush);
-	recordcache_entry_flush(USER_ID_TO_RECORD(u->id));
-	return u;
-}
-
-/* callback for sjdb
- * reads a new user record */
-EXPORT int user_sjdb_update(sjdb_id_t id, size_t len, void *data) {
-	TODO("implement this");
-	abort(); /* TODO: implement this */
-}
-
-/* callback for sjdb
- * erases a user */
-EXPORT int user_sjdb_erase(sjdb_id_t id) {
-	TODO("implement this");
-	abort(); /* TODO: implement this */
-}
-
-/******************************************************************************
  * Menus
  ******************************************************************************/
 struct menuitem {
@@ -4527,7 +3865,8 @@ EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*f
 	struct menuitem *newitem;
 	newitem=malloc(sizeof *newitem);
 	newitem->name=strdup(name);
-	newitem->key=ch; /* TODO: check for duplicate keys */
+	newitem->key=ch;
+	TODO("check for duplicate keys");
 	newitem->action_func=func;
 	newitem->extra2=extra2;
 	newitem->extra3=extra3;
@@ -4605,7 +3944,7 @@ static void menu_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 static void command_lineinput(struct telnetclient *cl, const char *line) {
 	assert(cl != NULL);
 	assert(cl->sh != NULL);
-	/* TODO: do something with the command */
+	TODO("do something with the command");
 	DEBUG("%s:entered command '%s'\n", cl->sh->name, line);
 }
 
@@ -4625,19 +3964,23 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 	assert(line != NULL);
 	assert(cl->state.login.username[0] != '\0'); /* must have a valid username */
 
-	/* TODO: complete login process */
+	TODO("complete login process");
 	DEBUG("Login attempt: Username='%s'\n", cl->state.login.username);
 
 	u=user_get(cl->state.login.username);
 	if(u) {
+		TODO("verify the password");
 		telnetclient_printf(cl, "Hello, %s.\n", u->username);
+		command_start_lineinput(cl);
+		return; /* success */
 	} else {
 		telnetclient_puts(cl, mud_config.msg_noaccount);
-		/* TODO: kick out back to the menu */
+		TODO("kick out back to the menu");
 	}
 
-	/* TODO: failed logins go back to the main menu or disconnect */
-	command_start_lineinput(cl);
+	command_start_lineinput(cl); /* XXX - temporary code */
+	TODO("failed logins go back to the main menu or disconnect");
+	// telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
 static void login_password_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
@@ -4655,6 +3998,8 @@ static void login_username_lineinput(struct telnetclient *cl, const char *line) 
 
 	if(!*line) {
 		telnetclient_puts(cl, mud_config.msg_invalidusername);
+		telnetclient_start_menuinput(cl, &gamemenu_login);
+		return;
 	}
 
 	/* store the username for the password state to use */
@@ -4779,7 +4124,7 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 	while(*line && isspace(*line)) line++; /* ignore leading spaces */
 
 	if(tolower(*line)=='a') { /* accept */
-		/* TODO: callback to close out the form */
+		TODO("callback to close out the form");
 		if(f->form_close) {
 			/* this call will switch states on success */
 			f->form_close(cl, f);
@@ -4874,7 +4219,7 @@ static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
 
 	telnetclient_puts(cl, mud_config.msg_usercreatesuccess);
 
-	/* TODO: for approvable based systems, disconnect the user with a friendly message */
+	TODO("for approvable based systems, disconnect the user with a friendly message");
 	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
@@ -4905,7 +4250,7 @@ EXPORT int game_init(void) {
 
 	/* */
 	menu_create(&gamemenu_login, "Login Menu");
-	/* TODO: setup functions for these */
+
 	menu_additem(&gamemenu_login, 'E', "Enter the game", login_username_start, 0, NULL);
 	menu_additem(&gamemenu_login, 'C', "Create account", form_start, 0, NULL);
 	/*
@@ -4918,17 +4263,11 @@ EXPORT int game_init(void) {
 /******************************************************************************
  * Config loader
  ******************************************************************************/
-struct config;
-
 struct config_watcher {
 	LIST_ENTRY(struct config_watcher) list;
 	char *mask;
 	int (*func)(struct config *cfg, void *extra, const char *id, const char *value);
 	void *extra;
-};
-
-struct config {
-	LIST_HEAD(struct, struct config_watcher) watchers;
 };
 
 EXPORT void config_setup(struct config *cfg) {
@@ -4968,7 +4307,7 @@ EXPORT int config_load(const char *filename, struct config *cfg) {
 
 	f=fopen(filename, "r");
 	if(!f) {
-		perror(filename);
+		PERROR(filename);
 		return 0;
 	}
 	line=0;
@@ -5004,7 +4343,7 @@ EXPORT int config_load(const char *filename, struct config *cfg) {
 		e=strchr(buf, '=');
 		if(!e) {
 			/* invalid directive */
-			fprintf(stderr, "%s:%d:invalid directive\n", filename, line);
+			ERROR_FMT("%s:%d:invalid directive\n", filename, line);
 			goto failure;
 		}
 
@@ -5018,15 +4357,20 @@ EXPORT int config_load(const char *filename, struct config *cfg) {
 			*e=0;
 		}
 
-		/* TODO: dequote the value part */
+		TODO("dequote the value part");
 
 		/* printf("id='%s' value='%s'\n", buf, value); */
 
 		/* check the masks */
 		for(curr=LIST_TOP(cfg->watchers);curr;curr=LIST_NEXT(curr, list)) {
 			if(!util_fnmatch(curr->mask, buf, UTIL_FNM_CASEFOLD) && curr->func) {
-				if(!curr->func(cfg, curr->extra, buf, value)) {
+				int res;
+				res=curr->func(cfg, curr->extra, buf, value);
+				if(!res) {
 					break; /* return 0 from the callback will terminate the list */
+				} else if(res<0) {
+					ERROR_FMT("%s:%u:error in loading file\n", filename, line);
+					goto failure;
 				}
 			}
 		}
@@ -5038,7 +4382,7 @@ failure:
 	return 0; /* failure */
 }
 
-#ifndef NDEBUG
+#ifndef NTEST
 static int config_test_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	printf("CONFIG SHOW: %s=%s\n", id, value);
 	return 1;
@@ -5069,7 +4413,7 @@ static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const
 	} else if(!strcmp(id, "prompt.command")) {
 		target=&mud_config.command_prompt;
 	} else {
-		fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
+		ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
 		return 1; /* failure - continue looking for matches */
 	}
 
@@ -5108,7 +4452,7 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 			return 0; /* success - terminate the callback chain */
 		}
 	}
-	fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
+	ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
 	return 1; /* failure - continue looking for matches */
 }
 
@@ -5135,7 +4479,7 @@ static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, cons
 			return 0; /* success - terminate the callback chain */
 		}
 	}
-	fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
+	ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
 	return 1; /* failure - continue looking for matches */
 }
 
@@ -5152,7 +4496,7 @@ static int do_config_string(struct config *cfg UNUSED, void *extra, const char *
 /* handles the 'server.port' property */
 static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
-		fprintf(stderr, "problem with config option '%s' = '%s'\n", id, value);
+		ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
 		return 1; /* failure - continue looking for matches */
 	}
 	return 0; /* success - terminate the callback chain */
@@ -5173,8 +4517,6 @@ EXPORT void mud_config_init(void) {
 	mud_config.msg_usercreatesuccess=strdup("Account successfully created!\n");
 	mud_config.msg_userexists=strdup("Username already exists!\n");
 	mud_config.msg_usermin3=strdup("Username must contain at least 3 characters!\n");
-	mud_config.db_filename=strdup("boris.sjdb");
-	mud_config.db_filename_timestamp=strdup("%y%m%d");
 }
 
 EXPORT void mud_config_shutdown(void) {
@@ -5192,8 +4534,6 @@ EXPORT void mud_config_shutdown(void) {
 	    &mud_config.msg_usercreatesuccess,
 	    &mud_config.msg_userexists,
 	    &mud_config.msg_usermin3,
-	    &mud_config.db_filename,
-	    &mud_config.db_filename_timestamp,
 	};
 	unsigned i;
 	for(i=0;i<NR(targets);i++) {
@@ -5209,9 +4549,7 @@ EXPORT int mud_config_process(void) {
 	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
 	config_watch(&cfg, "msg.*", do_config_msg, 0);
 	config_watch(&cfg, "msgfile.*", do_config_msgfile, 0);
-	config_watch(&cfg, "db.filename", do_config_string, &mud_config.db_filename);
-	config_watch(&cfg, "db.filename.timestamp", do_config_string, &mud_config.db_filename_timestamp);
-#if !defined(NDEBUG) && !defined(NTRACE)
+#if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", config_test_show, 0);
 #endif
 	if(!config_load(mud_config.config_filename, &cfg)) {
@@ -5238,7 +4576,7 @@ static void usage(void) {
 /* exits if next_arg is NULL */
 static void need_parameter(int ch, const char *next_arg) {
 	if(!next_arg) {
-		fprintf(stderr, "ERROR: option -%c takes a parameter\n", ch);
+		ERROR_FMT("option -%c takes a parameter\n", ch);
 		usage();
 	}
 }
@@ -5263,7 +4601,7 @@ static int process_flag(int ch, const char *next_arg) {
 			}
 			return 1; /* uses next arg */
 		default:
-			fprintf(stderr, "ERROR: Unknown option -%c\n", ch);
+			ERROR_FMT("Unknown option -%c\n", ch);
 		case 'h':
 			usage();
 	}
@@ -5284,15 +4622,14 @@ static void process_args(int argc, char **argv) {
 				}
 			}
 		} else {
-			/* TODO: process arguments */
+			TODO("process arguments");
 			fprintf(stderr, "TODO: process argument '%s'\n", argv[i]);
 		}
 	}
 }
 
 int main(int argc, char **argv) {
-#ifndef NDEBUG
-	/*
+#ifndef NTEST
 	adler32_test();
 	ieee754_test();
 	acs_test();
@@ -5301,8 +4638,12 @@ int main(int argc, char **argv) {
 	bitmap_test();
 	freelist_test();
 	heapqueue_test();
-	*/
 #endif
+
+	if(mkdir("data", 0777)==-1 && errno!=EEXIST) {
+		PERROR("data/");
+		return EXIT_FAILURE;
+	}
 
 	if(!socketio_init()) {
 		return EXIT_FAILURE;
@@ -5318,28 +4659,22 @@ int main(int argc, char **argv) {
 
 	/* process configuration file and load into mud_config global */
 	if(!mud_config_process()) {
-		fprintf(stderr, "ERROR: could not load configuration\n");
-		return 0;
+		ERROR_MSG("could not load configuration");
+		return EXIT_FAILURE;
 	}
 
-	/** sets up database **/
-	if(!sjdb_open(&recordcache_sjdb, mud_config.db_filename)) {
-		fprintf(stderr, "ERROR: could not load database\n");
-		return 0;
+	if(!user_init()) {
+		ERROR_MSG("could not initialize users");
+		return EXIT_FAILURE;
 	}
-
-	recordcache_init();
-	atexit(recordcache_shutdown);
-
-	user_init();
 	atexit(user_shutdown);
 
 	if(!game_init()) {
-		fprintf(stderr, "ERROR: could not start game\n");
-		return 0;
+		ERROR_MSG("could not start game");
+		return EXIT_FAILURE;
 	}
 
-	/* TODO: use the next event for the timer */
+	TODO("use the next event for the timer");
 	while(socketio_dispatch(-1)) {
 		fprintf(stderr, "Tick\n");
 	}
