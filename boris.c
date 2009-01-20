@@ -2368,9 +2368,9 @@ static int user_cache_remove(struct user *u) {
 	return ret;
 }
 
-static void user_free(struct user *u) {
+/* only free the structure data */
+static void user_ll_free(struct user *u) {
 	if(!u) return;
-	user_cache_remove(u);
 	free(u->username);
 	u->username=0;
 	free(u->password_crypt);
@@ -2380,6 +2380,27 @@ static void user_free(struct user *u) {
 	free(u);
 }
 
+static void user_free(struct user *u) {
+	if(!u) return;
+	user_cache_remove(u);
+	user_ll_free(u);
+}
+
+/* allocate a default struct */
+static struct user *user_defaults(void) {
+	struct user *u;
+	u=calloc(1, sizeof *u);
+	if(!u) {
+		PERROR("malloc()");
+		return NULL;
+	}
+
+	u->id=0;
+	u->username=NULL;
+	u->password_crypt=NULL;
+	u->email=NULL;
+	return u;
+}
 static int user_ll_load_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
 	char *endptr;
 	unsigned *uint_p=extra;
@@ -2425,9 +2446,9 @@ static struct user *user_load_byname(const char *username) {
 
 	config_setup(&cfg);
 
-	u=calloc(1, sizeof *u); /* unused fields need to be NULL for below */
+	u=user_defaults(); /* allocate a default struct */
 	if(!u) {
-		PERROR("malloc()");
+		DEBUG_MSG("Could not allocate user structure\n");
 		fclose(f);
 		return 0; /* failure */
 	}
@@ -2452,10 +2473,7 @@ static struct user *user_load_byname(const char *username) {
 	return u; /* success */
 
 failure:
-	free(u->username);
-	free(u->password_crypt);
-	free(u->email);
-	free(u);
+	user_ll_free(u);
 	return 0; /* failure */
 }
 
@@ -2542,16 +2560,16 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 		return NULL; /* failure */
 	}
 
-	u=malloc(sizeof *u);
+	u=user_defaults(); /* allocate a default struct */
 	if(!u) {
-		PERROR("malloc()");
+		DEBUG_MSG("Could not allocate user structure\n");
 		return NULL; /* failure */
 	}
 
 	id=freelist_alloc(&user_id_freelist, 1);
 	if(id<0) {
 		ERROR_FMT("Could not allocate user id for username(%s)\n", username);
-		free(u);
+		user_free(u);
 		return NULL; /* failure */
 	}
 
@@ -2559,7 +2577,7 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 
 	if(!user_name_map_add((unsigned)id, username)) {
 		freelist_pool(&user_id_freelist, (unsigned)id, 1);
-		free(u);
+		user_free(u);
 		return NULL; /* failure */
 	}
 
@@ -2571,6 +2589,7 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 	if(!user_write(u)) {
 		ERROR_FMT("Could not save account username(%s)\n", u->username);
 		user_free(u);
+		return NULL; /* failure */
 	}
 
 	/* add to cache of loaded users */
