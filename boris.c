@@ -350,6 +350,8 @@ static struct mud_config {
 	char *msgfile_welcome;
 	unsigned newuser_level;
 	unsigned newuser_flags;
+	char *eventlog_filename;
+	char *eventlog_timeformat;
 } mud_config;
 
 /******************************************************************************
@@ -1629,6 +1631,100 @@ EXPORT void map_test(void) {
 }
 #endif
 
+/******************************************************************************
+ * eventlog - writes logging information based on events
+ ******************************************************************************/
+/*-* eventlog:globals *-*/
+static FILE *eventlog_file;
+
+/*-* eventlog:internal functions *-*/
+
+/*-* eventlog:external functions *-*/
+
+/** initialize */
+int eventlog_init(void) {
+	eventlog_file=fopen(mud_config.eventlog_filename, "a");
+	if(!eventlog_file) {
+		PERROR(mud_config.eventlog_filename);
+		return 0; /* failure */
+	}
+
+	setlinebuf(eventlog_file);
+
+	return 1; /* success */
+}
+
+void eventlog_shutdown(void) {
+	if(eventlog_file) {
+		fclose(eventlog_file);
+		eventlog_file=0;
+	}
+}
+
+void eventlog(const char *type, const char *fmt, ...) {
+	va_list ap;
+	char buf[512];
+	int n;
+	time_t t;
+	char timestamp[64];
+
+	va_start(ap, fmt);
+	n=vsnprintf(buf, sizeof buf, fmt, ap);
+	va_end(ap);
+	if(n<0) {
+		ERROR_MSG("vsnprintf() failure");
+		return; /* failure */
+	}
+
+	if(n>=(int)sizeof buf) { /* output was truncated */
+		n=strlen(buf);
+	}
+
+	/* make certain the last character is a newline */
+	if(n>0 && buf[n-1]!='\n') {
+		if(n==sizeof buf) n--;
+		buf[n]='\n';
+		buf[n+1]=0;
+		DEBUG_MSG("Adding newline to message");
+	}
+
+	time(&t);
+	strftime(timestamp, sizeof timestamp, mud_config.eventlog_timeformat, gmtime(&t));
+	if(fprintf(eventlog_file?eventlog_file:stderr, "%s:%s:%s", timestamp, type, buf)<0) {
+		/* there was a write error */
+		PERROR(eventlog_file?mud_config.eventlog_filename:"stderr");
+	}
+}
+
+/** report that a connection has occured */
+void eventlog_connect(const char *peer_str) {
+	eventlog("CONNECT", "remote=%s\n", peer_str);
+}
+
+void eventlog_server_startup(void) {
+	eventlog("STARTUP", "\n");
+}
+
+void eventlog_server_shutdown(void) {
+	eventlog("SHUTDOWN", "\n");
+}
+
+void eventlog_login_failattempt(const char *username, const char *peer_str) {
+	eventlog("LOGINFAIL", "remote=%s name='%s'\n", peer_str, username);
+}
+
+void eventlog_signon(const char *username, const char *peer_str) {
+	eventlog("SIGNON", "remote=%s name='%s'\n", peer_str, username);
+}
+
+void eventlog_signoff(const char *username, const char *peer_str) {
+	eventlog("SIGNOFF", "remote=%s name='%s'\n", peer_str, username);
+}
+
+void eventlog_toomany(void) {
+	/* TODO: we could get the peername from the fd and log that? */
+	eventlog("TOOMANY", "\n");
+}
 /******************************************************************************
  * Config loader
  ******************************************************************************/
@@ -3454,6 +3550,8 @@ failure:
 static void socketio_toomany(SOCKET fd) {
 	const char buf[]="Too many connections\r\n";
 
+	eventlog_toomany(); /* report that we are refusing connections */
+
 	if(socketio_nonblock(fd)) {
 		send(fd, buf, (sizeof buf)-1, 0);
 		socketio_send(fd, buf, (sizeof buf)-1);
@@ -3648,6 +3746,8 @@ EXPORT void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p) {
 	if(!socketio_sockname((struct sockaddr*)&ss, sslen, buf, sizeof buf)) {
 		strcpy(buf, "<UNKNOWN>");
 	}
+
+	eventlog_connect(buf);
 
 	newclient=socketio_ll_newhandle(fd, buf, 1, NULL, NULL);
 	if(!newclient) {
@@ -3844,6 +3944,10 @@ static void telnetclient_free(struct socketio_handle *sh) {
 	assert(client!=NULL);
 	if(!client)
 		return;
+
+	TODO("Determine if connection was logged in first");
+	eventlog_signoff("<UNKNOWN>", sh->name); /* TODO: fix the username field */
+
 	DEBUG("freeing client '%s'\n", sh->name);
 
 	if(sh->fd!=INVALID_SOCKET) {
@@ -4347,6 +4451,8 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 	if(u) {
 		/* verify the password */
 		if(xxtcrypt_checkpass(u->password_crypt, line)) {
+			TODO("Tag user account with username");
+			eventlog_signon(cl->state.login.username, cl->sh->name);
 			telnetclient_printf(cl, "Hello, %s.\n", u->username);
 			command_start_lineinput(cl);
 			return; /* success */
@@ -4355,6 +4461,9 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 	} else {
 		telnetclient_puts(cl, mud_config.msg_noaccount);
 	}
+
+	/* report the attempt */
+	eventlog_login_failattempt(cl->state.login.username, cl->sh->name);
 
 	/* failed logins go back to the main menu or disconnect */
 	telnetclient_start_menuinput(cl, &gamemenu_login);
@@ -4779,8 +4888,11 @@ EXPORT void mud_config_init(void) {
 	mud_config.msg_usercreatesuccess=strdup("Account successfully created!\n");
 	mud_config.msg_userexists=strdup("Username already exists!\n");
 	mud_config.msg_usermin3=strdup("Username must contain at least 3 characters!\n");
+	mud_config.msgfile_welcome=strdup("Welcome\n\n");
 	mud_config.newuser_level=5;
 	mud_config.newuser_flags=0;
+	mud_config.eventlog_filename=strdup("boris.log\n");
+	mud_config.eventlog_timeformat=strdup("%y%m%d-%H%M"); /* another good one: %Y.%j-%H%M */
 }
 
 EXPORT void mud_config_shutdown(void) {
@@ -4799,6 +4911,9 @@ EXPORT void mud_config_shutdown(void) {
 	    &mud_config.msg_usercreatesuccess,
 	    &mud_config.msg_userexists,
 	    &mud_config.msg_usermin3,
+	    &mud_config.msgfile_welcome,
+	    &mud_config.eventlog_filename,
+	    &mud_config.eventlog_timeformat,
 	};
 	unsigned i;
 	for(i=0;i<NR(targets);i++) {
@@ -4816,6 +4931,8 @@ EXPORT int mud_config_process(void) {
 	config_watch(&cfg, "msgfile.*", do_config_msgfile, 0);
 	config_watch(&cfg, "newuser.level", do_config_uint, &mud_config.newuser_level);
 	config_watch(&cfg, "newuser.flags", do_config_uint, &mud_config.newuser_flags);
+	config_watch(&cfg, "eventlog.filename", do_config_string, &mud_config.eventlog_filename);
+	config_watch(&cfg, "eventlog.timeformat", do_config_string, &mud_config.eventlog_timeformat);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", config_test_show, 0);
 #endif
@@ -4932,6 +5049,11 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
+	if(!eventlog_init()) {
+		return EXIT_FAILURE;
+	}
+	atexit(eventlog_shutdown);
+
 	if(!user_init()) {
 		ERROR_MSG("could not initialize users");
 		return EXIT_FAILURE;
@@ -4943,11 +5065,14 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
+	eventlog_server_startup();
+
 	TODO("use the next event for the timer");
 	while(socketio_dispatch(-1)) {
 		fprintf(stderr, "Tick\n");
 	}
 
+	eventlog_server_shutdown();
 	return 0;
 }
 
