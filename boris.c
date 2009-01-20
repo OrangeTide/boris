@@ -95,7 +95,7 @@
 #endif
 #include <sys/stat.h>
 #include <sys/types.h>
-
+#include <time.h>
 
 /******************************************************************************
  * Macros
@@ -340,6 +340,7 @@ static struct mud_config {
 	char *msg_invalidselection;
 	char *msg_invalidusername;
 	char *msg_noaccount;
+	char *msg_badpassword;
 	char *msg_tryagain;
 	char *msg_unsupported;
 	char *msg_useralphanumeric;
@@ -2278,6 +2279,258 @@ static int adler32_test(void) {
 #define	MODE_MASK 31
 
 /******************************************************************************
+ * base64 : encode base64
+ ******************************************************************************/
+/* base64_encodes as ./0123456789a-zA-Z
+ * length is the number of 32-bit words */
+static inline void base64_encode(char *ret, size_t length, uint32_t *v) {
+	uint32_t x; /* buffer for current value */
+	int xlen, vlen;
+
+	xlen=0;
+	vlen=0;
+	x=0;
+
+	while(length>0 || xlen>0) {
+		if(xlen<6) {
+			if(length>0) {
+				x|=(*v>>vlen)<<xlen;
+				xlen+=16;
+				vlen+=16;
+				if(vlen>=32) {
+					v++;
+					length--;
+					vlen=0;
+				}
+			} else {
+				xlen=6; /* pad remaining */
+			}
+		}
+		*ret=x&63;
+
+		/* convert to a base64 system (this code only works for ASCII) */
+		if(*ret>=0 && *ret<12) *ret+='.'; else
+		if(*ret>=12 && *ret<38) *ret+='A'-12; else
+		if(*ret>=38 && *ret<64) *ret+='a'-38;
+
+		ret++;
+		x>>=6;
+		xlen-=6;
+	}
+	*ret=0;
+}
+
+/******************************************************************************
+ * xxtcrypt : password hashing using XXT (improved version of TEA)
+ ******************************************************************************/
+#define XXTCRYPT_BITS 128
+#define XXTCRYPT_GENSALT_LEN 6
+#define XXTCRYPT_GENSALT_MAX 16
+/* maximum length of crypted password */
+#define XXTCRYPT_MAX (XXTCRYPT_GENSALT_MAX+1+(2+4*(XXTCRYPT_BITS/8))/3+1)
+
+/**
+ * expands copies of salt and plaintext into key space m
+ */
+static inline void xxtcrypt_salt_prepare(char *m, size_t len, const char *plaintext, const char salt[2]) {
+	unsigned i;
+
+	memset(m, 0, len);
+	/* load salt */
+	for(i=0;i<2;i++) {
+		m[i]=salt[i];
+	}
+	/* load plaintext into remaining bytes, looping over them */
+	for(;plaintext[i-2];i++) {
+		int pos=i%len;
+		/* swap nibbles of previous cell and add key */
+		m[pos]=((m[pos]<<4)|((unsigned)m[pos]>>4))+plaintext[i-2];
+	}
+}
+
+/**
+ * XXT encrypt
+ */
+static inline void xxtcrypt_ll_enc(size_t length, uint32_t *v, uint32_t k[4]) {
+	uint32_t z=v[length-1], y, sum=0, e;
+	unsigned q, p;
+
+	assert(length>1);
+
+	// TRACE("len=%d\n", length);
+	// TRACE("--- KEY --- k: 0x%08x 0x%08x 0x%08x 0x%08x\n", k[0], k[1], k[2], k[3]);
+	// TRACE("--- ENC --- v0: 0x%08x v1: 0x%08x\n", v[0], v[1]);
+
+	/* 32 cycles for a length=2, which is 64 rounds */
+	q=6+52/length;
+	// printf("%s(): %d cycles (%d rounds)\n", __func__, q, q*length);
+	while(q-->0) {
+		sum+=0x9e3779b9; /* delta */
+		e=sum>>2&3;
+		for(p=0;p<=length-1;p++) {
+			if(p<length-1) {
+				y=v[p+1];
+			} else {
+				y=v[0];
+			}
+			v[p]+=(((z>>5)^(y<<2))+((y>>3)^(z<<4)))^((sum^y)+(k[(p&3)^e]^z));
+			z=v[p];
+		}
+	}
+}
+
+/* load keys returns new offset */
+static inline unsigned xxtcrypt_ll_load_k4(unsigned ofs, uint32_t k[4], const char *plaintext, size_t saltlen, const char *salt) {
+	unsigned ki, i;
+
+	ki=0;
+
+	k[0]=k[1]=k[2]=k[3]=0; /* clear the key space */
+
+	for(;ofs<saltlen;ofs++) {
+		k[ki/4]|=(uint32_t)salt[ofs]<<(8*ki);
+		ki=(ki+1)%(4*4); /* 4 bytes per word, 4 words per key */
+	}
+
+	for(i=ofs-saltlen;plaintext[i];i++,ofs++) {
+		k[ki/4]|=(uint32_t)plaintext[i]<<(8*ki);
+		ki=(ki+1)%(4*4); /* 4 bytes per word, 4 words per key */
+	}
+	return ofs;
+}
+
+/**
+ * format: salt!hash
+ */
+char *xxtcrypt(size_t max, char *dest, const char *plaintext, size_t saltlen, const char *salt, size_t bits) {
+	unsigned ofs, i;
+	uint32_t k[128/32]; /* 128-bit key */
+	uint32_t v[bits/32], lastv[bits/32]; /* encrypted value - 64-bit*/
+
+	if(max<saltlen+1+(2+4*(bits/8))/3+1) {
+		printf("won't fit!!\n");
+		return 0;
+	}
+
+	memset(v, 0, sizeof v); /* start with a hash of 0 */
+
+	ofs=0;
+	do {
+		ofs=xxtcrypt_ll_load_k4(ofs, k, plaintext, saltlen, salt); /* load next chunk */
+
+		memcpy(lastv, v, sizeof v); /* copy the old value of v */
+		xxtcrypt_ll_enc(NR(v), v, k); /* modifies v to encrypt it */
+		for(i=0;i<NR(v);i++) {
+			v[i]^=lastv[i]; /* the XOR step in Davies-Meyer */
+		}
+		// TRACE("bits=%d vsz=%d ofs=%d saltlen=%d\n", bits, NR(v), ofs, saltlen);
+	} while(plaintext[ofs-saltlen]);
+
+	memset(k, 0, sizeof k); /* remove key data */
+
+	memcpy(dest, salt, saltlen);
+	i=saltlen;
+	dest[i++]='!';
+
+	base64_encode(dest+i, NR(v), v);
+	return dest;
+}
+
+/* fills with salt data */
+void xxtcrypt_gensalt(size_t salt_len, char *salt, int (*rand_func)(void), unsigned randomitity) {
+	unsigned randness, i, pool;
+
+	/* pool starts with no randomness */
+	pool=time(NULL);
+	randness=0;
+
+	for(i=0;i<salt_len;i++) {
+		if(randness<64) {
+			pool^=rand_func();
+			randness+=randomitity; /* rand_func adds a certain amount of randness */
+		}
+
+		/* */
+		salt[i]=pool%64;
+		pool/=64;
+		randness/=64;
+
+		/* convert to a base64 system (this code only works for ASCII) */
+		if(salt[i]>=0 && salt[i]<12) salt[i]+='.'; else
+		if(salt[i]>=12 && salt[i]<38) salt[i]+='A'-12; else
+		if(salt[i]>=38 && salt[i]<64) salt[i]+='a'-38;
+	}
+}
+
+/**
+ * creates a random salt and applies it to the password
+ */
+int xxtcrypt_makepass(char *buf, size_t max, const char *plaintext) {
+	char salt[XXTCRYPT_GENSALT_LEN];
+
+	xxtcrypt_gensalt(sizeof salt, salt, rand, RAND_MAX/2);
+
+	if(!xxtcrypt(max, buf, plaintext, sizeof salt, salt, XXTCRYPT_BITS)) {
+		return 0; /* failure */
+	}
+	return 1; /* success */
+}
+
+/**
+ * checks a password
+ */
+int xxtcrypt_checkpass(const char *crypttext, const char *plaintext) {
+	const char *hashptr;
+	size_t saltlen;
+	char buf[XXTCRYPT_MAX+1], *res;
+
+	hashptr=strchr(crypttext, '!');
+	if(!hashptr) return 0; /* failure - not a valid password crypt */
+	saltlen=hashptr-crypttext;
+	hashptr++;
+
+	if(saltlen>XXTCRYPT_GENSALT_MAX) {
+		return 0; /* failure - this large salt size is unsupported */
+	}
+
+	res=xxtcrypt(sizeof buf, buf, plaintext, saltlen, crypttext, XXTCRYPT_BITS);
+	if(!res) {
+		return 0; /* failure - won't fit */
+	}
+
+	/* TODO: only compare the hashes and not the salts and formatting */
+	return strcmp(buf, crypttext)==0; /* return 1 if passwords match */
+}
+
+#ifndef NTEST
+static void xxtcrypt_test(void) {
+	const char *test_pass[] = {
+		"hello",
+		"tHIs Is A tEst",
+		"",
+		"    "
+		"xxxxxxxxxxxxxxxxyyyyy",
+	};
+	char buf[XXTCRYPT_MAX+1];
+	unsigned i;
+
+	srand((unsigned)time(NULL));
+
+	for(i=0;i<NR(test_pass);i++) {
+		if(!xxtcrypt_makepass(buf, sizeof buf, test_pass[i])) abort();
+		if(!xxtcrypt_checkpass(buf, test_pass[i])) {
+			fprintf(stderr, "ERROR:passwords do not match\n");
+			abort();
+		}
+		fprintf(stderr, "crypted: %s plain: \"%s\"\n", buf, test_pass[i]);
+	}
+	if(xxtcrypt_checkpass(buf, "abc")) {
+		fprintf(stderr, "ERROR:password shouldn't match\n");
+		abort();
+	}
+}
+#endif
+/******************************************************************************
  * fdb
  ******************************************************************************/
 
@@ -2571,9 +2824,16 @@ EXPORT struct user *user_get(const char *username) {
 EXPORT struct user *user_create(const char *username, const char *password, const char *email) {
 	struct user *u;
 	long id;
+	char password_crypt[XXTCRYPT_MAX+1];
 
 	if(!username) {
 		ERROR_MSG("Username was NULL");
+		return NULL; /* failure */
+	}
+
+	/* encrypt password */
+	if(!xxtcrypt_makepass(password_crypt, sizeof password_crypt, password)) {
+		ERROR_MSG("Could not hash password");
 		return NULL; /* failure */
 	}
 
@@ -2600,7 +2860,7 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 
 	u->id=id;
 	u->username=strdup(username);
-	u->password_crypt=strdup(":crypt:"); /* TODO: encrypt password */
+	u->password_crypt=strdup(password_crypt);
 	u->email=strdup(email);
 
 	if(!user_write(u)) {
@@ -4138,18 +4398,19 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 
 	u=user_get(cl->state.login.username);
 	if(u) {
-		TODO("verify the password");
-		telnetclient_printf(cl, "Hello, %s.\n", u->username);
-		command_start_lineinput(cl);
-		return; /* success */
+		/* verify the password */
+		if(xxtcrypt_checkpass(u->password_crypt, line)) {
+			telnetclient_printf(cl, "Hello, %s.\n", u->username);
+			command_start_lineinput(cl);
+			return; /* success */
+		}
+		telnetclient_puts(cl, mud_config.msg_badpassword);
 	} else {
 		telnetclient_puts(cl, mud_config.msg_noaccount);
-		TODO("kick out back to the menu");
 	}
 
-	command_start_lineinput(cl); /* XXX - temporary code */
-	TODO("failed logins go back to the main menu or disconnect");
-	// telnetclient_start_menuinput(cl, &gamemenu_login);
+	/* failed logins go back to the main menu or disconnect */
+	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
 static void login_password_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
@@ -4466,6 +4727,7 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 		{ "msg.unsupported", &mud_config.msg_unsupported },
 		{ "msg.invalidselection", &mud_config.msg_invalidselection },
 		{ "msg.noaccount", &mud_config.msg_noaccount },
+		{ "msg.badpassword", &mud_config.msg_badpassword },
 		{ "msg.invalidusername", &mud_config.msg_invalidusername },
 		{ "msg.tryagain", &mud_config.msg_tryagain },
 		{ "msg.errormain", &mud_config.msg_errormain },
@@ -4563,6 +4825,7 @@ EXPORT void mud_config_init(void) {
 	mud_config.msg_invalidselection=strdup("Invalid selection!\n");
 	mud_config.msg_invalidusername=strdup("Invalid username\n");
 	mud_config.msg_noaccount=strdup("Invalid account!\n");
+	mud_config.msg_badpassword=strdup("Invalid account!\n");
 	mud_config.msg_tryagain=strdup("Try again!\n");
 	mud_config.msg_unsupported=strdup("Not supported!\n");
 	mud_config.msg_useralphanumeric=strdup("Username must only contain alphanumeric characters and must start with a letter!\n");
@@ -4582,6 +4845,7 @@ EXPORT void mud_config_shutdown(void) {
 	    &mud_config.msg_invalidselection,
 	    &mud_config.msg_invalidusername,
 	    &mud_config.msg_noaccount,
+	    &mud_config.msg_badpassword,
 	    &mud_config.msg_tryagain,
 	    &mud_config.msg_unsupported,
 	    &mud_config.msg_useralphanumeric,
@@ -4694,7 +4958,10 @@ int main(int argc, char **argv) {
 	bitmap_test();
 	freelist_test();
 	heapqueue_test();
+	xxtcrypt_test();
 #endif
+
+	srand((unsigned)time(NULL));
 
 	if(mkdir("data", 0777)==-1 && errno!=EEXIST) {
 		PERROR("data/");
