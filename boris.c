@@ -2322,12 +2322,19 @@ int fdb_is_id(const char *filename) {
 /******************************************************************************
  * users
  ******************************************************************************/
+/** user:configuration **/
+
+/* defaults for new users */
+#define USER_LEVEL_NEWUSER 5
+#define USER_FLAGS_NEWUSER 0x00000002u
+
 /** user:types **/
 struct user {
 	unsigned id;
 	char *username;
 	char *password_crypt;
 	char *email;
+	struct acs_info acs;
 };
 
 struct user_name_map_entry {
@@ -2399,6 +2406,8 @@ static struct user *user_defaults(void) {
 	u->username=NULL;
 	u->password_crypt=NULL;
 	u->email=NULL;
+	u->acs.level=USER_LEVEL_NEWUSER;
+	u->acs.flags=USER_FLAGS_NEWUSER;
 	return u;
 }
 static int user_ll_load_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
@@ -2489,10 +2498,13 @@ static int user_write(const struct user *u) {
 	}
 
 	if(fprintf(f,
-		"id       = %u\n"
-		"username = %s\n"
-		"pwcrypt  = %s\n"
-		"email    = %s\n", u->id, u->username, u->password_crypt, u->email
+		"id          = %u\n"
+		"username    = %s\n"
+		"pwcrypt     = %s\n"
+		"email       = %s\n"
+		"acs.level   = %u\n"
+		"acs.flags   = 0x%08x\n",
+		u->id, u->username, u->password_crypt, u->email, u->acs.level, u->acs.flags
 	)<0) {
 		PERROR(filename);
 		fclose(f);
