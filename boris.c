@@ -2176,59 +2176,6 @@ static void ieee754_test(void) {
 #endif
 
 /******************************************************************************
- * adler32
- ******************************************************************************/
-#define ADLER32_INITIAL 0x00000001ul
-
-EXPORT uint_least32_t adler32(uint_least32_t ck, const void *data, size_t len) {
-	unsigned a, b;
-	size_t sublen;
-
-	a=ck&0xffff;
-	b=(ck>>16)&0xffff;
-
-	while(len>0) {
-		sublen=len>5552?5552:len;
-		len-=sublen;
-		while(sublen--) {
-			a+=*(char*)data;
-			data=(char*)data+1;
-			b+=a;
-		}
-		a%=65521;
-		b%=65521;
-	}
-	return ((uint_least32_t)b<<16)|a;
-}
-
-#ifndef NTEST
-/* test code */
-static int adler32_test(void) {
-	struct {
-		char *s;
-		size_t len;
-		uint_least32_t a32;
-	} test[] = {
-		{ "Hotdog", 6, 0x8220266 },
-		{ "Hello World", 11, 0x180b041d },
-	};
-	uint_least32_t ck;
-	unsigned i;
-
-	for(i=0;i<NR(test);i++) {
-		ck=ADLER32_INITIAL;
-		ck=adler32(ck, test[i].s, test[i].len);
-		if(ck!=test[i].a32) {
-			fprintf(stderr, "%s():failed\n", __func__);
-			return 0;
-		}
-	}
-	fprintf(stderr, "%s():passed\n", __func__);
-	return 1;
-}
-#endif
-
-/******************************************************************************
  * Telnet protocol constants
  ******************************************************************************/
 /* TODO: prefix these to clean up the namespace */
@@ -4950,7 +4897,6 @@ static void process_args(int argc, char **argv) {
 
 int main(int argc, char **argv) {
 #ifndef NTEST
-	adler32_test();
 	ieee754_test();
 	acs_test();
 	map_test();
