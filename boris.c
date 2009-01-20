@@ -347,6 +347,8 @@ static struct mud_config {
 	char *msg_userexists;
 	char *msg_usermin3;
 	char *msgfile_welcome;
+	unsigned newuser_level;
+	unsigned newuser_flags;
 } mud_config;
 
 /******************************************************************************
@@ -2325,8 +2327,8 @@ int fdb_is_id(const char *filename) {
 /** user:configuration **/
 
 /* defaults for new users */
-#define USER_LEVEL_NEWUSER 5
-#define USER_FLAGS_NEWUSER 0x00000002u
+#define USER_LEVEL_NEWUSER mud_config.newuser_level
+#define USER_FLAGS_NEWUSER mud_config.newuser_flags
 
 /** user:types **/
 struct user {
@@ -2410,6 +2412,7 @@ static struct user *user_defaults(void) {
 	u->acs.flags=USER_FLAGS_NEWUSER;
 	return u;
 }
+
 static int user_ll_load_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
 	char *endptr;
 	unsigned *uint_p=extra;
@@ -2466,6 +2469,8 @@ static struct user *user_load_byname(const char *username) {
 	config_watch(&cfg, "username", user_ll_load_str, &u->username);
 	config_watch(&cfg, "pwcrypt", user_ll_load_str, &u->password_crypt);
 	config_watch(&cfg, "email", user_ll_load_str, &u->email);
+	config_watch(&cfg, "acs.level", user_ll_load_uint, &u->acs.level);
+	config_watch(&cfg, "acs.flags", user_ll_load_uint, &u->acs.flags);
 
 	if(!config_load(filename, &cfg)) {
 		config_free(&cfg);
@@ -4529,6 +4534,26 @@ static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const c
 	return 0; /* success - terminate the callback chain */
 }
 
+static int do_config_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
+	char *endptr;
+	unsigned *uint_p=extra;
+	assert(extra != NULL);
+	if(!extra) return -1; /* error */
+
+	if(!*value) {
+		DEBUG_MSG("Empty string");
+		return -1; /* error - empty string */
+	}
+	*uint_p=strtoul(value, &endptr, 0);
+
+	if(*endptr!=0) {
+		DEBUG_MSG("Not a number");
+		return -1; /* error - empty string */
+	}
+
+	return 0; /* success - terminate the callback chain */
+}
+
 EXPORT void mud_config_init(void) {
 	mud_config.config_filename=strdup("boris.cfg");
 	mud_config.menu_prompt=strdup("Selection: ");
@@ -4544,6 +4569,8 @@ EXPORT void mud_config_init(void) {
 	mud_config.msg_usercreatesuccess=strdup("Account successfully created!\n");
 	mud_config.msg_userexists=strdup("Username already exists!\n");
 	mud_config.msg_usermin3=strdup("Username must contain at least 3 characters!\n");
+	mud_config.newuser_level=5;
+	mud_config.newuser_flags=0;
 }
 
 EXPORT void mud_config_shutdown(void) {
@@ -4576,6 +4603,8 @@ EXPORT int mud_config_process(void) {
 	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
 	config_watch(&cfg, "msg.*", do_config_msg, 0);
 	config_watch(&cfg, "msgfile.*", do_config_msgfile, 0);
+	config_watch(&cfg, "newuser.level", do_config_uint, &mud_config.newuser_level);
+	config_watch(&cfg, "newuser.flags", do_config_uint, &mud_config.newuser_flags);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", config_test_show, 0);
 #endif
