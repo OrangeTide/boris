@@ -1451,7 +1451,7 @@ EXPORT int map_add_uint(struct map *m, uintptr_t key, void *ptr) {
  */
 EXPORT int map_replace_fpos(struct map *m, uintptr_t key, const fpos_t *pos) {
 	const union map_data data={.pos=*pos};
-	DEBUG("key=%d\n", key);
+	DEBUG("key=%" PRIdPTR "\n", key);
 	return map_replace(m, (void*)key, &data, 1, 1);
 }
 
@@ -1649,7 +1649,7 @@ int eventlog_init(void) {
 		return 0; /* failure */
 	}
 
-	setlinebuf(eventlog_file);
+	setvbuf(eventlog_file, NULL, _IOLBF, 0);
 
 	return 1; /* success */
 }
@@ -4749,7 +4749,7 @@ static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
 static void form_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 	struct telnetclient *cl=p;
 	struct form *f=&cl->state.form.form;
-	void (*form_close)(struct telnetclient *cl, struct form *f)=form_createaccount_close;
+	void (*form_close)(struct telnetclient *, struct form *)=form_createaccount_close;
 
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
 
