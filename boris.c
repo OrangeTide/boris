@@ -339,8 +339,8 @@ static struct mud_config {
 	char *msg_errormain;
 	char *msg_invalidselection;
 	char *msg_invalidusername;
-	char *msg_noaccount;
-	char *msg_badpassword;
+	char *msgfile_noaccount;
+	char *msgfile_badpassword;
 	char *msg_tryagain;
 	char *msg_unsupported;
 	char *msg_useralphanumeric;
@@ -4487,9 +4487,9 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 			telnetclient_start_menuinput(cl, &gamemenu_main);
 			return; /* success */
 		}
-		telnetclient_puts(cl, mud_config.msg_badpassword);
+		telnetclient_puts(cl, mud_config.msgfile_badpassword);
 	} else {
-		telnetclient_puts(cl, mud_config.msg_noaccount);
+		telnetclient_puts(cl, mud_config.msgfile_noaccount);
 	}
 
 	/* report the attempt */
@@ -4822,8 +4822,6 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 	} info[] = {
 		{ "msg.unsupported", &mud_config.msg_unsupported },
 		{ "msg.invalidselection", &mud_config.msg_invalidselection },
-		{ "msg.noaccount", &mud_config.msg_noaccount },
-		{ "msg.badpassword", &mud_config.msg_badpassword },
 		{ "msg.invalidusername", &mud_config.msg_invalidusername },
 		{ "msg.tryagain", &mud_config.msg_tryagain },
 		{ "msg.errormain", &mud_config.msg_errormain },
@@ -4852,6 +4850,8 @@ static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, cons
 		const char *id;
 		char **target;
 	} info[] = {
+		{ "msgfile.noaccount", &mud_config.msgfile_noaccount },
+		{ "msgfile.badpassword", &mud_config.msgfile_badpassword },
 		{ "msgfile.welcome", &mud_config.msgfile_welcome },
 	};
 
@@ -4920,8 +4920,8 @@ EXPORT void mud_config_init(void) {
 	mud_config.msg_errormain=strdup("ERROR: going back to main menu!\n");
 	mud_config.msg_invalidselection=strdup("Invalid selection!\n");
 	mud_config.msg_invalidusername=strdup("Invalid username\n");
-	mud_config.msg_noaccount=strdup("Invalid account!\n");
-	mud_config.msg_badpassword=strdup("Invalid account!\n");
+	mud_config.msgfile_noaccount=strdup("\nInvalid password or account not found!\n\n");
+	mud_config.msgfile_badpassword=strdup("\nInvalid password or account not found!\n\n");
 	mud_config.msg_tryagain=strdup("Try again!\n");
 	mud_config.msg_unsupported=strdup("Not supported!\n");
 	mud_config.msg_useralphanumeric=strdup("Username must only contain alphanumeric characters and must start with a letter!\n");
@@ -4943,8 +4943,8 @@ EXPORT void mud_config_shutdown(void) {
 	    &mud_config.msg_errormain,
 	    &mud_config.msg_invalidselection,
 	    &mud_config.msg_invalidusername,
-	    &mud_config.msg_noaccount,
-	    &mud_config.msg_badpassword,
+	    &mud_config.msgfile_noaccount,
+	    &mud_config.msgfile_badpassword,
 	    &mud_config.msg_tryagain,
 	    &mud_config.msg_unsupported,
 	    &mud_config.msg_useralphanumeric,
