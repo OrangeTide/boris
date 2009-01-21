@@ -329,7 +329,7 @@ struct form {
 /******************************************************************************
  * Globals
  ******************************************************************************/
-static struct menuinfo gamemenu_login;
+static struct menuinfo gamemenu_login, gamemenu_main;
 
 static struct mud_config {
 	char *config_filename;
@@ -357,7 +357,7 @@ static struct mud_config {
 /******************************************************************************
  * Prototypes
  ******************************************************************************/
-static void telnetclient_free(struct socketio_handle *sh);
+EXPORT void telnetclient_close(struct telnetclient *cl);
 EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
 EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 static void form_menu_lineinput(struct telnetclient *cl, const char *line);
@@ -3150,6 +3150,7 @@ EXPORT unsigned buffer_consume(struct buffer *b, size_t len) {
 		len=b->used;
 	}
 	b->used-=len;
+	assert((signed)b->used >= 0);
 	memmove(b->data, b->data+len, b->used);
 	return b->used;
 }
@@ -3271,6 +3272,7 @@ struct socketio_handle {
 	void (*write_event)(struct socketio_handle *sh, SOCKET fd, void *p);
 	void (*read_event)(struct socketio_handle *sh, SOCKET fd, void *p);
 	void *extra;
+	void (*extra_free)(struct socketio_handle *sh, void *extra);
 };
 
 static LIST_HEAD(struct socketio_handle_list, struct socketio_handle) socketio_handle_list;
@@ -3282,6 +3284,7 @@ static unsigned socketio_socket_count; /* WIN32: the limit of fd_set is the coun
 #else
 static SOCKET socketio_fdmax=INVALID_SOCKET; /* used by select() to limit the number of fds to check */
 #endif
+static unsigned socketio_delete_count=0; /* counts the number of pending deletions */
 
 #if defined(USE_WIN32_SOCKETS) && !defined(gai_strerror)
 static const char *gai_strerror(int err) {
@@ -3512,7 +3515,11 @@ static void socketio_ll_handle_free(struct socketio_handle *sh) {
 	DEBUG("freeing socket handle '%s'\n", sh->name);
 
 	if(sh->extra) {
-		DEBUG_MSG("WARNING:extra data for socket handle is being leaked");
+		if(sh->extra_free) {
+			sh->extra_free(sh, sh->extra);
+		} else {
+			DEBUG_MSG("WARNING:extra data for socket handle is being leaked");
+		}
 	}
 
 	if(sh->fd!=INVALID_SOCKET) {
@@ -3630,6 +3637,26 @@ EXPORT int socketio_dispatch(long msec) {
 		return 0;
 	}
 
+	/* loop through all sockets to check for deletion */
+	for(curr=LIST_TOP(socketio_handle_list);socketio_delete_count && curr;curr=next) {
+		next=LIST_NEXT(curr, list);
+		if(curr->delete_flag) {
+			/* this entry must be deleted */
+			DEBUG("Deleting %s\n", curr->name);
+
+			socketio_close(&curr->fd);
+			socketio_ll_handle_free(curr);
+
+			socketio_delete_count--;
+		}
+	}
+
+	/* clean up if there was a mistake in the count */
+	if(socketio_delete_count!=0) {
+		ERROR_MSG("WARNING:socketio_delete_count is higher than number of marked sockets");
+		socketio_delete_count=0;
+	}
+
 	socketio_fdset_copy(&out_readfds, socketio_readfds);
 	socketio_fdset_copy(&out_writefds, socketio_writefds);
 
@@ -3651,34 +3678,7 @@ EXPORT int socketio_dispatch(long msec) {
 	for(curr=LIST_TOP(socketio_handle_list);nr>0 && curr;curr=next) {
 		SOCKET fd=curr->fd;
 
-		/* TODO: use a setjmp() to deal with freeing of the current connection.
-		 * this is needed because the filling the input or output buffers can trigger
-		 * a telnetclient_free(). perhaps it would be better to just ignore the
-		 * overflowing of a buffer and check an error flag in the current client first
-		 *
-		 * or possibly stop using the refcount code and just have a simple delete flag that
-		 * is checked in the loops, and possibly before select()
-		 */
 		TRACE("Checking socket %s\n", curr->name);
-
-		if(curr->delete_flag) {
-			/* this entry must be deleted */
-			DEBUG("Deleting %s\n", curr->name);
-
-			if(FD_ISSET(fd, &out_writefds)) {
-				/* ignore events for this deleted socket */
-				nr--;
-			}
-			if(FD_ISSET(fd, &out_readfds)) {
-				/* ignore events for this deleted socket */
-				nr--;
-			}
-
-			socketio_close(&curr->fd);
-			next=LIST_NEXT(curr, list);
-			socketio_ll_handle_free(curr);
-			continue; /* try again at curr=next */
-		}
 
 		assert(fd!=INVALID_SOCKET); /* verify consistency of datastructure */
 
@@ -3765,6 +3765,23 @@ failure:
 	return;
 }
 
+static void server_free(struct socketio_handle *sh, void *p) {
+	struct server *servdata=p;
+
+	if(!sh->delete_flag) {
+		ERROR_MSG("WARNING: delete_flag was not set before freeing");
+	}
+
+	/* break connection to the extra data pointer */
+	sh->extra=NULL;
+
+#ifndef NDEBUG
+	memset(servdata, 0xBB, sizeof *servdata); /* fill with fake data before freeing */
+#endif
+
+	free(servdata);
+}
+
 static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct socketio_handle *new_sh)) {
 	SOCKET fd;
 	int res;
@@ -3822,6 +3839,7 @@ static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct so
 	servdata->newclient=newclient;
 
 	newserv->extra=servdata;
+	newserv->extra_free=server_free;
 
 	DEBUG("Bind success: %s %s\n", ai->ai_family==AF_INET ? "IPv4" : ai->ai_family==AF_INET6 ? "IPv6" : "Unknown", buf);
 
@@ -3939,8 +3957,8 @@ static void telnetclient_clear_statedata(struct telnetclient *cl) {
 	memset(&cl->state, 0, sizeof cl->state);
 }
 
-static void telnetclient_free(struct socketio_handle *sh) {
-	struct telnetclient *client=sh->extra;
+static void telnetclient_free(struct socketio_handle *sh, void *p) {
+	struct telnetclient *client=p;
 	assert(client!=NULL);
 	if(!client)
 		return;
@@ -3951,15 +3969,19 @@ static void telnetclient_free(struct socketio_handle *sh) {
 	DEBUG("freeing client '%s'\n", sh->name);
 
 	if(sh->fd!=INVALID_SOCKET) {
+		TODO("I forget the purpose of this code");
 		/* only call this if the client wasn't closed earlier */
 		socketio_readready(sh->fd);
 	}
 
-	sh->delete_flag=1; /* cause deletetion later */
+	if(!sh->delete_flag) {
+		ERROR_MSG("WARNING: delete_flag was not set before freeing");
+	}
 
 	telnetclient_clear_statedata(client); /* free data associated with current state */
 
-	client->sh->extra=NULL;
+	/* break connection to the extra data pointer */
+	sh->extra=NULL;
 	client->sh=NULL;
 
 	buffer_free(&client->output);
@@ -3989,6 +4011,7 @@ static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh) {
 	cl->sh=sh;
 
 	sh->extra=cl;
+	sh->extra_free=telnetclient_free;
 	return cl;
 failed:
 	return NULL;
@@ -4004,7 +4027,7 @@ static int telnetclient_telnet_init(struct telnetclient *cl) {
 	};
 	if(buffer_write_noexpand(&cl->output, support, sizeof support)<0) {
 		DEBUG_MSG("write failure");
-		cl->sh->delete_flag=1;
+		telnetclient_close(cl);
 		return 0; /* failure */
 	}
 
@@ -4228,7 +4251,7 @@ static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl
 	return 1;
 failure:
 	/* close the socket and free the client */
-	telnetclient_free(sh);
+	telnetclient_close(cl);
 	return 0;
 }
 
@@ -4256,12 +4279,6 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 		buffer_consume(&cl->input, consumed);
 
 		if(sh->read_event!=telnetclient_rdev_lineinput) break;
-
-		/* TODO: I don't like how we decide to redraw the prompt. we should use a flag? */
-		if(prompt_string==cl->prompt_string) {
-			/* send the prompt, but only if the prompt pointer has not been updated */
-			telnetclient_puts(cl, cl->prompt_string);
-		}
 	}
 	socketio_readready(fd); /* only call this if the client wasn't closed earlier */
 	return;
@@ -4308,6 +4325,13 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 	fprintf(stderr, "*** Connection %d: %s\n", sh->fd, sh->name);
 	telnetclient_puts(cl, mud_config.msgfile_welcome);
 	telnetclient_start_menuinput(cl, &gamemenu_login);
+}
+
+EXPORT void telnetclient_close(struct telnetclient *cl) {
+	if(cl && cl->sh) {
+		cl->sh->delete_flag=1; /* cause deletetion later */
+		socketio_delete_count++;
+	}
 }
 
 /******************************************************************************
@@ -4409,12 +4433,13 @@ EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const
 	}
 	telnetclient_puts(cl, mud_config.msg_invalidselection);
 	menu_show(cl, mi);
+	telnetclient_setprompt(cl, mud_config.menu_prompt);
 }
 
 /* used as a generic starting point for menus */
-static void menu_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+static void menu_start(void *p, long unused2 UNUSED, void *extra3) {
 	struct telnetclient *cl=p;
-	struct menuinfo *mi=unused3;
+	struct menuinfo *mi=extra3;
 	telnetclient_start_menuinput(cl, mi);
 }
 
@@ -4426,12 +4451,17 @@ static void command_lineinput(struct telnetclient *cl, const char *line) {
 	assert(cl->sh != NULL);
 	TODO("do something with the command");
 	DEBUG("%s:entered command '%s'\n", cl->sh->name, line);
+	telnetclient_setprompt(cl, mud_config.command_prompt);
 }
 
 static void command_start_lineinput(struct telnetclient *cl) {
 	telnetclient_printf(cl, "Terminal type: %s\n", cl->terminal.name);
 	telnetclient_printf(cl, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
 	telnetclient_start_lineinput(cl, command_lineinput, mud_config.command_prompt);
+}
+
+EXPORT void command_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+	command_start_lineinput(p);
 }
 
 /******************************************************************************
@@ -4453,8 +4483,8 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 		if(xxtcrypt_checkpass(u->password_crypt, line)) {
 			TODO("Tag user account with username");
 			eventlog_signon(cl->state.login.username, cl->sh->name);
-			telnetclient_printf(cl, "Hello, %s.\n", u->username);
-			command_start_lineinput(cl);
+			telnetclient_printf(cl, "Hello, %s.\n\n", u->username);
+			telnetclient_start_menuinput(cl, &gamemenu_main);
 			return; /* success */
 		}
 		telnetclient_puts(cl, mud_config.msg_badpassword);
@@ -4465,7 +4495,7 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 	/* report the attempt */
 	eventlog_login_failattempt(cl->state.login.username, cl->sh->name);
 
-	/* failed logins go back to the main menu or disconnect */
+	/* failed logins go back to the login menu or disconnect */
 	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
@@ -4497,6 +4527,11 @@ static void login_username_lineinput(struct telnetclient *cl, const char *line) 
 static void login_username_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 	struct telnetclient *cl=p;
 	telnetclient_start_lineinput(cl, login_username_lineinput, "Username: ");
+}
+
+static void signoff(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+	struct telnetclient *cl=p;
+	telnetclient_close(cl);
 }
 
 /******************************************************************************
@@ -4582,6 +4617,7 @@ static void form_lineinput(struct telnetclient *cl, const char *line) {
 		if(f->curr->form_check && !f->curr->form_check(cl, line)) {
 			DEBUG("%s:Invalid form input\n", cl->sh->name);
 			telnetclient_puts(cl, mud_config.msg_tryagain);
+			telnetclient_setprompt(cl, f->curr->name);
 			return;
 		}
 		if(f->curr->user_value) {
@@ -4637,6 +4673,7 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 	/* invalid_selection */
 	telnetclient_puts(cl, mud_config.msg_invalidselection);
 	form_menu_show(cl, f);
+	telnetclient_setprompt(cl, mud_config.form_prompt);
 	return;
 }
 
@@ -4734,15 +4771,18 @@ static void form_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
  ******************************************************************************/
 EXPORT int game_init(void) {
 
-	/* */
+	/* The login menu */
 	menu_create(&gamemenu_login, "Login Menu");
 
-	menu_additem(&gamemenu_login, 'E', "Enter the game", login_username_start, 0, NULL);
-	menu_additem(&gamemenu_login, 'C', "Create account", form_start, 0, NULL);
-	/*
-	menu_additem(&gamemenu_login, 'Q', "Disconnect", menu_start, 0, &gamemenu_login);
-	*/
+	menu_additem(&gamemenu_login, 'L', "Login", login_username_start, 0, NULL);
+	menu_additem(&gamemenu_login, 'N', "New User", form_start, 0, NULL);
+	menu_additem(&gamemenu_login, 'Q', "Disconnect", signoff, 0, NULL);
 
+	menu_create(&gamemenu_main, "Main Menu");
+	menu_additem(&gamemenu_main, 'E', "Enter the game", command_start, 0, NULL);
+	// menu_additem(&gamemenu_main, 'C', "Create Character", form_start, 0, NULL);
+	menu_additem(&gamemenu_main, 'B', "Back to login menu", menu_start, 0, &gamemenu_login);
+	menu_additem(&gamemenu_main, 'Q', "Disconnect", signoff, 0, NULL);
 	return 1;
 }
 
