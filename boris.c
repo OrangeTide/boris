@@ -347,6 +347,7 @@ static struct mud_config {
 	char *msg_usercreatesuccess;
 	char *msg_userexists;
 	char *msg_usermin3;
+	char *msg_invalidcommand;
 	char *msgfile_welcome;
 	unsigned newuser_level;
 	unsigned newuser_flags;
@@ -1724,6 +1725,13 @@ void eventlog_signoff(const char *username, const char *peer_str) {
 void eventlog_toomany(void) {
 	/* TODO: we could get the peername from the fd and log that? */
 	eventlog("TOOMANY", "\n");
+}
+
+/**
+ * log commands that a user enters
+ */
+void eventlog_commandinput(const char *remote, const char *username, const char *line) {
+	eventlog("COMMAND", "remote=\"%s\" user=\"%s\" command=\"%s\"\n", remote, username, line);
 }
 /******************************************************************************
  * Config loader
@@ -4296,6 +4304,14 @@ static void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_in
 	cl->sh->read_event=telnetclient_rdev_lineinput;
 }
 
+/* return true if client is still in this state */
+static int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt) {
+
+	if(!cl) return 0;
+
+	return cl->sh->read_event==telnetclient_rdev_lineinput && cl->line_input==line_input && cl->prompt_string==prompt;
+}
+
 static void menu_lineinput(struct telnetclient *cl, const char *line) {
 	menu_input(cl, cl->state.menu.menu, line);
 }
@@ -4446,12 +4462,161 @@ static void menu_start(void *p, long unused2 UNUSED, void *extra3) {
 /******************************************************************************
  * command - handles the command processing
  ******************************************************************************/
+
+static int command_do_pose(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
+	TODO("Get user name");
+	TODO("Broadcast to everyone in current room");
+	telnetclient_printf(cl, "%s %s\n", cl->sh->name, arg);
+	return 1; /* success */
+}
+
+static int command_do_yell(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
+	TODO("Get user name");
+	TODO("Broadcast to everyone in yelling distance");
+	telnetclient_printf(cl, "%s yells \"%s\"\n", cl->sh->name, arg);
+	return 1; /* success */
+}
+
+static int command_do_say(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
+	TODO("Get user name");
+	TODO("Broadcast to everyone in current room");
+	telnetclient_printf(cl, "%s says \"%s\"\n", cl->sh->name, arg);
+	return 1; /* success */
+}
+
+static int command_do_emote(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
+	TODO("Get user name");
+	TODO("Broadcast to everyone in current room");
+	telnetclient_printf(cl, "%s %s\n", cl->sh->name, arg);
+	return 1; /* success */
+}
+
+static int command_do_chsay(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg) {
+	TODO("Get user name");
+	TODO("Broadcast to everyone in a channel");
+	telnetclient_printf(cl, "%s says \"%s\"\n", cl->sh->name, arg);
+	return 1; /* success */
+}
+
+/* executes a command for user u */
+static int command_execute(struct telnetclient *cl, struct user *u, const char *line) {
+	char cmd[64];
+	const char *e, *arg;
+
+	assert(cl != NULL); /* TODO: support cl as NULL for silent/offline commands */
+	assert(line != NULL);
+
+	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+
+	TODO("Can we eliminate trailing spaces?");
+
+	TODO("can we define these 1 character commands as aliases?");
+
+	if(ispunct(line[0])) {
+		cmd[0]=line[0];
+		cmd[1]=0;
+		arg=line+1; /* point to where the args start if it's a 1 character command */
+		while(*arg && isspace(*arg)) arg++; /* ignore leading spaces */
+		if(line[0]==':') { /* pose : */
+			command_do_pose(cl, u, cmd, arg);
+			return 1; /* success */
+		} else if(line[0]=='"' && line[1]=='"') { /* yell "" */
+			cmd[0]=line[0];
+			cmd[1]=line[1];
+			cmd[2]=0;
+			arg=line+2; /* args start here for 2 character commands */
+			while(*arg && isspace(*arg)) arg++; /* ignore leading spaces */
+			return command_do_yell(cl, u, cmd, arg);
+		} else if(line[0]=='"') { /* say " */
+			return command_do_say(cl, u, cmd, arg);
+		} else if(line[0]==';') { /* spoof ; */
+			TODO("Implement this");
+		} else if(line[0]==',') { /* emote , */
+			return command_do_emote(cl, u, cmd, arg);
+		} else if(line[0]=='\'') { /* say ' */
+			return command_do_say(cl, u, cmd, arg);
+		} else if(line[0]=='.') { /* channel say */
+			TODO("check \".chan\" for CHSAY and copy into cmd");
+			return command_do_chsay(cl, u, cmd, arg);
+		} else {
+			telnetclient_puts(cl, mud_config.msg_invalidcommand);
+			return 0; /* failure */
+		}
+	}
+
+	/* copy the first word into cmd[] */
+	e=line+strcspn(line, " \t");
+	arg=*e ? e+1+strspn(e+1, " \t") : e; /* point to where the args start */
+	while(*arg && isspace(*arg)) arg++; /* ignore leading spaces */
+	assert(e >= line);
+	if((unsigned)(e-line)>sizeof cmd-1) { /* first word is too long */
+		DEBUG("Command length %d is too long, truncating\n", e-line);
+		e=line+sizeof cmd-1;
+	}
+	memcpy(cmd, line, (unsigned)(e-line));
+	cmd[e-line]=0;
+
+	TODO("check for \"playername,\" syntax for directed speech");
+
+	TODO("check user aliases");
+
+	DEBUG("cmd=\"%s\"\n", cmd);
+
+	if(!strcmp(cmd, "who")) {
+		telnetclient_puts(cl, "Not implemented");
+		return 1; /* success */
+	} else if(!strcmp(cmd, "quit")) {
+		telnetclient_close(cl); /* TODO: the close code needs to change the state so telnetclient_isstate does not end up being true for a future read? */
+		return 1; /* success */
+	} else if(!strcmp(cmd, "page")) {
+		telnetclient_puts(cl, "Not implemented");
+		return 1; /* success */
+	} else if(!strcmp(cmd, "say")) {
+		return command_do_say(cl, u, cmd, arg);
+	} else if(!strcmp(cmd, "emote")) {
+		return command_do_emote(cl, u, cmd, arg);
+	} else if(!strcmp(cmd, "pose")) {
+		return command_do_pose(cl, u, cmd, arg);
+	} else if(!strcmp(cmd, "chsay")) {
+		TODO("pass the channel name in a way that makes sense");
+		return command_do_chsay(cl, u, cmd, arg);
+	} else if(!strcmp(cmd, "sayto")) {
+		telnetclient_puts(cl, "Not implemented");
+		return 1; /* success */
+	} else if(!strcmp(cmd, "tell")) { /* can work over any distance */
+		telnetclient_puts(cl, "Not implemented");
+		return 1; /* success */
+	} else if(!strcmp(cmd, "whisper")) { /* only works in current room */
+		telnetclient_puts(cl, "Not implemented");
+		return 1; /* success */
+	} else if(!strcmp(cmd, "to")) {
+		telnetclient_puts(cl, "Not implemented");
+		return 1; /* success */
+	} else {
+		telnetclient_puts(cl, mud_config.msg_invalidcommand);
+		return 0; /* failure */
+	}
+
+	ERROR_FMT("fell through command lookup on '%s'\n", line);
+	telnetclient_puts(cl, mud_config.msg_invalidcommand);
+	return 0; /* failure */
+}
+
 static void command_lineinput(struct telnetclient *cl, const char *line) {
 	assert(cl != NULL);
 	assert(cl->sh != NULL);
-	TODO("do something with the command");
 	DEBUG("%s:entered command '%s'\n", cl->sh->name, line);
-	telnetclient_setprompt(cl, mud_config.command_prompt);
+
+	/* log command input */
+	eventlog_commandinput(cl->sh->name, "<UNKNOWN>", line);
+
+	/* do something with the command */
+	command_execute(cl, NULL, line); /* TODO: pass current user and character */
+
+	/* check if we should update the prompt */
+	if(telnetclient_isstate(cl, command_lineinput, mud_config.command_prompt)) {
+		telnetclient_setprompt(cl, mud_config.command_prompt);
+	}
 }
 
 static void command_start_lineinput(struct telnetclient *cl) {
@@ -4826,6 +4991,7 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 		{ "msg.tryagain", &mud_config.msg_tryagain },
 		{ "msg.errormain", &mud_config.msg_errormain },
 		{ "msg.usermin3", &mud_config.msg_usermin3 },
+		{ "msg.invalidcommand", &mud_config.msg_invalidcommand },
 		{ "msg.useralphanumeric", &mud_config.msg_useralphanumeric },
 		{ "msg.userexists", &mud_config.msg_userexists },
 		{ "msg.usercreatesuccess", &mud_config.msg_usercreatesuccess },
@@ -4928,6 +5094,7 @@ EXPORT void mud_config_init(void) {
 	mud_config.msg_usercreatesuccess=strdup("Account successfully created!\n");
 	mud_config.msg_userexists=strdup("Username already exists!\n");
 	mud_config.msg_usermin3=strdup("Username must contain at least 3 characters!\n");
+	mud_config.msg_invalidcommand=strdup("Invalid command!\n");
 	mud_config.msgfile_welcome=strdup("Welcome\n\n");
 	mud_config.newuser_level=5;
 	mud_config.newuser_flags=0;
@@ -4951,6 +5118,7 @@ EXPORT void mud_config_shutdown(void) {
 	    &mud_config.msg_usercreatesuccess,
 	    &mud_config.msg_userexists,
 	    &mud_config.msg_usermin3,
+	    &mud_config.msg_invalidcommand,
 	    &mud_config.msgfile_welcome,
 	    &mud_config.eventlog_filename,
 	    &mud_config.eventlog_timeformat,
