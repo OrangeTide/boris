@@ -355,8 +355,11 @@ static struct mud_config {
 	char *msgfile_welcome;
 	unsigned newuser_level;
 	unsigned newuser_flags;
+	unsigned newuser_allowed; /* true if we're allowing newuser applications */
 	char *eventlog_filename;
 	char *eventlog_timeformat;
+	char *msgfile_newuser_create;
+	char *msgfile_newuser_deny;
 } mud_config;
 
 /******************************************************************************
@@ -4964,12 +4967,21 @@ static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
 	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
-static void form_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+static void form_createaccount_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 	struct telnetclient *cl=p;
 	struct form *f=&cl->state.form.form;
 	void (*form_close)(struct telnetclient *, struct form *)=form_createaccount_close;
 
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
+
+	if(!mud_config.newuser_allowed) {
+		/* currently not accepting applications */
+		telnetclient_puts(cl, mud_config.msgfile_newuser_deny);
+		telnetclient_start_menuinput(cl, &gamemenu_login);
+		return;
+	}
+
+	telnetclient_puts(cl, mud_config.msgfile_newuser_create);
 
 	cl->state_free=form_state_free;
 
@@ -4993,12 +5005,12 @@ EXPORT int game_init(void) {
 	menu_create(&gamemenu_login, "Login Menu");
 
 	menu_additem(&gamemenu_login, 'L', "Login", login_username_start, 0, NULL);
-	menu_additem(&gamemenu_login, 'N', "New User", form_start, 0, NULL);
+	menu_additem(&gamemenu_login, 'N', "New User", form_createaccount_start, 0, NULL);
 	menu_additem(&gamemenu_login, 'Q', "Disconnect", signoff, 0, NULL);
 
 	menu_create(&gamemenu_main, "Main Menu");
 	menu_additem(&gamemenu_main, 'E', "Enter the game", command_start, 0, NULL);
-	// menu_additem(&gamemenu_main, 'C', "Create Character", form_start, 0, NULL);
+	// menu_additem(&gamemenu_main, 'C', "Create Character", form_start, 0, &character_form);
 	menu_additem(&gamemenu_main, 'B', "Back to login menu", menu_start, 0, &gamemenu_login);
 	menu_additem(&gamemenu_main, 'Q', "Disconnect", signoff, 0, NULL);
 	return 1;
@@ -5072,6 +5084,8 @@ static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, cons
 		{ "msgfile.noaccount", &mud_config.msgfile_noaccount },
 		{ "msgfile.badpassword", &mud_config.msgfile_badpassword },
 		{ "msgfile.welcome", &mud_config.msgfile_welcome },
+		{ "msgfile.newuser_create", &mud_config.msgfile_newuser_create },
+		{ "msgfile.newuser_deny", &mud_config.msgfile_newuser_deny },
 	};
 
 	for(i=0;i<NR(info);i++) {
@@ -5151,8 +5165,11 @@ EXPORT void mud_config_init(void) {
 	mud_config.msgfile_welcome=strdup("Welcome\n\n");
 	mud_config.newuser_level=5;
 	mud_config.newuser_flags=0;
+	mud_config.newuser_allowed=0;
 	mud_config.eventlog_filename=strdup("boris.log\n");
 	mud_config.eventlog_timeformat=strdup("%y%m%d-%H%M"); /* another good one: %Y.%j-%H%M */
+	mud_config.msgfile_newuser_create=strdup("\nPlease enter only correct information in this application.\n\n");
+	mud_config.msgfile_newuser_deny=strdup("\nNot accepting new user applications!\n\n");
 }
 
 EXPORT void mud_config_shutdown(void) {
@@ -5175,6 +5192,8 @@ EXPORT void mud_config_shutdown(void) {
 	    &mud_config.msgfile_welcome,
 	    &mud_config.eventlog_filename,
 	    &mud_config.eventlog_timeformat,
+	    &mud_config.msgfile_newuser_create,
+	    &mud_config.msgfile_newuser_deny,
 	};
 	unsigned i;
 	for(i=0;i<NR(targets);i++) {
@@ -5191,6 +5210,7 @@ EXPORT int mud_config_process(void) {
 	config_watch(&cfg, "msg.*", do_config_msg, 0);
 	config_watch(&cfg, "msgfile.*", do_config_msgfile, 0);
 	config_watch(&cfg, "newuser.level", do_config_uint, &mud_config.newuser_level);
+	config_watch(&cfg, "newuser.allowed", do_config_uint, &mud_config.newuser_allowed);
 	config_watch(&cfg, "newuser.flags", do_config_uint, &mud_config.newuser_flags);
 	config_watch(&cfg, "eventlog.filename", do_config_string, &mud_config.eventlog_filename);
 	config_watch(&cfg, "eventlog.timeformat", do_config_string, &mud_config.eventlog_timeformat);
