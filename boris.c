@@ -84,6 +84,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <math.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -3707,7 +3708,10 @@ EXPORT int socketio_dispatch(long msec) {
 		DEBUG_MSG("WARNING:currently not waiting on any sockets");
 	}
 	nr=select(socketio_fdmax+1, &out_readfds, &out_writefds, 0, to);
-	SOCKETIO_FAILON(nr==SOCKET_ERROR, "select()", failure);
+	if(nr==SOCKET_ERROR) {
+		SOCKETIO_FAILON(errno!=EINTR, "select()", failure);
+		return 1; /* EINTR occured */
+	}
 
 	DEBUG("select() returned %d results\n", nr);
 
@@ -5204,6 +5208,13 @@ EXPORT int mud_config_process(void) {
 /******************************************************************************
  * Main - Option parsing and initialization
  ******************************************************************************/
+static sig_atomic_t keep_going_fl=1;
+
+/* signal handler - this causes the main loop to terminated */
+static void sh_quit(int s UNUSED) {
+	keep_going_fl=0;
+}
+
 static void usage(void) {
 	fprintf(stderr,
 		"usage: boris [-h46] [-p port]\n"
@@ -5270,6 +5281,8 @@ static void process_args(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+	signal(SIGINT, sh_quit);
+
 #ifndef NTEST
 	ieee754_test();
 	acs_test();
@@ -5325,11 +5338,12 @@ int main(int argc, char **argv) {
 	eventlog_server_startup();
 
 	TODO("use the next event for the timer");
-	while(socketio_dispatch(-1)) {
+	while(keep_going_fl && socketio_dispatch(-1)) {
 		fprintf(stderr, "Tick\n");
 	}
 
 	eventlog_server_shutdown();
+	fprintf(stderr, "Server shutting down.\n");
 	return 0;
 }
 
