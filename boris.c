@@ -251,11 +251,14 @@
 #define REFCOUNT_NAME _referencecount
 #define REFCOUNT_INIT(obj) ((obj)->REFCOUNT_NAME=0)
 #define REFCOUNT_TAKE(obj) ((obj)->REFCOUNT_NAME++)
-#define REFCOUNT_PUT(obj, free_func) do { \
+#define REFCOUNT_PUT(obj, free_action) do { \
 		assert((obj)->REFCOUNT_NAME>0); \
-		if(--(obj)->REFCOUNT_NAME<=0) \
-			free_func((obj)); \
+		if(--(obj)->REFCOUNT_NAME<=0) { \
+			free_action; \
+		} \
 	} while(0)
+#define REFCOUNT_GET(obj) do { (obj)->REFCOUNT_NAME++; } while(0)
+
 
 /*=* Linked list macros *=*/
 #define LIST_ENTRY(type) struct { type *_next, **_prev; }
@@ -1441,10 +1444,20 @@ EXPORT int map_add_ptr(struct map *m, void *key, void *ptr) {
 	return map_replace(m, key, &data, 0, 1);
 }
 
+EXPORT int map_replace_ptr(struct map *m, void *key, void *ptr) {
+	const union map_data data={.ptr=ptr};
+	return map_replace(m, key, &data, 1, 1);
+}
+
 /* refuses to add more than one copy of the same key */
 EXPORT int map_add_uint(struct map *m, uintptr_t key, void *ptr) {
 	const union map_data data={.ptr=ptr};
 	return map_replace(m, (void*)key, &data, 0, 1);
+}
+
+EXPORT int map_replace_uint(struct map *m, uintptr_t key, void *ptr) {
+	const union map_data data={.ptr=ptr};
+	return map_replace(m, (void*)key, &data, 1, 1);
 }
 
 /**
@@ -2641,6 +2654,7 @@ struct user {
 	char *password_crypt;
 	char *email;
 	struct acs_info acs;
+	REFCOUNT_TYPE REFCOUNT_NAME;
 };
 
 struct user_name_map_entry {
@@ -2657,11 +2671,11 @@ static struct map user_cache_name_map; /* cache table for looking up by username
 /** user:internal functions **/
 static int user_cache_add(struct user *u) {
 	int ret=1;
-	if(!map_add_uint(&user_cache_id_map, u->id, u)) {
+	if(!map_replace_uint(&user_cache_id_map, u->id, u)) {
 		ERROR_FMT("map_add_ptr() for userid(%d) failed\n", u->id);
 		ret=0; /* failure */
 	}
-	if(!map_add_ptr(&user_cache_name_map, u->username, u)) {
+	if(!map_replace_ptr(&user_cache_name_map, u->username, u)) {
 		ERROR_FMT("map_add_ptr() for username(%s) failed\n", u->username);
 		ret=0; /* failure */
 	}
@@ -2709,6 +2723,7 @@ static struct user *user_defaults(void) {
 	}
 
 	u->id=0;
+	REFCOUNT_INIT(u);
 	u->username=NULL;
 	u->password_crypt=NULL;
 	u->email=NULL;
@@ -2861,8 +2876,10 @@ EXPORT int user_exists(const char *username) {
 	return 0; /* user not found */
 }
 
-EXPORT struct user *user_get(const char *username) {
+/* loads a user into the cache */
+EXPORT struct user *user_lookup(const char *username) {
 	union map_data *tmp;
+	struct user *u;
 
 	/* check cache of loaded users */
 	tmp=map_lookup(&user_cache_name_map, username);
@@ -2920,9 +2937,6 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 		return NULL; /* failure */
 	}
 
-	/* add to cache of loaded users */
-	user_cache_add(u);
-
 	return u; /* success */
 }
 
@@ -2979,6 +2993,23 @@ EXPORT int user_init(void) {
 EXPORT void user_shutdown(void) {
 	map_free(&user_name_map);
 	freelist_free(&user_id_freelist);
+}
+
+/* decrement a reference count */
+EXPORT void user_put(struct user **user) {
+	if(user && *user) {
+		REFCOUNT_PUT(*user, user_free(*user); *user=NULL);
+	}
+}
+
+/* increment the reference count */
+EXPORT void user_get(struct user *user) {
+	if(user) {
+		REFCOUNT_GET(user);
+		user_cache_add(user);
+
+		DEBUG("user refcount=%d\n", user->REFCOUNT_NAME);
+	}
 }
 
 /******************************************************************************
@@ -3934,7 +3965,13 @@ struct telnetclient {
 			const struct menuinfo *menu; /* current menu */
 		} menu;
 	} state;
+	struct user *user;
 };
+
+/* return the username */
+EXPORT const char *telnetclient_username(struct telnetclient *cl) {
+	return cl && cl->user && cl->user->username ? cl->user->username : "<UNKNOWN>";
+}
 
 EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str) {
 	int res;
@@ -3972,7 +4009,7 @@ static void telnetclient_free(struct socketio_handle *sh, void *p) {
 		return;
 
 	TODO("Determine if connection was logged in first");
-	eventlog_signoff("<UNKNOWN>", sh->name); /* TODO: fix the username field */
+	eventlog_signoff(telnetclient_username(client), sh->name); /* TODO: fix the username field */
 
 	DEBUG("freeing client '%s'\n", sh->name);
 
@@ -3994,6 +4031,8 @@ static void telnetclient_free(struct socketio_handle *sh, void *p) {
 
 	buffer_free(&client->output);
 	buffer_free(&client->input);
+
+	user_put(&client->user);
 
 	TODO("free any other data structures associated with client"); /* be vigilant about memory leaks */
 
@@ -4017,12 +4056,23 @@ static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh) {
 	cl->line_input=NULL;
 	cl->prompt_string=NULL;
 	cl->sh=sh;
+	cl->user=NULL;
 
 	sh->extra=cl;
 	sh->extra_free=telnetclient_free;
 	return cl;
 failed:
 	return NULL;
+}
+
+/* replaces the current user with a different one and updates the reference counts */
+static void telnetclient_setuser(struct telnetclient *cl, struct user *u) {
+	struct user *old_user;
+	assert(cl != NULL);
+	old_user=cl->user;
+	cl->user=u;
+	user_get(u);
+	user_put(&old_user);
 }
 
 /* posts telnet protocol necessary to begin negotiation of options */
@@ -4466,35 +4516,35 @@ static void menu_start(void *p, long unused2 UNUSED, void *extra3) {
 static int command_do_pose(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in current room");
-	telnetclient_printf(cl, "%s %s\n", cl->sh->name, arg);
+	telnetclient_printf(cl, "%s %s\n", telnetclient_username(cl), arg);
 	return 1; /* success */
 }
 
 static int command_do_yell(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in yelling distance");
-	telnetclient_printf(cl, "%s yells \"%s\"\n", cl->sh->name, arg);
+	telnetclient_printf(cl, "%s yells \"%s\"\n", telnetclient_username(cl), arg);
 	return 1; /* success */
 }
 
 static int command_do_say(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in current room");
-	telnetclient_printf(cl, "%s says \"%s\"\n", cl->sh->name, arg);
+	telnetclient_printf(cl, "%s says \"%s\"\n", telnetclient_username(cl), arg);
 	return 1; /* success */
 }
 
 static int command_do_emote(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in current room");
-	telnetclient_printf(cl, "%s %s\n", cl->sh->name, arg);
+	telnetclient_printf(cl, "%s %s\n", telnetclient_username(cl), arg);
 	return 1; /* success */
 }
 
 static int command_do_chsay(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg) {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in a channel");
-	telnetclient_printf(cl, "%s says \"%s\"\n", cl->sh->name, arg);
+	telnetclient_printf(cl, "%s says \"%s\"\n", telnetclient_username(cl), arg);
 	return 1; /* success */
 }
 
@@ -4605,10 +4655,10 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 static void command_lineinput(struct telnetclient *cl, const char *line) {
 	assert(cl != NULL);
 	assert(cl->sh != NULL);
-	DEBUG("%s:entered command '%s'\n", cl->sh->name, line);
+	DEBUG("%s:entered command '%s'\n", telnetclient_username(cl), line);
 
 	/* log command input */
-	eventlog_commandinput(cl->sh->name, "<UNKNOWN>", line);
+	eventlog_commandinput(cl->sh->name, telnetclient_username(cl), line);
 
 	/* do something with the command */
 	command_execute(cl, NULL, line); /* TODO: pass current user and character */
@@ -4642,11 +4692,11 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 	TODO("complete login process");
 	DEBUG("Login attempt: Username='%s'\n", cl->state.login.username);
 
-	u=user_get(cl->state.login.username);
+	u=user_lookup(cl->state.login.username);
 	if(u) {
 		/* verify the password */
 		if(xxtcrypt_checkpass(u->password_crypt, line)) {
-			TODO("Tag user account with username");
+			telnetclient_setuser(cl, u);
 			eventlog_signon(cl->state.login.username, cl->sh->name);
 			telnetclient_printf(cl, "Hello, %s.\n\n", u->username);
 			telnetclient_start_menuinput(cl, &gamemenu_main);
@@ -4893,8 +4943,7 @@ static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
 
 	DEBUG("%s:create account: '%s'\n", cl->sh->name, username);
 
-	u=user_get(username);
-	if(u) {
+	if(user_exists(username)) {
 		telnetclient_puts(cl, mud_config.msg_userexists);
 		return;
 	}
