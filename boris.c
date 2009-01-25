@@ -101,6 +101,9 @@
 /******************************************************************************
  * Macros
  ******************************************************************************/
+#if !defined(__STDC_VERSION__) || !(__STDC_VERSION__ >= 199901L)
+#error Requires C99
+#endif
 
 /*=* General purpose macros *=*/
 /* get number of elements in an array */
@@ -216,7 +219,6 @@
 /* VERBOSE(), DEBUG() and TRACE() macros.
  * DEBUG() does nothing if NDEBUG is defined
  * TRACE() does nothing if NTRACE is defined */
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L)
 # define VERBOSE(...) fprintf(stderr, __VA_ARGS__)
 # ifdef NDEBUG
 #  define DEBUG(...) /* DEBUG disabled */
@@ -235,10 +237,6 @@
 #  define HEXDUMP_TRACE(data, len, ...) HEXDUMP(data, len, __VA_ARGS__)
 # endif
 # define ERROR_FMT(msg, ...) fprintf(stderr, "ERROR:%s():%d:" msg, __func__, __LINE__, __VA_ARGS__);
-#else
-/* TODO: prepare a solution for C89 */
-# error Requires C99.
-#endif
 
 #define ERROR_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
 #define TODO(msg) fprintf(stderr, "TODO:%s():%d:" msg "\n", __func__, __LINE__);
@@ -311,7 +309,14 @@
  ******************************************************************************/
 struct telnetclient;
 struct socketio_handle;
-struct menuinfo;
+struct menuitem;
+
+struct menuinfo {
+	LIST_HEAD(struct, struct menuitem) items;
+	char *title;
+	size_t title_width;
+	struct menuitem *tail;
+};
 
 struct formitem {
 	LIST_ENTRY(struct formitem) item;
@@ -4417,13 +4422,6 @@ struct menuitem {
 	void (*action_func)(void *p, long extra2, void *extra3);
 	long extra2;
 	void *extra3;
-};
-
-struct menuinfo {
-	LIST_HEAD(struct, struct menuitem) items;
-	char *title;
-	size_t title_width;
-	struct menuitem *tail;
 };
 
 EXPORT void menu_create(struct menuinfo *mi, const char *title) {
