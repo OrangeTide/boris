@@ -4,6 +4,8 @@
 # universal settings for all platforms and architectures
 ##############################################################################
 
+# detect if we're using GCC and use gcc-specific flags
+ifeq ($(findstring gcc,$(shell $(CC) -v 2>&1)),gcc)
 CFLAGS:=-Wall -Wextra -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -Wstrict-aliasing -Wpointer-arith -Wcast-align  -Wold-style-definition -Wredundant-decls -Wnested-externs -std=gnu99 -pedantic -g
 # Uninitialized/clobbered variable warning
 #CFLAGS+=-Wuninitialized -O1
@@ -13,6 +15,7 @@ CFLAGS:=-Wall -Wextra -Wshadow -Wsign-compare -Wconversion -Wstrict-prototypes -
 #CFLAGS+=-Os
 # enable the following for dead code elimination
 #CFLAGS+=-ffunction-sections -fdata-sections -Wl,--gc-sections
+endif
 
 # turn on POSIX/susv3 and BSD things
 CPPFLAGS:=-D_XOPEN_SOURCE=600 -D_BSD_SOURCE
