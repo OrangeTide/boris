@@ -98,6 +98,23 @@
 #include <sys/types.h>
 #include <time.h>
 
+#if defined(USE_BSD_SOCKETS)
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+#elif defined(USE_WIN32_SOCKETS)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#error Must define either USE_BSD_SOCKETS or USE_WIN32_SOCKETS
+#endif
+
 /******************************************************************************
  * Macros
  ******************************************************************************/
@@ -257,7 +274,6 @@
 		} \
 	} while(0)
 #define REFCOUNT_GET(obj) do { (obj)->REFCOUNT_NAME++; } while(0)
-
 
 /*=* Linked list macros *=*/
 #define LIST_ENTRY(type) struct { type *_next, **_prev; }
@@ -3287,26 +3303,10 @@ EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t
 /******************************************************************************
  * Socket I/O API
  ******************************************************************************/
-#if defined(USE_BSD_SOCKETS)
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
 #if !defined(SOCKET) || !defined(INVALID_SOCKET) || !defined(SOCKET_ERROR)
 #define SOCKET int
 #define INVALID_SOCKET (-1)
 #define SOCKET_ERROR (-1)
-#endif
-#elif defined(USE_WIN32_SOCKETS)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#error Must define either USE_BSD_SOCKETS or USE_WIN32_SOCKETS
 #endif
 
 #define SOCKETIO_FAILON(e, reason, fail_label) do { if(e) { fprintf(stderr, "ERROR:%s:%s\n", reason, socketio_strerror()); goto fail_label; } } while(0)
