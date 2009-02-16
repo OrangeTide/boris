@@ -3972,6 +3972,7 @@ struct telnetclient {
 		int width, height;
 		char name[32];
 	} terminal;
+	int prompt_flag;
 	const char *prompt_string;
 	void (*line_input)(struct telnetclient *cl, const char *line);
 	void (*state_free)(struct telnetclient *cl);
@@ -4078,6 +4079,7 @@ static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh) {
 	cl->state_free=NULL;
 	telnetclient_clear_statedata(cl);
 	cl->line_input=NULL;
+	cl->prompt_flag=0;
 	cl->prompt_string=NULL;
 	cl->sh=sh;
 	cl->user=NULL;
@@ -4342,7 +4344,6 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 	const char *line;
 	size_t consumed;
 	struct telnetclient *cl=extra;
-	const char *prompt_string;
 
 	/* pull data from socket into buffer */
 	if(!telnetclient_recv(sh, cl)) {
@@ -4353,7 +4354,6 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 	while((line=buffer_getline(&cl->input, &consumed, telnetclient_iac_process, cl))) {
 		DEBUG("client line:%s(): '%s'\n", __func__, line);
 
-		prompt_string=cl->prompt_string;
 		if(cl->line_input) {
 			cl->line_input(cl, line);
 		}
@@ -4369,6 +4369,7 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 static void telnetclient_setprompt(struct telnetclient *cl, const char *prompt) {
 	cl->prompt_string=prompt?prompt:"? ";
 	telnetclient_puts(cl, cl->prompt_string);
+	cl->prompt_flag=1;
 }
 
 static void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt) {
@@ -4421,6 +4422,22 @@ EXPORT void telnetclient_close(struct telnetclient *cl) {
 	if(cl && cl->sh) {
 		cl->sh->delete_flag=1; /* cause deletetion later */
 		socketio_delete_count++;
+	}
+}
+
+EXPORT void telnetclient_prompt_refresh(struct telnetclient *cl) {
+	if(cl && cl->prompt_string && !cl->prompt_flag) {
+		telnetclient_setprompt(cl, cl->prompt_string);
+	}
+}
+
+EXPORT void telnetclient_prompt_refresh_all(void) {
+	struct socketio_handle *curr, *next;
+	for(curr=LIST_TOP(socketio_handle_list);curr;curr=next) {
+		next=LIST_NEXT(curr, list);
+		if(curr->type==1 && curr->extra) {
+			telnetclient_prompt_refresh(curr->extra);
+		}
 	}
 }
 
@@ -5369,7 +5386,10 @@ int main(int argc, char **argv) {
 	eventlog_server_startup();
 
 	TODO("use the next event for the timer");
-	while(keep_going_fl && socketio_dispatch(-1)) {
+	while(keep_going_fl) {
+		telnetclient_prompt_refresh_all();
+		if(!socketio_dispatch(-1))
+			break;
 		fprintf(stderr, "Tick\n");
 	}
 
