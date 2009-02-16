@@ -262,6 +262,15 @@
 #define FAILON(e, reason, label) do { if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
 #define PERROR(msg) fprintf(stderr, "ERROR:%s():%d:%s:%s\n", __func__, __LINE__, msg, strerror(errno));
 
+
+#ifndef NDEBUG
+#include <string.h>
+/* initialize with junk - used to find unitialized values */
+# define JUNKINIT(ptr, len) memset((ptr), 0xBB, (len));
+#else
+# define JUNKINIT(ptr, len) /* do nothing */
+#endif
+
 /*=* reference counting macros *=*/
 #define REFCOUNT_TYPE int
 #define REFCOUNT_NAME _referencecount
@@ -4059,6 +4068,9 @@ static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh) {
 	struct telnetclient *cl;
 	cl=malloc(sizeof *cl);
 	FAILON(!cl, "malloc()", failed);
+
+	JUNKINIT(cl, sizeof *cl);
+
 	buffer_init(&cl->output, TELNETCLIENT_OUTPUT_BUFFER_SZ);
 	buffer_init(&cl->input, TELNETCLIENT_INPUT_BUFFER_SZ);
 	cl->terminal.width=cl->terminal.height=0;
