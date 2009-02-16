@@ -3972,7 +3972,7 @@ struct telnetclient {
 		int width, height;
 		char name[32];
 	} terminal;
-	int prompt_flag;
+	int prompt_flag; /* true if prompt has been sent */
 	const char *prompt_string;
 	void (*line_input)(struct telnetclient *cl, const char *line);
 	void (*state_free)(struct telnetclient *cl);
@@ -4001,18 +4001,36 @@ EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str) {
 	assert(cl->sh != NULL);
 	res=buffer_puts(&cl->output, str);
 	socketio_writeready(cl->sh->fd);
+	cl->prompt_flag=0;
+	return res;
+}
+
+EXPORT int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap) {
+	int res;
+
+	assert(cl != NULL);
+	assert(cl->sh != NULL);
+	assert(fmt != NULL);
+
+	res=buffer_vprintf(&cl->output, fmt, ap);
+	socketio_writeready(cl->sh->fd);
+	cl->prompt_flag=0;
 	return res;
 }
 
 EXPORT int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...) {
 	va_list ap;
 	int res;
+
 	assert(cl != NULL);
 	assert(cl->sh != NULL);
+	assert(fmt != NULL);
+
 	va_start(ap, fmt);
 	res=buffer_vprintf(&cl->output, fmt, ap);
 	va_end(ap);
 	socketio_writeready(cl->sh->fd);
+	cl->prompt_flag=0;
 	return res;
 }
 
@@ -4850,7 +4868,6 @@ static void form_menu_show(struct telnetclient *cl, struct form *f) {
 		telnetclient_printf(cl, "%d. %s %s\n", i, curr->name, user_value);
 	}
 	telnetclient_printf(cl, "A. accept\n");
-	socketio_writeready(cl->sh->fd);
 }
 
 static void form_lineinput(struct telnetclient *cl, const char *line) {
