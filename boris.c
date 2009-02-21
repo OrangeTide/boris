@@ -119,7 +119,7 @@
  * Macros
  ******************************************************************************/
 #if !defined(__STDC_VERSION__) || !(__STDC_VERSION__ >= 199901L)
-#error Requires C99
+#warning Requires C99
 #endif
 
 /*=* General purpose macros *=*/
@@ -537,7 +537,7 @@ const char *util_strfile_readline(struct util_strfile *h, size_t *len) {
 		*len=h->buf-ret;
 	if(*h->buf)
 		h->buf++;
-	return h->buf==ret?0:ret; /* return EOF if the offset couldn't move forward */
+	return h->buf==ret?NULL:ret; /* return EOF if the offset couldn't move forward */
 }
 
 /* removes a trailing newline if one exists */
@@ -2575,7 +2575,11 @@ static inline unsigned xxtcrypt_ll_load_k4(unsigned ofs, uint32_t k[4], const ch
 char *xxtcrypt(size_t max, char *dest, const char *plaintext, size_t saltlen, const char *salt, size_t bits) {
 	unsigned ofs, i;
 	uint32_t k[128/32]; /* 128-bit key */
-	uint32_t v[bits/32], lastv[bits/32]; /* encrypted value - 64-bit*/
+#if __STDC_VERSION__ >= 199901L
+	uint32_t v[bits/32], lastv[bits/32]; /* encrypted value */
+#else
+	uint32_t v[XXTCRYPT_BITS/32], lastv[XXTCRYPT_BITS/32]; /* encrypted value */
+#endif
 
 	if(max<saltlen+1+(2+4*(bits/8))/3+1) {
 		printf("won't fit!!\n");
@@ -4580,7 +4584,7 @@ EXPORT struct channel_group *channel_group_lookup(const char *name) {
 
 EXPORT struct channel_group *channel_group_create(const char *name) {
 	struct channel_group *ret;
-	
+
 	/* check if channel exists and return that instead */
 	if((ret=channel_group_lookup(name))) {
 		ERROR_FMT("WARNING:channel '%s' already exists\n", name);
@@ -4606,7 +4610,7 @@ EXPORT struct channel_group *channel_group_create(const char *name) {
 
 	LIST_INIT(&ret->member_list);
 	LIST_ENTRY_INIT(ret, channels);
-	
+
 	LIST_INSERT_HEAD(&channel_global_list, ret, channels);
 
 	eventlog_channel_new(name);
@@ -4660,7 +4664,8 @@ EXPORT int channel_module_init(void) {
 		if(e-s>(int)sizeof buf-1) goto failure; /* confirm the length */
 
 		/* copy string */
-		memcpy(buf, s, e-s);
+		assert(s <= e);
+		memcpy(buf, s, (size_t)(e-s));
 		buf[e-s]=0;
 
 		if(!*buf) continue; /* ignore empty channel names */
@@ -4704,7 +4709,7 @@ EXPORT int channel_member_join(struct channel_group *ch, struct channel_member_h
 	struct channel_member *new;
 
 	if(channel_member_check(ch, mh)) {
-		return 0; /* already a member */	
+		return 0; /* already a member */
 	}
 
 	/* allocate the entry */
@@ -4742,7 +4747,7 @@ EXPORT int channel_member_part(struct channel_group *ch, struct channel_member_h
 	eventlog_channel_part(curr->cl&&curr->cl->sh?curr->cl->sh->name:NULL, ch->name, "<USER>");
 
 	LIST_REMOVE(curr, client_membership);
-	LIST_REMOVE(curr, groups);	
+	LIST_REMOVE(curr, groups);
 	free(curr);
 
 	/* remove the channel if it is empty */
@@ -4754,7 +4759,7 @@ EXPORT int channel_member_part(struct channel_group *ch, struct channel_member_h
 	return 1; /* success */
 }
 
-/** 
+/**
  */
 EXPORT void channel_member_part_all(struct channel_member_head *mh) {
 	struct channel_member *curr;
@@ -4789,7 +4794,7 @@ EXPORT int channel_broadcast(struct channel_group *ch, struct channel_member *ex
 	}
 	va_end(ap);
 
-	TRACE("sent message to %d players\n", count);	
+	TRACE("sent message to %d players\n", count);
 
 	return count;
 }
@@ -4837,7 +4842,13 @@ EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*f
 
 /* draw a little box around the string */
 static void menu_titledraw(struct telnetclient *cl, const char *title, size_t len) {
+#if __STDC_VERSION__ >= 199901L
 	char buf[len+2];
+#else
+	char buf[256];
+	if(len>sizeof buf-1)
+		len=sizeof buf-1;
+#endif
 	memset(buf, '=', len);
 	buf[len]='\n';
 	buf[len+1]=0;
