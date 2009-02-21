@@ -347,19 +347,30 @@ struct menuinfo {
 
 struct formitem {
 	LIST_ENTRY(struct formitem) item;
+	unsigned value_index; /* used to index the form_state->value[] array */
 	char *name;
-	char *user_value;
 	unsigned flags;
 	int (*form_check)(struct telnetclient *cl, const char *str);
+	char *description;
+	char *prompt;
+};
+
+struct form_state {
+	const struct form *form;
+	const struct formitem *curritem;
+	unsigned curr_i;
+	unsigned nr_value;
+	char **value;
+	int done;
 };
 
 struct form {
 	LIST_HEAD(struct, struct formitem) items;
 	struct formitem *tail;
 	char *form_title;
-	struct formitem *curr;
-	int done;
-	void (*form_close)(struct telnetclient *cl, struct form *f);
+	void (*form_close)(struct telnetclient *cl, struct form_state *fs);
+	unsigned item_count; /* number of items */
+	const char *message; /* display this message on start - points to one allocated elsewhere */
 };
 
 /******************************************************************************
@@ -498,6 +509,35 @@ failure1:
 	fclose(f);
 failure0:
 	return 0; /* failure */
+}
+
+struct util_strfile {
+	const char *buf;
+};
+
+void util_strfile_open(struct util_strfile *h, const char *buf) {
+	assert(h != NULL);
+	assert(buf != NULL);
+	h->buf=buf;
+}
+
+void util_strfile_close(struct util_strfile *h) {
+	h->buf=NULL;
+}
+
+const char *util_strfile_readline(struct util_strfile *h, size_t *len) {
+	const char *ret;
+
+	assert(h != NULL);
+	assert(h->buf != NULL);
+	ret=h->buf;
+
+	while(*h->buf && *h->buf!='\n') h->buf++;
+	if(len)
+		*len=h->buf-ret;
+	if(*h->buf)
+		h->buf++;
+	return h->buf==ret?0:ret; /* return EOF if the offset couldn't move forward */
 }
 
 /* removes a trailing newline if one exists */
@@ -3034,21 +3074,22 @@ EXPORT int user_init(void) {
 	}
 
 	while((de=readdir(d))) {
-		if(de->d_name[0]=='.') continue; /* ignore hidden files */
-		if(fdb_is_id(de->d_name)) {
-			struct user *u;
+		struct user *u;
 
-			DEBUG("Found user record '%s'\n", de->d_name);
-			/* Load user file */
-			u=user_load_byname(de->d_name);
-			if(!u) {
-				ERROR_FMT("Could not load user from file '%s'\n", de->d_name);
-				closedir(d);
-				return 0; /* failure */
-			}
-			user_name_map_add(u->id, u->username);
-			user_free(u); /* we only wanted to load the data */
+		if(de->d_name[0]=='.') continue; /* ignore hidden files */
+
+		TODO("skip directories and other things that don't look like user files.");
+
+		DEBUG("Found user record '%s'\n", de->d_name);
+		/* Load user file */
+		u=user_load_byname(de->d_name);
+		if(!u) {
+			ERROR_FMT("Could not load user from file '%s'\n", de->d_name);
+			closedir(d);
+			return 0; /* failure */
 		}
+		user_name_map_add(u->id, u->username);
+		user_free(u); /* we only wanted to load the data */
 	}
 
 	closedir(d);
@@ -4012,9 +4053,7 @@ struct telnetclient {
 		struct login_state {
 			char username[16];
 		} login;
-		struct form_state {
-			struct form form;
-		} form;
+		struct form_state form;
 		struct menu_state {
 			const struct menuinfo *menu; /* current menu */
 		} menu;
@@ -5102,13 +5141,20 @@ static void signoff(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 /******************************************************************************
  * form - handles processing input forms
  ******************************************************************************/
-EXPORT void form_init(struct form *f, const char *title, void (*form_close)(struct telnetclient *cl, struct form *f)) {
+static struct form *form_newuser_app;
+
+EXPORT void form_init(struct form *f, const char *title, void (*form_close)(struct telnetclient *cl, struct form_state *fs)) {
 	LIST_INIT(&f->items);
 	f->form_title=strdup(title);
 	f->tail=NULL;
-	f->curr=NULL;
-	f->done=0;
 	f->form_close=form_close;
+	f->item_count=0;
+	f->message=0;
+}
+
+/** define a message to be displayed on start */
+EXPORT void form_setmessage(struct form *f, const char *message) {
+	f->message=message;
 }
 
 EXPORT void form_free(struct form *f) {
@@ -5122,12 +5168,8 @@ EXPORT void form_free(struct form *f) {
 	while((curr=LIST_TOP(f->items))) {
 		LIST_REMOVE(curr, item);
 		free(curr->name);
-		if(curr->user_value) {
-			size_t len; /* carefully erase the data from the heap, it may be private */
-			len=strlen(curr->user_value);
-			memset(curr->user_value, 0, len);
-			free(curr->user_value);
-		}
+		free(curr->prompt);
+		free(curr->description);
 #ifndef NDEBUG
 		memset(curr, 0x55, sizeof *curr); /* fill with fake data before freeing */
 #endif
@@ -5136,13 +5178,16 @@ EXPORT void form_free(struct form *f) {
 	memset(f, 0x55, sizeof *f); /* fill with fake data before freeing */
 }
 
-EXPORT void form_additem(struct form *f, unsigned flags, const char *name, int (*form_check)(struct telnetclient *cl, const char *str)) {
+EXPORT void form_additem(struct form *f, unsigned flags, const char *name, const char *prompt, const char *description, int (*form_check)(struct telnetclient *cl, const char *str)) {
 	struct formitem *newitem;
+
 	newitem=malloc(sizeof *newitem);
 	newitem->name=strdup(name);
-	newitem->user_value=NULL;
+	newitem->description=strdup(description);
+	newitem->prompt=strdup(prompt);
 	newitem->flags=flags;
 	newitem->form_check=form_check;
+	newitem->value_index=f->item_count++;
 
 	if(f->tail) {
 		LIST_INSERT_AFTER(f->tail, newitem, item);
@@ -5152,56 +5197,96 @@ EXPORT void form_additem(struct form *f, unsigned flags, const char *name, int (
 	f->tail=newitem;
 }
 
-static void form_menu_show(struct telnetclient *cl, struct form *f) {
+static struct formitem *form_getitem(struct form *f, const char *name) {
 	struct formitem *curr;
+
+	assert(f != NULL);
+	assert(name != NULL);
+
+	for(curr=LIST_TOP(f->items);curr;curr=LIST_NEXT(curr, item)) {
+		if(!strcasecmp(curr->name, name)) {
+			/* found first matching entry */
+			return curr;
+		}
+	}
+	ERROR_FMT("Unknown form variable '%s'\n", name);
+	return NULL; /* not found */
+}
+
+/** look up the user value from a form */
+static const char *form_getvalue(const struct form *f, unsigned nr_value, char **value, const char *name) {
+	const struct formitem *curr;
+
+	assert(f != NULL);
+	assert(name != NULL);
+
+	for(curr=LIST_TOP(f->items);curr;curr=LIST_NEXT(curr, item)) {
+		if(!strcasecmp(curr->name, name) && curr->value_index<nr_value) {
+			/* found matching entry that was in range */
+			return value[curr->value_index];
+		}
+	}
+	ERROR_FMT("Unknown form variable '%s'\n", name);
+	return NULL; /* not found */
+}
+
+static void form_menu_show(struct telnetclient *cl, const struct form *f, struct form_state *fs) {
+	const struct formitem *curr;
 	unsigned i;
 
 	menu_titledraw(cl, f->form_title, strlen(f->form_title));
 
-	for(i=1,curr=LIST_TOP(f->items);curr;curr=LIST_NEXT(curr, item),i++) {
-		const char *user_value=curr->user_value ? curr->user_value : "";
+	for(i=0,curr=LIST_TOP(f->items);curr&&(!fs||i<fs->nr_value);curr=LIST_NEXT(curr, item),i++) {
+		const char *user_value;
+
+		user_value=fs ? fs->value[i] ? fs->value[i] : "" : 0;
 		if((curr->flags&1)==1) {
 			user_value="<hidden>";
 		}
-		telnetclient_printf(cl, "%d. %s %s\n", i, curr->name, user_value);
+		telnetclient_printf(cl, "%d. %s %s\n", i+1, curr->prompt, user_value ? user_value : "");
 	}
 	telnetclient_printf(cl, "A. accept\n");
 }
 
 static void form_lineinput(struct telnetclient *cl, const char *line) {
-	struct form *f=&cl->state.form.form;
+	struct form_state *fs=&cl->state.form;
+	const struct form *f=fs->form;
+	char **value=&fs->value[fs->curritem->value_index];
 
 	assert(f != NULL);
-	assert(f->curr != NULL);
+	assert(fs->curritem != NULL);
 
 	while(*line && isspace(*line)) line++; /* ignore leading spaces */
 
 	if(*line) {
 		/* check the input */
-		if(f->curr->form_check && !f->curr->form_check(cl, line)) {
+		if(fs->curritem->form_check && !fs->curritem->form_check(cl, line)) {
 			DEBUG("%s:Invalid form input\n", cl->sh->name);
 			telnetclient_puts(cl, mud_config.msg_tryagain);
-			telnetclient_setprompt(cl, f->curr->name);
+			telnetclient_setprompt(cl, fs->curritem->prompt);
 			return;
 		}
-		if(f->curr->user_value) {
-			free(f->curr->user_value);
+		if(*value) {
+			free(*value);
+			*value=NULL;
 		}
-		f->curr->user_value=strdup(line);
-		f->curr=LIST_NEXT(f->curr, item);
-		if(f->curr && !f->done) {
-			telnetclient_setprompt(cl, f->curr->name);
+		*value=strdup(line);
+		fs->curritem=LIST_NEXT(fs->curritem, item);
+		if(fs->curritem && !fs->done) {
+			telnetclient_puts(cl, fs->curritem->description);
+			telnetclient_setprompt(cl, fs->curritem->prompt);
 		} else {
-			f->done=1; /* causes form entry to bounce back to form menu */
+			fs->done=1; /* causes form entry to bounce back to form menu */
 			/* a menu for verifying the form */
-			form_menu_show(cl, f);
+			form_menu_show(cl, f, fs);
 			telnetclient_start_lineinput(cl, form_menu_lineinput, mud_config.form_prompt);
 		}
 	}
 }
 
 static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
-	struct form *f=&cl->state.form.form;
+	struct form_state *fs=&cl->state.form;
+	const struct form *f=fs->form;
 	char *endptr;
 
 	assert(cl != NULL);
@@ -5213,7 +5298,7 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 		TODO("callback to close out the form");
 		if(f->form_close) {
 			/* this call will switch states on success */
-			f->form_close(cl, f);
+			f->form_close(cl, fs);
 		} else {
 			/* fallback */
 			DEBUG("%s():%s:ERROR:going to main menu\n", __func__, cl->sh->name);
@@ -5225,9 +5310,9 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 		long i;
 		i=strtol(line, &endptr, 10);
 		if(endptr!=line && i>0) {
-			for(f->curr=LIST_TOP(f->items);f->curr;f->curr=LIST_NEXT(f->curr, item)) {
+			for(fs->curritem=LIST_TOP(f->items);fs->curritem;fs->curritem=LIST_NEXT(fs->curritem, item)) {
 				if(--i==0) {
-					telnetclient_start_lineinput(cl, form_lineinput, f->curr->name);
+					telnetclient_start_lineinput(cl, form_lineinput, fs->curritem->prompt);
 					return; /* success */
 				}
 			}
@@ -5236,14 +5321,37 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 
 	/* invalid_selection */
 	telnetclient_puts(cl, mud_config.msg_invalidselection);
-	form_menu_show(cl, f);
+	form_menu_show(cl, f, fs);
 	telnetclient_setprompt(cl, mud_config.form_prompt);
 	return;
 }
 
 static void form_state_free(struct telnetclient *cl) {
+	struct form_state *fs=&cl->state.form;
+	unsigned i;
 	DEBUG("%s():%s:freeing state\n", __func__, cl->sh->name);
-	form_free(&cl->state.form.form);
+
+	if(fs->value) {
+		for(i=0;i<fs->nr_value;i++) {
+			if(fs->value[i]) {
+				size_t len; /* carefully erase the data from the heap, it may be private */
+				len=strlen(fs->value[i]);
+				memset(fs->value[i], 0, len);
+				free(fs->value[i]);
+				fs->value[i]=NULL;
+			}
+		}
+		free(fs->value);
+	}
+	fs->value=0;
+	fs->nr_value=0;
+}
+
+EXPORT void form_state_init(struct form_state *fs, const struct form *f) {
+	fs->form=f;
+	fs->nr_value=0;
+	fs->value=NULL;
+	fs->done=0;
 }
 
 static int form_createaccount_username_check(struct telnetclient *cl, const char *str) {
@@ -5251,9 +5359,12 @@ static int form_createaccount_username_check(struct telnetclient *cl, const char
 	size_t len;
 	const char *s;
 
+	TRACE_ENTER();
+
 	len=strlen(str);
 	if(len<3) {
 		telnetclient_puts(cl, mud_config.msg_usermin3);
+		DEBUG_MSG("failure: username too short.");
 		return 0;
 	}
 
@@ -5261,34 +5372,29 @@ static int form_createaccount_username_check(struct telnetclient *cl, const char
 		res=res&&isalnum(*s);
 		if(!res) {
 			telnetclient_puts(cl, mud_config.msg_useralphanumeric);
+			DEBUG_MSG("failure: bad characters");
 			return 0;
 		}
 	}
 
 	if(user_exists(str)) {
 		telnetclient_puts(cl, mud_config.msg_userexists);
+		DEBUG_MSG("failure: user exists.");
 		return 0;
 	}
 
+	DEBUG_MSG("success.");
 	return 1;
 }
 
-static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
+static void form_createaccount_close(struct telnetclient *cl, struct form_state *fs) {
 	const char *username, *password, *email;
 	struct user *u;
-	struct formitem *curr;
+	const struct form *f=fs->form;
 
-	curr=LIST_TOP(f->items);
-	assert(curr != NULL);
-	username=curr->user_value;
-
-	curr=LIST_NEXT(curr, item);
-	assert(curr != NULL);
-	password=curr->user_value;
-
-	curr=LIST_NEXT(curr, item);
-	assert(curr != NULL);
-	email=curr->user_value;
+	username=form_getvalue(f, fs->nr_value, fs->value, "USERNAME");
+	password=form_getvalue(f, fs->nr_value, fs->value, "PASSWORD");
+	email=form_getvalue(f, fs->nr_value, fs->value, "EMAIL");
 
 	DEBUG("%s:create account: '%s'\n", cl->sh->name, username);
 
@@ -5302,6 +5408,7 @@ static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
 		telnetclient_printf(cl, "Could not create user named '%s'\n", username);
 		return;
 	}
+	user_free(u);
 
 	telnetclient_puts(cl, mud_config.msg_usercreatesuccess);
 
@@ -5309,10 +5416,10 @@ static void form_createaccount_close(struct telnetclient *cl, struct form *f) {
 	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
-static void form_createaccount_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+static void form_start(void *p, long unused2 UNUSED, void *form) {
 	struct telnetclient *cl=p;
-	struct form *f=&cl->state.form.form;
-	void (*form_close)(struct telnetclient *, struct form *)=form_createaccount_close;
+	struct form *f=form;
+	struct form_state *fs=&cl->state.form;
 
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
 
@@ -5323,19 +5430,160 @@ static void form_createaccount_start(void *p, long unused2 UNUSED, void *unused3
 		return;
 	}
 
-	telnetclient_puts(cl, mud_config.msgfile_newuser_create);
+	if(f->message)
+		telnetclient_puts(cl, f->message);
 
 	cl->state_free=form_state_free;
-
-	form_init(f, "New User Application", form_close);
-	form_additem(f, 0, "Username: ", form_createaccount_username_check);
-	form_additem(f, 1, "Password: ", NULL);
-	form_additem(f, 0, "Email: ", NULL);
-	f->curr=LIST_TOP(f->items);
+	fs->form=f;
+	fs->curritem=LIST_TOP(f->items);
+	fs->nr_value=f->item_count;
+	fs->value=calloc(fs->nr_value, sizeof *fs->value);
 
 	menu_titledraw(cl, f->form_title, strlen(f->form_title));
 
-	telnetclient_start_lineinput(cl, form_lineinput, f->curr->name);
+	telnetclient_puts(cl, fs->curritem->description);
+	telnetclient_start_lineinput(cl, form_lineinput, fs->curritem->prompt);
+}
+
+static void form_createaccount_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
+	form_start(p, 0, form_newuser_app);
+}
+
+EXPORT struct form *form_load(const char *buf, void (*form_close)(struct telnetclient *cl, struct form_state *fs)) {
+	const char *p, *tmp;
+	char *name, *prompt, *description, *title;
+	struct form *f;
+	struct util_strfile h;
+	size_t e, len;
+
+	name=0;
+	prompt=0;
+	description=0;
+	f=0;
+
+	util_strfile_open(&h, buf);
+
+	p=util_strfile_readline(&h, &len);
+	if(!p) {
+		ERROR_MSG("Could not parse form.");
+		goto failure;
+	}
+	title=malloc(len+1);
+	memcpy(title, p, len);
+	title[len]=0;
+
+	f=calloc(1, sizeof *f);
+	form_init(f, title, form_close);
+
+	free(title);
+	title=NULL;
+
+	/* count number of entries */
+	while(1) {
+
+		/* look for the name */
+		do {
+			p=util_strfile_readline(&h, &len);
+			if(!p)
+				goto done;
+			while(isspace(*p)) p++ ; /* skip leading blanks and blank lines */
+			for(e=0;e<len && !isspace(p[e]);e++) ;
+		} while(!e);
+		/* found a word */
+		name=malloc(e+1);
+		memcpy(name, p, e);
+		name[e]=0;
+
+		/* look for the prompt */
+		p=util_strfile_readline(&h, &len);
+		if(!p) break;
+		prompt=malloc(len+1);
+		memcpy(prompt, p, len);
+		prompt[len]=0;
+
+		/* find end of description */
+		tmp=strstr(h.buf, "\n~");
+		if(!tmp)
+			tmp=strlen(h.buf)+h.buf;
+		else
+			tmp++;
+
+		len=tmp-h.buf;
+		description=malloc(len+1);
+		memcpy(description, h.buf, len);
+		description[len]=0;
+		h.buf=*tmp?tmp+1:tmp;
+
+		DEBUG("name='%s'\n", name);
+		DEBUG("prompt='%s'\n", prompt);
+		DEBUG("description='%s'\n", description);
+		form_additem(f, 0, name, prompt, description, NULL);
+		free(name);
+		name=0;
+		free(prompt);
+		prompt=0;
+		free(description);
+		description=0;
+	}
+done:
+	util_strfile_close(&h);
+	free(name); /* with current loop will always be NULL */
+	free(prompt); /* with current loop will always be NULL */
+	free(description); /* with current loop will always be NULL */
+	return f;
+failure:
+	ERROR_MSG("Error loading form");
+	util_strfile_close(&h);
+	free(name);
+	free(prompt);
+	free(description);
+	if(f) {
+		form_free(f);
+	}
+	return NULL;
+}
+
+EXPORT struct form *form_load_from_file(const char *filename, void (*form_close)(struct telnetclient *cl, struct form_state *fs)) {
+	struct form *ret;
+	char *buf;
+
+	buf=util_textfile_load(filename);
+	if(!buf) return 0;
+	ret=form_load(buf, form_close);
+	free(buf);
+	return ret;
+}
+
+EXPORT int form_module_init(void) {
+	struct formitem *fi;
+
+	form_newuser_app=form_load_from_file("newuser.form", form_createaccount_close);
+	if(!form_newuser_app) {
+		ERROR_MSG("could not load newuser.form");
+		return 0; /* failure */
+	}
+
+	fi=form_getitem(form_newuser_app, "USERNAME");
+	if(!fi) {
+		ERROR_MSG("newuser.form does not have a USERNAME field.");
+		return 0; /* failure */
+	}
+	fi->form_check=form_createaccount_username_check;
+
+	fi=form_getitem(form_newuser_app, "PASSWORD");
+	if(!fi) {
+		ERROR_MSG("newuser.form does not have a PASSWORD field.");
+		return 0; /* failure */
+	}
+	fi->flags|=1; /* hidden */
+
+	return 1;
+}
+
+EXPORT void form_module_shutdown(void) {
+	form_free(form_newuser_app);
+	free(form_newuser_app);
+	form_newuser_app=NULL;
 }
 
 /******************************************************************************
@@ -5699,6 +5947,12 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	atexit(user_shutdown);
+
+	if(!form_module_init()) {
+		ERROR_MSG("could not initialize forms");
+		return EXIT_FAILURE;
+	}
+	atexit(form_module_shutdown);
 
 	if(!game_init()) {
 		ERROR_MSG("could not start game");
