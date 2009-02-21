@@ -11,10 +11,12 @@ ifeq ($(findstring gcc,$(shell $(CC) -v 2>&1)),gcc)
 CFLAGS:=-Wall -Wextra -Wshadow -Wsign-compare -Wstrict-prototypes -Wstrict-aliasing -Wpointer-arith -Wcast-align  -Wold-style-definition -Wredundant-decls -Wnested-externs -std=gnu99 -pedantic -g
 
 ifeq ($(OS),Darwin)
-DARWIN_SDK=/Developer/SDKs/MacOSX10.4u.sdk
+# build universal binary 
+MACOSX_DEPLOYMENT_TARGET=10.4
+export MACOSX_DEPLOYMENT_TARGET
+DARWIN_SDK=$(wildcard /Developer/SDKs/MacOSX${MACOSX_DEPLOYMENT_TARGET}*.sdk)
 CFLAGS+=-isysroot $(DARWIN_SDK)
 LDFLAGS+=-isysroot $(DARWIN_SDK)
-# build universal binary
 TARGET_ARCH=-arch i386 -arch ppc
 else
 # mkdir()'s mode parameter is a short on Darwin which cause warnings with the following.
