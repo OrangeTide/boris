@@ -581,7 +581,7 @@ EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
  * @param filename
  * @return NULL on failure. A malloc'd string containing the file on success.
  */
-char *util_textfile_load(const char *filename) {
+EXPORT char *util_textfile_load(const char *filename) {
 	FILE *f;
 	char *ret;
 	long len;
@@ -638,25 +638,29 @@ failure0:
 	return 0; /* failure */
 }
 
+/******************************************************************************
+ * Util_strfile - utility routines for holding a file in one large string.
+ ******************************************************************************/
+
 /** undocumented - please add documentation. */
 struct util_strfile {
 	const char *buf; /** buffer holding the contents of the entire file. */
 };
 
 /** undocumented - please add documentation. */
-void util_strfile_open(struct util_strfile *h, const char *buf) {
+EXPORT void util_strfile_open(struct util_strfile *h, const char *buf) {
 	assert(h != NULL);
 	assert(buf != NULL);
 	h->buf=buf;
 }
 
 /** undocumented - please add documentation. */
-void util_strfile_close(struct util_strfile *h) {
+EXPORT void util_strfile_close(struct util_strfile *h) {
 	h->buf=NULL;
 }
 
 /** undocumented - please add documentation. */
-const char *util_strfile_readline(struct util_strfile *h, size_t *len) {
+EXPORT const char *util_strfile_readline(struct util_strfile *h, size_t *len) {
 	const char *ret;
 
 	assert(h != NULL);
@@ -675,7 +679,7 @@ const char *util_strfile_readline(struct util_strfile *h, size_t *len) {
  * removes a trailing newline if one exists.
  * @param line the string to modify.
  */
-void trim_nl(char *line) {
+EXPORT void trim_nl(char *line) {
 	line=strrchr(line, '\n');
 	if(line) *line=0;
 }
@@ -685,7 +689,7 @@ void trim_nl(char *line) {
  * @param line the string to modify.
  * @return pointer that may be offset into original string.
  */
-char *trim_whitespace(char *line) {
+EXPORT char *trim_whitespace(char *line) {
 	char *tmp;
 	while(isspace(*line)) line++;
 	for(tmp=line+strlen(line)-1;line<tmp && isspace(*tmp);tmp--) *tmp=0;
