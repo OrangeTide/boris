@@ -1,60 +1,73 @@
-/* boris.c :
- * example of a very tiny MUD
+/** @file boris.c
+ * example of a very tiny MUD.
+ *
+ * @author Jon Mayo <jon.mayo@gmail.com>
+ * @version 0.2
  */
-/******************************************************************************
+/** @mainpage
+ *
  * Design Documentation
  *
+ *
  * components:
- *  bitfield - manages small staticly sized bitmaps
- *  bitmap - manages large bitmaps
- *  buffer - manages an i/o buffer
- *  freelist - allocate ranges of numbers from a pool
- *  game_logic
- *  hash
- *  heapqueue - priority queue for implementing timers
- *  menu - draws menus to a telnetclient
- *  object_base - a generic object type
- *  object_cache - interface to recordcache for objects
- *  object_xxx - free/load/save routines for objects
- *  refcount - macros to provide reference counting
- *  server - accepts new connections
- *  shvar - process $() macros
- *  socketio - manages network sockets
- *  telnetclient - processes data from a socket for Telnet protocol
+ * - acs_info - access control string
+ * - bitfield - manages small staticly sized bitmaps
+ * - bitmap - manages large bitmaps
+ * - buffer - manages an i/o buffer
+ * - channel_group
+ * - channel_member
+ * - config - represent a configuration parser. uses config_watcher as entries.
+ * - form - uses formitem.
+ * - form_state
+ * - freelist - allocate ranges of numbers from a pool. uses freelist_entry and freelist_extent.
+ * - game_logic - TBD
+ * - heapqueue_elm - priority queue for implementing timers
+ * - map - hash used as an associative array. uses map_data and map_entry.
+ * - menuinfo - draws menus to a telnetclient
+ * - object_base - a generic object type
+ * - object_cache - interface to recordcache for objects
+ * - object_xxx - free/load/save routines for objects
+ * - refcount - macros to provide reference counting
+ * - server - accepts new connections
+ * - shvar - process $() macros
+ * - socketio_handle - manages network sockets
+ * - telnetclient - processes data from a socket for Telnet protocol
+ * - user - user account handling. @see user_name_map_entry.
+ * - util_strfile - holds contents of a textfile in an array.
  *
  * dependency:
- *  socketio_handles - uses ref counts to determine when to free linked lists items
+ * - socketio_handle - uses ref counts to determine when to free linked lists items
  *
  * types of records:
- *  objects - base objects for room, mob, or item
- *  instances - instance data for room, mob or item
- *  container - container data for room, mob or item (a type of instance data)
- *  stringmap - maps strings to a data structure (hash table)
- *  numbermap - maps integers to a data structure (hash table)
- *  strings - a large string that can span multiple blocks
+ * - objects - base objects for room, mob, or item
+ * - instances - instance data for room, mob or item
+ * - container - container data for room, mob or item (a type of instance data)
+ * - stringmap - maps strings to a data structure (hash table)
+ * - numbermap - maps integers to a data structure (hash table)
+ * - strings - a large string that can span multiple blocks
  *
  * objects:
- *	base - the following types of objects are defined:
- *		room
- *		mob
- *		item
- *	instance - all instances are the same structure:
- *		id - object id
- *		count - all item instances are stackable 1 to 256.
- *		flags - 24 status flags [A-HJ-KM-Z]
- *		extra1..extra2 - control values that can be variable
+ * - base - the following types of objects are defined:
+ *   - room
+ *   - mob
+ *   - item
+ * - instance - all instances are the same structure:
+ *   - id - object id
+ *   - count - all item instances are stackable 1 to 256.
+ *   - flags - 24 status flags [A-HJ-KM-Z]
+ *   - extra1..extra2 - control values that can be variable
  *
  * containers:
- *	instance parameter holds a id that holds an array of up to 64 objects.
+ * - instance parameter holds a id that holds an array of up to 64 objects.
  *
  * database saves the following types of blobs:
- *	player account
- *	room object
- *	mob object (also used for characters)
- *	item object
- *	instances
- *	container slots
- *	help text
+ * - player account
+ * - room object
+ * - mob object (also used for characters)
+ * - item object
+ * - instances
+ * - container slots
+ * - help text
  *
  ******************************************************************************/
 
@@ -63,14 +76,20 @@
  ******************************************************************************/
 
 #if defined(_MSC_VER) || defined(WIN32) || defined(__WIN32__)
+/** detected a winsock2 system. */
 #define USE_WIN32_SOCKETS
 #else
+/** detected system with BSD compatible sockets. */
 #define USE_BSD_SOCKETS
 #endif
 
-/* number of connections that can be queues waiting for accept() */
+/** number of connections that can be queues waiting for accept(). */
 #define SOCKETIO_LISTEN_QUEUE 10
+
+/** undocumented - please add documentation. */
 #define TELNETCLIENT_OUTPUT_BUFFER_SZ 4096
+
+/** undocumented - please add documentation. */
 #define TELNETCLIENT_INPUT_BUFFER_SZ 256
 
 /******************************************************************************
@@ -123,37 +142,44 @@
 #endif
 
 /*=* General purpose macros *=*/
-/* get number of elements in an array */
+
+/** get number of elements in an array. */
 #define NR(x) (sizeof(x)/sizeof*(x))
 
-/* round up/down on a boundry */
+/** round up on a boundry. */
 #define ROUNDUP(a,n) (((a)+(n)-1)/(n)*(n))
+
+/** round down on a boundry. */
 #define ROUNDDOWN(a,n) ((a)-((a)%(n)))
 
-/* make four ASCII characters into a 32-bit integer */
+/** make four ASCII characters into a 32-bit integer. */
 #define FOURCC(a,b,c,d)	( \
 	((uint_least32_t)(d)<<24) \
 	|((uint_least32_t)(c)<<16) \
 	|((uint_least32_t)(b)<<8) \
 	|(a))
 
-/* used by var */
+/** _make_name2 is used by VAR and _make_name. */
 #define _make_name2(x,y) x##y
+
+/** _make_name is used by var. */
 #define _make_name(x,y) _make_name2(x,y)
 
-/* VAR() is used for making temp variables in macros */
+/** VAR() is used for making temp variables in macros. */
 #define VAR(x) _make_name(x,__LINE__)
 
 /* controls how external functions are exported */
 #ifndef NDEBUG
+/** tag a function as being an exported symbol. */
 #define EXPORT
 #else
-/* fake out the export and keep the functions internal */
+/** fake out the export and keep the functions internal. */
 #define EXPORT static
 #endif
 
 /*=* Byte-order functions *=*/
-/* WRite Big-Endian 32-bit value */
+
+/** WRite Big-Endian 32-bit value. */
 #define WR_BE32(dest, offset, value) do { \
 		unsigned VAR(tmp)=value; \
 		(dest)[offset]=(VAR(tmp)/16777216L)%256; \
@@ -162,14 +188,14 @@
 		(dest)[(offset)+3]=VAR(tmp)%256; \
 	} while(0)
 
-/* WRite Big-Endian 16-bit value */
+/** WRite Big-Endian 16-bit value. */
 #define WR_BE16(dest, offset, value) do { \
 		unsigned VAR(tmp)=value; \
 		(dest)[offset]=(VAR(tmp)/256)%256; \
 		(dest)[(offset)+1]=VAR(tmp)%256; \
 	} while(0)
 
-/* WRite Big-Endian 64-bit value */
+/** WRite Big-Endian 64-bit value. */
 #define WR_BE64(dest, offset, value) do { \
 		unsigned long long VAR(tmp)=value; \
 		(dest)[offset]=((VAR(tmp))>>56)&255; \
@@ -182,17 +208,17 @@
 		(dest)[(offset)+7]=(VAR(tmp))&255; \
 	} while(0)
 
-/* ReaD Big-Endian 16-bit value */
+/** ReaD Big-Endian 16-bit value. */
 #define RD_BE16(src, offset) ((((src)[offset]&255u)<<8)|((src)[(offset)+1]&255u))
 
-/* ReaD Big-Endian 32-bit value */
+/** ReaD Big-Endian 32-bit value. */
 #define RD_BE32(src, offset) (\
 	(((src)[offset]&255ul)<<24) \
 	|(((src)[(offset)+1]&255ul)<<16) \
 	|(((src)[(offset)+2]&255ul)<<8) \
 	|((src)[(offset)+3]&255ul))
 
-/* ReaD Big-Endian 64-bit value */
+/** ReaD Big-Endian 64-bit value. */
 #define RD_BE64(src, offset) (\
 		(((src)[offset]&255ull)<<56) \
 		|(((src)[(offset)+1]&255ull)<<48) \
@@ -204,112 +230,186 @@
 		|((src)[(offset)+7]&255ull))
 
 /*=* Rotate operations *=*/
+
+/** Rotate Left on 8-bit values. */
 #define ROL8(a,b) (((uint_least8_t)(a)<<(b))|((uint_least8_t)(a)>>(8-(b))))
+
+/** Rotate Left on 16-bit values. */
 #define ROL16(a,b) (((uint_least16_t)(a)<<(b))|((uint_least16_t)(a)>>(16-(b))))
+
+/** Rotate Left on 32-bit values. */
 #define ROL32(a,b) (((uint_least32_t)(a)<<(b))|((uint_least32_t)(a)>>(32-(b))))
+
+/** Rotate Left on 64-bit values. */
 #define ROL64(a,b) (((uint_least64_t)(a)<<(b))|((uint_least64_t)(a)>>(64-(b))))
+
+/** Rotate Right on 8-bit values. */
 #define ROR8(a,b) (((uint_least8_t)(a)>>(b))|((uint_least8_t)(a)<<(8-(b))))
+
+/** Rotate Right on 16-bit values. */
 #define ROR16(a,b) (((uint_least16_t)(a)>>(b))|((uint_least16_t)(a)<<(16-(b))))
+
+/** Rotate Right on 32-bit values. */
 #define ROR32(a,b) (((uint_least32_t)(a)>>(b))|((uint_least32_t)(a)<<(32-(b))))
+
+/** Rotate Right on 64-bit values. */
 #define ROR64(a,b) (((uint_least64_t)(a)>>(b))|((uint_least64_t)(a)<<(64-(b))))
 
 /*=* Bitfield operations *=*/
-/* return in type sized elements to create a bitfield of 'bits' bits */
+
+/** return in type sized elements to create a bitfield of 'bits' bits. */
 #define BITFIELD(bits, type) (((bits)+(CHAR_BIT*sizeof(type))-1)/(CHAR_BIT*sizeof(type)))
 
-/* set bit position 'bit' in bitfield x */
+/** set bit position 'bit' in bitfield x. */
 #define BITSET(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]|=1<<((bit)&((CHAR_BIT*sizeof *(x))-1))
 
-/* clear bit position 'bit' in bitfield x */
+/** clear bit position 'bit' in bitfield x */
 #define BITCLR(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]&=~(1<<((bit)&((CHAR_BIT*sizeof *(x))-1)))
 
-/* toggle bit position 'bit' in bitfield x */
+/** toggle bit position 'bit' in bitfield x. */
 #define BITINV(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]^=1<<((bit)&((CHAR_BIT*sizeof *(x))-1))
 
-/* return a large non-zero number if the bit is set, zero if clear */
+/** return a large non-zero number if the bit is set, zero if clear. */
 #define BITTEST(x, bit) ((x)[(bit)/((CHAR_BIT*sizeof *(x)))]&(1<<((bit)&((CHAR_BIT*sizeof *(x))-1))))
 
-/* checks that bit is in range for bitfield x */
+/** checks that bit is in range for bitfield x. */
 #define BITRANGE(x, bit) ((bit)<(sizeof(x)*CHAR_BIT))
 
 /*=* DEBUG MACROS *=*/
 /* VERBOSE(), DEBUG() and TRACE() macros.
  * DEBUG() does nothing if NDEBUG is defined
  * TRACE() does nothing if NTRACE is defined */
+
+/** undocumented - please add documentation. */
 # define VERBOSE(...) fprintf(stderr, __VA_ARGS__)
+
 # ifdef NDEBUG
 #  define DEBUG(...) /* DEBUG disabled */
 #  define DEBUG_MSG(msg) /* DEBUG_MSG disabled */
 #  define HEXDUMP(data, len, ...) /* HEXDUMP disabled */
 # else
+
+/** DEBUG() prints a formatted message to stderr if NDEBUG is not defined. */
 #  define DEBUG(msg, ...) fprintf(stderr, "DEBUG:%s():%d:" msg, __func__, __LINE__, ## __VA_ARGS__);
+
+/** DEBUG_MSG prints a string and newline to stderr if NDEBUG is not defined. */
 #  define DEBUG_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
+
+/** HEXDUMP() outputs a message and block of hexdump data to stderr if NDEBUG is not defined. */
 #  define HEXDUMP(data, len, ...) do { fprintf(stderr, __VA_ARGS__); hexdump(stderr, data, len); } while(0)
 # endif
 # ifdef NTRACE
 #  define TRACE(...) /* TRACE disabled */
 #  define HEXDUMP_TRACE(data, len, ...) /* HEXDUMP_TRACE disabled */
 # else
+/** TRACE() prints a message to stderr if NTRACE is not defined. */
 #  define TRACE(...) fprintf(stderr, __VA_ARGS__)
+/** HEXDUMP_TRACE() does a hexdump to stderr if NTRACE is not defined. */
 #  define HEXDUMP_TRACE(data, len, ...) HEXDUMP(data, len, __VA_ARGS__)
 # endif
+
+/** ERROR_FMT() prints a formatted message to stderr. */
 # define ERROR_FMT(msg, ...) fprintf(stderr, "ERROR:%s():%d:" msg, __func__, __LINE__, __VA_ARGS__);
 
+/** ERROR_MSG prints a string and newline to stderr. */
 #define ERROR_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
-#define TODO(msg) fprintf(stderr, "TODO:%s():%d:" msg "\n", __func__, __LINE__);
-#define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
-#define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
-#define FAILON(e, reason, label) do { if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
-#define PERROR(msg) fprintf(stderr, "ERROR:%s():%d:%s:%s\n", __func__, __LINE__, msg, strerror(errno));
 
+/** TODO prints a string and newline to stderr. */
+#define TODO(msg) fprintf(stderr, "TODO:%s():%d:" msg "\n", __func__, __LINE__);
+
+/** trace logs entry to a function if NTRACE is not defined. */
+#define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
+
+/** trace logs exit of a function if NTRACE is not defined. */
+#define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
+
+/** tests an expression, if failed prints an error message based on errno and jumps to a label. */
+#define FAILON(e, reason, label) do { if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
+
+/** logs a message based on errno */
+#define PERROR(msg) fprintf(stderr, "ERROR:%s():%d:%s:%s\n", __func__, __LINE__, msg, strerror(errno));
 
 #ifndef NDEBUG
 #include <string.h>
-/* initialize with junk - used to find unitialized values */
+/** initialize with junk - used to find unitialized values. */
 # define JUNKINIT(ptr, len) memset((ptr), 0xBB, (len));
 #else
 # define JUNKINIT(ptr, len) /* do nothing */
 #endif
 
 /*=* reference counting macros *=*/
+
+/** undocumented - please add documentation. */
 #define REFCOUNT_TYPE int
+
+/** undocumented - please add documentation. */
 #define REFCOUNT_NAME _referencecount
+
+/** undocumented - please add documentation. */
 #define REFCOUNT_INIT(obj) ((obj)->REFCOUNT_NAME=0)
+
+/** undocumented - please add documentation. */
 #define REFCOUNT_TAKE(obj) ((obj)->REFCOUNT_NAME++)
+
+/** undocumented - please add documentation. */
 #define REFCOUNT_PUT(obj, free_action) do { \
 		assert((obj)->REFCOUNT_NAME>0); \
 		if(--(obj)->REFCOUNT_NAME<=0) { \
 			free_action; \
 		} \
 	} while(0)
+
+/** undocumented - please add documentation. */
 #define REFCOUNT_GET(obj) do { (obj)->REFCOUNT_NAME++; } while(0)
 
 /*=* Linked list macros *=*/
+
+/** undocumented - please add documentation. */
 #define LIST_ENTRY(type) struct { type *_next, **_prev; }
+
+/** undocumented - please add documentation. */
 #define LIST_HEAD(headname, type) headname { type *_head; }
+
+/** undocumented - please add documentation. */
 #define LIST_INIT(head) ((head)->_head=NULL)
+
+/** undocumented - please add documentation. */
 #define LIST_ENTRY_INIT(elm, name) do { (elm)->name._next=NULL; (elm)->name._prev=NULL; } while(0)
+
+/** undocumented - please add documentation. */
 #define LIST_TOP(head) ((head)._head)
+
+/** undocumented - please add documentation. */
 #define LIST_NEXT(elm, name) ((elm)->name._next)
+
+/** undocumented - please add documentation. */
 #define LIST_PREVPTR(elm, name) ((elm)->name._prev)
+
+/** undocumented - please add documentation. */
 #define LIST_INSERT_ATPTR(prevptr, elm, name) do { \
 	(elm)->name._prev=(prevptr); \
 	if(((elm)->name._next=*(prevptr))!=NULL) \
 		(elm)->name._next->name._prev=&(elm)->name._next; \
 	*(prevptr)=(elm); \
 	} while(0)
+
+/** undocumented - please add documentation. */
 #define LIST_INSERT_AFTER(where, elm, name) do { \
 		(elm)->name._prev=&(where)->name._next; \
 		if(((elm)->name._next=(where)->name._next)!=NULL) \
 			(where)->name._next->name._prev=&(elm)->name._next; \
 		*(elm)->name._prev=(elm); \
 	} while(0)
+
+/** undocumented - please add documentation. */
 #define LIST_INSERT_HEAD(head, elm, name) do { \
 		(elm)->name._prev=&(head)->_head; \
 		if(((elm)->name._next=(head)->_head)!=NULL) \
 			(head)->_head->name._prev=&(elm)->name._next; \
 		(head)->_head=(elm); \
 	} while(0)
+
+/** undocumented - please add documentation. */
 #define LIST_REMOVE(elm, name) do { \
 		if((elm)->name._next!=NULL) \
 			(elm)->name._next->name._prev=(elm)->name._prev; \
@@ -320,24 +420,32 @@
 
 /*=* Compiler macros *=*/
 #ifdef __GNUC__
-/* using GCC, enable special GCC options */
+/** using GCC, enable special GCC options. */
 #define GCC_ONLY(x) x
 #else
-/* not using GCC */
+/** this version defined if not using GCC. */
 #define GCC_ONLY(x)
 #endif
 
+/** macro to mark function parameters as unused, used to supress warnings. */
 #define UNUSED GCC_ONLY(__attribute__((unused)))
 
 /******************************************************************************
  * Types and data structures
  ******************************************************************************/
+
 struct telnetclient;
+
 struct socketio_handle;
+
 struct menuitem;
+
 struct channel_group;
+
+/** undocumented - please add documentation. */
 LIST_HEAD(struct channel_member_head, struct channel_member); /* membership for channels */
 
+/** undocumented - please add documentation. */
 struct menuinfo {
 	LIST_HEAD(struct, struct menuitem) items;
 	char *title;
@@ -345,6 +453,7 @@ struct menuinfo {
 	struct menuitem *tail;
 };
 
+/** undocumented - please add documentation. */
 struct formitem {
 	LIST_ENTRY(struct formitem) item;
 	unsigned value_index; /* used to index the form_state->value[] array */
@@ -355,6 +464,7 @@ struct formitem {
 	char *prompt;
 };
 
+/** undocumented - please add documentation. */
 struct form_state {
 	const struct form *form;
 	const struct formitem *curritem;
@@ -364,6 +474,7 @@ struct form_state {
 	int done;
 };
 
+/** undocumented - please add documentation. */
 struct form {
 	LIST_HEAD(struct, struct formitem) items;
 	struct formitem *tail;
@@ -376,8 +487,11 @@ struct form {
 /******************************************************************************
  * Globals
  ******************************************************************************/
+
+/** undocumented - please add documentation. */
 static struct menuinfo gamemenu_login, gamemenu_main;
 
+/** undocumented - please add documentation. */
 static struct mud_config {
 	char *config_filename;
 	char *menu_prompt;
@@ -421,10 +535,21 @@ EXPORT struct channel_group *channel_system_get(unsigned n);
 /******************************************************************************
  * Util - utility routines
  ******************************************************************************/
-#define UTIL_FNM_NOMATCH 1
-#define UTIL_FNM_CASEFOLD 16	/* case insensitive matches */
 
-/* clone of the fnmatch() function */
+/** util_fnmatch returns this value when a match was not found. */
+#define UTIL_FNM_NOMATCH 1
+
+/** util_fnmatch accepts this as a paramter to perform case insensitive matches. */
+#define UTIL_FNM_CASEFOLD 16
+
+/**
+ * clone of the fnmatch() function.
+ * Only supports flag UTIL_FNM_CASEFOLD.
+ * @param pattern a shell wildcard pattern.
+ * @param string string to compare against.
+ * @param flags zero or UTIL_FNM_CASEFOLD for case-insensitive matches..
+ * @return 0 on a match, UTIL_FNM_NOMATCH on failure.
+ */
 EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
 	char c;
 
@@ -452,7 +577,9 @@ EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
 }
 
 /**
- * read the contents of a text file into an allocated string
+ * read the contents of a text file into an allocated string.
+ * @param filename
+ * @return NULL on failure. A malloc'd string containing the file on success.
  */
 char *util_textfile_load(const char *filename) {
 	FILE *f;
@@ -511,20 +638,24 @@ failure0:
 	return 0; /* failure */
 }
 
+/** undocumented - please add documentation. */
 struct util_strfile {
-	const char *buf;
+	const char *buf; /** buffer holding the contents of the entire file. */
 };
 
+/** undocumented - please add documentation. */
 void util_strfile_open(struct util_strfile *h, const char *buf) {
 	assert(h != NULL);
 	assert(buf != NULL);
 	h->buf=buf;
 }
 
+/** undocumented - please add documentation. */
 void util_strfile_close(struct util_strfile *h) {
 	h->buf=NULL;
 }
 
+/** undocumented - please add documentation. */
 const char *util_strfile_readline(struct util_strfile *h, size_t *len) {
 	const char *ret;
 
@@ -540,13 +671,20 @@ const char *util_strfile_readline(struct util_strfile *h, size_t *len) {
 	return h->buf==ret?NULL:ret; /* return EOF if the offset couldn't move forward */
 }
 
-/* removes a trailing newline if one exists */
+/**
+ * removes a trailing newline if one exists.
+ * @param line the string to modify.
+ */
 void trim_nl(char *line) {
 	line=strrchr(line, '\n');
 	if(line) *line=0;
 }
 
-/* remove beginning and trailing whitespace */
+/**
+ * remove beginning and trailing whitespace.
+ * @param line the string to modify.
+ * @return pointer that may be offset into original string.
+ */
 char *trim_whitespace(char *line) {
 	char *tmp;
 	while(isspace(*line)) line++;
@@ -558,6 +696,12 @@ char *trim_whitespace(char *line) {
  * Debug routines
  ******************************************************************************/
 #ifndef NDEBUG
+/**
+ * debug routine to convert a number to a string.
+ * @param n the value.
+ * @param base the output base (2 to 64)
+ * @param pad length to use when padding with zeros. 0 means do not pad.
+ */
 static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 	static char number_buffer[65];
 	static const char tab[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-";
@@ -580,6 +724,12 @@ static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
 	return o;
 }
 
+/**
+ * debug routine to hexdump some bytes.
+ * @param f output file stream.
+ * @param data pointer to the data.
+ * @param len length to hexdump.
+ */
 static void hexdump(FILE *f, const void *data, int len) {
 	fprintf(f, "[%d]", len);
 	while(len>0) {
@@ -599,9 +749,14 @@ static void hexdump(FILE *f, const void *data, int len) {
 /******************************************************************************
  * shvar - shell variables
  ******************************************************************************/
-#define SHVAR_ID_MAX 128	/* maximum number of characters in a $() */
-#define SHVAR_ESCAPE '$'	/* escape character used */
 
+/** maximum number of characters in a $(). */
+#define SHVAR_ID_MAX 128
+
+/** escape character used. */
+#define SHVAR_ESCAPE '$'
+
+/** undocumented - please add documentation. */
 EXPORT int shvar_eval(char *out, size_t len, const char *src, const char *(*match)(const char *key)) {
 	const char *old;
 	char key[SHVAR_ID_MAX];
@@ -675,20 +830,30 @@ EXPORT int shvar_eval(char *out, size_t len, const char *src, const char *(*matc
  * heapqueue - a binary heap used as a priority queue
  ******************************************************************************/
 
+/** undocumented - please add documentation. */
 #define HEAPQUEUE_LEFT(i) (2*(i)+1)
+
+/** undocumented - please add documentation. */
 #define HEAPQUEUE_RIGHT(i) (2*(i)+2)
+
+/** undocumented - please add documentation. */
 #define HEAPQUEUE_PARENT(i) (((i)-1)/2)
 
+/** undocumented - please add documentation. */
 struct heapqueue_elm {
 	unsigned d; /* key */
-	/* TODO: put useful data in here */
+	/** @todo put useful data in here */
 };
 
-static struct heapqueue_elm heap[512]; /* test heap */
+/** undocumented - please add documentation. */
+static struct heapqueue_elm heap[512];
+
+/** undocumented - please add documentation. */
 static unsigned heap_len;
 
-/* min heap is sorted by lowest value at root
- * return non-zero if a>b
+/**
+ * min heap is sorted by lowest value at root.
+ * @return non-zero if a>b
  */
 static inline int heapqueue_greaterthan(struct heapqueue_elm *a, struct heapqueue_elm *b) {
 	assert(a!=NULL);
@@ -696,9 +861,11 @@ static inline int heapqueue_greaterthan(struct heapqueue_elm *a, struct heapqueu
 	return a->d>b->d;
 }
 
-/* i is the "hole" location
- * elm is the value to compare against
- * return new position of hole */
+/**
+ * @param i the "hole" location
+ * @param elm the value to compare against
+ * @return new position of hole
+ */
 static int heapqueue_ll_siftdown(unsigned i, struct heapqueue_elm *elm) {
 	assert(elm!=NULL);
 	assert(i<heap_len || i==0);
@@ -723,9 +890,10 @@ static int heapqueue_ll_siftdown(unsigned i, struct heapqueue_elm *elm) {
 	return i;
 }
 
-/* i is the "hole" location
- * elm is the value to compare against
- * return the new position of the hole
+/**
+ * @param i the "hole" location
+ * @param elm the value to compare against
+ * @return the new position of the hole
  */
 static int heapqueue_ll_siftup(unsigned i, struct heapqueue_elm *elm) {
 	assert(elm!=NULL);
@@ -738,7 +906,8 @@ static int heapqueue_ll_siftup(unsigned i, struct heapqueue_elm *elm) {
 	return i;
 }
 
-/* removes entry at i */
+/**
+ * removes entry at i. */
 EXPORT int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret) {
 	/* 1. copy the value at i into ret
 	 * 2. put last node into empty position
@@ -796,10 +965,11 @@ EXPORT int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret) {
 	return 1;
 }
 
-/* sift-up operation for enqueueing
- * 1. Add the element on the bottom level of the heap.
- * 2. Compare the added element with its parent; if they are in the correct order, stop.
- * 3. If not, swap the element with its parent and return to the previous step.
+/**
+ * sift-up operation for enqueueing.
+ * -# Add the element on the bottom level of the heap.
+ * -# Compare the added element with its parent; if they are in the correct order, stop.
+ * -# If not, swap the element with its parent and return to the previous step.
  */
 EXPORT void heapqueue_enqueue(struct heapqueue_elm *elm) {
 	unsigned i;
@@ -811,8 +981,9 @@ EXPORT void heapqueue_enqueue(struct heapqueue_elm *elm) {
 	heap[i]=*elm; /* fill in the "hole" */
 }
 
-/* sift-down operation for dequeueing
- * removes the root entry and copies it to ret
+/**
+ * sift-down operation for dequeueing.
+ * removes the root entry and copies it to ret.
  */
 EXPORT int heapqueue_dequeue(struct heapqueue_elm *ret) {
 	unsigned i;
@@ -830,7 +1001,9 @@ EXPORT int heapqueue_dequeue(struct heapqueue_elm *ret) {
 
 #ifndef NDEBUG
 
-/* checks the heap to see that it is valid */
+/**
+ * checks the heap to see that it is valid.
+ */
 static int heapqueue_isvalid(void) {
 	unsigned i;
 	for(i=1;i<heap_len;i++) {
@@ -842,6 +1015,7 @@ static int heapqueue_isvalid(void) {
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 static void heapqueue_dump(void) {
 	unsigned i;
 	fprintf(stderr, "::: Dumping heapqueue :::\n");
@@ -851,6 +1025,7 @@ static void heapqueue_dump(void) {
 	printf("heap valid? %d (%d entries)\n", heapqueue_isvalid(), heap_len);
 }
 
+/** undocumented - please add documentation. */
 EXPORT void heapqueue_test(void) {
 	struct heapqueue_elm elm, tmp;
 	unsigned i;
@@ -915,21 +1090,25 @@ EXPORT void heapqueue_test(void) {
  * Freelist
  ******************************************************************************/
 
-/* bucket number to use for overflows */
+/** bucket number to use for overflows. */
 #define FREELIST_OVERFLOW_BUCKET(flp) (NR((flp)->buckets)-1)
 
+/** undocumented - please add documentation. */
 struct freelist_extent {
 	unsigned length, offset; /* both are in block-sized units */
 };
 
+/** undocumented - please add documentation. */
 struct freelist_entry {
 	LIST_ENTRY(struct freelist_entry) global; /* global list */
 	LIST_ENTRY(struct freelist_entry) bucket; /* bucket list */
 	struct freelist_extent extent;
 };
 
+/** undocumented - please add documentation. */
 LIST_HEAD(struct freelist_listhead, struct freelist_entry);
 
+/** undocumented - please add documentation. */
 struct freelist {
 	/* single list ordered by offset to find adjacent chunks. */
 	struct freelist_listhead global;
@@ -938,6 +1117,7 @@ struct freelist {
 	struct freelist_listhead *buckets;
 };
 
+/** undocumented - please add documentation. */
 static unsigned freelist_ll_bucketnr(struct freelist *fl, unsigned count) {
 	unsigned ret;
 	if(fl->nr_buckets>1) {
@@ -951,6 +1131,7 @@ static unsigned freelist_ll_bucketnr(struct freelist *fl, unsigned count) {
 	return ret;
 }
 
+/** undocumented - please add documentation. */
 static void freelist_ll_bucketize(struct freelist *fl, struct freelist_entry *e) {
 	unsigned bucket_nr;
 
@@ -965,7 +1146,9 @@ static void freelist_ll_bucketize(struct freelist *fl, struct freelist_entry *e)
 	LIST_INSERT_HEAD(&fl->buckets[bucket_nr], e, bucket);
 }
 
-/* lowlevel - detach and free an entry */
+/**
+ * lowlevel - detach and free an entry.
+ */
 static void freelist_ll_free(struct freelist_entry *e) {
 	assert(e!=NULL);
 	assert(e->global._prev!=NULL);
@@ -979,7 +1162,9 @@ static void freelist_ll_free(struct freelist_entry *e) {
 	free(e);
 }
 
-/* lowlevel - append an extra to the global list at prev */
+/**
+ * lowlevel - append an extra to the global list at prev
+ */
 static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsigned ofs, unsigned count) {
 	struct freelist_entry *new;
 	assert(prev!=NULL);
@@ -997,7 +1182,10 @@ static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsi
 	return new;
 }
 
-/* returns true if a bridge is detected */
+/**
+ * checks two extents and determine if they are immediately adjacent.
+ * @returns true if a bridge is detected.
+ */
 static int freelist_ll_isbridge(struct freelist_extent *prev_ext, unsigned ofs, unsigned count, struct freelist_extent *next_ext) {
 	/*
 	DEBUG("testing for bridge:\n"
@@ -1009,12 +1197,14 @@ static int freelist_ll_isbridge(struct freelist_extent *prev_ext, unsigned ofs, 
 	return prev_ext->offset+prev_ext->length==ofs && next_ext->offset==ofs+count;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void freelist_init(struct freelist *fl, unsigned nr_buckets) {
 	fl->nr_buckets=nr_buckets+1; /* add one for the overflow bucket */
 	fl->buckets=calloc(fl->nr_buckets, sizeof *fl->buckets);
 	LIST_INIT(&fl->global);
 }
 
+/** undocumented - please add documentation. */
 EXPORT void freelist_free(struct freelist *fl) {
 	while(LIST_TOP(fl->global)) {
 		freelist_ll_free(LIST_TOP(fl->global));
@@ -1031,9 +1221,9 @@ EXPORT void freelist_free(struct freelist *fl) {
 #endif
 }
 
-/* allocate memory from the pool
- * returns offset of the allocation
- * return -1 on failure */
+/** allocate memory from the pool.
+ * @return offset of the allocation. return -1 on failure.
+ */
 EXPORT long freelist_alloc(struct freelist *fl, unsigned count) {
 	unsigned bucketnr, ofs;
 	struct freelist_entry **bucketptr, *curr;
@@ -1066,7 +1256,7 @@ EXPORT long freelist_alloc(struct freelist *fl, unsigned count) {
 	return -1;
 }
 
-/* adds a piece to the freelist pool
+/** adds a piece to the freelist pool.
  *
  * . allocated
  * _ empty
@@ -1078,7 +1268,7 @@ EXPORT long freelist_alloc(struct freelist *fl, unsigned count) {
  * |......|XXX|.......|		bridge
  *
  * WARNING: passing bad parameters will result in strange data in the list
- * */
+ */
 EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 	struct freelist_entry *new, *curr, *last;
 
@@ -1172,7 +1362,7 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 }
 
 /**
- * allocates a particular range
+ * allocates a particular range on a freelist.
  * (assumes that freelist_pool assembles adjacent regions into the largest
  * possible contigious spaces)
  */
@@ -1238,6 +1428,7 @@ EXPORT int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count) {
 }
 
 #ifndef NTEST
+/** undocumented - please add documentation. */
 EXPORT void freelist_dump(struct freelist *fl) {
 	struct freelist_entry *curr;
 	unsigned n;
@@ -1247,6 +1438,7 @@ EXPORT void freelist_dump(struct freelist *fl) {
 	}
 }
 
+/** undocumented - please add documentation. */
 EXPORT void freelist_test(void) {
 	struct freelist fl;
 	unsigned n;
@@ -1308,7 +1500,9 @@ EXPORT void freelist_test(void) {
  * Hashing Functions
  ******************************************************************************/
 
-/* a hash that ignores case */
+/**
+ * a hash that ignores case.
+ */
 static uint_least32_t hash_stringignorecase32(const char *key) {
 	uint_least32_t h=0;
 
@@ -1321,7 +1515,9 @@ static uint_least32_t hash_stringignorecase32(const char *key) {
 	return h;
 }
 
-/* creates a 32-bit hash of a null terminated string */
+/**
+ * creates a 32-bit hash of a null terminated string.
+ */
 static uint_least32_t hash_string32(const char *key) {
 	uint_least32_t h=0;
 
@@ -1335,7 +1531,9 @@ static uint_least32_t hash_string32(const char *key) {
 }
 
 #if 0
-/* creates a 32-bit hash of a blob of memory */
+/**
+ * creates a 32-bit hash of a blob of memory.
+ */
 static uint_least32_t hash_mem32(const char *key, size_t len) {
 	uint_least32_t h=0;
 
@@ -1350,7 +1548,9 @@ static uint_least32_t hash_mem32(const char *key, size_t len) {
 }
 #endif
 
-/* creates a 32-bit hash of a 32-bit value */
+/**
+ * creates a 32-bit hash of a 32-bit value.
+ */
 static uint_least32_t hash_uint32(uint_least32_t key) {
 	key=(key^61)*ROR32(key,16);
 	key+=key<<3;
@@ -1361,7 +1561,9 @@ static uint_least32_t hash_uint32(uint_least32_t key) {
 }
 
 #if 0
-/* creates a 64-bit hash of a 64-bit value */
+/**
+ * creates a 64-bit hash of a 64-bit value.
+ */
 static uint_least64_t hash64_uint64(uint_least64_t key) {
 	key=~key+(key<<21);
 	key^=ROR64(key, 24);
@@ -1373,7 +1575,9 @@ static uint_least64_t hash64_uint64(uint_least64_t key) {
 	return key;
 }
 
-/* turns a 64-bit value into a 32-bit hash */
+/**
+ * turns a 64-bit value into a 32-bit hash.
+ */
 static uint_least32_t hash_uint64(uint_least64_t key) {
 	key=(key<<18)-key-1;
 	key^=ROR64(key, 31);
@@ -1388,6 +1592,7 @@ static uint_least32_t hash_uint64(uint_least64_t key) {
 /******************************************************************************
  * map
  ******************************************************************************/
+/** undocumented - please add documentation. */
 union map_data {
 	void *ptr;
 	fpos_t pos;
@@ -1395,12 +1600,14 @@ union map_data {
 	uintptr_t u;
 };
 
+/** undocumented - please add documentation. */
 struct map_entry {
 	LIST_ENTRY(struct map_entry) list;
 	void *key;	/* key can point inside of data (and usually should) */
 	union map_data data;
 };
 
+/** undocumented - please add documentation. */
 struct map {
 	void (*free_entry)(void *key, union map_data *data);
 	uint_least32_t (*hash)(const void *key);
@@ -1411,47 +1618,56 @@ struct map {
 };
 
 /**
- * use this as a callback to init when you don't want to free
+ * use this as a callback to init when you don't want to free.
  */
 static void _map_donotfree(void *key UNUSED, union map_data *data UNUSED) {
 }
 
+/** undocumented - please add documentation. */
 EXPORT uint_least32_t map_hash_stringignorecase(const void *key) {
 	return hash_stringignorecase32(key);
 }
 
+/** undocumented - please add documentation. */
 EXPORT uint_least32_t map_hash_string(const void *key) {
 	return hash_string32(key);
 }
 
+/** undocumented - please add documentation. */
 EXPORT uint_least32_t map_hash_unsigned(const void *key) {
 	return hash_uint32(*(unsigned*)key);
 }
 
+/** undocumented - please add documentation. */
 EXPORT uint_least32_t map_hash_uintptr(const void *key) {
 	return hash_uint32((uintptr_t)key);
 }
 
+/** undocumented - please add documentation. */
 EXPORT int map_compare_stringignorecase(const void *key1, const void *key2) {
 	return strcasecmp(key1, key2);
 }
 
+/** undocumented - please add documentation. */
 EXPORT int map_compare_string(const void *key1, const void *key2) {
 	return strcmp(key1, key2);
 }
 
+/** undocumented - please add documentation. */
 EXPORT int map_compare_unsigned(const void *key1, const void *key2) {
 	unsigned a=*(unsigned*)key1, b=*(unsigned*)key2;
 	return a<b?-1:a>b?1:0;
 }
 
 /**
- * treat argument as an unsigned instead of as a pointer */
+ * treat argument as an unsigned instead of as a pointer.
+ */
 EXPORT int map_compare_uintptr(const void *key1, const void *key2) {
 	uintptr_t a=(uintptr_t)key1, b=(uintptr_t)key2;
 	return a<b?-1:a>b?1:0;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entry)(void *key, union map_data *data), uint_least32_t (*hash)(const void *key), int (*compare)(const void *key1, const void *key2)) {
 	unsigned i;
 
@@ -1474,9 +1690,10 @@ EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entr
 	m->compare=compare;
 }
 
-/* adds an entry, and refuses to add more than one
- * exclusive prevents the same key from being added more than once
- * replace causes the old entry to be removed
+/**
+ * adds an entry to a map, and refuses to add more than one.
+ * exclusive prevents the same key from being added more than once.
+ * replace causes the old entry to be removed.
  */
 EXPORT int map_replace(struct map *m, void *key, const union map_data *data, int replace, int exclusive) {
 	struct map_entry *e;
@@ -1519,30 +1736,38 @@ EXPORT int map_replace(struct map *m, void *key, const union map_data *data, int
 	return 1;
 }
 
-/* refuses to add more than one copy of the same key */
+/**
+ * refuses to add more than one copy of the same key.
+ */
 EXPORT int map_add_ptr(struct map *m, void *key, void *ptr) {
 	const union map_data data={.ptr=ptr};
 	return map_replace(m, key, &data, 0, 1);
 }
 
+/**
+ * adds an entry to a map, replaces a pointer if one with the same key already exists.
+ */
 EXPORT int map_replace_ptr(struct map *m, void *key, void *ptr) {
 	const union map_data data={.ptr=ptr};
 	return map_replace(m, key, &data, 1, 1);
 }
 
-/* refuses to add more than one copy of the same key */
+/**
+ * refuses to add more than one copy of the same key.
+ */
 EXPORT int map_add_uint(struct map *m, uintptr_t key, void *ptr) {
 	const union map_data data={.ptr=ptr};
 	return map_replace(m, (void*)key, &data, 0, 1);
 }
 
+/** undocumented - please add documentation. */
 EXPORT int map_replace_uint(struct map *m, uintptr_t key, void *ptr) {
 	const union map_data data={.ptr=ptr};
 	return map_replace(m, (void*)key, &data, 1, 1);
 }
 
 /**
- * if key matches then replace
+ * if key matches then replace.
  */
 EXPORT int map_replace_fpos(struct map *m, uintptr_t key, const fpos_t *pos) {
 	const union map_data data={.pos=*pos};
@@ -1550,7 +1775,9 @@ EXPORT int map_replace_fpos(struct map *m, uintptr_t key, const fpos_t *pos) {
 	return map_replace(m, (void*)key, &data, 1, 1);
 }
 
-/* returns first matching entry */
+/**
+ * returns first matching entry.
+ */
 EXPORT union map_data *map_lookup(struct map *m, const void *key) {
 	struct map_entry *e;
 	uint_least32_t h;
@@ -1573,18 +1800,21 @@ EXPORT union map_data *map_lookup(struct map *m, const void *key) {
 	return NULL;
 }
 
+/** undocumented - please add documentation. */
 EXPORT fpos_t *map_lookup_fpos(struct map *m, uintptr_t key) {
 	union map_data *data;
 	data=map_lookup(m, (void*)key);
 	return data ? &data->pos : NULL;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void *map_lookup_ptr(struct map *m, const void *key) {
 	const union map_data *data;
 	data=map_lookup(m, key);
 	return data ? data->ptr : NULL;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void map_foreach(struct map *m, void *p, void (*callback)(void *p, void *key, union map_data *data)) {
 	unsigned i;
 	struct map_entry *curr;
@@ -1600,7 +1830,9 @@ EXPORT void map_foreach(struct map *m, void *p, void (*callback)(void *p, void *
 	}
 }
 
-/* frees the entry */
+/**
+ * frees the entry.
+ */
 EXPORT int map_remove(struct map *m, void *key) {
 	struct map_entry *e, *tmp;
 	uint_least32_t h;
@@ -1634,10 +1866,12 @@ EXPORT int map_remove(struct map *m, void *key) {
 	return res; /* not found */
 }
 
+/** undocumented - please add documentation. */
 EXPORT int map_remove_uint(struct map *m, uintptr_t key) {
 	return map_remove(m, (void*)key);
 }
 
+/** undocumented - please add documentation. */
 EXPORT void map_free(struct map *m) {
 	struct map_entry *e;
 	unsigned i;
@@ -1659,17 +1893,20 @@ EXPORT void map_free(struct map *m) {
 }
 
 #ifndef NDEBUG
+/** undocumented - please add documentation. */
 struct map_test_entry {
 	char *str;
 	unsigned value;
 };
 
+/** undocumented - please add documentation. */
 static void map_test_free(void *key UNUSED, union map_data *data) {
 	struct map_test_entry *e=data->ptr;
 	free(e->str);
 	free(e);
 }
 
+/** undocumented - please add documentation. */
 static struct map_test_entry *map_test_alloc(const char *str, unsigned value) {
 	struct map_test_entry *e;
 	e=malloc(sizeof *e);
@@ -1678,6 +1915,7 @@ static struct map_test_entry *map_test_alloc(const char *str, unsigned value) {
 	return e;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void map_test(void) {
 	struct map m;
 	struct map_test_entry *e;
@@ -1730,13 +1968,17 @@ EXPORT void map_test(void) {
  * eventlog - writes logging information based on events
  ******************************************************************************/
 /*-* eventlog:globals *-*/
+
+/** undocumented - please add documentation. */
 static FILE *eventlog_file;
 
 /*-* eventlog:internal functions *-*/
 
 /*-* eventlog:external functions *-*/
 
-/** initialize */
+/**
+ * initialize the eventlog component.
+ */
 int eventlog_init(void) {
 	eventlog_file=fopen(mud_config.eventlog_filename, "a");
 	if(!eventlog_file) {
@@ -1749,6 +1991,7 @@ int eventlog_init(void) {
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 void eventlog_shutdown(void) {
 	if(eventlog_file) {
 		fclose(eventlog_file);
@@ -1756,6 +1999,7 @@ void eventlog_shutdown(void) {
 	}
 }
 
+/** undocumented - please add documentation. */
 void eventlog(const char *type, const char *fmt, ...) {
 	va_list ap;
 	char buf[512];
@@ -1791,51 +2035,62 @@ void eventlog(const char *type, const char *fmt, ...) {
 	}
 }
 
-/** report that a connection has occured */
+/**
+ * report that a connection has occured.
+ */
 void eventlog_connect(const char *peer_str) {
 	eventlog("CONNECT", "remote=%s\n", peer_str);
 }
 
+/** undocumented - please add documentation. */
 void eventlog_server_startup(void) {
 	eventlog("STARTUP", "\n");
 }
 
+/** undocumented - please add documentation. */
 void eventlog_server_shutdown(void) {
 	eventlog("SHUTDOWN", "\n");
 }
 
+/** undocumented - please add documentation. */
 void eventlog_login_failattempt(const char *username, const char *peer_str) {
 	eventlog("LOGINFAIL", "remote=%s name='%s'\n", peer_str, username);
 }
 
+/** undocumented - please add documentation. */
 void eventlog_signon(const char *username, const char *peer_str) {
 	eventlog("SIGNON", "remote=%s name='%s'\n", peer_str, username);
 }
 
+/** undocumented - please add documentation. */
 void eventlog_signoff(const char *username, const char *peer_str) {
 	eventlog("SIGNOFF", "remote=%s name='%s'\n", peer_str, username);
 }
 
+/** undocumented - please add documentation. */
 void eventlog_toomany(void) {
-	/* TODO: we could get the peername from the fd and log that? */
+	/** @todo we could get the peername from the fd and log that? */
 	eventlog("TOOMANY", "\n");
 }
 
 /**
- * log commands that a user enters
+ * log commands that a user enters.
  */
 void eventlog_commandinput(const char *remote, const char *username, const char *line) {
 	eventlog("COMMAND", "remote=\"%s\" user=\"%s\" command=\"%s\"\n", remote, username, line);
 }
 
+/** undocumented - please add documentation. */
 void eventlog_channel_new(const char *channel_name) {
 	eventlog("CHANNEL-NEW", "channel=\"%s\"\n", channel_name);
 }
 
+/** undocumented - please add documentation. */
 void eventlog_channel_remove(const char *channel_name) {
 	eventlog("CHANNEL-REMOVE", "channel=\"%s\"\n", channel_name);
 }
 
+/** undocumented - please add documentation. */
 void eventlog_channel_join(const char *remote, const char *channel_name, const char *username) {
 	if(!remote) {
 		eventlog("CHANNEL-JOIN", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
@@ -1844,6 +2099,7 @@ void eventlog_channel_join(const char *remote, const char *channel_name, const c
 	}
 }
 
+/** undocumented - please add documentation. */
 void eventlog_channel_part(const char *remote, const char *channel_name, const char *username) {
 	if(!remote) {
 		eventlog("CHANNEL-PART", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
@@ -1855,11 +2111,15 @@ void eventlog_channel_part(const char *remote, const char *channel_name, const c
 /******************************************************************************
  * Config loader
  ******************************************************************************/
+
 struct config_watcher;
+
+/** undocumented - please add documentation. */
 struct config {
 	LIST_HEAD(struct, struct config_watcher) watchers;
 };
 
+/** undocumented - please add documentation. */
 struct config_watcher {
 	LIST_ENTRY(struct config_watcher) list;
 	char *mask;
@@ -1867,10 +2127,12 @@ struct config_watcher {
 	void *extra;
 };
 
+/** undocumented - please add documentation. */
 EXPORT void config_setup(struct config *cfg) {
 	LIST_INIT(&cfg->watchers);
 }
 
+/** undocumented - please add documentation. */
 EXPORT void config_free(struct config *cfg) {
 	struct config_watcher *curr;
 	assert(cfg != NULL);
@@ -1881,8 +2143,10 @@ EXPORT void config_free(struct config *cfg) {
 	}
 }
 
-/* adds a watcher with a shell style mask
- * func can return 0 to end the chain, or return 1 if the operation should continue on */
+/**
+ * adds a watcher with a shell style mask.
+ * func can return 0 to end the chain, or return 1 if the operation should continue on
+ */
 EXPORT void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value), void *extra) {
 	struct config_watcher *w;
 	assert(mask != NULL);
@@ -1894,6 +2158,7 @@ EXPORT void config_watch(struct config *cfg, const char *mask, int (*func)(struc
 	LIST_INSERT_HEAD(&cfg->watchers, w, list);
 }
 
+/** undocumented - please add documentation. */
 EXPORT int config_load(const char *filename, struct config *cfg) {
 	char buf[1024];
 	FILE *f;
@@ -1980,11 +2245,13 @@ failure:
 }
 
 #ifndef NTEST
+/** undocumented - please add documentation. */
 static int config_test_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	printf("CONFIG SHOW: %s=%s\n", id, value);
 	return 1;
 }
 
+/** undocumented - please add documentation. */
 static void config_test(void) {
 	struct config cfg;
 	config_setup(&cfg);
@@ -1994,24 +2261,27 @@ static void config_test(void) {
 }
 #endif
 
-
 /******************************************************************************
  * Bitmap API
  ******************************************************************************/
 
+/** undocumented - please add documentation. */
 #define BITMAP_BITSIZE (sizeof(unsigned)*CHAR_BIT)
 
+/** undocumented - please add documentation. */
 struct bitmap {
 	unsigned *bitmap;
 	size_t bitmap_allocbits;
 };
 
+/** undocumented - please add documentation. */
 EXPORT void bitmap_init(struct bitmap *bitmap) {
 	assert(bitmap!=NULL);
 	bitmap->bitmap=0;
 	bitmap->bitmap_allocbits=0;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void bitmap_free(struct bitmap *bitmap) {
 	assert(bitmap!=NULL); /* catch when calling free on NULL */
 	if(bitmap) {
@@ -2020,7 +2290,9 @@ EXPORT void bitmap_free(struct bitmap *bitmap) {
 	}
 }
 
-/* newbits is in bits (not bytes) */
+/**
+ * newbits is in bits (not bytes).
+ */
 EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	unsigned *tmp;
 
@@ -2044,6 +2316,7 @@ EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 EXPORT void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
@@ -2077,6 +2350,7 @@ EXPORT void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	}
 }
 
+/** undocumented - please add documentation. */
 EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
@@ -2109,7 +2383,9 @@ EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	}
 }
 
-/* gets a single bit */
+/**
+ * gets a single bit.
+ */
 EXPORT int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
 	if(ofs<bitmap->bitmap_allocbits) {
 		return (bitmap->bitmap[ofs/BITMAP_BITSIZE]>>(ofs%BITMAP_BITSIZE))&1;
@@ -2118,8 +2394,9 @@ EXPORT int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
 	}
 }
 
-/* return the position of the next set bit
- * -1 if the end of the bits was reached */
+/**
+ * @return the position of the next set bit. -1 if the end of the bits was reached
+ */
 EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
 	assert(bitmap != NULL);
@@ -2136,8 +2413,9 @@ EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 	return -1; /* outside of the range */
 }
 
-/* return the position of the next set bit
- * -1 if the end of the bits was reached */
+/**
+ * @return the position of the next set bit. -1 if the end of the bits was reached
+ */
 EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
 	assert(bitmap != NULL);
@@ -2154,9 +2432,11 @@ EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 	return -1; /* outside of the range */
 }
 
-/* loads a chunk of memory into the bitmap buffer
- * erases previous bitmap buffer
- * len is in bytes */
+/**
+ * loads a chunk of memory into the bitmap buffer.
+ * erases previous bitmap buffer.
+ * len is in bytes.
+ */
 EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len) {
 	unsigned *p, word_count, i;
 
@@ -2192,12 +2472,15 @@ EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len) 
 	}
 }
 
-/* returns the length in bytes of the entire bitmap table */
+/**
+ * @return the length in bytes of the entire bitmap table.
+ */
 EXPORT unsigned bitmap_length(struct bitmap *bitmap) {
 	return bitmap ? ROUNDUP(bitmap->bitmap_allocbits, CHAR_BIT)/CHAR_BIT : 0;
 }
 
 #ifndef NDEBUG
+/** undocumented - please add documentation. */
 EXPORT void bitmap_test(void) {
 	int i;
 	struct bitmap bitmap;
@@ -2265,16 +2548,20 @@ EXPORT void bitmap_test(void) {
  * acs - access control string
  ******************************************************************************/
 #include <limits.h>
+
+/** undocumented - please add documentation. */
 struct acs_info {
 	unsigned char level;
 	unsigned flags;
 };
 
+/** undocumented - please add documentation. */
 static void acs_init(struct acs_info *ai, unsigned level, unsigned flags) {
 	ai->level=level<=UCHAR_MAX?level:UCHAR_MAX;
 	ai->flags=flags;
 }
 
+/** undocumented - please add documentation. */
 static int acs_testflag(struct acs_info *ai, unsigned flag) {
 	unsigned i;
 	flag=tolower((char)flag);
@@ -2289,6 +2576,7 @@ static int acs_testflag(struct acs_info *ai, unsigned flag) {
 	return ((ai->flags>>i)&1)==1;
 }
 
+/** undocumented - please add documentation. */
 static int acs_check(struct acs_info *ai, const char *acsstring) {
 	const char *s=acsstring;
 	const char *endptr;
@@ -2322,6 +2610,8 @@ parse_failure:
 }
 
 #ifndef NDEBUG
+
+/** undocumented - please add documentation. */
 void acs_test(void) {
 	struct acs_info ai_test;
 
@@ -2337,58 +2627,138 @@ void acs_test(void) {
 /******************************************************************************
  * Telnet protocol constants
  ******************************************************************************/
-/* TODO: prefix these to clean up the namespace */
+/** @todo prefix these to clean up the namespace */
+
+/** undocumented - please add documentation. */
 #define IAC '\377'
+
+/** undocumented - please add documentation. */
 #define DONT '\376'
+
+/** undocumented - please add documentation. */
 #define DO '\375'
+
+/** undocumented - please add documentation. */
 #define WONT '\374'
+
+/** undocumented - please add documentation. */
 #define WILL '\373'
+
+/** undocumented - please add documentation. */
 #define SB '\372'
+
+/** undocumented - please add documentation. */
 #define GA '\371'
+
+/** undocumented - please add documentation. */
 #define EL '\370'
+
+/** undocumented - please add documentation. */
 #define EC '\367'
+
+/** undocumented - please add documentation. */
 #define AYT '\366'
+
+/** undocumented - please add documentation. */
 #define AO '\365'
+
+/** undocumented - please add documentation. */
 #define IP '\364'
+
+/** undocumented - please add documentation. */
 #define BREAK '\363'
+
+/** undocumented - please add documentation. */
 #define DM '\362'
+
+/** undocumented - please add documentation. */
 #define NOP '\361'
+
+/** undocumented - please add documentation. */
 #define SE '\360'
+
+/** undocumented - please add documentation. */
 #define EOR '\357'
+
+/** undocumented - please add documentation. */
 #define ABORT '\356'
+
+/** undocumented - please add documentation. */
 #define SUSP '\355'
+
+/** undocumented - please add documentation. */
 #define xEOF '\354' /* this is what BSD arpa/telnet.h calls the EOF */
+
+/** undocumented - please add documentation. */
 #define SYNCH '\362'
 
+/*=* telnet options *=*/
+
+/** undocumented - please add documentation. */
 #define TELOPT_ECHO 1
+
+/** undocumented - please add documentation. */
 #define TELOPT_SGA 3
+
+/** undocumented - please add documentation. */
 #define TELOPT_TTYPE 24		/* terminal type - rfc1091 */
+
+/** undocumented - please add documentation. */
 #define TELOPT_NAWS 31		/* negotiate about window size - rfc1073 */
+
+/** undocumented - please add documentation. */
 #define TELOPT_LINEMODE 34	/* line mode option - rfc1116 */
 
-/* generic sub-options */
+/*=* generic sub-options *=*/
+
+/** undocumented - please add documentation. */
 #define TELQUAL_IS 0
+
+/** undocumented - please add documentation. */
 #define TELQUAL_SEND 1
+
+/** undocumented - please add documentation. */
 #define TELQUAL_INFO 2
 
-/** Linemode sub-options **/
+/*=* Linemode sub-options *=*/
+
+/** undocumented - please add documentation. */
 #define	LM_MODE 1
+
+/** undocumented - please add documentation. */
 #define	LM_FORWARDMASK 2
+
+/** undocumented - please add documentation. */
 #define	LM_SLC 3
 
+/*=* linemode modes *=*/
+
+/** undocumented - please add documentation. */
 #define	MODE_EDIT 1
+
+/** undocumented - please add documentation. */
 #define	MODE_TRAPSIG 2
+
+/** undocumented - please add documentation. */
 #define	MODE_ACK 4
+
+/** undocumented - please add documentation. */
 #define MODE_SOFT_TAB 8
+
+/** undocumented - please add documentation. */
 #define MODE_LIT_ECHO 16
 
+/** undocumented - please add documentation. */
 #define	MODE_MASK 31
 
 /******************************************************************************
  * base64 : encode base64
  ******************************************************************************/
-/* base64_encodes as ./0123456789a-zA-Z
- * length is the number of 32-bit words */
+
+/**
+ * base64_encodes as ./0123456789a-zA-Z.
+ * length is the number of 32-bit words.
+ */
 static inline void base64_encode(char *ret, size_t length, uint32_t *v) {
 	uint32_t x; /* buffer for current value */
 	int xlen, vlen;
@@ -2429,14 +2799,21 @@ static inline void base64_encode(char *ret, size_t length, uint32_t *v) {
 /******************************************************************************
  * xxtcrypt : password hashing using XXT (improved version of TEA)
  ******************************************************************************/
+
+/** undocumented - please add documentation. */
 #define XXTCRYPT_BITS 128
+
+/** undocumented - please add documentation. */
 #define XXTCRYPT_GENSALT_LEN 6
+
+/** undocumented - please add documentation. */
 #define XXTCRYPT_GENSALT_MAX 16
-/* maximum length of crypted password */
+
+/** maximum length of crypted password **/
 #define XXTCRYPT_MAX (XXTCRYPT_GENSALT_MAX+1+(2+4*(XXTCRYPT_BITS/8))/3+1)
 
 /**
- * expands copies of salt and plaintext into key space m
+ * expands copies of salt and plaintext into key space m.
  */
 static inline void xxtcrypt_salt_prepare(char *m, size_t len, const char *plaintext, const char salt[2]) {
 	unsigned i;
@@ -2455,7 +2832,7 @@ static inline void xxtcrypt_salt_prepare(char *m, size_t len, const char *plaint
 }
 
 /**
- * XXT encrypt
+ * XXT encrypt routine.
  */
 static inline void xxtcrypt_ll_enc(size_t length, uint32_t *v, uint32_t k[4]) {
 	uint32_t z=v[length-1], y, sum=0, e;
@@ -2485,7 +2862,9 @@ static inline void xxtcrypt_ll_enc(size_t length, uint32_t *v, uint32_t k[4]) {
 	}
 }
 
-/* load keys returns new offset */
+/**
+ * load keys returns new offset.
+ */
 static inline unsigned xxtcrypt_ll_load_k4(unsigned ofs, uint32_t k[4], const char *plaintext, size_t saltlen, const char *salt) {
 	unsigned ki, i;
 
@@ -2506,6 +2885,7 @@ static inline unsigned xxtcrypt_ll_load_k4(unsigned ofs, uint32_t k[4], const ch
 }
 
 /**
+ * encrypt password into hashed password.
  * format: salt!hash
  */
 char *xxtcrypt(size_t max, char *dest, const char *plaintext, size_t saltlen, const char *salt, size_t bits) {
@@ -2546,7 +2926,9 @@ char *xxtcrypt(size_t max, char *dest, const char *plaintext, size_t saltlen, co
 	return dest;
 }
 
-/* fills with salt data */
+/**
+ * fills with salt data.
+ */
 void xxtcrypt_gensalt(size_t salt_len, char *salt, int (*rand_func)(void), unsigned randomitity) {
 	unsigned randness, i, pool;
 
@@ -2573,7 +2955,7 @@ void xxtcrypt_gensalt(size_t salt_len, char *salt, int (*rand_func)(void), unsig
 }
 
 /**
- * creates a random salt and applies it to the password
+ * creates a random salt and applies it to the password.
  */
 int xxtcrypt_makepass(char *buf, size_t max, const char *plaintext) {
 	char salt[XXTCRYPT_GENSALT_LEN];
@@ -2587,7 +2969,7 @@ int xxtcrypt_makepass(char *buf, size_t max, const char *plaintext) {
 }
 
 /**
- * checks a password
+ * checks a password.
  */
 int xxtcrypt_checkpass(const char *crypttext, const char *plaintext) {
 	const char *hashptr;
@@ -2608,11 +2990,12 @@ int xxtcrypt_checkpass(const char *crypttext, const char *plaintext) {
 		return 0; /* failure - won't fit */
 	}
 
-	/* TODO: only compare the hashes and not the salts and formatting */
+	/** @todo only compare the hashes and not the salts and formatting */
 	return strcmp(buf, crypttext)==0; /* return 1 if passwords match */
 }
 
 #ifndef NTEST
+/** undocumented - please add documentation. */
 static void xxtcrypt_test(void) {
 	const char *test_pass[] = {
 		"hello",
@@ -2645,7 +3028,7 @@ static void xxtcrypt_test(void) {
  ******************************************************************************/
 
 /**
- * creates a filename based on component and id
+ * creates a filename based on component and id.
  */
 void fdb_makename_str(char *fn, size_t max, const char *base, const char *id) {
 	char name[id?strlen(id)+1:6];
@@ -2670,14 +3053,14 @@ void fdb_makename_str(char *fn, size_t max, const char *base, const char *id) {
 }
 
 /**
- * creates a filename based on component and id
+ * creates a filename based on component and id.
  */
 void fdb_getbasename(char *fn, size_t max, const char *base) {
 	snprintf(fn, max, "data/%s/", base);
 }
 
 /**
- * return true if the file is a valid id filename
+ * @return true if the file is a valid id filename.
  */
 int fdb_is_id(const char *filename) {
 	for(;*filename;filename++) if(!isdigit(*filename)) return 0;
@@ -2689,11 +3072,17 @@ int fdb_is_id(const char *filename) {
  ******************************************************************************/
 /** user:configuration **/
 
-/* defaults for new users */
+/*=* defaults for new users *=*/
+
+/** default level for new users. */
 #define USER_LEVEL_NEWUSER mud_config.newuser_level
+
+/** default flags for new users. */
 #define USER_FLAGS_NEWUSER mud_config.newuser_flags
 
-/** user:types **/
+/*=* user:types *=*/
+
+/** undocumented - please add documentation. */
 struct user {
 	unsigned id;
 	char *username;
@@ -2703,18 +3092,29 @@ struct user {
 	REFCOUNT_TYPE REFCOUNT_NAME;
 };
 
+/** undocumented - please add documentation. */
 struct user_name_map_entry {
 	unsigned id;
 	char *username;
 };
 
-/** user:globals **/
+/*=* user:globals *=*/
+
+/** undocumented - please add documentation. */
 static struct map user_name_map; /* convert username to id */
+
+/** undocumented - please add documentation. */
 static struct freelist user_id_freelist;
+
+/** undocumented - please add documentation. */
 static struct map user_cache_id_map; /* cache table for looking up by id */
+
+/** undocumented - please add documentation. */
 static struct map user_cache_name_map; /* cache table for looking up by username */
 
-/** user:internal functions **/
+/*=* user:internal functions *=*/
+
+/** undocumented - please add documentation. */
 static int user_cache_add(struct user *u) {
 	int ret=1;
 	if(!map_replace_uint(&user_cache_id_map, u->id, u)) {
@@ -2728,6 +3128,7 @@ static int user_cache_add(struct user *u) {
 	return ret;
 }
 
+/** undocumented - please add documentation. */
 static int user_cache_remove(struct user *u) {
 	int ret=1;
 	if(!map_remove_uint(&user_cache_id_map, u->id)) {
@@ -2741,7 +3142,9 @@ static int user_cache_remove(struct user *u) {
 	return ret;
 }
 
-/* only free the structure data */
+/**
+ * only free the structure data.
+ */
 static void user_ll_free(struct user *u) {
 	if(!u) return;
 	free(u->username);
@@ -2753,13 +3156,16 @@ static void user_ll_free(struct user *u) {
 	free(u);
 }
 
+/** undocumented - please add documentation. */
 static void user_free(struct user *u) {
 	if(!u) return;
 	user_cache_remove(u);
 	user_ll_free(u);
 }
 
-/* allocate a default struct */
+/**
+ * allocate a default struct.
+ */
 static struct user *user_defaults(void) {
 	struct user *u;
 	u=calloc(1, sizeof *u);
@@ -2778,6 +3184,7 @@ static struct user *user_defaults(void) {
 	return u;
 }
 
+/** undocumented - please add documentation. */
 static int user_ll_load_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
 	char *endptr;
 	unsigned *uint_p=extra;
@@ -2798,6 +3205,7 @@ static int user_ll_load_uint(struct config *cfg UNUSED, void *extra, const char 
 	return 0; /* success - terminate the callback chain */
 }
 
+/** undocumented - please add documentation. */
 static int user_ll_load_str(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
 	char **str_p=extra;
 	assert(extra != NULL);
@@ -2813,6 +3221,7 @@ static int user_ll_load_str(struct config *cfg UNUSED, void *extra, const char *
 	return 0; /* success - terminate the callback chain */
 }
 
+/** undocumented - please add documentation. */
 static struct user *user_load_byname(const char *username) {
 	FILE *f;
 	char filename[PATH_MAX];
@@ -2856,6 +3265,7 @@ failure:
 	return 0; /* failure */
 }
 
+/** undocumented - please add documentation. */
 static int user_write(const struct user *u) {
 	FILE *f;
 	char filename[PATH_MAX];
@@ -2885,6 +3295,7 @@ static int user_write(const struct user *u) {
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 static void user_name_map_entry_free(void *key UNUSED, union map_data *data) {
 	struct user_name_map_entry *ne=data->ptr;
 	free(ne->username);
@@ -2894,7 +3305,7 @@ static void user_name_map_entry_free(void *key UNUSED, union map_data *data) {
 }
 
 /**
- * add a new account to username to id lookup table
+ * add a new account to username to id lookup table.
  */
 static int user_name_map_add(unsigned id, const char *username) {
 	struct user_name_map_entry *ne;
@@ -2910,7 +3321,9 @@ static int user_name_map_add(unsigned id, const char *username) {
 	return 1; /* success */
 }
 
-/** user:external functions **/
+/*=* user:external functions *=*/
+
+/** undocumented - please add documentation. */
 EXPORT int user_exists(const char *username) {
 	union map_data *tmp;
 	struct user_name_map_entry *ne;
@@ -2922,7 +3335,9 @@ EXPORT int user_exists(const char *username) {
 	return 0; /* user not found */
 }
 
-/* loads a user into the cache */
+/**
+ * loads a user into the cache.
+ */
 EXPORT struct user *user_lookup(const char *username) {
 	union map_data *tmp;
 	struct user *u;
@@ -2935,6 +3350,7 @@ EXPORT struct user *user_lookup(const char *username) {
 	return user_load_byname(username);
 }
 
+/** undocumented - please add documentation. */
 EXPORT struct user *user_create(const char *username, const char *password, const char *email) {
 	struct user *u;
 	long id;
@@ -2986,6 +3402,7 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 	return u; /* success */
 }
 
+/** undocumented - please add documentation. */
 EXPORT int user_init(void) {
 	char pathname[PATH_MAX];
 	DIR *d;
@@ -3037,19 +3454,24 @@ EXPORT int user_init(void) {
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 EXPORT void user_shutdown(void) {
 	map_free(&user_name_map);
 	freelist_free(&user_id_freelist);
 }
 
-/* decrement a reference count */
+/**
+ * decrement a reference count.
+ */
 EXPORT void user_put(struct user **user) {
 	if(user && *user) {
 		REFCOUNT_PUT(*user, user_free(*user); *user=NULL);
 	}
 }
 
-/* increment the reference count */
+/**
+ * increment the reference count.
+ */
 EXPORT void user_get(struct user *user) {
 	if(user) {
 		REFCOUNT_GET(user);
@@ -3063,11 +3485,13 @@ EXPORT void user_get(struct user *user) {
  * Socket Buffers
  ******************************************************************************/
 
+/** undocumented - please add documentation. */
 struct buffer {
 	char *data;
 	size_t used, max;
 };
 
+/** undocumented - please add documentation. */
 EXPORT void buffer_init(struct buffer *b, size_t max) {
 	assert(b != NULL);
 	b->data=malloc(max+1); /* allocate an extra byte past max for null */
@@ -3075,7 +3499,9 @@ EXPORT void buffer_init(struct buffer *b, size_t max) {
 	b->max=max;
 }
 
-/* free the buffer */
+/**
+ * free the buffer.
+ */
 EXPORT void buffer_free(struct buffer *b) {
 	free(b->data);
 	b->data=NULL;
@@ -3083,8 +3509,10 @@ EXPORT void buffer_free(struct buffer *b) {
 	b->max=0;
 }
 
-/* expand newlines into CR/LF startin at used
- * return length of processed string or -1 on overflow */
+/**
+ * expand newlines into CR/LF startin at used.
+ * @return length of processed string or -1 on overflow
+ */
 static int buffer_ll_expandnl(struct buffer *b, size_t len) {
 	size_t rem;
 	char *p, *e;
@@ -3106,8 +3534,10 @@ static int buffer_ll_expandnl(struct buffer *b, size_t len) {
 	return len;
 }
 
-/* special write that does not expand its input.
- * unlike the other calls, truncation will not load partial data into a buffer */
+/**
+ * special write that does not expand its input.
+ * unlike the other calls, truncation will not load partial data into a buffer
+ */
 EXPORT int buffer_write_noexpand(struct buffer *b, const void *data, size_t len) {
 	if(b->used+len>b->max) {
 		DEBUG("%s():Overflow detected. refusing to send any data.\n", __func__);
@@ -3121,7 +3551,9 @@ EXPORT int buffer_write_noexpand(struct buffer *b, const void *data, size_t len)
 	return len;
 }
 
-/* writes data and exapands newline to CR/LF */
+/**
+ * writes data and exapands newline to CR/LF.
+ */
 EXPORT int buffer_write(struct buffer *b, const char *str, size_t len) {
 	size_t i, j;
 	int ret;
@@ -3151,12 +3583,16 @@ EXPORT int buffer_write(struct buffer *b, const char *str, size_t len) {
 	return j;
 }
 
-/* puts data in a client's output buffer */
+/**
+ * puts data in a client's output buffer.
+ */
 static int buffer_puts(struct buffer *b, const char *str) {
 	return buffer_write(b, str, strlen(str));
 }
 
-/* printfs and expands newline to CR/LF */
+/**
+ * printfs and expands newline to CR/LF.
+ */
 EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap) {
 	int res;
 	assert(b != NULL);
@@ -3189,7 +3625,9 @@ EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap) {
 	return res;
 }
 
-/* printfs data in a client's output buffer */
+/**
+ * printfs data in a client's output buffer.
+ */
 static int buffer_printf(struct buffer *b, const char *fmt, ...) {
 	va_list ap;
 	int res;
@@ -3199,6 +3637,7 @@ static int buffer_printf(struct buffer *b, const char *fmt, ...) {
 	return res;
 }
 
+/** undocumented - please add documentation. */
 EXPORT const char *buffer_data(struct buffer *b, size_t *len) {
 	assert(b != NULL);
 	assert(len != NULL);
@@ -3211,9 +3650,12 @@ EXPORT const char *buffer_data(struct buffer *b, size_t *len) {
 	return b->data;
 }
 
-/* used for adding more data to the buffer
- * returns a pointer to the start of the buffer
- * len is the amount remaining in the buffer */
+/**
+ * used for adding more data to the buffer.
+ * @return a pointer to the start of the buffer
+ * @param b a buffer
+ * @param len the amount remaining in the buffer
+ */
 EXPORT char *buffer_load(struct buffer *b, size_t *len) {
 	assert(b != NULL);
 	assert(len != NULL);
@@ -3226,7 +3668,9 @@ EXPORT char *buffer_load(struct buffer *b, size_t *len) {
 	return b->data+b->used;
 }
 
-/* returns the remaining data in the buffer */
+/**
+ * @return the remaining data in the buffer
+ */
 EXPORT unsigned buffer_consume(struct buffer *b, size_t len) {
 	assert(b != NULL);
 	DEBUG("len=%zu used=%zu rem=%zu\n", len, b->used, b->max-b->used);
@@ -3241,7 +3685,8 @@ EXPORT unsigned buffer_consume(struct buffer *b, size_t len) {
 	return b->used;
 }
 
-/* commits data to buffer
+/**
+ * commits data to buffer.
  */
 EXPORT void buffer_emit(struct buffer *b, size_t len) {
 	assert(b != NULL);
@@ -3254,8 +3699,8 @@ EXPORT void buffer_emit(struct buffer *b, size_t len) {
 	}
 }
 
-/*
- * callback returns the number of items consumed
+/**
+ * callback returns the number of items consumed.
  * if a line is incomplete (which it will be if an IAC is incomplete, then return NULL
  */
 static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p) {
@@ -3305,6 +3750,7 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 	return NULL; /* not found */
 }
 
+/** undocumented - please add documentation. */
 EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p) {
 	char *d;
 	assert(b != NULL);
@@ -3326,13 +3772,22 @@ EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t
  * Socket I/O API
  ******************************************************************************/
 #if !defined(SOCKET) || !defined(INVALID_SOCKET) || !defined(SOCKET_ERROR)
+
+/** undocumented - please add documentation. */
 #define SOCKET int
+
+/** undocumented - please add documentation. */
 #define INVALID_SOCKET (-1)
+
+/** undocumented - please add documentation. */
 #define SOCKET_ERROR (-1)
+
 #endif
 
+/** undocumented - please add documentation. */
 #define SOCKETIO_FAILON(e, reason, fail_label) do { if(e) { fprintf(stderr, "ERROR:%s:%s\n", reason, socketio_strerror()); goto fail_label; } } while(0)
 
+/** undocumented - please add documentation. */
 struct socketio_handle {
 	unsigned type; /* 0 = server, 1 = telnetclient */
 	LIST_ENTRY(struct socketio_handle) list;
@@ -3345,18 +3800,36 @@ struct socketio_handle {
 	void (*extra_free)(struct socketio_handle *sh, void *extra);
 };
 
+/** undocumented - please add documentation. */
 static LIST_HEAD(struct socketio_handle_list, struct socketio_handle) socketio_handle_list;
-static fd_set *socketio_readfds, *socketio_writefds;
-static unsigned socketio_fdset_sz; /* number of bits allocated */
+
+/** undocumented - please add documentation. */
+static fd_set *socketio_readfds,
+/** undocumented - please add documentation. */
+	*socketio_writefds;
+
+/** number of bits allocated. */
+static unsigned socketio_fdset_sz;
+
 #if defined(USE_WIN32_SOCKETS)
+
+/** undocumented - please add documentation. */
 #define socketio_fdmax 0 /* not used on Win32 */
+
+/** undocumented - please add documentation. */
 static unsigned socketio_socket_count; /* WIN32: the limit of fd_set is the count not the fd number */
 #else
+
+/** undocumented - please add documentation. */
 static SOCKET socketio_fdmax=INVALID_SOCKET; /* used by select() to limit the number of fds to check */
 #endif
+
+/** undocumented - please add documentation. */
 static unsigned socketio_delete_count=0; /* counts the number of pending deletions */
 
 #if defined(USE_WIN32_SOCKETS) && !defined(gai_strerror)
+
+/** undocumented - please add documentation. */
 static const char *gai_strerror(int err) {
 	switch(err) {
 		case EAI_AGAIN: return "Temporary failure in name resolution";
@@ -3372,6 +3845,7 @@ static const char *gai_strerror(int err) {
 }
 #endif
 
+/** undocumented - please add documentation. */
 EXPORT const char *socketio_strerror(void) {
 #if defined(USE_WIN32_SOCKETS)
 	static char buf[64];
@@ -3386,7 +3860,9 @@ EXPORT const char *socketio_strerror(void) {
 #endif
 }
 
-/* return true is the last recv()/send() call would have blocked */
+/**
+ * @return true if the last recv()/send() call would have blocked.
+ */
 EXPORT int socketio_wouldblock(void) {
 #if defined(USE_WIN32_SOCKETS)
 	return WSAGetLastError()==WSAEWOULDBLOCK;
@@ -3396,6 +3872,7 @@ EXPORT int socketio_wouldblock(void) {
 }
 
 #ifndef NTRACE
+/** undocumented - please add documentation. */
 static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds) {
 #if defined(USE_WIN32_SOCKETS)
 	unsigned i;
@@ -3422,6 +3899,7 @@ static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds) {
 }
 #endif
 
+/** undocumented - please add documentation. */
 EXPORT int socketio_init(void) {
 #if defined(USE_WIN32_SOCKETS)
 	WSADATA wsaData;
@@ -3457,12 +3935,14 @@ EXPORT int socketio_init(void) {
 	return 1;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void socketio_shutdown(void) {
 #if defined(USE_WIN32_SOCKETS)
 	WSACleanup();
 #endif
 }
 
+/** undocumented - please add documentation. */
 EXPORT int socketio_close(SOCKET *fd) {
 	int res;
 	assert(fd!=0);
@@ -3485,8 +3965,10 @@ EXPORT int socketio_close(SOCKET *fd) {
 	return res;
 }
 
-/* You should call this whenever opening a new socket
- * checks the maximum count and updates socketio_fdmax */
+/**
+ * You should call this whenever opening a new socket.
+ * checks the maximum count and updates socketio_fdmax
+ */
 EXPORT int socketio_check_count(SOCKET fd) {
 	assert(fd!=INVALID_SOCKET);
 #if defined(USE_WIN32_SOCKETS)
@@ -3507,18 +3989,23 @@ EXPORT int socketio_check_count(SOCKET fd) {
 	return 1; /* success */
 }
 
-/* report that an fd is ready for read events, and update the fdmax value */
+/**
+ * report that an fd is ready for read events, and update the fdmax value.
+ */
 EXPORT void socketio_readready(SOCKET fd) {
 	assert(fd!=INVALID_SOCKET);
 	FD_SET(fd, socketio_readfds);
 }
 
-/* report that an fd is ready for write events, and update the fdmax value */
+/**
+ * report that an fd is ready for write events, and update the fdmax value.
+ */
 EXPORT void socketio_writeready(SOCKET fd) {
 	assert(fd!=INVALID_SOCKET);
 	FD_SET(fd, socketio_writefds);
 }
 
+/** undocumented - please add documentation. */
 EXPORT int socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, size_t name_len) {
 	char servbuf[16];
 	int res;
@@ -3542,6 +4029,7 @@ failure:
 	return 0;
 }
 
+/** undocumented - please add documentation. */
 EXPORT int socketio_getpeername(SOCKET fd, char *name, size_t name_len) {
 	struct sockaddr_storage ss;
 	socklen_t sslen;
@@ -3564,6 +4052,7 @@ EXPORT int socketio_getpeername(SOCKET fd, char *name, size_t name_len) {
 	return 1;
 }
 
+/** undocumented - please add documentation. */
 static int socketio_nonblock(SOCKET fd) {
 	int res;
 #if defined(USE_WIN32_SOCKETS)
@@ -3578,6 +4067,7 @@ failure:
 	return 0;
 }
 
+/** undocumented - please add documentation. */
 static void socketio_ll_handle_free(struct socketio_handle *sh) {
 	assert(sh!=NULL);
 	if(!sh)
@@ -3606,6 +4096,7 @@ static void socketio_ll_handle_free(struct socketio_handle *sh) {
 	free(sh);
 }
 
+/** undocumented - please add documentation. */
 EXPORT int socketio_send(SOCKET fd, const void *data, size_t len) {
 	int res;
 	res=send(fd, data, len, 0);
@@ -3615,6 +4106,7 @@ failure:
 	return -1;
 }
 
+/** undocumented - please add documentation. */
 EXPORT int socketio_recv(SOCKET fd, void *data, size_t len) {
 	int res;
 	res=recv(fd, data, len, 0);
@@ -3624,6 +4116,7 @@ failure:
 	return -1;
 }
 
+/** undocumented - please add documentation. */
 static void socketio_toomany(SOCKET fd) {
 	const char buf[]="Too many connections\r\n";
 
@@ -3636,6 +4129,7 @@ static void socketio_toomany(SOCKET fd) {
 	socketio_close(&fd);
 }
 
+/** undocumented - please add documentation. */
 static void socketio_fdset_copy(fd_set *dst, const fd_set *src) {
 	assert(dst!=NULL);
 	assert(src!=NULL);
@@ -3660,6 +4154,7 @@ static void socketio_fdset_copy(fd_set *dst, const fd_set *src) {
 
 }
 
+/** undocumented - please add documentation. */
 static struct socketio_handle *socketio_ll_newhandle(SOCKET fd, const char *name, unsigned type, void (*write_event)(struct socketio_handle *sh, SOCKET fd, void *p), void (*read_event)(struct socketio_handle *sh, SOCKET fd, void *p)) {
 	struct socketio_handle *ret;
 
@@ -3686,6 +4181,7 @@ failure:
 	return NULL;
 }
 
+/** undocumented - please add documentation. */
 EXPORT int socketio_dispatch(long msec) {
 	struct socketio_handle *curr, *next;
 	struct timeval timeout, *to;
@@ -3796,10 +4292,13 @@ failure:
 /******************************************************************************
  * Server
  ******************************************************************************/
+
+/** undocumented - please add documentation. */
 struct server {
 	void (*newclient)(struct socketio_handle *new_sh);
 };
 
+/** undocumented - please add documentation. */
 EXPORT void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p) {
 	struct sockaddr_storage ss;
 	socklen_t sslen;
@@ -3838,6 +4337,7 @@ failure:
 	return;
 }
 
+/** undocumented - please add documentation. */
 static void server_free(struct socketio_handle *sh, void *p) {
 	struct server *servdata=p;
 
@@ -3855,6 +4355,7 @@ static void server_free(struct socketio_handle *sh, void *p) {
 	free(servdata);
 }
 
+/** undocumented - please add documentation. */
 static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct socketio_handle *new_sh)) {
 	SOCKET fd;
 	int res;
@@ -3924,9 +4425,14 @@ failure_clean:
 	return 0;
 }
 
-/*
- * family : 0 or AF_INET or AF_INET6
- * socktype: SOCK_STREAM or SOCK_DGRAM
+/**
+ * opens and binds a listening socket on a port.
+ * @param family 0 or AF_INET or AF_INET6
+ * @param socktype SOCK_STREAM or SOCK_DGRAM
+ * @param host NULL or hostname/IP to bind to.
+ * @param port port number or service name to use when binding the socket.
+ * @param newclient callback to use on accept().
+ * @return file descriptor of socket.
  */
 EXPORT int socketio_listen(int family, int socktype, const char *host, const char *port, void (*newclient)(struct socketio_handle *sh)) {
 	int res;
@@ -3978,9 +4484,12 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 /******************************************************************************
  * Client - handles client connections
  ******************************************************************************/
+
+/** undocumented - please add documentation. */
 struct telnetclient {
 	struct socketio_handle *sh;
 	struct buffer output, input;
+	/** undocumented - please add documentation. */
 	struct terminal {
 		int width, height;
 		char name[32];
@@ -3989,11 +4498,14 @@ struct telnetclient {
 	const char *prompt_string;
 	void (*line_input)(struct telnetclient *cl, const char *line);
 	void (*state_free)(struct telnetclient *cl);
+	/** undocumented - please add documentation. */
 	union state_data {
+		/** undocumented - please add documentation. */
 		struct login_state {
 			char username[16];
 		} login;
 		struct form_state form;
+		/** undocumented - please add documentation. */
 		struct menu_state {
 			const struct menuinfo *menu; /* current menu */
 		} menu;
@@ -4002,11 +4514,14 @@ struct telnetclient {
 	struct channel_member_head member_list; /* membership for channels */
 };
 
-/* return the username */
+/**
+ * @return the username
+ */
 EXPORT const char *telnetclient_username(struct telnetclient *cl) {
 	return cl && cl->user && cl->user->username ? cl->user->username : "<UNKNOWN>";
 }
 
+/** undocumented - please add documentation. */
 EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str) {
 	int res;
 	assert(cl != NULL);
@@ -4017,6 +4532,7 @@ EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str) {
 	return res;
 }
 
+/** undocumented - please add documentation. */
 EXPORT int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap) {
 	int res;
 
@@ -4030,6 +4546,7 @@ EXPORT int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_lis
 	return res;
 }
 
+/** undocumented - please add documentation. */
 EXPORT int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...) {
 	va_list ap;
 	int res;
@@ -4046,6 +4563,7 @@ EXPORT int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...) {
 	return res;
 }
 
+/** undocumented - please add documentation. */
 static void telnetclient_clear_statedata(struct telnetclient *cl) {
 	if(cl->state_free) {
 		cl->state_free(cl);
@@ -4054,6 +4572,7 @@ static void telnetclient_clear_statedata(struct telnetclient *cl) {
 	memset(&cl->state, 0, sizeof cl->state);
 }
 
+/** undocumented - please add documentation. */
 static void telnetclient_free(struct socketio_handle *sh, void *p) {
 	struct telnetclient *client=p;
 	assert(client!=NULL);
@@ -4061,7 +4580,7 @@ static void telnetclient_free(struct socketio_handle *sh, void *p) {
 		return;
 
 	TODO("Determine if connection was logged in first");
-	eventlog_signoff(telnetclient_username(client), sh->name); /* TODO: fix the username field */
+	eventlog_signoff(telnetclient_username(client), sh->name); /** @todo fix the username field */
 
 	DEBUG("freeing client '%s'\n", sh->name);
 
@@ -4097,6 +4616,7 @@ static void telnetclient_free(struct socketio_handle *sh, void *p) {
 	free(client);
 }
 
+/** undocumented - please add documentation. */
 static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh) {
 	struct telnetclient *cl;
 	cl=malloc(sizeof *cl);
@@ -4127,7 +4647,9 @@ failed:
 	return NULL;
 }
 
-/* replaces the current user with a different one and updates the reference counts */
+/**
+ * replaces the current user with a different one and updates the reference counts.
+ */
 static void telnetclient_setuser(struct telnetclient *cl, struct user *u) {
 	struct user *old_user;
 	assert(cl != NULL);
@@ -4137,7 +4659,9 @@ static void telnetclient_setuser(struct telnetclient *cl, struct user *u) {
 	user_put(&old_user);
 }
 
-/* posts telnet protocol necessary to begin negotiation of options */
+/**
+ * posts telnet protocol necessary to begin negotiation of options.
+ */
 static int telnetclient_telnet_init(struct telnetclient *cl) {
 	const char support[] = {
 		IAC, DO, TELOPT_LINEMODE,
@@ -4154,6 +4678,7 @@ static int telnetclient_telnet_init(struct telnetclient *cl) {
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 static int telnetclient_echomode(struct telnetclient *cl, int mode) {
 	static const char echo_off[] = { IAC, WILL, TELOPT_ECHO }; /* OFF */
 	static const char echo_on[] = { IAC, WONT, TELOPT_ECHO }; /* ON */
@@ -4175,6 +4700,7 @@ static int telnetclient_echomode(struct telnetclient *cl, int mode) {
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 static int telnetclient_linemode(struct telnetclient *cl, int mode) {
 	const char enable[] = {
 		IAC, SB, TELOPT_LINEMODE, LM_MODE, MODE_EDIT|MODE_TRAPSIG, IAC, SE
@@ -4201,6 +4727,7 @@ static int telnetclient_linemode(struct telnetclient *cl, int mode) {
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 EXPORT void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void *p) {
 	const char *data;
 	size_t len;
@@ -4228,7 +4755,9 @@ EXPORT void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void
 	}
 }
 
-/* for processing IAC SB */
+/**
+ * for processing IAC SB.
+ */
 static void telnetclient_iac_process_sb(const char *iac, size_t len, struct telnetclient *cl) {
 	assert(cl != NULL);
 	assert(iac[0] == IAC);
@@ -4267,7 +4796,9 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 	}
 }
 
-/* return: 0 means "incomplete" data for this function */
+/**
+ * @return 0 means "incomplete" data for this function
+ */
 static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 	struct telnetclient *cl=p;
 	const char *endptr;
@@ -4348,7 +4879,9 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 
 }
 
-/* pull data from socket into buffer */
+/**
+ * pull data from socket into buffer.
+ */
 static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl) {
 	char *data;
 	size_t len;
@@ -4375,7 +4908,7 @@ failure:
 	return 0;
 }
 
-/* */
+/** undocumented - please add documentation. */
 EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, void *extra) {
 	const char *line;
 	size_t consumed;
@@ -4402,12 +4935,14 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 	return;
 }
 
+/** undocumented - please add documentation. */
 static void telnetclient_setprompt(struct telnetclient *cl, const char *prompt) {
 	cl->prompt_string=prompt?prompt:"? ";
 	telnetclient_puts(cl, cl->prompt_string);
 	cl->prompt_flag=1;
 }
 
+/** undocumented - please add documentation. */
 static void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt) {
 	assert(cl != NULL);
 	telnetclient_setprompt(cl, prompt);
@@ -4415,7 +4950,9 @@ static void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_in
 	cl->sh->read_event=telnetclient_rdev_lineinput;
 }
 
-/* return true if client is still in this state */
+/**
+ * @return true if client is still in this state
+ */
 static int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt) {
 
 	if(!cl) return 0;
@@ -4423,10 +4960,12 @@ static int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(stru
 	return cl->sh->read_event==telnetclient_rdev_lineinput && cl->line_input==line_input && cl->prompt_string==prompt;
 }
 
+/** undocumented - please add documentation. */
 static void menu_lineinput(struct telnetclient *cl, const char *line) {
 	menu_input(cl, cl->state.menu.menu, line);
 }
 
+/** undocumented - please add documentation. */
 static void telnetclient_start_menuinput(struct telnetclient *cl, struct menuinfo *menu) {
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
 	cl->state.menu.menu=menu;
@@ -4434,6 +4973,7 @@ static void telnetclient_start_menuinput(struct telnetclient *cl, struct menuinf
 	telnetclient_start_lineinput(cl, menu_lineinput, mud_config.menu_prompt);
 }
 
+/** undocumented - please add documentation. */
 EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 	struct telnetclient *cl;
 
@@ -4454,6 +4994,7 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
+/** undocumented - please add documentation. */
 EXPORT void telnetclient_close(struct telnetclient *cl) {
 	if(cl && cl->sh) {
 		cl->sh->delete_flag=1; /* cause deletetion later */
@@ -4461,12 +5002,14 @@ EXPORT void telnetclient_close(struct telnetclient *cl) {
 	}
 }
 
+/** undocumented - please add documentation. */
 EXPORT void telnetclient_prompt_refresh(struct telnetclient *cl) {
 	if(cl && cl->prompt_string && !cl->prompt_flag) {
 		telnetclient_setprompt(cl, cl->prompt_string);
 	}
 }
 
+/** undocumented - please add documentation. */
 EXPORT void telnetclient_prompt_refresh_all(void) {
 	struct socketio_handle *curr, *next;
 	for(curr=LIST_TOP(socketio_handle_list);curr;curr=next) {
@@ -4481,33 +5024,47 @@ EXPORT void telnetclient_prompt_refresh_all(void) {
  * Channels
  ******************************************************************************/
 
-/*
- * channel_member - a client has one of these for every channel they belong to
- * channel_group - head for list of members
- *   to delete this all members must be detached, because they have a reference to the head.
- */
-
+/** undocumented - please add documentation. */
 #define CHANNEL_FLAG_PERMANENT 1
 
+/**
+ * a client has one of these for every channel they belong to.
+ */
 struct channel_member {
 	LIST_ENTRY(struct channel_member) client_membership; /* client's list */
 	struct telnetclient *cl; /* we could use a function pointer and void* to allow a more generic strategy */
-	LIST_ENTRY(struct channel_member) groups; /* channel's list */
+	/** channel's list */
+	LIST_ENTRY(struct channel_member) groups;
 	struct channel_group *group_head; /* pointer to the channel head */
 };
 
+/**
+ * head for list of members.
+ *   to delete this all members must be detached, because they have a reference to the head.
+ */
 struct channel_group {
-	/* TODO: work out how to use a channel group with a room */
-	char *name; /* channel name */
-	LIST_HEAD(struct, struct channel_member) member_list;
-	LIST_ENTRY(struct channel_group) channels;
+	/** @todo work out how to use a channel group with a room */
+	char *name; /** channel name */
+	LIST_HEAD(struct, struct channel_member) member_list; /** undocumented - please add documentation. */
+	LIST_ENTRY(struct channel_group) channels; /** undocumented - please add documentation. */
 	unsigned flags[BITFIELD(32, unsigned)];
 };
 
+/** undocumented - please add documentation. */
 static LIST_HEAD(struct, struct channel_group) channel_global_list;
-static struct channel_group **channel_system; /* array of system channels */
-static unsigned nr_channel_system; /* number of system channels */
 
+/**
+ * array of system channels.
+ */
+static struct channel_group **channel_system;
+
+/**
+ * number of system channels for channel_system array.
+ * @see channel_group
+ */
+static unsigned nr_channel_system;
+
+/** undocumented - please add documentation. */
 EXPORT struct channel_group *channel_group_lookup(const char *name) {
 	struct channel_group *curr;
 	for(curr=LIST_TOP(channel_global_list);curr;curr=LIST_NEXT(curr, channels)) {
@@ -4518,6 +5075,7 @@ EXPORT struct channel_group *channel_group_lookup(const char *name) {
 	return NULL;
 }
 
+/** undocumented - please add documentation. */
 EXPORT struct channel_group *channel_group_create(const char *name) {
 	struct channel_group *ret;
 
@@ -4554,6 +5112,7 @@ EXPORT struct channel_group *channel_group_create(const char *name) {
 	return ret;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void channel_group_free(struct channel_group *ch) {
 	struct channel_member *curr;
 	if(!ch) return; /* ignore NULL */
@@ -4570,7 +5129,9 @@ EXPORT void channel_group_free(struct channel_group *ch) {
 	free(ch);
 }
 
-/** fetch a system channel */
+/**
+ * fetch a system channel
+ */
 EXPORT struct channel_group *channel_system_get(unsigned n) {
 	if(n<nr_channel_system) {
 		return channel_system[n];
@@ -4578,7 +5139,9 @@ EXPORT struct channel_group *channel_system_get(unsigned n) {
 	return 0;
 }
 
-/** initialize some default channels */
+/**
+ * initialize some default channels
+ */
 EXPORT int channel_module_init(void) {
 	const char *s, *e;
 	char buf[128];
@@ -4629,7 +5192,9 @@ failure:
 	return 0;
 }
 
-/** find membership in a channel */
+/**
+ * find membership in a channel
+ */
 EXPORT struct channel_member *channel_member_check(struct channel_group *ch, struct channel_member_head *mh) {
 	struct channel_member *curr;
 	for(curr=LIST_TOP(*mh);curr;curr=LIST_NEXT(curr, client_membership)) {
@@ -4640,7 +5205,9 @@ EXPORT struct channel_member *channel_member_check(struct channel_group *ch, str
 	return 0; /* not a member of this channel */
 }
 
-/** add membership for a channel */
+/**
+ * add membership for a channel
+ */
 EXPORT int channel_member_join(struct channel_group *ch, struct channel_member_head *mh, struct telnetclient *cl) {
 	struct channel_member *new;
 
@@ -4662,7 +5229,7 @@ EXPORT int channel_member_join(struct channel_group *ch, struct channel_member_h
 	LIST_INSERT_HEAD(mh, new, client_membership);
 	LIST_INSERT_HEAD(&ch->member_list, new, groups);
 
-	/* TODO: log the system channel number if there is no name */
+	/** @todo log the system channel number if there is no name */
 	eventlog_channel_join(cl&&cl->sh?cl->sh->name:NULL, ch->name, "<USER>");
 
 	TRACE("join (ch=%p) (mem=%p)\n", ch, new);
@@ -4670,6 +5237,7 @@ EXPORT int channel_member_join(struct channel_group *ch, struct channel_member_h
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 EXPORT int channel_member_part(struct channel_group *ch, struct channel_member_head *mh) {
 	struct channel_member *curr;
 
@@ -4679,7 +5247,7 @@ EXPORT int channel_member_part(struct channel_group *ch, struct channel_member_h
 		return 0; /* failure */
 	}
 
-	/* TODO: log the system channel number if there is no name */
+	/** @todo log the system channel number if there is no name */
 	eventlog_channel_part(curr->cl&&curr->cl->sh?curr->cl->sh->name:NULL, ch->name, "<USER>");
 
 	LIST_REMOVE(curr, client_membership);
@@ -4695,8 +5263,7 @@ EXPORT int channel_member_part(struct channel_group *ch, struct channel_member_h
 	return 1; /* success */
 }
 
-/**
- */
+/** undocumented - please add documentation. */
 EXPORT void channel_member_part_all(struct channel_member_head *mh) {
 	struct channel_member *curr;
 	while((curr=LIST_TOP(*mh))) {
@@ -4704,8 +5271,10 @@ EXPORT void channel_member_part_all(struct channel_member_head *mh) {
 	}
 }
 
-/** send a message to a channel, excluding one member
- * return a count of the number receiving the message */
+/**
+ * send a message to a channel, excluding one member.
+ * @return a count of the number receiving the message
+ */
 EXPORT int channel_broadcast(struct channel_group *ch, struct channel_member *exclude_member, const char *fmt, ...) {
 	struct channel_member *curr, *next;
 	int count;
@@ -4738,6 +5307,8 @@ EXPORT int channel_broadcast(struct channel_group *ch, struct channel_member *ex
 /******************************************************************************
  * Menus
  ******************************************************************************/
+
+/** undocumented - please add documentation. */
 struct menuitem {
 	LIST_ENTRY(struct menuitem) item;
 	char *name;
@@ -4747,6 +5318,7 @@ struct menuitem {
 	void *extra3;
 };
 
+/** undocumented - please add documentation. */
 EXPORT void menu_create(struct menuinfo *mi, const char *title) {
 	assert(mi!=NULL);
 	LIST_INIT(&mi->items);
@@ -4759,6 +5331,7 @@ failed:
 	return;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*, long, void*), long extra2, void *extra3) {
 	struct menuitem *newitem;
 	newitem=malloc(sizeof *newitem);
@@ -4776,7 +5349,9 @@ EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*f
 	mi->tail=newitem;
 }
 
-/* draw a little box around the string */
+/**
+ * draw a little box around the string.
+ */
 static void menu_titledraw(struct telnetclient *cl, const char *title, size_t len) {
 #if __STDC_VERSION__ >= 199901L
 	char buf[len+2];
@@ -4799,6 +5374,7 @@ static void menu_titledraw(struct telnetclient *cl, const char *title, size_t le
 	DEBUG("%s>>%s", cl?cl->sh->name:"", buf);
 }
 
+/** undocumented - please add documentation. */
 EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi) {
 	const struct menuitem *curr;
 
@@ -4817,6 +5393,7 @@ EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi) {
 	}
 }
 
+/** undocumented - please add documentation. */
 EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line) {
 	const struct menuitem *curr;
 	while(*line && isspace(*line)) line++; /* ignore leading spaces */
@@ -4836,7 +5413,9 @@ EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const
 	telnetclient_setprompt(cl, mud_config.menu_prompt);
 }
 
-/* used as a generic starting point for menus */
+/**
+ * used as a generic starting point for menus.
+ */
 static void menu_start(void *p, long unused2 UNUSED, void *extra3) {
 	struct telnetclient *cl=p;
 	struct menuinfo *mi=extra3;
@@ -4847,6 +5426,7 @@ static void menu_start(void *p, long unused2 UNUSED, void *extra3) {
  * command - handles the command processing
  ******************************************************************************/
 
+/** undocumented - please add documentation. */
 static int command_do_pose(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in current room");
@@ -4854,6 +5434,7 @@ static int command_do_pose(struct telnetclient *cl, struct user *u, const char *
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 static int command_do_yell(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in yelling distance");
@@ -4861,6 +5442,7 @@ static int command_do_yell(struct telnetclient *cl, struct user *u, const char *
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 static int command_do_say(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
 	struct channel_group *ch;
 	TODO("Get user name");
@@ -4870,6 +5452,7 @@ static int command_do_say(struct telnetclient *cl, struct user *u, const char *c
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 static int command_do_emote(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in current room");
@@ -4877,6 +5460,7 @@ static int command_do_emote(struct telnetclient *cl, struct user *u, const char 
 	return 1; /* success */
 }
 
+/** undocumented - please add documentation. */
 static int command_do_chsay(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg) {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in a channel");
@@ -4884,12 +5468,14 @@ static int command_do_chsay(struct telnetclient *cl, struct user *u, const char 
 	return 1; /* success */
 }
 
-/* executes a command for user u */
+/**
+ * executes a command for user u.
+ */
 static int command_execute(struct telnetclient *cl, struct user *u, const char *line) {
 	char cmd[64];
 	const char *e, *arg;
 
-	assert(cl != NULL); /* TODO: support cl as NULL for silent/offline commands */
+	assert(cl != NULL); /** @todo support cl as NULL for silent/offline commands */
 	assert(line != NULL);
 
 	while(*line && isspace(*line)) line++; /* ignore leading spaces */
@@ -4952,7 +5538,7 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 		telnetclient_puts(cl, "Not implemented");
 		return 1; /* success */
 	} else if(!strcmp(cmd, "quit")) {
-		telnetclient_close(cl); /* TODO: the close code needs to change the state so telnetclient_isstate does not end up being true for a future read? */
+		telnetclient_close(cl); /** @todo the close code needs to change the state so telnetclient_isstate does not end up being true for a future read? */
 		return 1; /* success */
 	} else if(!strcmp(cmd, "page")) {
 		telnetclient_puts(cl, "Not implemented");
@@ -4988,6 +5574,7 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 	return 0; /* failure */
 }
 
+/** undocumented - please add documentation. */
 static void command_lineinput(struct telnetclient *cl, const char *line) {
 	assert(cl != NULL);
 	assert(cl->sh != NULL);
@@ -4997,7 +5584,7 @@ static void command_lineinput(struct telnetclient *cl, const char *line) {
 	eventlog_commandinput(cl->sh->name, telnetclient_username(cl), line);
 
 	/* do something with the command */
-	command_execute(cl, NULL, line); /* TODO: pass current user and character */
+	command_execute(cl, NULL, line); /** @todo pass current user and character */
 
 	/* check if we should update the prompt */
 	if(telnetclient_isstate(cl, command_lineinput, mud_config.command_prompt)) {
@@ -5005,12 +5592,14 @@ static void command_lineinput(struct telnetclient *cl, const char *line) {
 	}
 }
 
+/** undocumented - please add documentation. */
 static void command_start_lineinput(struct telnetclient *cl) {
 	telnetclient_printf(cl, "Terminal type: %s\n", cl->terminal.name);
 	telnetclient_printf(cl, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
 	telnetclient_start_lineinput(cl, command_lineinput, mud_config.command_prompt);
 }
 
+/** undocumented - please add documentation. */
 EXPORT void command_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 	command_start_lineinput(p);
 }
@@ -5018,6 +5607,8 @@ EXPORT void command_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 /******************************************************************************
  * login - handles the login process
  ******************************************************************************/
+
+/** undocumented - please add documentation. */
 static void login_password_lineinput(struct telnetclient *cl, const char *line) {
 	struct user *u;
 
@@ -5050,11 +5641,13 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
+/** undocumented - please add documentation. */
 static void login_password_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 	struct telnetclient *cl=p;
 	telnetclient_start_lineinput(cl, login_password_lineinput, "Password: ");
 }
 
+/** undocumented - please add documentation. */
 static void login_username_lineinput(struct telnetclient *cl, const char *line) {
 	assert(line != NULL);
 
@@ -5075,11 +5668,13 @@ static void login_username_lineinput(struct telnetclient *cl, const char *line) 
 	login_password_start(cl, 0, 0);
 }
 
+/** undocumented - please add documentation. */
 static void login_username_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 	struct telnetclient *cl=p;
 	telnetclient_start_lineinput(cl, login_username_lineinput, "Username: ");
 }
 
+/** undocumented - please add documentation. */
 static void signoff(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 	struct telnetclient *cl=p;
 	telnetclient_close(cl);
@@ -5088,8 +5683,11 @@ static void signoff(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 /******************************************************************************
  * form - handles processing input forms
  ******************************************************************************/
+
+/** undocumented - please add documentation. */
 static struct form *form_newuser_app;
 
+/** undocumented - please add documentation. */
 EXPORT void form_init(struct form *f, const char *title, void (*form_close)(struct telnetclient *cl, struct form_state *fs)) {
 	LIST_INIT(&f->items);
 	f->form_title=strdup(title);
@@ -5099,11 +5697,14 @@ EXPORT void form_init(struct form *f, const char *title, void (*form_close)(stru
 	f->message=0;
 }
 
-/** define a message to be displayed on start */
+/**
+ * define a message to be displayed on start.
+ */
 EXPORT void form_setmessage(struct form *f, const char *message) {
 	f->message=message;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void form_free(struct form *f) {
 	struct formitem *curr;
 
@@ -5125,6 +5726,7 @@ EXPORT void form_free(struct form *f) {
 	memset(f, 0x55, sizeof *f); /* fill with fake data before freeing */
 }
 
+/** undocumented - please add documentation. */
 EXPORT void form_additem(struct form *f, unsigned flags, const char *name, const char *prompt, const char *description, int (*form_check)(struct telnetclient *cl, const char *str)) {
 	struct formitem *newitem;
 
@@ -5144,6 +5746,7 @@ EXPORT void form_additem(struct form *f, unsigned flags, const char *name, const
 	f->tail=newitem;
 }
 
+/** undocumented - please add documentation. */
 static struct formitem *form_getitem(struct form *f, const char *name) {
 	struct formitem *curr;
 
@@ -5160,7 +5763,9 @@ static struct formitem *form_getitem(struct form *f, const char *name) {
 	return NULL; /* not found */
 }
 
-/** look up the user value from a form */
+/**
+ * look up the user value from a form.
+ */
 static const char *form_getvalue(const struct form *f, unsigned nr_value, char **value, const char *name) {
 	const struct formitem *curr;
 
@@ -5177,6 +5782,7 @@ static const char *form_getvalue(const struct form *f, unsigned nr_value, char *
 	return NULL; /* not found */
 }
 
+/** undocumented - please add documentation. */
 static void form_menu_show(struct telnetclient *cl, const struct form *f, struct form_state *fs) {
 	const struct formitem *curr;
 	unsigned i;
@@ -5195,6 +5801,7 @@ static void form_menu_show(struct telnetclient *cl, const struct form *f, struct
 	telnetclient_printf(cl, "A. accept\n");
 }
 
+/** undocumented - please add documentation. */
 static void form_lineinput(struct telnetclient *cl, const char *line) {
 	struct form_state *fs=&cl->state.form;
 	const struct form *f=fs->form;
@@ -5231,6 +5838,7 @@ static void form_lineinput(struct telnetclient *cl, const char *line) {
 	}
 }
 
+/** undocumented - please add documentation. */
 static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 	struct form_state *fs=&cl->state.form;
 	const struct form *f=fs->form;
@@ -5273,6 +5881,7 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 	return;
 }
 
+/** undocumented - please add documentation. */
 static void form_state_free(struct telnetclient *cl) {
 	struct form_state *fs=&cl->state.form;
 	unsigned i;
@@ -5294,6 +5903,7 @@ static void form_state_free(struct telnetclient *cl) {
 	fs->nr_value=0;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void form_state_init(struct form_state *fs, const struct form *f) {
 	fs->form=f;
 	fs->nr_value=0;
@@ -5301,6 +5911,7 @@ EXPORT void form_state_init(struct form_state *fs, const struct form *f) {
 	fs->done=0;
 }
 
+/** undocumented - please add documentation. */
 static int form_createaccount_username_check(struct telnetclient *cl, const char *str) {
 	int res;
 	size_t len;
@@ -5334,6 +5945,7 @@ static int form_createaccount_username_check(struct telnetclient *cl, const char
 	return 1;
 }
 
+/** undocumented - please add documentation. */
 static void form_createaccount_close(struct telnetclient *cl, struct form_state *fs) {
 	const char *username, *password, *email;
 	struct user *u;
@@ -5363,6 +5975,7 @@ static void form_createaccount_close(struct telnetclient *cl, struct form_state 
 	telnetclient_start_menuinput(cl, &gamemenu_login);
 }
 
+/** undocumented - please add documentation. */
 static void form_start(void *p, long unused2 UNUSED, void *form) {
 	struct telnetclient *cl=p;
 	struct form *f=form;
@@ -5392,10 +6005,12 @@ static void form_start(void *p, long unused2 UNUSED, void *form) {
 	telnetclient_start_lineinput(cl, form_lineinput, fs->curritem->prompt);
 }
 
+/** undocumented - please add documentation. */
 static void form_createaccount_start(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 	form_start(p, 0, form_newuser_app);
 }
 
+/** undocumented - please add documentation. */
 EXPORT struct form *form_load(const char *buf, void (*form_close)(struct telnetclient *cl, struct form_state *fs)) {
 	const char *p, *tmp;
 	char *name, *prompt, *description, *title;
@@ -5490,6 +6105,7 @@ failure:
 	return NULL;
 }
 
+/** undocumented - please add documentation. */
 EXPORT struct form *form_load_from_file(const char *filename, void (*form_close)(struct telnetclient *cl, struct form_state *fs)) {
 	struct form *ret;
 	char *buf;
@@ -5501,6 +6117,7 @@ EXPORT struct form *form_load_from_file(const char *filename, void (*form_close)
 	return ret;
 }
 
+/** undocumented - please add documentation. */
 EXPORT int form_module_init(void) {
 	struct formitem *fi;
 
@@ -5527,6 +6144,7 @@ EXPORT int form_module_init(void) {
 	return 1;
 }
 
+/** undocumented - please add documentation. */
 EXPORT void form_module_shutdown(void) {
 	form_free(form_newuser_app);
 	free(form_newuser_app);
@@ -5536,6 +6154,8 @@ EXPORT void form_module_shutdown(void) {
 /******************************************************************************
  * Game - game logic
  ******************************************************************************/
+
+/** undocumented - please add documentation. */
 EXPORT int game_init(void) {
 
 	/* The login menu */
@@ -5556,8 +6176,11 @@ EXPORT int game_init(void) {
 /******************************************************************************
  * Mud Config
  ******************************************************************************/
+
+/** undocumented - please add documentation. */
 static int fl_default_family=0;
 
+/** undocumented - please add documentation. */
 static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	char **target;
 	size_t len;
@@ -5580,6 +6203,7 @@ static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const
 	return 0; /* success - terminate the callback chain */
 }
 
+/** undocumented - please add documentation. */
 static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	size_t len;
 	unsigned i;
@@ -5612,6 +6236,7 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 	return 1; /* failure - continue looking for matches */
 }
 
+/** undocumented - please add documentation. */
 static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	unsigned i;
 	const struct {
@@ -5643,6 +6268,7 @@ static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, cons
 	return 1; /* failure - continue looking for matches */
 }
 
+/** undocumented - please add documentation. */
 static int do_config_string(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
 	char **target=extra;
 	assert(value != NULL);
@@ -5653,7 +6279,9 @@ static int do_config_string(struct config *cfg UNUSED, void *extra, const char *
 	return 0; /* success - terminate the callback chain */
 }
 
-/* handles the 'server.port' property */
+/**
+ * @brief handles the 'server.port' property.
+ */
 static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value) {
 	if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
 		ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
@@ -5662,6 +6290,7 @@ static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const c
 	return 0; /* success - terminate the callback chain */
 }
 
+/** undocumented - please add documentation. */
 static int do_config_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
 	char *endptr;
 	unsigned *uint_p=extra;
@@ -5682,6 +6311,9 @@ static int do_config_uint(struct config *cfg UNUSED, void *extra, const char *id
 	return 0; /* success - terminate the callback chain */
 }
 
+/**
+ * intialize default configuration. Config file overrides these defaults.
+ */
 EXPORT void mud_config_init(void) {
 	mud_config.config_filename=strdup("boris.cfg");
 	mud_config.menu_prompt=strdup("Selection: ");
@@ -5710,6 +6342,9 @@ EXPORT void mud_config_init(void) {
 	mud_config.default_channels=strdup("@system,@wiz,OOC,auction,chat,newbie");
 }
 
+/**
+ * free all configuration data.
+ */
 EXPORT void mud_config_shutdown(void) {
 	char **targets[] = {
 	    &mud_config.menu_prompt,
@@ -5741,6 +6376,10 @@ EXPORT void mud_config_shutdown(void) {
 	}
 }
 
+/**
+ * setup config loging callback functions then reads in a configuration file.
+ * @return 0 on failure, 1 on success.
+ */
 EXPORT int mud_config_process(void) {
 	struct config cfg;
 	config_setup(&cfg);
@@ -5768,13 +6407,22 @@ EXPORT int mud_config_process(void) {
 /******************************************************************************
  * Main - Option parsing and initialization
  ******************************************************************************/
+
+/**
+ * flag used for the main loop, zero to terminated.
+ */
 static sig_atomic_t keep_going_fl=1;
 
-/* signal handler - this causes the main loop to terminated */
+/**
+ * signal handler to cause the main loop to terminated by clearing keep_going_fl.
+ */
 static void sh_quit(int s UNUSED) {
 	keep_going_fl=0;
 }
 
+/**
+ * display a program usage message and terminated with an exit code.
+ */
 static void usage(void) {
 	fprintf(stderr,
 		"usage: boris [-h46] [-p port]\n"
@@ -5785,7 +6433,11 @@ static void usage(void) {
 	exit(EXIT_FAILURE);
 }
 
-/* exits if next_arg is NULL */
+/**
+ * check if a flag needs a parameter and exits if next_arg is NULL.
+ * @param ch flag currently processing, used for printing error message.
+ * @param next_arg string holding the next argument, or NULL if no argument.
+ */
 static void need_parameter(int ch, const char *next_arg) {
 	if(!next_arg) {
 		ERROR_FMT("option -%c takes a parameter\n", ch);
@@ -5793,6 +6445,13 @@ static void need_parameter(int ch, const char *next_arg) {
 	}
 }
 
+/**
+ * called for each command-line flag passed to decode them.
+ * A flag is an argument that starts with a -.
+ * @param ch character found for this flag
+ * @param next_arg following argument.
+ * @return 0 if the following argument is not consumed. 1 if the argument was used.
+ */
 static int process_flag(int ch, const char *next_arg) {
 	switch(ch) {
 		case '4':
@@ -5820,7 +6479,11 @@ static int process_flag(int ch, const char *next_arg) {
 	return 0; /* didn't use next_arg */
 }
 
-/* process all arguments */
+/**
+ * process all command-line arguments.
+ * @param argc count of arguments.
+ * @param argv array of strings holding the arguments.
+ */
 static void process_args(int argc, char **argv) {
 	int i, j;
 
@@ -5840,6 +6503,9 @@ static void process_args(int argc, char **argv) {
 	}
 }
 
+/**
+ * main - where it all starts.
+ */
 int main(int argc, char **argv) {
 	signal(SIGINT, sh_quit);
 	signal(SIGTERM, sh_quit);
