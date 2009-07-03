@@ -6515,7 +6515,6 @@ int main(int argc, char **argv) {
 	signal(SIGTERM, sh_quit);
 
 #ifndef NTEST
-	ieee754_test();
 	acs_test();
 	map_test();
 	config_test();
