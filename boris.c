@@ -76,11 +76,30 @@
  ******************************************************************************/
 
 #if defined(_MSC_VER) || defined(WIN32) || defined(__WIN32__)
-/** detected a winsock2 system. */
+/** detected a Win32 system, default to using winsock2. */
 #define USE_WIN32_SOCKETS
+
+/**
+ * tell some compilers to use the library.
+ * GCC users will have to specify manually
+ */
+#ifndef __GNUC__
+#pragma comment(lib, "ws2_32.lib")
+#endif
+
+#ifndef _WIN32_WINNT
+/** require at least NT5.1 API for getaddinfo() and others */
+#define _WIN32_WINNT 0x0501
+#endif
+
+/** macro used to wrap mkdir() function from UNIX and Windows */
+#define MKDIR(d) mkdir(d)
 #else
 /** detected system with BSD compatible sockets. */
 #define USE_BSD_SOCKETS
+
+/** macro used to wrap mkdir() function from UNIX and Windows */
+#define MKDIR(d) mkdir(d, 0777)
 #endif
 
 /** number of connections that can be queues waiting for accept(). */
@@ -128,6 +147,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #elif defined(USE_WIN32_SOCKETS)
+#include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
@@ -3422,7 +3442,7 @@ EXPORT int user_init(void) {
 	freelist_pool(&user_id_freelist, 1, 32768);
 
 	fdb_getbasename(pathname, sizeof pathname, "users");
-	if(mkdir(pathname, 0777)==-1 && errno!=EEXIST) {
+	if(MKDIR(pathname)==-1 && errno!=EEXIST) {
 		PERROR(pathname);
 		return 0;
 	}
@@ -3775,17 +3795,19 @@ EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t
 /******************************************************************************
  * Socket I/O API
  ******************************************************************************/
-#if !defined(SOCKET) || !defined(INVALID_SOCKET) || !defined(SOCKET_ERROR)
-
-/** undocumented - please add documentation. */
-#define SOCKET int
+#ifndef USE_WIN32_SOCKETS
+/** define SOCKET on POSIX systems because Winsock2 uses this typedef too,
+ * but it is good to remember that ws2's sockets are unsigned int handles
+ * while POSIX/BSD systems use a signed int, with -1 as flag value for an
+ * unused or freed socket.
+ */
+typedef int SOCKET;
 
 /** undocumented - please add documentation. */
 #define INVALID_SOCKET (-1)
 
 /** undocumented - please add documentation. */
 #define SOCKET_ERROR (-1)
-
 #endif
 
 /** undocumented - please add documentation. */
@@ -6526,7 +6548,7 @@ int main(int argc, char **argv) {
 
 	srand((unsigned)time(NULL));
 
-	if(mkdir("data", 0777)==-1 && errno!=EEXIST) {
+	if(MKDIR("data")==-1 && errno!=EEXIST) {
 		PERROR("data/");
 		return EXIT_FAILURE;
 	}
