@@ -722,9 +722,13 @@ EXPORT char *trim_whitespace(char *line) {
 }
 
 /******************************************************************************
- * Debug routines
+ * Debug and test routines
  ******************************************************************************/
-#ifndef NDEBUG
+
+/* enable these routines unless both NDEBUG and NTEST are defined.
+ * if debugging or testing is enabled then we need some of these functions.
+ */
+#if !defined(NTEST) || !defined(NDEBUG)
 /**
  * debug routine to convert a number to a string.
  * @param n the value.
@@ -1028,7 +1032,7 @@ EXPORT int heapqueue_dequeue(struct heapqueue_elm *ret) {
 	return 1;
 }
 
-#ifndef NDEBUG
+#ifndef NTEST
 
 /**
  * checks the heap to see that it is valid.
@@ -1921,7 +1925,7 @@ EXPORT void map_free(struct map *m) {
 #endif
 }
 
-#ifndef NDEBUG
+#ifndef NTEST
 /** undocumented - please add documentation. */
 struct map_test_entry {
 	char *str;
@@ -2508,7 +2512,7 @@ EXPORT unsigned bitmap_length(struct bitmap *bitmap) {
 	return bitmap ? ROUNDUP(bitmap->bitmap_allocbits, CHAR_BIT)/CHAR_BIT : 0;
 }
 
-#ifndef NDEBUG
+#ifndef NTEST
 /** undocumented - please add documentation. */
 EXPORT void bitmap_test(void) {
 	int i;
@@ -2638,7 +2642,7 @@ parse_failure:
 	return 0;
 }
 
-#ifndef NDEBUG
+#ifndef NTEST
 
 /** undocumented - please add documentation. */
 void acs_test(void) {
