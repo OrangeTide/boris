@@ -10,6 +10,11 @@ endif
 ifneq ($(findstring mingw32,$(GCC_MACHINE))$(findstring cygwin,$(GCC_MACHINE)),)
 GCC_WIN32:=1
 EXE:=.exe
+
+# rule for windows executables
+%.exe : %.o
+	$(CC) $(LDFLAGS) $(TARGET_ARCH) $^ $(LOADLIBES) $(LDLIBS) -o $@
+
 endif
 ##############################################################################
 ### CPPFLAGS - C preprocessor flags
