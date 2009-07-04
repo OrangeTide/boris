@@ -2298,23 +2298,32 @@ static void config_test(void) {
  * Bitmap API
  ******************************************************************************/
 
-/** undocumented - please add documentation. */
+/** size in bits of a group of bits for struct bitmap. */
 #define BITMAP_BITSIZE (sizeof(unsigned)*CHAR_BIT)
 
-/** undocumented - please add documentation. */
+/**
+ * a large bitarray that can be allocated to any size.
+ * @see bitmap_init bitmap_free bitmap_resize bitmap_clear bitmap_set
+ *      bitmap_next_set bitmap_next_clear bitmap_loadmem bitmap_length
+ *      bitmap_test
+ */
 struct bitmap {
 	unsigned *bitmap;
 	size_t bitmap_allocbits;
 };
 
-/** undocumented - please add documentation. */
+/**
+ * initialize an bitmap structure to be empty.
+ */
 EXPORT void bitmap_init(struct bitmap *bitmap) {
 	assert(bitmap!=NULL);
 	bitmap->bitmap=0;
 	bitmap->bitmap_allocbits=0;
 }
 
-/** undocumented - please add documentation. */
+/**
+ * free a bitmap structure.
+ */
 EXPORT void bitmap_free(struct bitmap *bitmap) {
 	assert(bitmap!=NULL); /* catch when calling free on NULL */
 	if(bitmap) {
@@ -2324,7 +2333,9 @@ EXPORT void bitmap_free(struct bitmap *bitmap) {
 }
 
 /**
- * newbits is in bits (not bytes).
+ * resize (grow or shrink) a struct bitmap.
+ * @param bitmap the bitmap structure.
+ * @param newbits is in bits (not bytes).
  */
 EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	unsigned *tmp;
@@ -2349,7 +2360,12 @@ EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	return 1; /* success */
 }
 
-/** undocumented - please add documentation. */
+/**
+ * set a range of bits to 0.
+ * @param bitmap the bitmap structure.
+ * @param ofs first bit to clear.
+ * @param len number of bits to clear.
+ */
 EXPORT void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
@@ -2383,7 +2399,12 @@ EXPORT void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	}
 }
 
-/** undocumented - please add documentation. */
+/**
+ * set a range of bits to 1.
+ * @param bitmap the bitmap structure.
+ * @param ofs first bit to set.
+ * @param len number of bits to set.
+ */
 EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
@@ -2418,6 +2439,9 @@ EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len) {
 
 /**
  * gets a single bit.
+ * @param bitmap the bitmap structure.
+ * @param ofs the index of the bit.
+ * @return 0 or 1 depending on value of the bit.
  */
 EXPORT int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
 	if(ofs<bitmap->bitmap_allocbits) {
@@ -2428,6 +2452,9 @@ EXPORT int bitmap_get(struct bitmap *bitmap, unsigned ofs) {
 }
 
 /**
+ * scan a bitmap structure for the next set bit.
+ * @param bitmap the bitmap structure.
+ * @param ofs the index of the bit to begin scanning.
  * @return the position of the next set bit. -1 if the end of the bits was reached
  */
 EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
@@ -2447,7 +2474,10 @@ EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs) {
 }
 
 /**
- * @return the position of the next set bit. -1 if the end of the bits was reached
+ * scan a bitmap structure for the next clear bit.
+ * @param bitmap the bitmap structure.
+ * @param ofs the index of the bit to begin scanning.
+ * @return the position of the next cleared bit. -1 if the end of the bits was reached
  */
 EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 	unsigned i, len, bofs;
@@ -2466,9 +2496,11 @@ EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs) {
 }
 
 /**
- * loads a chunk of memory into the bitmap buffer.
- * erases previous bitmap buffer.
- * len is in bytes.
+ * loads a chunk of memory into the bitmap structure.
+ * erases previous bitmap buffer, resizes bitmap buffer to make room if necessary.
+ * @param bitmap the bitmap structure.
+ * @param d a buffer to use for initializing the bitmap.
+ * @param len length in bytes of the buffer d.
  */
 EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len) {
 	unsigned *p, word_count, i;
@@ -2506,6 +2538,7 @@ EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len) 
 }
 
 /**
+ * Get the length (in bytes) of the bitmap table.
  * @return the length in bytes of the entire bitmap table.
  */
 EXPORT unsigned bitmap_length(struct bitmap *bitmap) {
@@ -2513,7 +2546,9 @@ EXPORT unsigned bitmap_length(struct bitmap *bitmap) {
 }
 
 #ifndef NTEST
-/** undocumented - please add documentation. */
+/**
+ * unit tests for struct bitmap data structure.
+ */
 EXPORT void bitmap_test(void) {
 	int i;
 	struct bitmap bitmap;
