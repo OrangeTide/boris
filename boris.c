@@ -301,13 +301,13 @@
  * TRACE() does nothing if NTRACE is defined */
 
 /** undocumented - please add documentation. */
-# define VERBOSE(...) fprintf(stderr, __VA_ARGS__)
+#define VERBOSE(...) fprintf(stderr, __VA_ARGS__)
 
-# ifdef NDEBUG
+#ifdef NDEBUG
 #  define DEBUG(...) /* DEBUG disabled */
 #  define DEBUG_MSG(msg) /* DEBUG_MSG disabled */
 #  define HEXDUMP(data, len, ...) /* HEXDUMP disabled */
-# else
+#else
 
 /** DEBUG() prints a formatted message to stderr if NDEBUG is not defined. */
 #  define DEBUG(msg, ...) fprintf(stderr, "DEBUG:%s():%d:" msg, __func__, __LINE__, ## __VA_ARGS__);
@@ -317,19 +317,24 @@
 
 /** HEXDUMP() outputs a message and block of hexdump data to stderr if NDEBUG is not defined. */
 #  define HEXDUMP(data, len, ...) do { fprintf(stderr, __VA_ARGS__); hexdump(stderr, data, len); } while(0)
-# endif
-# ifdef NTRACE
+#endif
+
+#ifdef NTRACE
 #  define TRACE(...) /* TRACE disabled */
 #  define HEXDUMP_TRACE(data, len, ...) /* HEXDUMP_TRACE disabled */
-# else
+#else
 /** TRACE() prints a message to stderr if NTRACE is not defined. */
-#  define TRACE(...) fprintf(stderr, __VA_ARGS__)
+#  define TRACE(f, ...) fprintf(stderr, "TRACE:%s():%u:" f, __func__, __LINE__, __VA_ARGS__)
 /** HEXDUMP_TRACE() does a hexdump to stderr if NTRACE is not defined. */
 #  define HEXDUMP_TRACE(data, len, ...) HEXDUMP(data, len, __VA_ARGS__)
-# endif
+#endif
+
+
+/** TRACE_MSG() prints a message and newline to stderr if NTRACE is not defined. */
+#define TRACE_MSG(m) TRACE("%s\n", m);
 
 /** ERROR_FMT() prints a formatted message to stderr. */
-# define ERROR_FMT(msg, ...) fprintf(stderr, "ERROR:%s():%d:" msg, __func__, __LINE__, __VA_ARGS__);
+#define ERROR_FMT(msg, ...) fprintf(stderr, "ERROR:%s():%d:" msg, __func__, __LINE__, __VA_ARGS__);
 
 /** ERROR_MSG prints a string and newline to stderr. */
 #define ERROR_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
@@ -338,10 +343,10 @@
 #define TODO(msg) fprintf(stderr, "TODO:%s():%d:" msg "\n", __func__, __LINE__);
 
 /** trace logs entry to a function if NTRACE is not defined. */
-#define TRACE_ENTER() TRACE("%s():%u:ENTER\n", __func__, __LINE__);
+#define TRACE_ENTER() TRACE("%u:ENTER\n", __LINE__);
 
 /** trace logs exit of a function if NTRACE is not defined. */
-#define TRACE_EXIT() TRACE("%s():%u:EXIT\n", __func__, __LINE__);
+#define TRACE_EXIT() TRACE("%u:EXIT\n", __LINE__);
 
 /** tests an expression, if failed prints an error message based on errno and jumps to a label. */
 #define FAILON(e, reason, label) do { if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
@@ -352,9 +357,9 @@
 #ifndef NDEBUG
 #include <string.h>
 /** initialize with junk - used to find unitialized values. */
-# define JUNKINIT(ptr, len) memset((ptr), 0xBB, (len));
+#  define JUNKINIT(ptr, len) memset((ptr), 0xBB, (len));
 #else
-# define JUNKINIT(ptr, len) /* do nothing */
+#  define JUNKINIT(ptr, len) /* do nothing */
 #endif
 
 /*=* reference counting macros *=*/
@@ -906,11 +911,11 @@ static int heapqueue_ll_siftdown(unsigned i, struct heapqueue_elm *elm) {
 			break;
 		}
 		/* swap "hole" and selected child */
-		TRACE("%s():swap hole %d with entry %d\n", __func__, i, child);
+		TRACE("swap hole %d with entry %d\n", i, child);
 		heap[i]=heap[child];
 		i=child;
 	}
-	TRACE("%s():chosen position %d for hole.\n", __func__, i);
+	TRACE("chosen position %d for hole.\n", i);
 	return i;
 }
 
@@ -962,25 +967,25 @@ EXPORT int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret) {
 
 	if(i>0 && heapqueue_greaterthan(&heap[HEAPQUEUE_PARENT(i)], last)) {
 		/* we already did the compare, so we'll perform the first move here */
-		TRACE("%s():swap hole %d with entry %d\n", __func__, i, HEAPQUEUE_PARENT(i));
+		TRACE("swap hole %d with entry %d\n", i, HEAPQUEUE_PARENT(i));
 		heap[i]=heap[HEAPQUEUE_PARENT(i)]; /* move parent down */
 		i=heapqueue_ll_siftup(HEAPQUEUE_PARENT(i), last); /* sift the "hole" up */
 	} else if(HEAPQUEUE_RIGHT(i)<heap_len && (heapqueue_greaterthan(last, &heap[HEAPQUEUE_RIGHT(i)]) || heapqueue_greaterthan(last, &heap[HEAPQUEUE_LEFT(i)]))) {
 		/* if right is on the list, then left is as well */
 		if(heapqueue_greaterthan(&heap[HEAPQUEUE_LEFT(i)], &heap[HEAPQUEUE_RIGHT(i)])) {
 			/* left is larger - use the right hole */
-			TRACE("%s():swap hole %d with entry %d\n", __func__, i, HEAPQUEUE_RIGHT(i));
+			TRACE("swap hole %d with entry %d\n", i, HEAPQUEUE_RIGHT(i));
 			heap[i]=heap[HEAPQUEUE_RIGHT(i)]; /* move right up */
 			i=heapqueue_ll_siftdown(HEAPQUEUE_RIGHT(i), last); /* sift the "hole" down */
 		} else {
 			/* right is the larger or equal - use the left hole */
-			TRACE("%s():swap hole %d with entry %d\n", __func__, i, HEAPQUEUE_LEFT(i));
+			TRACE("swap hole %d with entry %d\n", i, HEAPQUEUE_LEFT(i));
 			heap[i]=heap[HEAPQUEUE_LEFT(i)]; /* move left up */
 			i=heapqueue_ll_siftdown(HEAPQUEUE_LEFT(i), last); /* sift the "hole" down */
 		}
 	} else if(HEAPQUEUE_LEFT(i)<heap_len && heapqueue_greaterthan(last, &heap[HEAPQUEUE_LEFT(i)])) {
 		/* at this point there is no right node */
-		TRACE("%s():swap hole %d with entry %d\n", __func__, i, HEAPQUEUE_LEFT(i));
+		TRACE("swap hole %d with entry %d\n", i, HEAPQUEUE_LEFT(i));
 		heap[i]=heap[HEAPQUEUE_LEFT(i)]; /* move left up */
 		i=heapqueue_ll_siftdown(HEAPQUEUE_LEFT(i), last); /* sift the "hole" down */
 	}
@@ -1816,7 +1821,7 @@ EXPORT union map_data *map_lookup(struct map *m, const void *key) {
 	/* look for a duplicate key and refuse to overwrite it */
 	for(e=LIST_TOP(m->table[h&m->table_mask]);e;e=LIST_NEXT(e, list)) {
 		assert(e->key != NULL);
-		/* DEBUG("%s():comparing '%s' '%s'\n", __func__, key, e->key); */
+		/* DEBUG("comparing '%s' '%s'\n", key, e->key); */
 		if(m->compare(key, e->key)==0) {
 			return &e->data;
 		}
@@ -1848,7 +1853,7 @@ EXPORT void map_foreach(struct map *m, void *p, void (*callback)(void *p, void *
 	for(i=0;i<=m->table_mask;i++) {
 		TRACE("i=%u mask=%u\n", i, m->table_mask);
 		for(curr=LIST_TOP(m->table[i]);curr;curr=LIST_NEXT(curr, list)) {
-			TRACE("curr=%p\n", curr);
+			TRACE("curr=%p\n", (void*)curr);
 			callback(p, curr->key, &curr->data);
 		}
 	}
@@ -2321,7 +2326,7 @@ EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 	unsigned *tmp;
 
 	newbits=ROUNDUP(newbits, BITMAP_BITSIZE);
-	DEBUG("%s():Allocating %zd bytes\n", __func__, newbits/CHAR_BIT);
+	DEBUG("Allocating %zd bytes\n", newbits/CHAR_BIT);
 	tmp=realloc(bitmap->bitmap, newbits/CHAR_BIT);
 	if(!tmp) {
 		PERROR("realloc()");
@@ -2331,7 +2336,7 @@ EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits) {
 		/* clear out the new bits */
 		size_t len;
 		len=(newbits-bitmap->bitmap_allocbits)/CHAR_BIT;
-		DEBUG("%s():Clearing %zd bytes (ofs %zd)\n", __func__, len, bitmap->bitmap_allocbits/BITMAP_BITSIZE);
+		DEBUG("Clearing %zd bytes (ofs %zd)\n", len, bitmap->bitmap_allocbits/BITMAP_BITSIZE);
 		memset(tmp+bitmap->bitmap_allocbits/BITMAP_BITSIZE, 0, len);
 	}
 
@@ -2870,7 +2875,7 @@ static inline void xxtcrypt_ll_enc(size_t length, uint32_t *v, uint32_t k[4]) {
 
 	/* 32 cycles for a length=2, which is 64 rounds */
 	q=6+52/length;
-	// printf("%s(): %d cycles (%d rounds)\n", __func__, q, q*length);
+	// printf(" %d cycles (%d rounds)\n", q, q*length);
 	while(q-->0) {
 		sum+=0x9e3779b9; /* delta */
 		e=sum>>2&3;
@@ -3258,7 +3263,7 @@ static struct user *user_load_byname(const char *username) {
 
 	u=user_defaults(); /* allocate a default struct */
 	if(!u) {
-		DEBUG_MSG("Could not allocate user structure\n");
+		DEBUG_MSG("Could not allocate user structure");
 		fclose(f);
 		return 0; /* failure */
 	}
@@ -3393,7 +3398,7 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 
 	u=user_defaults(); /* allocate a default struct */
 	if(!u) {
-		DEBUG_MSG("Could not allocate user structure\n");
+		DEBUG_MSG("Could not allocate user structure");
 		return NULL; /* failure */
 	}
 
@@ -3546,7 +3551,7 @@ static int buffer_ll_expandnl(struct buffer *b, size_t len) {
 	for(p=b->data+b->used,rem=len;(e=memchr(p, '\n', rem));rem-=e-p,p=e+2) {
 		/* check b->max for overflow */
 		if(p-b->data>=(ptrdiff_t)b->max) {
-			DEBUG("%s():Overflow detected\n", __func__);
+			DEBUG_MSG("Overflow detected");
 			return -1;
 		}
 		memmove(e+1, e, rem);
@@ -3564,7 +3569,7 @@ static int buffer_ll_expandnl(struct buffer *b, size_t len) {
  */
 EXPORT int buffer_write_noexpand(struct buffer *b, const void *data, size_t len) {
 	if(b->used+len>b->max) {
-		DEBUG("%s():Overflow detected. refusing to send any data.\n", __func__);
+		DEBUG_MSG("Overflow detected. refusing to send any data.\n");
 		return -1;
 	}
 
@@ -3603,7 +3608,7 @@ EXPORT int buffer_write(struct buffer *b, const char *str, size_t len) {
 		DEBUG("Truncation detected in buffer %p\n", (void*)b);
 		return -1;
 	}
-	TRACE("Wrote %d bytes to buffer %p using %s()\n", j, (void*)b, __func__);
+	TRACE("Wrote %d bytes to buffer %p\n", j, (void*)b);
 	return j;
 }
 
@@ -3641,11 +3646,11 @@ EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap) {
 	res=buffer_ll_expandnl(b, (unsigned)res);
 	if(res==-1) {
 		TODO("test this code");
-		ERROR_FMT("%s():Overflow in buffer %p\n", __func__, (void*)b);
+		ERROR_FMT("Overflow in buffer %p\n", (void*)b);
 		return -1;
 	}
 	b->used+=res;
-	TRACE("Wrote %d bytes to buffer %p using %s()\n", res, (void*)b, __func__);
+	TRACE("Wrote %d bytes to buffer %p\n", res, (void*)b);
 	return res;
 }
 
@@ -3742,7 +3747,7 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 
 	assert((int)*len>=0);
 	for(tmplen=*len;tmplen;) {
-		TRACE("%s():%d: len=%d tmplen=%d\n", __func__, __LINE__, *len, tmplen);
+		TRACE("%d: len=%d tmplen=%d\n", __LINE__, *len, tmplen);
 		assert((int)tmplen>0);
 		if(*d==IAC) {
 			assert(iac_process != NULL);
@@ -3753,7 +3758,7 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 				return NULL;
 			}
 			DEBUG("Telnet control data processed (%zd bytes)\n", res);
-			TRACE("%s():%d: res=%d len=%d tmplen=%d\n", __func__, __LINE__, res, *len, tmplen);
+			TRACE("%d: res=%d len=%d tmplen=%d\n", __LINE__, res, *len, tmplen);
 			assert((int)res<=(int)*len);
 			assert((int)tmplen>0);
 			assert((int)res<=(int)tmplen);
@@ -4067,11 +4072,11 @@ EXPORT int socketio_getpeername(SOCKET fd, char *name, size_t name_len) {
 	sslen=sizeof ss;
 	res=getpeername(fd, (struct sockaddr*)&ss, &sslen);
 	if(res!=0) {
-		ERROR_FMT("%s():%s\n", __func__, socketio_strerror());
+		ERROR_FMT("%s\n", socketio_strerror());
 		return 0;
 	}
 	if(!socketio_sockname((struct sockaddr*)&ss, sslen, name, name_len)) {
-		ERROR_FMT("Failed %s() on fd %d\n", __func__, fd);
+		ERROR_FMT("Failed on fd %d\n", fd);
 		return 0;
 	}
 	DEBUG("getpeername is %s\n", name);
@@ -4772,7 +4777,7 @@ EXPORT void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void
 		sh->delete_flag=1;
 		return; /* client write failure */
 	}
-	TRACE("%s():len=%zu res=%zu\n", __func__, len, res);
+	TRACE("len=%zu res=%zu\n", len, res);
 	len=buffer_consume(&cl->output, (unsigned)res);
 
 	if(len>0) {
@@ -4833,7 +4838,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 	assert(iac[0] == IAC);
 
 	if(iac[0]!=IAC) {
-		ERROR_FMT("%s() called on non-telnet data\n", __func__);
+		ERROR_MSG("called on non-telnet data\n");
 		return 0;
 	}
 
@@ -4842,28 +4847,28 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 			return 1; /* consume the first IAC and leave the second behind */
 		case WILL:
 			if(len>=3) {
-				DEBUG("%s():IAC WILL %hhu\n", __func__, iac[2]);
+				DEBUG("IAC WILL %hhu\n", iac[2]);
 				return 3; /* 3-byte operations*/
 			} else {
 				return 0; /* not enough data */
 			}
 		case WONT:
 			if(len>=3) {
-				DEBUG("%s():IAC WONT %hhu\n", __func__, iac[2]);
+				DEBUG("IAC WONT %hhu\n", iac[2]);
 				return 3; /* 3-byte operations*/
 			} else {
 				return 0; /* not enough data */
 			}
 		case DO:
 			if(len>=3) {
-				DEBUG("%s():IAC DO %hhu\n", __func__, iac[2]);
+				DEBUG("IAC DO %hhu\n", iac[2]);
 				return 3; /* 3-byte operations*/
 			} else {
 				return 0; /* not enough data */
 			}
 		case DONT:
 			if(len>=3) {
-				DEBUG("%s():IAC DONT %hhu\n", __func__, iac[2]);
+				DEBUG("IAC DONT %hhu\n", iac[2]);
 				return 3; /* 3-byte operations*/
 			} else {
 				return 0; /* not enough data */
@@ -4882,12 +4887,12 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 				}
 				if(endptr[0]==SE) {
 					endptr++;
-					// DEBUG("%s():IAC SB %hhu ... IAC SE\n", __func__, iac[2]);
+					// DEBUG("IAC SB %hhu ... IAC SE\n", iac[2]);
 					HEXDUMP(iac, endptr-iac, "%s():IAC SB %hhu: ", __func__, iac[2]);
 					telnetclient_iac_process_sb(iac, (size_t)(endptr-iac), cl);
 					return endptr-iac;
 				} else if(endptr[0]==IAC) {
-					TRACE("Found IAC IAC in IAC SB block\n");
+					TRACE_MSG("Found IAC IAC in IAC SB block");
 					endptr++;
 				}
 			}
@@ -4923,7 +4928,7 @@ static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl
 		/* close or error */
 		goto failure;
 	}
-	DEBUG("%s():res=%u\n", __func__, res);
+	DEBUG("res=%u\n", res);
 	buffer_emit(&cl->input, (unsigned)res);
 
 	DEBUG("Client %d(%s):received %d bytes (used=%zu)\n", sh->fd, sh->name, res, cl->input.used);
@@ -4947,7 +4952,7 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 
 	/* getline triggers a special IAC parser that stops at a line */
 	while((line=buffer_getline(&cl->input, &consumed, telnetclient_iac_process, cl))) {
-		DEBUG("client line:%s(): '%s'\n", __func__, line);
+		DEBUG("client line: '%s'\n", line);
 
 		if(cl->line_input) {
 			cl->line_input(cl, line);
@@ -5207,7 +5212,7 @@ EXPORT int channel_module_init(void) {
 
 	/* load the system channels in the same order that they were specified in the configuration */
 	for(g=LIST_TOP(channel_global_list);count>0;g=LIST_NEXT(g, channels)) {
-		TRACE("count=%d g=%p name=%s\n", count, g, g->name);
+		TRACE("count=%d g=%p name=%s\n", count, (void*)g, g->name);
 		assert(g != NULL);
 		channel_system[--count]=g;
 	}
@@ -5258,7 +5263,7 @@ EXPORT int channel_member_join(struct channel_group *ch, struct channel_member_h
 	/** @todo log the system channel number if there is no name */
 	eventlog_channel_join(cl&&cl->sh?cl->sh->name:NULL, ch->name, "<USER>");
 
-	TRACE("join (ch=%p) (mem=%p)\n", ch, new);
+	TRACE("join (ch=%p) (mem=%p)\n", (void*)ch, (void*)new);
 
 	return 1; /* success */
 }
@@ -5306,7 +5311,7 @@ EXPORT int channel_broadcast(struct channel_group *ch, struct channel_member *ex
 	int count;
 	va_list ap;
 
-	TRACE("Enter (ch=%p) (mem=%p)\n", ch, exclude_member);
+	TRACE("Enter (ch=%p) (mem=%p)\n", (void*)ch, (void*)exclude_member);
 
 	if(!ch) return 0; /* ignore NULL */
 
@@ -5317,7 +5322,7 @@ EXPORT int channel_broadcast(struct channel_group *ch, struct channel_member *ex
 
 		next=LIST_NEXT(curr, groups);
 
-		TRACE("curr-member=%p\n", curr);
+		TRACE("curr-member=%p\n", (void*)curr);
 
 		if(curr!=exclude_member && curr->cl) {
 			telnetclient_vprintf(curr->cl, fmt, ap);
@@ -5734,7 +5739,7 @@ EXPORT void form_setmessage(struct form *f, const char *message) {
 EXPORT void form_free(struct form *f) {
 	struct formitem *curr;
 
-	TRACE("*** %s() ***\n", __func__);
+	TRACE_ENTER();
 
 	free(f->form_title);
 	f->form_title=NULL;
@@ -5882,7 +5887,7 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 			f->form_close(cl, fs);
 		} else {
 			/* fallback */
-			DEBUG("%s():%s:ERROR:going to main menu\n", __func__, cl->sh->name);
+			DEBUG("%s:ERROR:going to main menu\n", cl->sh->name);
 			telnetclient_puts(cl, mud_config.msg_errormain);
 			telnetclient_start_menuinput(cl, &gamemenu_login);
 		}
@@ -5911,7 +5916,7 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 static void form_state_free(struct telnetclient *cl) {
 	struct form_state *fs=&cl->state.form;
 	unsigned i;
-	DEBUG("%s():%s:freeing state\n", __func__, cl->sh->name);
+	DEBUG("%s:freeing state\n", cl->sh->name);
 
 	if(fs->value) {
 		for(i=0;i<fs->nr_value;i++) {
