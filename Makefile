@@ -37,8 +37,8 @@ else
 	CFLAGS := -Wall
 endif
 ##############################################################################
-.DEFAULT : all
-.PHONY : all clean clean-all distclean documentation
+_all : all
+.PHONY : all _all clean clean-all distclean documentation
 ##############################################################################
 ## modules - configuration defining targets
 include mod-*.mk
