@@ -75,7 +75,12 @@
  * Configuration
  ******************************************************************************/
 
-#if defined(_MSC_VER) || defined(WIN32) || defined(__WIN32__)
+/* make sure WIN32 is defined when building in a Windows environment */
+#if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
+#define WIN32
+#endif
+
+#if defined(WIN32)
 /** detected a Win32 system, default to using winsock2. */
 #define USE_WIN32_SOCKETS
 
@@ -719,6 +724,136 @@ EXPORT char *trim_whitespace(char *line) {
 	while(isspace(*line)) line++;
 	for(tmp=line+strlen(line)-1;line<tmp && isspace(*tmp);tmp--) *tmp=0;
 	return line;
+}
+
+/******************************************************************************
+ * DLL / Plug-in routines.
+ ******************************************************************************/
+
+#ifdef WIN32
+#include <windows.h>
+/**
+ * handle for an open DLL used by dll_open() and dll_close().
+ */
+typedef HMODULE dll_handle_t;
+typedef FARPROC dll_func_t;
+#else
+#include <dlfcn.h>
+/**
+ * handle for an open DLL used by dll_open() and dll_close().
+ */
+typedef void *dll_handle_t;
+typedef void *dll_func_t;
+#endif
+
+/**
+ * internal function for reporting errors on last operation with a DLL.
+ * @see dll_open dll_close
+ */
+static void dll_show_error(const char *reason) {
+#ifdef WIN32
+    LPTSTR lpMsgBuf;
+    FormatMessage(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER|FORMAT_MESSAGE_FROM_SYSTEM
+        |FORMAT_MESSAGE_IGNORE_INSERTS, NULL, GetLastError(),
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpMsgBuf, 0, NULL);
+    if(reason) {
+        fprintf(stderr, "%s:%s\n", reason, lpMsgBuf);
+    } else {
+        fprintf(stderr, "%s\n", lpMsgBuf);
+    }
+    LocalFree(lpMsgBuf);
+#else
+    const char *msg;
+    msg=dlerror();
+    if(msg) {
+        if(reason) {
+            fprintf(stderr, "%s:%s\n", reason, msg);
+        } else {
+            fprintf(stderr, "%s\n", msg);
+        }
+    }
+#endif
+}
+
+
+/**
+ * opens a file and updates the handle at h.
+ * @param h pointer to the handle to be updated. set to NULL on failure.
+ * @param filename name of the DLL file to open. should not contain an
+ *                 extension, that will be added.
+ * @return non-zero on success, 0 on failure.
+ * @see dll_close
+ */
+EXPORT int dll_open(dll_handle_t *h, const char *filename) {
+	char path[PATH_MAX];
+#ifdef WIN32
+	unsigned i;
+	/* convert / to \ in the filename, as required by LoadLibrary(). */
+	for(i=0;filename[i] && i<sizeof path-1;i++) {
+		path[i]=filename[i]=='/'?'\\':filename[i];
+	}
+	path[i]=0; /* null terminate */
+	if(!strstr(filename, ".dll")) {
+		strcat(path, ".dll");
+	}
+    /* TODO: convert filename to windows text encoding */
+    *h=LoadLibrary(filename);
+#else
+	strcpy(path, filename);
+	if(!strstr(filename, ".so")) {
+		strcat(path, ".so");
+	}
+    *h=dlopen(path, RTLD_LOCAL);
+#endif
+    if(!*h) {
+        dll_show_error(path);
+        return 0;
+    }
+    return 1;
+}
+
+/**
+ * closes an open DLL file handle. ignores NULL handles.
+ * @param h handle to close
+ * @see dll_open
+ */
+EXPORT void dll_close(dll_handle_t h) {
+	if(h) {
+#ifdef WIN32
+		if(!FreeLibrary(h)) {
+			dll_show_error("FreeLibrary()");
+		}
+#else
+		if(dlclose(h)) {
+			dll_show_error("dlclose()");
+		}
+#endif
+	}
+}
+
+/**
+ * get a function's address from a DLL.
+ * name must by a symbol name for a function.
+ * @param h handle
+ * @param name a symbol name, must be a function.
+ * @return NULL on error. address of exported symbol on success.
+ */
+EXPORT dll_func_t dll_func(dll_handle_t h, const char *name) {
+    dll_func_t ret;
+#ifdef WIN32
+    ret=GetProcAddress(h, name);
+    if(!ret) {
+        dll_show_error(name);
+    }
+    return ret;
+#else
+    ret=dlsym(h, name);
+    if(!ret) {
+        dll_show_error(name);
+    }
+    return ret;
+#endif
 }
 
 /******************************************************************************

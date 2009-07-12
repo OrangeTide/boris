@@ -14,6 +14,8 @@ $(EXEC_boris) : $(OBJS_boris)
 ifneq ($(GCC_WIN32),)
 # use Winsock2 when building for windows
 $(EXEC_boris) : LDLIBS+=-lws2_32
+else
+$(EXEC_boris) : LDLIBS+=-ldl
 endif
 
 documentation-boris :
