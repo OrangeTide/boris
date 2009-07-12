@@ -11,28 +11,25 @@
  *
  * components:
  * - acs_info - access control string
- * - bitfield - manages small staticly sized bitmaps
+ * - bitfield - manages small staticly sized bitmaps. uses @ref BITFIELD
  * - bitmap - manages large bitmaps
  * - buffer - manages an i/o buffer
  * - channel_group
  * - channel_member
  * - config - represent a configuration parser. uses config_watcher as entries.
+ * - dll - open plug-ins (.dll or .so) uses @ref dll_open and @ref dll_close
  * - form - uses formitem.
  * - form_state
  * - freelist - allocate ranges of numbers from a pool. uses freelist_entry and freelist_extent.
- * - game_logic - TBD
  * - heapqueue_elm - priority queue for implementing timers
  * - map - hash used as an associative array. uses map_data and map_entry.
  * - menuinfo - draws menus to a telnetclient
- * - object_base - a generic object type
- * - object_cache - interface to recordcache for objects
- * - object_xxx - free/load/save routines for objects
- * - refcount - macros to provide reference counting
+ * - refcount - macros to provide reference counting. uses @ref REFCOUNT_TAKE and @ref REFCOUNT_GET
  * - server - accepts new connections
- * - shvar - process $() macros
+ * - shvar - process $() macros. implemented by @ref shvar_eval.
  * - socketio_handle - manages network sockets
  * - telnetclient - processes data from a socket for Telnet protocol
- * - user - user account handling. @see user_name_map_entry.
+ * - user - user account handling. see also user_name_map_entry.
  * - util_strfile - holds contents of a textfile in an array.
  *
  * dependency:
@@ -321,7 +318,7 @@
 #  define DEBUG_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
 
 /** HEXDUMP() outputs a message and block of hexdump data to stderr if NDEBUG is not defined. */
-#  define HEXDUMP(data, len, ...) do { fprintf(stderr, __VA_ARGS__); hexdump(stderr, data, len); } while(0)
+#  define HEXDUMP(data, len, ...) do { fprintf(stderr, __VA_ARGS__); util_hexdump(stderr, data, len); } while(0)
 #endif
 
 #ifdef NTRACE
@@ -870,7 +867,7 @@ EXPORT dll_func_t dll_func(dll_handle_t h, const char *name) {
  * @param base the output base (2 to 64)
  * @param pad length to use when padding with zeros. 0 means do not pad.
  */
-static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
+static const char *util_convertnumber(unsigned n, unsigned base, unsigned pad) {
 	static char number_buffer[65];
 	static const char tab[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-";
 	char *o; /* output */
@@ -898,7 +895,7 @@ static const char *convert_number(unsigned n, unsigned base, unsigned pad) {
  * @param data pointer to the data.
  * @param len length to hexdump.
  */
-static void hexdump(FILE *f, const void *data, int len) {
+static void util_hexdump(FILE *f, const void *data, int len) {
 	fprintf(f, "[%d]", len);
 	while(len>0) {
 		unsigned char ch=*(unsigned char*)data;
@@ -2699,35 +2696,35 @@ EXPORT void bitmap_test(void) {
 	/* display the test pattern */
 	printf("bitmap_set():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
 	bitmap_set(&bitmap, 12, 64);
 	/* display the test pattern */
 	printf("bitmap_set():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
 	bitmap_clear(&bitmap, 7, 1);
 	/* display the test pattern */
 	printf("bitmap_clear():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
 	bitmap_clear(&bitmap, 12, 64);
 	/* display the test pattern */
 	printf("bitmap_clear():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
 	bitmap_set(&bitmap, 0, BITMAP_BITSIZE*5);
 	/* display the test pattern */
 	printf("bitmap_set():\n");
 	for(i=0;i<5;i++) {
-		printf("0x%08x %s\n", bitmap.bitmap[i], convert_number(bitmap.bitmap[i], 2, 32));
+		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
 	bitmap_clear(&bitmap, 0, BITMAP_BITSIZE*5);
