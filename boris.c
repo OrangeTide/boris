@@ -4558,7 +4558,7 @@ static void server_free(struct socketio_handle *sh, void *p) {
 }
 
 /** undocumented - please add documentation. */
-static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct socketio_handle *new_sh)) {
+static struct socketio_handle *socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct socketio_handle *new_sh)) {
 	SOCKET fd;
 	int res;
 	char buf[64];
@@ -4619,7 +4619,7 @@ static int socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct so
 
 	DEBUG("Bind success: %s %s\n", ai->ai_family==AF_INET ? "IPv4" : ai->ai_family==AF_INET6 ? "IPv6" : "Unknown", buf);
 
-	return 1; /* success */
+	return newserv; /* success */
 
 failure:
 	socketio_close(&fd);
@@ -4634,12 +4634,13 @@ failure_clean:
  * @param host NULL or hostname/IP to bind to.
  * @param port port number or service name to use when binding the socket.
  * @param newclient callback to use on accept().
- * @return file descriptor of socket.
+ * @return socketio_handle for the created listening socket.
  */
-EXPORT int socketio_listen(int family, int socktype, const char *host, const char *port, void (*newclient)(struct socketio_handle *sh)) {
+EXPORT struct socketio_handle *socketio_listen(int family, int socktype, const char *host, const char *port, void (*newclient)(struct socketio_handle *sh)) {
 	int res;
 	struct addrinfo *ai_res, *curr;
 	struct addrinfo ai_hints;
+	struct socketio_handle *ret;
 
 	assert(port!=NULL);
 	assert(family==0 || family==AF_INET || family==AF_INET6);
@@ -4673,14 +4674,15 @@ EXPORT int socketio_listen(int family, int socktype, const char *host, const cha
 
 	assert(socktype==SOCK_STREAM || socktype==SOCK_DGRAM);
 
-	if(!socketio_listen_bind(curr, newclient)) {
+	ret=socketio_listen_bind(curr, newclient);
+	if(!ret) {
 		freeaddrinfo(ai_res);
 		ERROR_FMT("Could bind socket for %s:%s\n", host ? host : "*", port);
 		return 0; /* failure */
 	}
 
 	freeaddrinfo(ai_res);
-	return 1; /* success */
+	return ret; /* success */
 }
 
 /******************************************************************************
@@ -5198,7 +5200,7 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh) {
 
 /** undocumented - please add documentation. */
 EXPORT void telnetclient_close(struct telnetclient *cl) {
-	if(cl && cl->sh) {
+	if(cl && cl->sh && !cl->sh->delete_flag) {
 		cl->sh->delete_flag=1; /* cause deletetion later */
 		socketio_delete_count++;
 	}
