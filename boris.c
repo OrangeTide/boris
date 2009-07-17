@@ -545,6 +545,7 @@ static struct mud_config {
 	char *msgfile_newuser_create;
 	char *msgfile_newuser_deny;
 	char *default_channels;
+	unsigned webserver_port;
 } mud_config;
 
 /******************************************************************************
@@ -6378,6 +6379,197 @@ EXPORT int game_init(void) {
 }
 
 /******************************************************************************
+ * Webserver
+ ******************************************************************************/
+
+/**
+ * handle for a webserver client.
+ * holds a socketio_handle that points back to this structure through the
+ * void *extra field.
+ */
+struct webserver {
+	struct socketio_handle *sh; /**< socketio_handle associated with this entry. */
+	/** @todo add some kind of pointer and offset for a pre-written request.
+	 * reference count the request blob so it is freed once everyone is done.
+	 *
+	 * use some kind of look-up for what makes up a request to find if a blob
+	 * is already in cache. perhaps a SHA1 of the filename+parameters. if time
+	 * is a factor then make it like a paramter, where it is scaled to the
+	 * resolution where it is important. (like 1-5 minute intervals for most
+	 * status updates.)
+	 *
+	 * fully expanded @ref shvar_eval caches of the output could be kept this
+	 * way.
+	 *
+	 * We could just keep a very short duration cache. Just for the active connection only, that
+	 * would be the least effort. And would fit in well with the reference
+	 * counting scheme. Time duration caches can be messier because some event
+	 * other than simple client connections would have to be used to take and
+	 * put the refcounts to expire the cache entry.
+	 *
+	 */
+};
+
+/**
+ * the listening socket for the webserver.
+ */
+static struct socketio_handle *webserver_listen_handle;
+
+/**
+ * marks a webserver socket as needing to be reaped.
+ */
+static void webserver_close(struct webserver *ws) {
+	if(ws && ws->sh && !ws->sh->delete_flag) {
+		ws->sh->delete_flag=1; /* cause deletetion later */
+		socketio_delete_count++; /* tracks if clean-up phase should be done. */
+	}
+}
+
+/**
+ * try to fill the input buffers on a read-ready event.
+ */
+static void webserver_read_event(struct socketio_handle *sh, SOCKET fd, void *extra) {
+	struct webserver *ws=extra;
+	int res;
+	char data[60]; /**< parser input buffer. */
+	const size_t len=sizeof data; /**< parser input buffer size. */
+
+	assert(sh != NULL);
+	assert(ws != NULL);
+	assert(fd != INVALID_SOCKET);
+	assert(!sh->delete_flag);
+
+	res=socketio_recv(fd, data, len);
+	if(res<=0) {
+		/* close or error */
+		webserver_close(ws);
+		return;
+	}
+
+	/** @todo implement something to parse the input. use an HTTP parser state machine. */
+
+	/* pretend we have read in a useful request and also pretened we have
+	 * pushed some data into a buffer to deliever.
+	 */
+
+	/* go into write mode to send our message. */
+	socketio_writeready(fd);
+
+	/* keep sucking down data. */
+	socketio_readready(fd);
+}
+
+/**
+ * empty the buffers into a socket on a write-ready event.
+ */
+static void webserver_write_event(struct socketio_handle *sh, SOCKET fd, void *extra) {
+	struct webserver *ws=extra;
+	int res;
+	const char data[]=
+		"HTTP/1.1 200 OK\r\n"
+		"Connection: close\r\n"
+		"Content-Type: text/plain\r\n"
+		"\r\n"
+		"Hello World. This is my webserver!\r\n";
+
+	assert(sh != NULL);
+	assert(ws != NULL);
+	assert(fd != INVALID_SOCKET);
+	assert(!sh->delete_flag);
+
+	res=socketio_send(fd, data, strlen(data));
+	if(res<0) {
+		sh->delete_flag=1;
+		return; /* client write failure */
+	}
+
+	/**
+	 * @todo check if res<len. the buffer wasn't completely transfered then set the socket
+	 * as write-ready.
+	 * socketio_writeready(sh->fd);
+	 */
+
+	webserver_close(ws);
+}
+
+/**
+ * free a struct webserver client connection.
+ */
+static void webserver_free(struct socketio_handle *sh, void *p) {
+	struct webserver *ws=p;
+
+	if(sh->fd!=INVALID_SOCKET) {
+		/* force a future invocation when the remote socket closes. */
+		socketio_readready(sh->fd);
+	}
+
+	if(!sh->delete_flag) {
+		ERROR_MSG("WARNING: delete_flag was not set before freeing");
+	}
+
+	/* detach our special data from the socketio_handle. */
+	sh->extra=NULL;
+	ws->sh=NULL;
+
+	free(ws);
+}
+
+/**
+ * creates a new webserver client connections from a socketio_handle.
+ */
+static struct webserver *webserver_newclient(struct socketio_handle *sh) {
+	struct webserver *ws;
+	ws=calloc(1, sizeof *ws);
+	ws->sh=sh;
+
+	sh->extra=ws;
+	sh->extra_free=webserver_free;
+
+	sh->write_event=webserver_write_event;
+	sh->read_event=webserver_read_event;
+
+	/* being parsing input. */
+	socketio_readready(sh->fd);
+
+	return ws;
+}
+
+/**
+ * create a new webserver on a new connection event from a listening socket.
+ */
+static void webserver_new_event(struct socketio_handle *sh) {
+	struct webserver *ws; /**< client connected to our webserver. */
+
+	ws=webserver_newclient(sh);
+
+}
+
+/**
+ * initialize the webserver module by binding a listening socket for the server.
+ */
+int webserver_init(int family, unsigned port) {
+	char port_str[16];
+	snprintf(port_str, sizeof port_str, "%u", port);
+	webserver_listen_handle=socketio_listen(family, SOCK_STREAM, NULL, port_str, webserver_new_event);
+	if(!webserver_listen_handle) {
+		return 0; /* */
+	}
+
+	return 1; /* success */
+}
+
+/**
+ * delete the the server's socketio_handle.
+ */
+void webserver_shutdown(void) {
+	if(webserver_listen_handle) {
+		webserver_listen_handle->delete_flag=1;
+		socketio_delete_count++; /* tracks if clean-up phase should be done. */
+		webserver_listen_handle=NULL;
+	}
+}
+
+/******************************************************************************
  * Mud Config
  ******************************************************************************/
 
@@ -6544,6 +6736,7 @@ EXPORT void mud_config_init(void) {
 	mud_config.msgfile_newuser_create=strdup("\nPlease enter only correct information in this application.\n\n");
 	mud_config.msgfile_newuser_deny=strdup("\nNot accepting new user applications!\n\n");
 	mud_config.default_channels=strdup("@system,@wiz,OOC,auction,chat,newbie");
+	mud_config.webserver_port=0; /* default is to disable. */
 }
 
 /**
@@ -6597,6 +6790,7 @@ EXPORT int mud_config_process(void) {
 	config_watch(&cfg, "eventlog.filename", do_config_string, &mud_config.eventlog_filename);
 	config_watch(&cfg, "eventlog.timeformat", do_config_string, &mud_config.eventlog_timeformat);
 	config_watch(&cfg, "channels.default", do_config_string, &mud_config.default_channels);
+	config_watch(&cfg, "webserver.port", do_config_uint, &mud_config.webserver_port);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", config_test_show, 0);
 #endif
@@ -6769,6 +6963,15 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	atexit(form_module_shutdown);
+
+	/* start the webserver if webserver.port is defined. */
+	if(mud_config.webserver_port) {
+		if(!webserver_init(fl_default_family, mud_config.webserver_port)) {
+			ERROR_MSG("could not initialize webserver");
+			return EXIT_FAILURE;
+		}
+		atexit(webserver_shutdown);
+	}
 
 	if(!game_init()) {
 		ERROR_MSG("could not start game");
