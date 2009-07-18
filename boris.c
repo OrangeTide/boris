@@ -2274,6 +2274,12 @@ void eventlog_channel_part(const char *remote, const char *channel_name, const c
 	}
 }
 
+/**
+ * logs an HTTP GET action.
+ */
+void eventlog_webserver_get(const char *remote, const char *uri) {
+	eventlog("WEBSITE-GET", "remote=\"%s\" uri=\"%s\"\n", remote?remote:"", uri?uri:"");
+}
 /******************************************************************************
  * Config loader
  ******************************************************************************/
@@ -6447,6 +6453,8 @@ static void webserver_read_event(struct socketio_handle *sh, SOCKET fd, void *ex
 	}
 
 	/** @todo implement something to parse the input. use an HTTP parser state machine. */
+
+	eventlog_webserver_get(sh->name, "/"); /**< @todo log the right URI. */
 
 	/* pretend we have read in a useful request and also pretened we have
 	 * pushed some data into a buffer to deliever.
