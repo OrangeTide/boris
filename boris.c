@@ -4080,6 +4080,17 @@ EXPORT int socketio_wouldblock(void) {
 #endif
 }
 
+/**
+ * @return true for errno==EINTR.
+ */
+EXPORT int socketio_eintr(void) {
+#if defined(USE_WIN32_SOCKETS)
+    return WSAGetLastError()==WSAEINTR;
+#else
+    return errno==EINTR;
+#endif
+}
+
 #ifndef NTRACE
 /** undocumented - please add documentation. */
 static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds) {
@@ -4444,7 +4455,7 @@ EXPORT int socketio_dispatch(long msec) {
 	}
 	nr=select(socketio_fdmax+1, &out_readfds, &out_writefds, 0, to);
 	if(nr==SOCKET_ERROR) {
-		SOCKETIO_FAILON(errno!=EINTR, "select()", failure);
+		SOCKETIO_FAILON(socketio_eintr(), "select()", failure);
 		return 1; /* EINTR occured */
 	}
 
