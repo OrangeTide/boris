@@ -1,0 +1,6 @@
+CC = llvmc ;
+CCFLAGS = -Os -g -std=gnu99 ;
+
+if $(UNIX) { LINK += -ldl ; }
+
+Main boris : boris.c ;
