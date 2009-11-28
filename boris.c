@@ -3003,233 +3003,322 @@ static inline void base64_encode(char *ret, size_t length, uint32_t *v) {
 	*ret=0;
 }
 
+
 /******************************************************************************
- * xxtcrypt : password hashing using XXT (improved version of TEA)
+ * SHA1
  ******************************************************************************/
-
-/** undocumented - please add documentation. */
-#define XXTCRYPT_BITS 128
-
-/** undocumented - please add documentation. */
-#define XXTCRYPT_GENSALT_LEN 6
-
-/** undocumented - please add documentation. */
-#define XXTCRYPT_GENSALT_MAX 16
-
-/** maximum length of crypted password **/
-#define XXTCRYPT_MAX (XXTCRYPT_GENSALT_MAX+1+(2+4*(XXTCRYPT_BITS/8))/3+1)
+/* SHA-1 hashing routines.
+ * see RFC3174 for the SHA-1 algorithm.
+ *
+ * Jon Mayo - PUBLIC DOMAIN - July 17, 2009
+ *
+ */
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdint.h>
 
 /**
- * expands copies of salt and plaintext into key space m.
+ * size of a SHA-1 digest in bytes. SHA-1 is 160-bit.
  */
-static inline void xxtcrypt_salt_prepare(char *m, size_t len, const char *plaintext, const char salt[2]) {
-	unsigned i;
-
-	memset(m, 0, len);
-	/* load salt */
-	for(i=0;i<2;i++) {
-		m[i]=salt[i];
-	}
-	/* load plaintext into remaining bytes, looping over them */
-	for(;plaintext[i-2];i++) {
-		int pos=i%len;
-		/* swap nibbles of previous cell and add key */
-		m[pos]=((m[pos]<<4)|((unsigned)m[pos]>>4))+plaintext[i-2];
-	}
-}
+#define SHA1_DIGEST_LENGTH 20
 
 /**
- * XXT encrypt routine.
+ * number of 32-bit values in a 512-bit block.
  */
-static inline void xxtcrypt_ll_enc(size_t length, uint32_t *v, uint32_t k[4]) {
-	uint32_t z=v[length-1], y, sum=0, e;
-	unsigned q, p;
-
-	assert(length>1);
-
-	// TRACE("len=%d\n", length);
-	// TRACE("--- KEY --- k: 0x%08x 0x%08x 0x%08x 0x%08x\n", k[0], k[1], k[2], k[3]);
-	// TRACE("--- ENC --- v0: 0x%08x v1: 0x%08x\n", v[0], v[1]);
-
-	/* 32 cycles for a length=2, which is 64 rounds */
-	q=6+52/length;
-	// printf(" %d cycles (%d rounds)\n", q, q*length);
-	while(q-->0) {
-		sum+=0x9e3779b9; /* delta */
-		e=sum>>2&3;
-		for(p=0;p<=length-1;p++) {
-			if(p<length-1) {
-				y=v[p+1];
-			} else {
-				y=v[0];
-			}
-			v[p]+=(((z>>5)^(y<<2))+((y>>3)^(z<<4)))^((sum^y)+(k[(p&3)^e]^z));
-			z=v[p];
-		}
-	}
-}
+#define SHA1_LBLOCK 16
 
 /**
- * load keys returns new offset.
+ * SHA-1 Constants.
  */
-static inline unsigned xxtcrypt_ll_load_k4(unsigned ofs, uint32_t k[4], const char *plaintext, size_t saltlen, const char *salt) {
-	unsigned ki, i;
-
-	ki=0;
-
-	k[0]=k[1]=k[2]=k[3]=0; /* clear the key space */
-
-	for(;ofs<saltlen;ofs++) {
-		k[ki/4]|=(uint32_t)salt[ofs]<<(8*ki);
-		ki=(ki+1)%(4*4); /* 4 bytes per word, 4 words per key */
-	}
-
-	for(i=ofs-saltlen;plaintext[i];i++,ofs++) {
-		k[ki/4]|=(uint32_t)plaintext[i]<<(8*ki);
-		ki=(ki+1)%(4*4); /* 4 bytes per word, 4 words per key */
-	}
-	return ofs;
-}
+#define SHA1_K0 0x5a827999
+#define SHA1_K1 0x6ed9eba1
+#define SHA1_K2 0x8f1bbcdc
+#define SHA1_K3 0xca62c1d6
 
 /**
- * encrypt password into hashed password.
- * format: salt!hash
+ * rotate a value in an f-bit field left by b bits.
+ * truncate to 32-bits.
  */
-char *xxtcrypt(size_t max, char *dest, const char *plaintext, size_t saltlen, const char *salt, size_t bits) {
-	unsigned ofs, i;
-	uint32_t k[128/32]; /* 128-bit key */
-#if __STDC_VERSION__ >= 199901L
-	uint32_t v[bits/32], lastv[bits/32]; /* encrypted value */
-#else
-	uint32_t v[XXTCRYPT_BITS/32], lastv[XXTCRYPT_BITS/32]; /* encrypted value */
-#endif
-
-	if(max<saltlen+1+(2+4*(bits/8))/3+1) {
-		printf("won't fit!!\n");
-		return 0;
-	}
-
-	memset(v, 0, sizeof v); /* start with a hash of 0 */
-
-	ofs=0;
-	do {
-		ofs=xxtcrypt_ll_load_k4(ofs, k, plaintext, saltlen, salt); /* load next chunk */
-
-		memcpy(lastv, v, sizeof v); /* copy the old value of v */
-		xxtcrypt_ll_enc(NR(v), v, k); /* modifies v to encrypt it */
-		for(i=0;i<NR(v);i++) {
-			v[i]^=lastv[i]; /* the XOR step in Davies-Meyer */
-		}
-		// TRACE("bits=%d vsz=%d ofs=%d saltlen=%d\n", bits, NR(v), ofs, saltlen);
-	} while(plaintext[ofs-saltlen]);
-
-	memset(k, 0, sizeof k); /* remove key data */
-
-	memcpy(dest, salt, saltlen);
-	i=saltlen;
-	dest[i++]='!';
-
-	base64_encode(dest+i, NR(v), v);
-	return dest;
-}
+#define ROL(f, v, b) ((((v)<<(b))|((v)>>((f)-(b))))&(0xfffffffful>>(32-(f))))
+/* here is a version that doens't truncate, useful for f-bit sized environments.
+ * #define ROL(f, v, b) (((v)<<(b))|((v)>>((f)-(b))))
+ */
+#define ROL32(v, b) ROL(32, v, b)
 
 /**
- * fills with salt data.
+ * data structure holding the state of the hash processing.
  */
-void xxtcrypt_gensalt(size_t salt_len, char *salt, int (*rand_func)(void), unsigned randomitity) {
-	unsigned randness, i, pool;
-
-	/* pool starts with no randomness */
-	pool=time(NULL);
-	randness=0;
-
-	for(i=0;i<salt_len;i++) {
-		if(randness<64) {
-			pool^=rand_func();
-			randness+=randomitity; /* rand_func adds a certain amount of randness */
-		}
-
-		/* */
-		salt[i]=pool%64;
-		pool/=64;
-		randness/=64;
-
-		/* convert to a base64 system (this code only works for ASCII) */
-		if(salt[i]>=0 && salt[i]<12) salt[i]+='.'; else
-		if(salt[i]>=12 && salt[i]<38) salt[i]+='A'-12; else
-		if(salt[i]>=38 && salt[i]<64) salt[i]+='a'-38;
-	}
-}
+struct sha1_ctx {
+	uint_least32_t
+		h[5], /**< five hash state values for 160-bits. */
+		data[SHA1_LBLOCK]; /**< load data into chunks here. */
+	uint_least64_t cnt; /**< total so far in bits. */
+	unsigned data_len; /**< number of bytes used in data. (not the number of words/elements) */
+};
 
 /**
- * creates a random salt and applies it to the password.
+ * initialize the hash context.
  */
-int xxtcrypt_makepass(char *buf, size_t max, const char *plaintext) {
-	char salt[XXTCRYPT_GENSALT_LEN];
+int sha1_init(struct sha1_ctx *ctx) {
+	if(!ctx) return 0; /* failure */
 
-	xxtcrypt_gensalt(sizeof salt, salt, rand, RAND_MAX/2);
+	/* initialize h state. */
+	ctx->h[0]=0x67452301lu;
+	ctx->h[1]=0xefcdab89lu;
+	ctx->h[2]=0x98badcfelu;
+	ctx->h[3]=0x10325476lu;
+	ctx->h[4]=0xc3d2e1f0lu;
 
-	if(!xxtcrypt(max, buf, plaintext, sizeof salt, salt, XXTCRYPT_BITS)) {
-		return 0; /* failure */
-	}
+	ctx->cnt=0;
+	ctx->data_len=0;
+	memset(ctx->data, 0, sizeof ctx->data);
+
 	return 1; /* success */
 }
 
 /**
- * checks a password.
+ * do this transformation for each chunk, chunk assumed to be loaded into ctx->data[].
  */
-int xxtcrypt_checkpass(const char *crypttext, const char *plaintext) {
-	const char *hashptr;
-	size_t saltlen;
-	char buf[XXTCRYPT_MAX+1], *res;
+static void sha1_transform_chunk(struct sha1_ctx *ctx) {
+	unsigned i;
+	uint_least32_t
+		v[5], /**< called a, b, c, d, e in the documentation. */
+		f, k, tmp, w[16];
 
-	hashptr=strchr(crypttext, '!');
-	if(!hashptr) return 0; /* failure - not a valid password crypt */
-	saltlen=hashptr-crypttext;
-	hashptr++;
+	assert(ctx != NULL);
 
-	if(saltlen>XXTCRYPT_GENSALT_MAX) {
-		return 0; /* failure - this large salt size is unsupported */
+	/* load a, b, c, d, e with the current hash state. */
+	for(i=0;i<5;i++) {
+		v[i]=ctx->h[i];
 	}
 
-	res=xxtcrypt(sizeof buf, buf, plaintext, saltlen, crypttext, XXTCRYPT_BITS);
-	if(!res) {
-		return 0; /* failure - won't fit */
+	for(i=0;i<80;i++) {
+		unsigned t=i&15;
+
+		if(i<16) {
+			/* load 16 words of data into w[]. */
+			w[i]=ctx->data[i];
+		} else {
+			/* 16 to 79 - perform this calculation. */
+			w[t]^=w[(t+13)&15]^w[(t+8)&15]^w[(t+2)&15];
+			w[t]=ROL32(w[t], 1); /* left rotate 1. */
+		}
+
+		if(i<20) {
+			f=(v[1]&v[2])|(~v[1]&v[3]);
+			k=SHA1_K0;
+		} else if(i<40) {
+			f=v[1]^v[2]^v[3];
+			k=SHA1_K1;
+		} else if(i<60) {
+			f=(v[1]&v[2])|(v[1]&v[3])|(v[2]&v[3]);
+			k=SHA1_K2;
+		} else {
+			f=v[1]^v[2]^v[3];
+			k=SHA1_K3;
+		}
+
+		tmp=ROL32(v[0], 5); /* left rotate 5. */
+		tmp+=f+v[4]+k+w[t];
+		v[4]=v[3];
+		v[3]=v[2];
+		v[2]=ROL32(v[1], 30); /* left rotate 30. */
+		v[1]=v[0];
+		v[0]=tmp;
+
 	}
 
-	/** @todo only compare the hashes and not the salts and formatting */
-	return strcmp(buf, crypttext)==0; /* return 1 if passwords match */
+	/* add a, b, c, d, e to the hash state. */
+	for(i=0;i<5;i++) {
+		ctx->h[i]+=v[i];
+	}
+
+	memset(v, 0, sizeof v); /* erase the variables to avoid leaving useful data behind. */
+}
+
+/**
+ * hash more data to the stream.
+ */
+int sha1_update(struct sha1_ctx *ctx, const void *data, size_t len) {
+	if(!ctx||(!data&&!len)) return 0; /* failure */
+
+	while(len>0) {
+		/* load a chunk into ctx->data[]. return on short chunk.
+		 * load data in endian neutral way.
+		 */
+
+		while(ctx->data_len<4*SHA1_LBLOCK) {
+			if(len<=0) return 1; /* continue this later. */
+
+			/* fill out the buffer in big-endian order. */
+			switch((ctx->cnt/8)%4) {
+				case 0:
+					ctx->data[ctx->data_len++/4]=((uint_least32_t)*(const unsigned char*)data)<<24;
+					break;
+				case 1:
+					ctx->data[ctx->data_len++/4]|=((uint_least32_t)*(const unsigned char*)data)<<16;
+					break;
+				case 2:
+					ctx->data[ctx->data_len++/4]|=((uint_least32_t)*(const unsigned char*)data)<<8;
+					break;
+				case 3:
+					ctx->data[ctx->data_len++/4]|=*(const unsigned char*)data;
+					break;
+			}
+
+			ctx->cnt+=8; /* 8 bits were added. */
+			data=(const unsigned char*)data+1; /* next byte. */
+			len--; /* we've used up a byte. */
+		}
+
+		assert(ctx->data_len==4*SHA1_LBLOCK); /* the loop condition above ensures this. */
+
+		sha1_transform_chunk(ctx);
+
+		ctx->data_len=0;
+	}
+
+	return 1; /* success */
+}
+
+/**
+ * pad SHA-1 with 1s followed by 0s and a 64-bit value of the number of bits.
+ */
+static void sha1_append_length(struct sha1_ctx *ctx) {
+	unsigned char lendata[8];
+
+	assert(ctx != NULL);
+
+	/* write out the total number of bits procesed by the hash into a buffer. */
+	lendata[0]=ctx->cnt>>56;
+	lendata[1]=ctx->cnt>>48;
+	lendata[2]=ctx->cnt>>40;
+	lendata[3]=ctx->cnt>>32;
+	lendata[4]=ctx->cnt>>24;
+	lendata[5]=ctx->cnt>>16;
+	lendata[6]=ctx->cnt>>8;
+	lendata[7]=ctx->cnt;
+
+	/* insert 1 bit followed by 0s. */
+	sha1_update(ctx, "\x80", 1); /* binary 10000000. */
+	while(ctx->cnt%512 != 448) {
+		sha1_update(ctx, "", 1); /* insert 0. */
+	}
+
+	/* write out the big-endian value holding the number of bits processed. */
+	sha1_update(ctx, lendata, sizeof lendata);
+
+	assert(ctx->cnt%512 == 0); /* above should have triggered a sha1_transform_chunk(). */
+}
+
+/**
+ * finish up the hash, and pad in the special SHA-1 way with the length.
+ */
+int sha1_final(unsigned char *md, struct sha1_ctx *ctx) {
+	assert(ctx != NULL);
+	assert(md != NULL);
+
+	sha1_append_length(ctx);
+
+	assert(ctx->cnt%512 == 0);
+
+	/* combine h0, h1, h2, h3, h4 into digest. */
+	if(md) {
+		unsigned i;
+		for(i=0;i<5;i++) {
+			/* big-endian */
+			md[i*4]=ctx->h[i]>>24;
+			md[i*4+1]=ctx->h[i]>>16;
+			md[i*4+2]=ctx->h[i]>>8;
+			md[i*4+3]=ctx->h[i];
+		}
+	}
+
+	sha1_init(ctx); /* rub out the old data. */
+
+	return 1; /* success */
+}
+
+/**
+ * quick calculation of SHA1 on buffer data.
+ * @param data pointer.
+ * @param len length of data at pointer data.
+ * @param md if NULL use a static array.
+ * @return return md, of md is NULL then return static array.
+ */
+unsigned char *sha1(const void *data, size_t len, unsigned char *md) {
+	struct sha1_ctx ctx;
+	static unsigned char tmp[SHA1_DIGEST_LENGTH];
+	sha1_init(&ctx);
+	sha1_update(&ctx, data, len);
+	if(!md) md=tmp;
+	sha1_final(md, &ctx);
+	return md;
 }
 
 #ifndef NTEST
-/** undocumented - please add documentation. */
-static void xxtcrypt_test(void) {
-	const char *test_pass[] = {
-		"hello",
-		"tHIs Is A tEst",
-		"",
-		"    "
-		"xxxxxxxxxxxxxxxxyyyyy",
-	};
-	char buf[XXTCRYPT_MAX+1];
+static void sha1_print_digest(const unsigned char *md) {
 	unsigned i;
-
-	srand((unsigned)time(NULL));
-
-	for(i=0;i<NR(test_pass);i++) {
-		if(!xxtcrypt_makepass(buf, sizeof buf, test_pass[i])) abort();
-		if(!xxtcrypt_checkpass(buf, test_pass[i])) {
-			fprintf(stderr, "ERROR:passwords do not match\n");
-			abort();
-		}
-		fprintf(stderr, "crypted: %s plain: \"%s\"\n", buf, test_pass[i]);
+	for(i=0;i<SHA1_DIGEST_LENGTH;i++) {
+		printf("%02X", md[i]);
+		if(i<SHA1_DIGEST_LENGTH-1) printf(":");
 	}
-	if(xxtcrypt_checkpass(buf, "abc")) {
-		fprintf(stderr, "ERROR:password shouldn't match\n");
-		abort();
+	printf("\n");
+}
+
+int sha1_test(void) {
+	const char test1[]="The quick brown fox jumps over the lazy dog";
+	const unsigned char test1_digest[SHA1_DIGEST_LENGTH] = {
+		0x2f, 0xd4, 0xe1, 0xc6, 0x7a, 0x2d, 0x28, 0xfc, 0xed, 0x84, 0x9e, 0xe1, 0xbb, 0x76, 0xe7, 0x39, 0x1b, 0x93, 0xeb, 0x12,
+	};
+	unsigned char digest[SHA1_DIGEST_LENGTH];
+
+	memset(digest, 0, sizeof digest);
+
+	if(!sha1(test1, strlen(test1), digest)) {
+		printf("failed.\n");
+		return 0;
 	}
+
+
+	printf("calculated : ");
+	sha1_print_digest(digest);
+
+	printf("known      : ");
+	sha1_print_digest(test1_digest);
+
+	printf("test1: %s\n", memcmp(digest, test1_digest, SHA1_DIGEST_LENGTH) ? "FAILED" : "PASSED");
+
+	return 1;
 }
 #endif
+/******************************************************************************
+ * SHA1PASSWD - passwd hashing using SHA-1 algorithm
+ ******************************************************************************/
+
+/** Number of bits used by SHA-1 */
+#define SHA1CRYPT_BITS 128
+
+/** undocumented - please add documentation. */
+#define SHA1CRYPT_GENSALT_LEN 6
+
+/** undocumented - please add documentation. */
+#define SHA1CRYPT_GENSALT_MAX 16
+
+/** maximum length of crypted password */
+#define SHA1CRYPT_MAX (SHA1CRYPT_GENSALT_MAX+1+(2+4*(SHA1CRYPT_BITS/8))/3+1)
+
+int sha1passwd_makepass(char *buf, size_t max, const char *plaintext) {
+	/** @todo implement this function. */
+	abort();
+}
+
+int sha1passwd_checkpass(const char *crypttext, const char *plaintext) {
+	abort();
+}
+
+
 /******************************************************************************
  * fdb
  ******************************************************************************/
@@ -3561,7 +3650,7 @@ EXPORT struct user *user_lookup(const char *username) {
 EXPORT struct user *user_create(const char *username, const char *password, const char *email) {
 	struct user *u;
 	long id;
-	char password_crypt[XXTCRYPT_MAX+1];
+	char password_crypt[SHA1CRYPT_MAX+1];
 
 	if(!username) {
 		ERROR_MSG("Username was NULL");
@@ -3569,7 +3658,7 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 	}
 
 	/* encrypt password */
-	if(!xxtcrypt_makepass(password_crypt, sizeof password_crypt, password)) {
+	if(!sha1passwd_makepass(password_crypt, sizeof password_crypt, password)) {
 		ERROR_MSG("Could not hash password");
 		return NULL; /* failure */
 	}
@@ -5844,7 +5933,7 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 	u=user_lookup(cl->state.login.username);
 	if(u) {
 		/* verify the password */
-		if(xxtcrypt_checkpass(u->password_crypt, line)) {
+		if(sha1passwd_checkpass(u->password_crypt, line)) {
 			telnetclient_setuser(cl, u);
 			eventlog_signon(cl->state.login.username, cl->sh->name);
 			telnetclient_printf(cl, "Hello, %s.\n\n", u->username);
@@ -6934,7 +7023,7 @@ int main(int argc, char **argv) {
 	bitmap_test();
 	freelist_test();
 	heapqueue_test();
-	xxtcrypt_test();
+	sha1_test();
 #endif
 
 	srand((unsigned)time(NULL));
