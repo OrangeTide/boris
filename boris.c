@@ -2469,45 +2469,38 @@ void acs_test(void) {
 
 /**
  * base64_encodes as ./0123456789a-zA-Z.
- * length is the number of 32-bit words.
+ *
  */
-static inline void base64_encode(char *ret, size_t length, uint32_t *v) {
-	uint32_t x; /* buffer for current value */
-	int xlen, vlen;
+EXPORT int base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
+	static const uint8_t base64enc_tab[64]= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	unsigned ii, io;
+	uint_least32_t v;
+	unsigned rem;
 
-	xlen=0;
-	vlen=0;
-	x=0;
-
-	while(length>0 || xlen>0) {
-		if(xlen<6) {
-			if(length>0) {
-				x|=(*v>>vlen)<<xlen;
-				xlen+=16;
-				vlen+=16;
-				if(vlen>=32) {
-					v++;
-					length--;
-					vlen=0;
-				}
-			} else {
-				xlen=6; /* pad remaining */
-			}
+	for(io=0,ii=0,v=0,rem=0;ii<in_len;ii++) {
+		unsigned char ch;
+		ch=in[ii];
+		v=(v<<8)|ch;
+		rem+=8;
+		while(rem>=6) {
+			rem-=6;
+			if(io>=out_len) return -1; /* truncation is failure */
+			out[io++]=base64enc_tab[(v>>rem)&63];
 		}
-		*ret=x&63;
-
-		/* convert to a base64 system (this code only works for ASCII) */
-		if(*ret>=0 && *ret<12) *ret+='.'; else
-		if(*ret>=12 && *ret<38) *ret+='A'-12; else
-		if(*ret>=38 && *ret<64) *ret+='a'-38;
-
-		ret++;
-		x>>=6;
-		xlen-=6;
 	}
-	*ret=0;
+	if(rem) {
+		v<<=(6-rem);
+		if(io>=out_len) return -1; /* truncation is failure */
+		out[io++]=base64enc_tab[v&63];
+	}
+	while(io&3) {
+		if(io>=out_len) return -1; /* truncation is failure */
+		out[io++]='=';
+	}
+	if(io>=out_len) return -1; /* no room for null terminator */
+	out[io]=0;
+	return io;
 }
-
 
 /******************************************************************************
  * SHA1
@@ -2786,7 +2779,6 @@ int sha1_test(void) {
 		return 0;
 	}
 
-
 	printf("calculated : ");
 	sha1_print_digest(digest);
 
@@ -2814,16 +2806,69 @@ int sha1_test(void) {
 /** maximum length of crypted password */
 #define SHA1CRYPT_MAX (SHA1CRYPT_GENSALT_MAX+1+(2+4*(SHA1CRYPT_BITS/8))/3+1)
 
-int sha1passwd_makepass(char *buf, size_t max, const char *plaintext) {
-	/** @todo implement this function. */
+/** prefix for salted SHA1 password hash. */
+#define SHA1PASSWD_MAGIC "$ssha1$"
+
+/**
+ * generate a salt for the hash.
+ */
+static void sha1crypt_gensalt(size_t salt_len, void *salt) {
+    size_t i;
+    for(i=0;i<salt_len;i++) {
+        /* TODO: use better random salt */
+        ((unsigned char*)salt)[i]=(rand()%96)+' ';
+    }
+}
+
+/**
+ * @param buf output buffer.
+ */
+EXPORT int sha1crypt_makepass(char *buf, size_t max, const char *plaintext) {
+	struct sha1_ctx ctx;
+	/** hold both the digest and the salt. */
+	unsigned char digest[SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_LEN];
+    unsigned char *salt=&digest[SHA1_DIGEST_LENGTH];
+	const size_t salt_len=SHA1CRYPT_GENSALT_LEN;
+	/** round up to a multiple of 4, then multiply by 4/3. */
+	char tmp[((SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_LEN+3)/4*4)*4/3+1];
+
+	assert(max > 0);
+
+	/* create a random salt of reasonable length. */
+    sha1crypt_gensalt(salt_len, salt);
+
+	/* calculate SHA1 of plaintext+salt. */
+	sha1_init(&ctx);
+	sha1_update(&ctx, plaintext, strlen(plaintext));
+	sha1_update(&ctx, salt, salt_len);
+	sha1_final(digest, &ctx);
+
+	/* encode digest+salt into buf. */
+	if(base64_encode(SHA1_DIGEST_LENGTH+salt_len, digest, sizeof tmp, tmp)<0) {
+		ERROR_MSG("Buffer cannot hold password.");
+		return 0; /**< no room. */
+	}
+
+	/** @todo return an error if snprintf truncated. */
+	snprintf(buf, max, "%s%s", SHA1PASSWD_MAGIC, tmp);
+
+	DEBUG("Password hash: \"%s\"\n", buf);
+
+    return 1; /**< success. */
+}
+
+EXPORT int sha1crypt_checkpass(const char *crypttext, const char *plaintext) {
 	abort();
 }
 
-int sha1passwd_checkpass(const char *crypttext, const char *plaintext) {
-	abort();
+#ifndef NTEST
+EXPORT void sha1crypt_test(void) {
+	char buf[SHA1CRYPT_MAX+1];
+	sha1crypt_makepass(buf, sizeof buf, "abcdef");
+
+	printf("buf=\"%s\"\n", buf);
 }
-
-
+#endif
 /******************************************************************************
  * fdb
  ******************************************************************************/
@@ -3130,7 +3175,7 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 	}
 
 	/* encrypt password */
-	if(!sha1passwd_makepass(password_crypt, sizeof password_crypt, password)) {
+	if(!sha1crypt_makepass(password_crypt, sizeof password_crypt, password)) {
 		ERROR_MSG("Could not hash password");
 		return NULL; /* failure */
 	}
@@ -5393,7 +5438,7 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line) 
 	u=user_lookup(cl->state.login.username);
 	if(u) {
 		/* verify the password */
-		if(sha1passwd_checkpass(u->password_crypt, line)) {
+		if(sha1crypt_checkpass(u->password_crypt, line)) {
 			telnetclient_setuser(cl, u);
 			eventlog_signon(cl->state.login.username, cl->sh->name);
 			telnetclient_printf(cl, "Hello, %s.\n\n", u->username);
@@ -6483,6 +6528,7 @@ int main(int argc, char **argv) {
 	freelist_test();
 	heapqueue_test();
 	sha1_test();
+	sha1crypt_test();
 #endif
 
 	srand((unsigned)time(NULL));
