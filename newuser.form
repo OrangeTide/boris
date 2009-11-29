@@ -7,6 +7,10 @@ PASSWORD
 Password:
 Enter a password for this account.
 ~
+PASSWORD2
+Enter password again:
+Confirm your password by reentering it.
+~
 EMAIL
 Email:
 Enter an email address to for receiving authorization code.

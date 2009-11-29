@@ -1563,6 +1563,7 @@ EXPORT int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count) {
 			}
 		}
 	}
+	DEBUG_MSG("failed.");
 	return 0; /* failure */
 }
 
@@ -5499,6 +5500,8 @@ static void signoff(void *p, long unused2 UNUSED, void *unused3 UNUSED) {
 /******************************************************************************
  * form - handles processing input forms
  ******************************************************************************/
+#define FORM_FLAG_HIDDEN 1
+#define FORM_FLAG_INVISIBLE 2
 
 /** undocumented - please add documentation. */
 static struct form *form_newuser_app;
@@ -5608,8 +5611,14 @@ static void form_menu_show(struct telnetclient *cl, const struct form *f, struct
 	for(i=0,curr=LIST_TOP(f->items);curr&&(!fs||i<fs->nr_value);curr=LIST_NEXT(curr, item),i++) {
 		const char *user_value;
 
-		user_value=fs ? fs->value[i] ? fs->value[i] : "" : 0;
-		if((curr->flags&1)==1) {
+		/* skip over invisible items without altering the count/index */
+		while(curr&&(curr->flags&FORM_FLAG_INVISIBLE)==FORM_FLAG_INVISIBLE)
+			curr=LIST_NEXT(curr, item);
+		if(!curr)
+			break;
+
+		user_value=fs ? fs->value[curr->value_index] ? fs->value[curr->value_index] : "" : 0;
+		if((curr->flags&FORM_FLAG_HIDDEN)==FORM_FLAG_HIDDEN) {
 			user_value="<hidden>";
 		}
 		telnetclient_printf(cl, "%d. %s %s\n", i+1, curr->prompt, user_value ? user_value : "");
@@ -5642,7 +5651,8 @@ static void form_lineinput(struct telnetclient *cl, const char *line) {
 		}
 		*value=strdup(line);
 		fs->curritem=LIST_NEXT(fs->curritem, item);
-		if(fs->curritem && !fs->done) {
+		if(fs->curritem && (!fs->done || ((fs->curritem->flags&FORM_FLAG_INVISIBLE)==FORM_FLAG_INVISIBLE))) {
+			/* go to next item if not done or if next item is invisible */
 			telnetclient_puts(cl, fs->curritem->description);
 			telnetclient_setprompt(cl, fs->curritem->prompt);
 		} else {
@@ -5682,6 +5692,9 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line) {
 		i=strtol(line, &endptr, 10);
 		if(endptr!=line && i>0) {
 			for(fs->curritem=LIST_TOP(f->items);fs->curritem;fs->curritem=LIST_NEXT(fs->curritem, item)) {
+				/* skip invisible entries in selection */
+				if((fs->curritem->flags&FORM_FLAG_INVISIBLE)==FORM_FLAG_INVISIBLE) continue;
+
 				if(--i==0) {
 					telnetclient_start_lineinput(cl, form_lineinput, fs->curritem->prompt);
 					return; /* success */
@@ -5735,11 +5748,13 @@ static int form_createaccount_username_check(struct telnetclient *cl, const char
 
 	TRACE_ENTER();
 
+	assert(cl != NULL);
+
 	len=strlen(str);
 	if(len<3) {
 		telnetclient_puts(cl, mud_config.msg_usermin3);
 		DEBUG_MSG("failure: username too short.");
-		return 0;
+		goto failure;
 	}
 
 	for(s=str,res=isalpha(*s);*s;s++) {
@@ -5747,18 +5762,61 @@ static int form_createaccount_username_check(struct telnetclient *cl, const char
 		if(!res) {
 			telnetclient_puts(cl, mud_config.msg_useralphanumeric);
 			DEBUG_MSG("failure: bad characters");
-			return 0;
+			goto failure;
 		}
 	}
 
 	if(user_exists(str)) {
 		telnetclient_puts(cl, mud_config.msg_userexists);
 		DEBUG_MSG("failure: user exists.");
-		return 0;
+		goto failure;
 	}
 
 	DEBUG_MSG("success.");
 	return 1;
+failure:
+	telnetclient_puts(cl, mud_config.msg_tryagain);
+	telnetclient_setprompt(cl, cl->state.form.curritem->prompt);
+	return 0;
+}
+
+static int form_createaccount_password_check(struct telnetclient *cl, const char *str) {
+	TRACE_ENTER();
+
+	assert(cl != NULL);
+	assert(cl->state.form.form != NULL);
+
+	if(str && strlen(str)>3) {
+		DEBUG_MSG("success.");
+		return 1;
+	}
+
+	/* failure */
+	telnetclient_puts(cl, mud_config.msg_tryagain);
+	telnetclient_setprompt(cl, cl->state.form.curritem->prompt);
+	return 0;
+}
+
+/** verify that the second password entry matches the first */
+static int form_createaccount_password2_check(struct telnetclient *cl, const char *str) {
+	const char *password1;
+	struct form_state *fs=&cl->state.form;
+
+	TRACE_ENTER();
+
+	assert(cl != NULL);
+	assert(fs->form != NULL);
+
+	password1=form_getvalue(fs->form, fs->nr_value, fs->value, "PASSWORD");
+	if(password1 && !strcmp(password1, str)) {
+		DEBUG_MSG("success.");
+		return 1;
+	}
+
+	telnetclient_puts(cl, mud_config.msg_tryagain);
+	fs->curritem=form_getitem((struct form*)fs->form, "PASSWORD"); /* rewind to password entry */
+	telnetclient_setprompt(cl, fs->curritem->prompt);
+	return 0;
 }
 
 /** undocumented - please add documentation. */
@@ -5955,7 +6013,17 @@ EXPORT int form_module_init(void) {
 		ERROR_MSG("newuser.form does not have a PASSWORD field.");
 		return 0; /* failure */
 	}
-	fi->flags|=1; /* hidden */
+	fi->flags|=FORM_FLAG_HIDDEN; /* hidden */
+	fi->form_check=form_createaccount_password_check;
+
+	fi=form_getitem(form_newuser_app, "PASSWORD2");
+	if(!fi) {
+		VERBOSE("warning: newuser.form does not have a PASSWORD2 field.\n");
+		return 0; /* failure */
+	} else {
+		fi->flags|=FORM_FLAG_INVISIBLE; /* invisible */
+		fi->form_check=form_createaccount_password2_check;
+	}
 
 	return 1;
 }
