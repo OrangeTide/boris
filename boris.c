@@ -22,7 +22,6 @@
  * - form_state
  * - freelist - allocate ranges of numbers from a pool. uses freelist_entry and freelist_extent.
  * - heapqueue_elm - priority queue for implementing timers
- * - map - hash used as an associative array. uses map_data and map_entry.
  * - menuinfo - draws menus to a telnetclient
  * - refcount - macros to provide reference counting. uses @ref REFCOUNT_TAKE and @ref REFCOUNT_GET
  * - server - accepts new connections
@@ -250,32 +249,6 @@
 		|(((src)[(offset)+5]&255ull)<<16) \
 		|(((src)[(offset)+6]&255ull)<<8) \
 		|((src)[(offset)+7]&255ull))
-
-/*=* Rotate operations *=*/
-
-/** Rotate Left on 8-bit values. */
-#define ROL8(a,b) (((uint_least8_t)(a)<<(b))|((uint_least8_t)(a)>>(8-(b))))
-
-/** Rotate Left on 16-bit values. */
-#define ROL16(a,b) (((uint_least16_t)(a)<<(b))|((uint_least16_t)(a)>>(16-(b))))
-
-/** Rotate Left on 32-bit values. */
-#define ROL32(a,b) (((uint_least32_t)(a)<<(b))|((uint_least32_t)(a)>>(32-(b))))
-
-/** Rotate Left on 64-bit values. */
-#define ROL64(a,b) (((uint_least64_t)(a)<<(b))|((uint_least64_t)(a)>>(64-(b))))
-
-/** Rotate Right on 8-bit values. */
-#define ROR8(a,b) (((uint_least8_t)(a)>>(b))|((uint_least8_t)(a)<<(8-(b))))
-
-/** Rotate Right on 16-bit values. */
-#define ROR16(a,b) (((uint_least16_t)(a)>>(b))|((uint_least16_t)(a)<<(16-(b))))
-
-/** Rotate Right on 32-bit values. */
-#define ROR32(a,b) (((uint_least32_t)(a)>>(b))|((uint_least32_t)(a)<<(32-(b))))
-
-/** Rotate Right on 64-bit values. */
-#define ROR64(a,b) (((uint_least64_t)(a)>>(b))|((uint_least64_t)(a)<<(64-(b))))
 
 /*=* Bitfield operations *=*/
 
@@ -1663,474 +1636,6 @@ EXPORT void freelist_test(void) {
 #endif
 
 /******************************************************************************
- * Hashing Functions
- ******************************************************************************/
-
-/**
- * a hash that ignores case.
- */
-static uint_least32_t hash_stringignorecase32(const char *key) {
-	uint_least32_t h=0;
-
-	while(*key) {
-		h=h*65599u+(unsigned)tolower(*(const unsigned char*)key++);
-		/* this might be faster on some systems with fast shifts and slow mult:
-		 * h=(h<<6)+(h<<16)-h+tolower(*key++);
-		 */
-	}
-	return h;
-}
-
-/**
- * creates a 32-bit hash of a null terminated string.
- */
-static uint_least32_t hash_string32(const char *key) {
-	uint_least32_t h=0;
-
-	while(*key) {
-		h=h*65599u+(unsigned)*key++;
-		/* this might be faster on some systems with fast shifts and slow mult:
-		 * h=(h<<6)+(h<<16)-h+*key++;
-		 */
-	}
-	return h;
-}
-
-#if 0
-/**
- * creates a 32-bit hash of a blob of memory.
- */
-static uint_least32_t hash_mem32(const char *key, size_t len) {
-	uint_least32_t h=0;
-
-	while(len>0) {
-		h=h*65599u+(unsigned)*key++;
-		/* this might be faster on some systems with fast shifts and slow mult:
-		 * h=(h<<6)+(h<<16)-h+*key++;
-		 */
-		len--;
-	}
-	return h;
-}
-#endif
-
-/**
- * creates a 32-bit hash of a 32-bit value.
- */
-static uint_least32_t hash_uint32(uint_least32_t key) {
-	key=(key^61)*ROR32(key,16);
-	key+=key<<3;
-	key^=ROR32(key, 4);
-	key*=668265261;
-	key^=ROR32(key, 15);
-	return key;
-}
-
-#if 0
-/**
- * creates a 64-bit hash of a 64-bit value.
- */
-static uint_least64_t hash64_uint64(uint_least64_t key) {
-	key=~key+(key<<21);
-	key^=ROR64(key, 24);
-	key*=265;
-	key^=ROR64(key,14);
-	key*=21;
-	key^=ROR64(key, 28);
-	key+=key<<31;
-	return key;
-}
-
-/**
- * turns a 64-bit value into a 32-bit hash.
- */
-static uint_least32_t hash_uint64(uint_least64_t key) {
-	key=(key<<18)-key-1;
-	key^=ROR64(key, 31);
-	key*=21;
-	key^=ROR64(key, 11);
-	key+=key<<6;
-	key^=ROR64(key, 22);
-	return (uint_least32_t)key;
-}
-#endif
-
-/******************************************************************************
- * map
- ******************************************************************************/
-/** undocumented - please add documentation. */
-union map_data {
-	void *ptr;
-	fpos_t pos;
-	intptr_t i;
-	uintptr_t u;
-};
-
-/** undocumented - please add documentation. */
-struct map_entry {
-	LIST_ENTRY(struct map_entry) list;
-	void *key;	/* key can point inside of data (and usually should) */
-	union map_data data;
-};
-
-/** undocumented - please add documentation. */
-struct map {
-	void (*free_entry)(void *key, union map_data *data);
-	uint_least32_t (*hash)(const void *key);
-	uint_least32_t table_mask;
-	int (*compare)(const void *key1, const void *key2);
-	LIST_HEAD(struct, struct map_entry) *table;
-	long count;
-};
-
-/**
- * use this as a callback to init when you don't want to free.
- */
-static void _map_donotfree(void *key UNUSED, union map_data *data UNUSED) {
-}
-
-/** undocumented - please add documentation. */
-EXPORT uint_least32_t map_hash_stringignorecase(const void *key) {
-	return hash_stringignorecase32(key);
-}
-
-/** undocumented - please add documentation. */
-EXPORT uint_least32_t map_hash_string(const void *key) {
-	return hash_string32(key);
-}
-
-/** undocumented - please add documentation. */
-EXPORT uint_least32_t map_hash_unsigned(const void *key) {
-	return hash_uint32(*(unsigned*)key);
-}
-
-/** undocumented - please add documentation. */
-EXPORT uint_least32_t map_hash_uintptr(const void *key) {
-	return hash_uint32((uintptr_t)key);
-}
-
-/** undocumented - please add documentation. */
-EXPORT int map_compare_stringignorecase(const void *key1, const void *key2) {
-	return strcasecmp(key1, key2);
-}
-
-/** undocumented - please add documentation. */
-EXPORT int map_compare_string(const void *key1, const void *key2) {
-	return strcmp(key1, key2);
-}
-
-/** undocumented - please add documentation. */
-EXPORT int map_compare_unsigned(const void *key1, const void *key2) {
-	unsigned a=*(unsigned*)key1, b=*(unsigned*)key2;
-	return a<b?-1:a>b?1:0;
-}
-
-/**
- * treat argument as an unsigned instead of as a pointer.
- */
-EXPORT int map_compare_uintptr(const void *key1, const void *key2) {
-	uintptr_t a=(uintptr_t)key1, b=(uintptr_t)key2;
-	return a<b?-1:a>b?1:0;
-}
-
-/** undocumented - please add documentation. */
-EXPORT void map_init(struct map *m, unsigned initial_size_bits, void (*free_entry)(void *key, union map_data *data), uint_least32_t (*hash)(const void *key), int (*compare)(const void *key1, const void *key2)) {
-	unsigned i;
-
-	assert(initial_size_bits < 32); /* 2^32 hash entries will break this init function */
-
-	/* calculate the table mask */
-	m->table_mask=0;
-	while(initial_size_bits--) {
-		m->table_mask=(m->table_mask<<1)&1;
-	}
-
-	m->table=calloc(sizeof *m->table, m->table_mask+1);
-	for(i=0;i<=m->table_mask;i++) {
-		LIST_INIT(&m->table[i]);
-	}
-
-	m->count=0;
-	m->free_entry=free_entry?free_entry:_map_donotfree;
-	m->hash=hash;
-	m->compare=compare;
-}
-
-/**
- * adds an entry to a map, and refuses to add more than one.
- * exclusive prevents the same key from being added more than once.
- * replace causes the old entry to be removed.
- */
-EXPORT int map_replace(struct map *m, void *key, const union map_data *data, int replace, int exclusive) {
-	struct map_entry *e;
-	uint_least32_t h;
-
-	assert(m != NULL);
-	assert(key != NULL);
-	assert(m->compare != NULL);
-
-	h=m->hash(key);
-
-	if(exclusive) {
-		/* look for a duplicate key and refuse to overwrite it */
-		for(e=LIST_TOP(m->table[h&m->table_mask]);e;e=LIST_NEXT(e, list)) {
-			assert(e->key != NULL);
-			if(m->compare(key, e->key)==0) {
-				if(replace) {
-					LIST_REMOVE(e, list);
-					m->free_entry(e->key, &e->data);
-					free(e);
-					m->count--;
-					/* this will continue freeing ALL matching entries */
-				} else {
-					return 0; /* duplicate key found */
-				}
-			}
-		}
-	}
-
-	e=malloc(sizeof *e);
-	if(!e) {
-		PERROR("malloc()");
-		return 0;
-	}
-	e->key=key;
-	e->data=*data;
-	LIST_INSERT_HEAD(&m->table[h&m->table_mask], e, list);
-	m->count++;
-
-	return 1;
-}
-
-/**
- * refuses to add more than one copy of the same key.
- */
-EXPORT int map_add_ptr(struct map *m, void *key, void *ptr) {
-	const union map_data data={.ptr=ptr};
-	return map_replace(m, key, &data, 0, 1);
-}
-
-/**
- * adds an entry to a map, replaces a pointer if one with the same key already exists.
- */
-EXPORT int map_replace_ptr(struct map *m, void *key, void *ptr) {
-	const union map_data data={.ptr=ptr};
-	return map_replace(m, key, &data, 1, 1);
-}
-
-/**
- * refuses to add more than one copy of the same key.
- */
-EXPORT int map_add_uint(struct map *m, uintptr_t key, void *ptr) {
-	const union map_data data={.ptr=ptr};
-	return map_replace(m, (void*)key, &data, 0, 1);
-}
-
-/** undocumented - please add documentation. */
-EXPORT int map_replace_uint(struct map *m, uintptr_t key, void *ptr) {
-	const union map_data data={.ptr=ptr};
-	return map_replace(m, (void*)key, &data, 1, 1);
-}
-
-/**
- * if key matches then replace.
- */
-EXPORT int map_replace_fpos(struct map *m, uintptr_t key, const fpos_t *pos) {
-	const union map_data data={.pos=*pos};
-	DEBUG("key=%" PRIdPTR "\n", key);
-	return map_replace(m, (void*)key, &data, 1, 1);
-}
-
-/**
- * returns first matching entry.
- */
-EXPORT union map_data *map_lookup(struct map *m, const void *key) {
-	struct map_entry *e;
-	uint_least32_t h;
-
-	assert(m != NULL);
-	assert(key != NULL);
-	assert(m->hash != NULL);
-	assert(m->compare != NULL);
-
-	h=m->hash(key);
-
-	/* look for a duplicate key and refuse to overwrite it */
-	for(e=LIST_TOP(m->table[h&m->table_mask]);e;e=LIST_NEXT(e, list)) {
-		assert(e->key != NULL);
-		/* DEBUG("comparing '%s' '%s'\n", key, e->key); */
-		if(m->compare(key, e->key)==0) {
-			return &e->data;
-		}
-	}
-	return NULL;
-}
-
-/** undocumented - please add documentation. */
-EXPORT fpos_t *map_lookup_fpos(struct map *m, uintptr_t key) {
-	union map_data *data;
-	data=map_lookup(m, (void*)key);
-	return data ? &data->pos : NULL;
-}
-
-/** undocumented - please add documentation. */
-EXPORT void *map_lookup_ptr(struct map *m, const void *key) {
-	const union map_data *data;
-	data=map_lookup(m, key);
-	return data ? data->ptr : NULL;
-}
-
-/** undocumented - please add documentation. */
-EXPORT void map_foreach(struct map *m, void *p, void (*callback)(void *p, void *key, union map_data *data)) {
-	unsigned i;
-	struct map_entry *curr;
-	assert(callback != NULL);
-	TODO("Does this function work?");
-	TRACE("table_mask=%d\n", m->table_mask);
-	for(i=0;i<=m->table_mask;i++) {
-		TRACE("i=%u mask=%u\n", i, m->table_mask);
-		for(curr=LIST_TOP(m->table[i]);curr;curr=LIST_NEXT(curr, list)) {
-			TRACE("curr=%p\n", (void*)curr);
-			callback(p, curr->key, &curr->data);
-		}
-	}
-}
-
-/**
- * frees the entry.
- */
-EXPORT int map_remove(struct map *m, void *key) {
-	struct map_entry *e, *tmp;
-	uint_least32_t h;
-	int res=0;
-
-	assert(m != NULL);
-	assert(key != NULL);
-	assert(m->hash != NULL);
-	assert(m->compare != NULL);
-
-	h=m->hash(key);
-
-	/* look for a duplicate key and refuse to overwrite it */
-	for(e=LIST_TOP(m->table[h&m->table_mask]);e;) {
-		assert(e->key != NULL);
-		if(m->compare(key, e->key)==0) {
-			tmp=LIST_NEXT(e, list);
-			LIST_REMOVE(e, list);
-			m->free_entry(e->key, &e->data);
-			memset(e, 0x99, sizeof *e);
-			free(e);
-			m->count--;
-			/* this will continue freeing ALL matching entries */
-			res=1; /* freed an entry */
-			e=tmp;
-		} else {
-			e=LIST_NEXT(e, list);
-		}
-	}
-
-	return res; /* not found */
-}
-
-/** undocumented - please add documentation. */
-EXPORT int map_remove_uint(struct map *m, uintptr_t key) {
-	return map_remove(m, (void*)key);
-}
-
-/** undocumented - please add documentation. */
-EXPORT void map_free(struct map *m) {
-	struct map_entry *e;
-	unsigned i;
-
-	for(i=0;i<=m->table_mask;i++) {
-		while((e=LIST_TOP(m->table[i]))) {
-			LIST_REMOVE(e, list);
-			m->free_entry(e->key, &e->data);
-			free(e);
-			m->count--;
-		}
-	}
-	m->table_mask=0;
-	free(m->table);
-	m->table=NULL;
-#ifndef NDEBUG
-	memset(m, 0x55, sizeof *m); /* fill with fake data before freeing */
-#endif
-}
-
-#ifndef NTEST
-/** undocumented - please add documentation. */
-struct map_test_entry {
-	char *str;
-	unsigned value;
-};
-
-/** undocumented - please add documentation. */
-static void map_test_free(void *key UNUSED, union map_data *data) {
-	struct map_test_entry *e=data->ptr;
-	free(e->str);
-	free(e);
-}
-
-/** undocumented - please add documentation. */
-static struct map_test_entry *map_test_alloc(const char *str, unsigned value) {
-	struct map_test_entry *e;
-	e=malloc(sizeof *e);
-	e->str=strdup(str);
-	e->value=value;
-	return e;
-}
-
-/** undocumented - please add documentation. */
-EXPORT void map_test(void) {
-	struct map m;
-	struct map_test_entry *e;
-	unsigned i;
-	const char *test[] = {
-		"foo",
-		"bar",
-		"",
-		"z",
-		"hi",
-	};
-
-	map_init(&m, 4, map_test_free, map_hash_stringignorecase, map_compare_stringignorecase);
-
-	for(i=0;i<NR(test);i++) {
-		e=map_test_alloc(test[i], 5*i);
-		if(!map_add_ptr(&m, e->str, e)) {
-			printf("map_add_ptr() failed\n");
-		}
-	}
-
-	if(!map_remove(&m, "bar")) {
-		printf("map_remove() failed\n");
-	}
-
-	for(i=0;i<NR(test);i++) {
-		e=map_lookup_ptr(&m, test[i]);
-		if(!e) {
-			printf("map_lookup() failed\n");
-		} else {
-			printf("found '%s' -> '%s' %u\n", test[i], e->str, e->value);
-		}
-	}
-
-	printf("removing 'foo'\n");
-	if(!map_remove(&m, "foo")) {
-		printf("map_remove() failed\n");
-	}
-
-	printf("removing 'hi'\n");
-	if(!map_remove(&m, "hi")) {
-		printf("map_remove() failed\n");
-	}
-
-	map_free(&m);
-}
-#endif
-
-/******************************************************************************
  * eventlog - writes logging information based on events
  ******************************************************************************/
 /*-* eventlog:globals *-*/
@@ -3388,55 +2893,24 @@ struct user {
 	REFCOUNT_TYPE REFCOUNT_NAME;
 };
 
-/** undocumented - please add documentation. */
-struct user_name_map_entry {
-	unsigned id;
-	char *username;
+struct userdb_entry {
+	struct user *u;
+	LIST_ENTRY(struct userdb_entry) list;
 };
 
 /*=* user:globals *=*/
 
 /** undocumented - please add documentation. */
-static struct map user_name_map; /* convert username to id */
+LIST_HEAD(struct, struct userdb_entry) user_list;
 
 /** undocumented - please add documentation. */
 static struct freelist user_id_freelist;
 
-/** undocumented - please add documentation. */
-static struct map user_cache_id_map; /* cache table for looking up by id */
+/*=* user:prototypes. *=*/
 
-/** undocumented - please add documentation. */
-static struct map user_cache_name_map; /* cache table for looking up by username */
+EXPORT int user_exists(const char *username);
 
 /*=* user:internal functions *=*/
-
-/** undocumented - please add documentation. */
-static int user_cache_add(struct user *u) {
-	int ret=1;
-	if(!map_replace_uint(&user_cache_id_map, u->id, u)) {
-		ERROR_FMT("map_add_ptr() for userid(%d) failed\n", u->id);
-		ret=0; /* failure */
-	}
-	if(!map_replace_ptr(&user_cache_name_map, u->username, u)) {
-		ERROR_FMT("map_add_ptr() for username(%s) failed\n", u->username);
-		ret=0; /* failure */
-	}
-	return ret;
-}
-
-/** undocumented - please add documentation. */
-static int user_cache_remove(struct user *u) {
-	int ret=1;
-	if(!map_remove_uint(&user_cache_id_map, u->id)) {
-		ERROR_FMT("map_remove() for userid(%d) failed\n", u->id);
-		ret=0; /* failure */
-	}
-	if(!map_remove(&user_cache_name_map, u->username)) {
-		ERROR_FMT("map_remove() for username(%s) failed\n", u->username);
-		ret=0; /* failure */
-	}
-	return ret;
-}
 
 /**
  * only free the structure data.
@@ -3455,7 +2929,6 @@ static void user_ll_free(struct user *u) {
 /** undocumented - please add documentation. */
 static void user_free(struct user *u) {
 	if(!u) return;
-	user_cache_remove(u);
 	user_ll_free(u);
 }
 
@@ -3515,6 +2988,26 @@ static int user_ll_load_str(struct config *cfg UNUSED, void *extra, const char *
 	}
 
 	return 0; /* success - terminate the callback chain */
+}
+
+/**
+ * insert a user into user_list, but only if it is not already on the list.
+ */
+static int user_ll_add(struct user *u) {
+	struct userdb_entry *ent;
+	assert(u != NULL);
+	assert(u->username != NULL);
+
+	if(!u) return 0; /**< failure. */
+
+	if(user_exists(u->username)) {
+		return 0; /**< failure. */
+	}
+
+	ent=calloc(1, sizeof *ent);
+	ent->u=u;
+	LIST_INSERT_HEAD(&user_list, ent, list);
+	return 1; /**< success. */
 }
 
 /** undocumented - please add documentation. */
@@ -3591,42 +3084,20 @@ static int user_write(const struct user *u) {
 	return 1; /* success */
 }
 
-/** undocumented - please add documentation. */
-static void user_name_map_entry_free(void *key UNUSED, union map_data *data) {
-	struct user_name_map_entry *ne=data->ptr;
-	free(ne->username);
-	ne->username=NULL;
-	ne->id=0;
-	free(ne);
-}
-
-/**
- * add a new account to username to id lookup table.
- */
-static int user_name_map_add(unsigned id, const char *username) {
-	struct user_name_map_entry *ne;
-	ne=malloc(sizeof *ne);
-	ne->id=id;
-	ne->username=strdup(username);
-	if(!map_add_ptr(&user_name_map, ne->username, ne)) {
-		ERROR_FMT("Could not add username(%s) to map\n", username);
-		free(ne->username);
-		free(ne);
-		return 0; /* failure */
-	}
-	return 1; /* success */
-}
-
 /*=* user:external functions *=*/
 
 /** undocumented - please add documentation. */
 EXPORT int user_exists(const char *username) {
-	union map_data *tmp;
-	struct user_name_map_entry *ne;
-	tmp=map_lookup(&user_name_map, username);
-	if(tmp && tmp->ptr) {
-		ne=tmp->ptr;
-		return ne->id;
+	struct userdb_entry *curr;
+
+	for(curr=LIST_TOP(user_list);curr;curr=LIST_NEXT(curr, list)) {
+		const struct user *u=curr->u;
+		assert(u != NULL);
+		assert(u->username != NULL);
+
+		if(!strcasecmp(u->username, username)) {
+			return 1; /**< user exists. */
+		}
 	}
 	return 0; /* user not found */
 }
@@ -3637,10 +3108,6 @@ EXPORT int user_exists(const char *username) {
 EXPORT struct user *user_lookup(const char *username) {
 	union map_data *tmp;
 	struct user *u;
-
-	/* check cache of loaded users */
-	tmp=map_lookup(&user_cache_name_map, username);
-	if(tmp && tmp->ptr) return tmp->ptr;
 
 	/* load from disk */
 	return user_load_byname(username);
@@ -3654,6 +3121,11 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 
 	if(!username) {
 		ERROR_MSG("Username was NULL");
+		return NULL; /* failure */
+	}
+
+	if(user_exists(username)) {
+		ERROR_FMT("Username '%s' already exists.\n", username);
 		return NULL; /* failure */
 	}
 
@@ -3678,12 +3150,6 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 
 	assert(id>=0);
 
-	if(!user_name_map_add((unsigned)id, username)) {
-		freelist_pool(&user_id_freelist, (unsigned)id, 1);
-		user_free(u);
-		return NULL; /* failure */
-	}
-
 	u->id=id;
 	u->username=strdup(username);
 	u->password_crypt=strdup(password_crypt);
@@ -3704,11 +3170,7 @@ EXPORT int user_init(void) {
 	DIR *d;
 	struct dirent *de;
 
-	map_init(&user_name_map, 6, user_name_map_entry_free, map_hash_stringignorecase, map_compare_stringignorecase);
-
-	/* the caches don't free because they share the same elements */
-	map_init(&user_cache_name_map, 6, NULL, map_hash_stringignorecase, map_compare_stringignorecase);
-	map_init(&user_cache_id_map, 6, NULL, map_hash_uintptr, map_compare_uintptr);
+	LIST_INIT(&user_list);
 
 	freelist_init(&user_id_freelist, 0);
 	freelist_pool(&user_id_freelist, 1, 32768);
@@ -3741,8 +3203,8 @@ EXPORT int user_init(void) {
 			closedir(d);
 			return 0; /* failure */
 		}
-		user_name_map_add(u->id, u->username);
-		user_free(u); /* we only wanted to load the data */
+		/** @todo put the user into some kind of data structure. */
+		user_ll_add(u);
 	}
 
 	closedir(d);
@@ -3752,7 +3214,7 @@ EXPORT int user_init(void) {
 
 /** undocumented - please add documentation. */
 EXPORT void user_shutdown(void) {
-	map_free(&user_name_map);
+	/** @todo free all loaded users. */
 	freelist_free(&user_id_freelist);
 }
 
@@ -3771,8 +3233,6 @@ EXPORT void user_put(struct user **user) {
 EXPORT void user_get(struct user *user) {
 	if(user) {
 		REFCOUNT_GET(user);
-		user_cache_add(user);
-
 		DEBUG("user refcount=%d\n", user->REFCOUNT_NAME);
 	}
 }
@@ -7018,7 +6478,6 @@ int main(int argc, char **argv) {
 
 #ifndef NTEST
 	acs_test();
-	map_test();
 	config_test();
 	bitmap_test();
 	freelist_test();
