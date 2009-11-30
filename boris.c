@@ -1906,7 +1906,7 @@ EXPORT int config_load(const char *filename, struct config *cfg) {
 
 		TODO("dequote the value part");
 
-		/* printf("id='%s' value='%s'\n", buf, value); */
+		DEBUG("id='%s' value='%s'\n", buf, value);
 
 		/* check the masks */
 		for(curr=LIST_TOP(cfg->watchers);curr;curr=LIST_NEXT(curr, list)) {
@@ -2878,6 +2878,89 @@ EXPORT void sha1crypt_test(void) {
 }
 #endif
 /******************************************************************************
+ * attribute list
+ ******************************************************************************/
+
+/**
+ * holds an entry.
+ */
+struct attr_entry {
+	LIST_ENTRY(struct attr_entry) list;
+	char *name;
+	char *value;
+};
+
+LIST_HEAD(struct attr_list, struct attr_entry);
+
+/**
+ * add an entry to the end, preserves the order.
+ * refuse to add a duplicate entry.
+ */
+EXPORT int attr_add(struct attr_list *al, const char *name, const char *value) {
+	struct attr_entry *curr, *prev, *item;
+
+	assert(al != NULL);
+
+	prev=NULL;
+	for(curr=LIST_TOP(*al);curr;curr=LIST_NEXT(curr, list)) {
+		/* case sensitive. */
+		if(!strcmp(curr->name, name)) {
+			ERROR_FMT("WARNING:attribute '%s' already exists.\n", curr->name);
+			return 0; /**< duplicate found, refuse to add. */
+		}
+		prev=curr;
+	}
+
+	/* create the new entry. */
+	item=calloc(1, sizeof *item);
+	if(!item) {
+		PERROR("calloc()");
+		return 0; /**< out of memory. */
+	}
+	item->name=strdup(name);
+	if(!item->name) {
+		PERROR("strdup()");
+		free(item);
+		return 0; /**< out of memory. */
+	}
+	item->value=strdup(name);
+	if(!item->value) {
+		PERROR("strdup()");
+		free(item->name);
+		free(item);
+		return 0; /**< out of memory. */
+	}
+
+	/* if head of list use LIST_INSERT_HEAD, else insert after curr. */
+	if(prev) {
+		assert(curr == NULL);
+		LIST_INSERT_AFTER(prev, item, list);
+	} else {
+		LIST_INSERT_HEAD(al, item, list);
+	}
+	return 1; /**< success. */
+}
+
+
+/**
+ * free every element on the list.
+ */
+EXPORT void attr_list_free(struct attr_list *al) {
+	struct attr_entry *curr;
+
+	assert(al != NULL);
+
+	while((curr=LIST_TOP(*al))) {
+		LIST_REMOVE(curr, list);
+		free(curr->name);
+		curr->name=NULL;
+		free(curr->value);
+		curr->value=NULL;
+		free(curr);
+	}
+}
+
+/******************************************************************************
  * fdb
  ******************************************************************************/
 
@@ -2944,6 +3027,7 @@ struct user {
 	char *email;
 	struct acs_info acs;
 	REFCOUNT_TYPE REFCOUNT_NAME;
+	struct attr_list extra_values; /**< load an other values here. */
 };
 
 struct userdb_entry {
@@ -2970,6 +3054,8 @@ EXPORT int user_exists(const char *username);
  */
 static void user_ll_free(struct user *u) {
 	if(!u) return;
+	attr_list_free(&u->extra_values);
+	LIST_INIT(&u->extra_values);
 	free(u->username);
 	u->username=0;
 	free(u->password_crypt);
@@ -3003,6 +3089,7 @@ static struct user *user_defaults(void) {
 	u->email=NULL;
 	u->acs.level=USER_LEVEL_NEWUSER;
 	u->acs.flags=USER_FLAGS_NEWUSER;
+	LIST_INIT(&u->extra_values);
 	return u;
 }
 
@@ -3011,6 +3098,7 @@ static int user_ll_load_uint(struct config *cfg UNUSED, void *extra, const char 
 	char *endptr;
 	unsigned *uint_p=extra;
 	assert(extra != NULL);
+	VERBOSE("%s():value=\"%s\"\n", __func__, value);
 	if(!extra) return -1; /* error */
 
 	if(!*value) {
@@ -3041,6 +3129,16 @@ static int user_ll_load_str(struct config *cfg UNUSED, void *extra, const char *
 	}
 
 	return 0; /* success - terminate the callback chain */
+}
+
+/**
+ * add to an attribute list.
+ */
+static int user_ll_load_attr(struct config *cfg UNUSED, void *extra, const char *id, const char *value) {
+	assert(extra != NULL);
+	/* if attr_add success, then terminate callback chain, if a duplicate was
+	 * found then continue on the chain. */
+	return !attr_add(extra, id, value);
 }
 
 /**
@@ -3081,6 +3179,11 @@ static struct user *user_load_byname(const char *username) {
 		return 0; /* failure */
 	}
 
+
+	/* anything unmatched is just added to an extra_values list.
+	 * remembed: last entries added via config_watch are checked first.
+	 */
+	config_watch(&cfg, "*", user_ll_load_attr, &u->extra_values);
 	config_watch(&cfg, "id", user_ll_load_uint, &u->id);
 	config_watch(&cfg, "username", user_ll_load_str, &u->username);
 	config_watch(&cfg, "pwcrypt", user_ll_load_str, &u->password_crypt);
@@ -3094,6 +3197,18 @@ static struct user *user_load_byname(const char *username) {
 	}
 
 	config_free(&cfg);
+
+	if(u->id<=0) {
+		ERROR_FMT("User id for user '%s' was not set or set to zero.\n", username);
+		goto failure;
+	}
+
+	if(!u->username || strcasecmp(username, u->username)) {
+		ERROR_FMT("User name field for user '%s' was not set or does not math.\n", username);
+		goto failure;
+	}
+
+	/** @todo check all fields of u to verify they are correct. */
 
 	if(!freelist_thwack(&user_id_freelist, u->id, 1)) {
 		ERROR_FMT("Could not use user id %d (bad id or id already used?)\n", u->id);
@@ -3111,11 +3226,15 @@ failure:
 static int user_write(const struct user *u) {
 	FILE *f;
 	char filename[PATH_MAX];
+	char tempname[PATH_MAX];
+	struct attr_entry *curr;
 
 	fdb_makename_str(filename, sizeof filename, "users", u->username);
-	f=fopen(filename, "w");
+	/* open a temporary file first. */
+	snprintf(tempname, sizeof tempname, "%s~", filename);
+	f=fopen(tempname, "w");
 	if(!f) {
-		PERROR(filename);
+		PERROR(tempname);
 		return 0; /* failure */
 	}
 
@@ -3128,12 +3247,25 @@ static int user_write(const struct user *u) {
 		"acs.flags   = 0x%08x\n",
 		u->id, u->username, u->password_crypt, u->email, u->acs.level, u->acs.flags
 	)<0) {
-		PERROR(filename);
+		PERROR(tempname);
 		fclose(f);
 		return 0; /* failure */
 	}
 
+	for(curr=LIST_TOP(u->extra_values);curr;curr=LIST_NEXT(curr, list)) {
+		if(fprintf(f, "%-12s= %s\n", curr->name, curr->value)<0) {
+			PERROR(tempname);
+			fclose(f);
+			return 0; /* failure */
+		}
+	}
+
 	fclose(f);
+	/* everything was successful, rename the file. */
+	if(rename(tempname, filename)) {
+		PERROR(tempname);
+		return 0; /* failure. */
+	}
 	return 1; /* success */
 }
 
@@ -3159,11 +3291,29 @@ EXPORT int user_exists(const char *username) {
  * loads a user into the cache.
  */
 EXPORT struct user *user_lookup(const char *username) {
-	union map_data *tmp;
-	struct user *u;
+	struct userdb_entry *curr;
 
-	/* load from disk */
-	return user_load_byname(username);
+	for(curr=LIST_TOP(user_list);curr;curr=LIST_NEXT(curr, list)) {
+		struct user *u=curr->u;
+
+		assert(u != NULL);
+		assert(u->username != NULL);
+
+		/*
+		 * load from disk if not loaded:
+		 * if(!strcasecmp(curr->cached_username, username)) {
+		 *   u=user_load_byname(username);
+		 *   user_ll_add(u);
+		 *   return u;
+		 * }
+		 */
+
+		if(!strcasecmp(u->username, username)) {
+			return u; /**< user exists. */
+		}
+	}
+
+	return NULL; /* user not found. */
 }
 
 /** undocumented - please add documentation. */
@@ -3220,6 +3370,7 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 /** undocumented - please add documentation. */
 EXPORT int user_init(void) {
 	char pathname[PATH_MAX];
+	char tempname[PATH_MAX];
 	DIR *d;
 	struct dirent *de;
 
@@ -3243,10 +3394,24 @@ EXPORT int user_init(void) {
 
 	while((de=readdir(d))) {
 		struct user *u;
+		struct stat st;
 
 		if(de->d_name[0]=='.') continue; /* ignore hidden files */
+		if(de->d_name[0] && de->d_name[strlen(de->d_name)-1]=='~') {
+			VERBOSE("skip things that don't look like user files:%s\n", de->d_name);
+			continue; /* ignore temp files. */
+		}
 
-		TODO("skip directories and other things that don't look like user files.");
+		snprintf(tempname, sizeof tempname, "%s%s", pathname, de->d_name);
+		if(stat(tempname, &st)) {
+			PERROR(tempname);
+			continue;
+		}
+
+		if(!S_ISREG(st.st_mode)) {
+			VERBOSE("Ignoring directories and other non-regular files:%s\n", de->d_name);
+			continue;
+		}
 
 		DEBUG("Found user record '%s'\n", de->d_name);
 		/* Load user file */
@@ -3256,7 +3421,7 @@ EXPORT int user_init(void) {
 			closedir(d);
 			return 0; /* failure */
 		}
-		/** @todo put the user into some kind of data structure. */
+		/** add all users to a list */
 		user_ll_add(u);
 	}
 
