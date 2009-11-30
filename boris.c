@@ -18,6 +18,7 @@
  * - channel_member
  * - config - represent a configuration parser. uses config_watcher as entries.
  * - dll - open plug-ins (.dll or .so) uses @ref dll_open and @ref dll_close
+ * - fdb - file database. holds data in regular files.
  * - form - uses formitem.
  * - form_state
  * - freelist - allocate ranges of numbers from a pool. uses freelist_entry and freelist_extent.
@@ -25,6 +26,8 @@
  * - menuinfo - draws menus to a telnetclient
  * - refcount - macros to provide reference counting. uses @ref REFCOUNT_TAKE and @ref REFCOUNT_GET
  * - server - accepts new connections
+ * - sha1 - SHA1 hashing.
+ * - sha1crypt - SHA1 passwd hashing.
  * - shvar - process $() macros. implemented by @ref shvar_eval.
  * - socketio_handle - manages network sockets
  * - telnetclient - processes data from a socket for Telnet protocol
@@ -33,6 +36,7 @@
  *
  * dependency:
  * - socketio_handle - uses ref counts to determine when to free linked lists items
+ * - user - uses ref counts.
  *
  * types of records:
  * - objects - base objects for room, mob, or item
@@ -328,6 +332,9 @@
 
 /** logs a message based on errno */
 #define PERROR(msg) fprintf(stderr, "ERROR:%s():%d:%s:%s\n", __func__, __LINE__, msg, strerror(errno));
+
+/** DIE - print the function and line number then abort. */
+#define DIE() do { ERROR_MSG("abort!"); abort(); } while(0)
 
 #ifndef NDEBUG
 #include <string.h>
@@ -1435,7 +1442,7 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 		if(ofs==curr->extent.offset) {
 			ERROR_FMT("overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
 			TODO("make something out of this");
-			abort();
+			DIE();
 		} else if(last && freelist_ll_isbridge(&last->extent, ofs, count, &curr->extent)) {
 			/* |......|XXX|.......|		bridge */
 			DEBUG("|......|XXX|.......|		bridge. last=%u+%u curr=%u+%u new=%u+%u\n", last->extent.length, last->extent.offset, curr->extent.offset, curr->extent.length, ofs, count);
@@ -1468,7 +1475,7 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 			if(ofs+count>curr->extent.offset) {
 				ERROR_FMT("overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
 				TODO("make something out of this");
-				abort();
+				DIE();
 			}
 			DEBUG("|.....|_XXX_|......|		normal new=%u+%u\n", ofs, count);
 			/* create a new entry */
@@ -1559,7 +1566,7 @@ EXPORT int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count) {
 					return 1; /* success */
 				}
 				DEBUG_MSG("Should not be possible to get here");
-				abort();
+				DIE();
 			}
 		}
 	}
@@ -2859,7 +2866,7 @@ EXPORT int sha1crypt_makepass(char *buf, size_t max, const char *plaintext) {
 }
 
 EXPORT int sha1crypt_checkpass(const char *crypttext, const char *plaintext) {
-	abort();
+	DIE();
 }
 
 #ifndef NTEST
