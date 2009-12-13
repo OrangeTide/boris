@@ -2475,12 +2475,14 @@ void acs_test(void) {
  * base64 : encode base64
  ******************************************************************************/
 
+static const uint8_t base64enc_tab[64]= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static uint8_t *base64dec_tab; /* initialized by base64_decode. */
+
 /**
  * base64_encodes as ./0123456789a-zA-Z.
  *
  */
 EXPORT int base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
-	static const uint8_t base64enc_tab[64]= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 	unsigned ii, io;
 	uint_least32_t v;
 	unsigned rem;
@@ -2509,6 +2511,50 @@ EXPORT int base64_encode(size_t in_len, const unsigned char *in, size_t out_len,
 	out[io]=0;
 	return io;
 }
+
+/* decode a base64 string in one shot */
+EXPORT int base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out) {
+	unsigned ii, io;
+	uint_least32_t v;
+	unsigned rem;
+
+	/* initialize base64dec_tab if not initialized. */
+	if(!base64dec_tab) {
+		unsigned i;
+		base64dec_tab=malloc(256);
+		if(!base64dec_tab) {
+			PERROR("malloc()");
+			return 0;
+		}
+		memset(base64dec_tab, 255, 256); /**< use 255 indicates a bad value. */
+
+		for(i=0;i<NR(base64enc_tab);i++) {
+			base64dec_tab[base64enc_tab[i]]=i;
+		}
+	}
+
+	for(io=0,ii=0,v=0,rem=0;ii<in_len;ii++) {
+		unsigned char ch;
+		if(isspace(in[ii])) continue;
+		if(in[ii]=='=') break; /* stop at = */
+		ch=base64dec_tab[(unsigned)in[ii]];
+		if(ch==255) break; /* stop at a parse error */
+		v=(v<<6)|ch;
+		rem+=6;
+		if(rem>=8) {
+			rem-=8;
+			if(io>=out_len) return -1; /* truncation is failure */
+			out[io++]=(v>>rem)&255;
+		}
+	}
+	if(rem>=8) {
+		rem-=8;
+		if(io>=out_len) return -1; /* truncation is failure */
+		out[io++]=(v>>rem)&255;
+	}
+	return io;
+}
+
 
 /******************************************************************************
  * SHA1
@@ -2811,11 +2857,16 @@ int sha1_test(void) {
 /** undocumented - please add documentation. */
 #define SHA1CRYPT_GENSALT_MAX 16
 
-/** maximum length of crypted password */
-#define SHA1CRYPT_MAX (SHA1CRYPT_GENSALT_MAX+1+(2+4*(SHA1CRYPT_BITS/8))/3+1)
-
 /** prefix for salted SHA1 password hash. */
 #define SHA1PASSWD_MAGIC "$ssha1$"
+
+/** length of SHA1PASSWD_MAGIC. */
+#define SHA1PASSWD_MAGIC_LEN 7
+
+/** maximum length of crypted password including null termination. */
+#define SHA1PASSWD_MAX (SHA1PASSWD_MAGIC_LEN+((SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_MAX+3)/4*4)*4/3+1)
+
+
 
 /**
  * generate a salt for the hash.
@@ -2828,28 +2879,26 @@ static void sha1crypt_gensalt(size_t salt_len, void *salt) {
     }
 }
 
-/**
- * @param buf output buffer.
- */
-EXPORT int sha1crypt_makepass(char *buf, size_t max, const char *plaintext) {
+static int sha1crypt_create_password(char *buf, size_t max, const char *plaintext, size_t salt_len, const unsigned char *salt) {
 	struct sha1_ctx ctx;
 	/** hold both the digest and the salt. */
-	unsigned char digest[SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_LEN];
-    unsigned char *salt=&digest[SHA1_DIGEST_LENGTH];
-	const size_t salt_len=SHA1CRYPT_GENSALT_LEN;
+	unsigned char digest[SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_MAX];
 	/** round up to a multiple of 4, then multiply by 4/3. */
-	char tmp[((SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_LEN+3)/4*4)*4/3+1];
+	char tmp[((SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_MAX+3)/4*4)*4/3+1];
 
-	assert(max > 0);
-
-	/* create a random salt of reasonable length. */
-    sha1crypt_gensalt(salt_len, salt);
+	if(salt_len>SHA1CRYPT_GENSALT_MAX) {
+		ERROR_MSG("Salt is too large.");
+		return 0; /**< salt too large. */
+	}
 
 	/* calculate SHA1 of plaintext+salt. */
 	sha1_init(&ctx);
 	sha1_update(&ctx, plaintext, strlen(plaintext));
 	sha1_update(&ctx, salt, salt_len);
 	sha1_final(digest, &ctx);
+
+	/* append salt onto end of digest. */
+	memcpy(digest+SHA1_DIGEST_LENGTH, salt, salt_len);
 
 	/* encode digest+salt into buf. */
 	if(base64_encode(SHA1_DIGEST_LENGTH+salt_len, digest, sizeof tmp, tmp)<0) {
@@ -2862,19 +2911,85 @@ EXPORT int sha1crypt_makepass(char *buf, size_t max, const char *plaintext) {
 
 	DEBUG("Password hash: \"%s\"\n", buf);
 
-    return 1; /**< success. */
+	return 1; /**< success. */
+}
+
+/**
+ * @param buf output buffer.
+ */
+EXPORT int sha1crypt_makepass(char *buf, size_t max, const char *plaintext) {
+    unsigned char salt[SHA1CRYPT_GENSALT_LEN];
+
+	assert(max > 0);
+
+	/* create a random salt of reasonable length. */
+    sha1crypt_gensalt(sizeof salt, salt);
+
+	return sha1crypt_create_password(buf, max, plaintext, sizeof salt, salt);
 }
 
 EXPORT int sha1crypt_checkpass(const char *crypttext, const char *plaintext) {
-	DIE();
+	char tmp[SHA1PASSWD_MAX]; /* big enough to hold a re-encoded password. */
+	unsigned char digest[SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_MAX];
+    unsigned char *salt;
+	int res;
+	size_t crypttext_len;
+
+	crypttext_len=strlen(crypttext);
+
+	/* check for password magic at beginning. */
+	if(crypttext_len<=SHA1PASSWD_MAGIC_LEN || strncmp(crypttext, SHA1PASSWD_MAGIC, SHA1PASSWD_MAGIC_LEN)) {
+		ERROR_MSG("not a SHA1 crypt.");
+		return 0; /**< bad base64 string, too large or too small. */
+	}
+
+	/* get salt from password, and skip over magic. */
+	res=base64_decode(crypttext_len-SHA1PASSWD_MAGIC_LEN, crypttext+SHA1PASSWD_MAGIC_LEN, sizeof digest, digest);
+	if(res<0 || res<SHA1_DIGEST_LENGTH) {
+		ERROR_MSG("crypt decode error.");
+		return 0; /**< bad base64 string, too large or too small. */
+	}
+	salt=&digest[SHA1_DIGEST_LENGTH];
+
+	/* saltlength = total - digest */
+	res=sha1crypt_create_password(tmp, sizeof tmp, plaintext, res-SHA1_DIGEST_LENGTH, salt);
+	if(!res) {
+		ERROR_MSG("crypt decode error2.");
+		return 0; /**< couldn't encode? weird. this shouldn't ever happen. */
+	}
+
+	/* encoded successfully - compare them */
+	return strcmp(tmp, crypttext)==0;
 }
 
 #ifndef NTEST
 EXPORT void sha1crypt_test(void) {
-	char buf[SHA1CRYPT_MAX+1];
-	sha1crypt_makepass(buf, sizeof buf, "abcdef");
+	char buf[SHA1PASSWD_MAX];
+	int res;
+	char salt[SHA1CRYPT_GENSALT_MAX];
 
+	/* generate salt. */
+	sha1crypt_gensalt(sizeof salt, salt);
+	HEXDUMP(salt, sizeof salt, "%s(): testing sha1crypt_gensalt()", __func__);
+
+	/* password creation and checking. - positive testing. */
+	sha1crypt_makepass(buf, sizeof buf, "abcdef");
 	printf("buf=\"%s\"\n", buf);
+	res=sha1crypt_checkpass(buf, "abcdef");
+	DEBUG("sha1crypt_checkpass() positive:%s (res=%d)\n", !res ? "FAILED" : "PASSED", res);
+	if(!res) {
+		ERROR_MSG("sha1crypt_checkpass() must succeed on positive test.");
+		exit(1);
+	}
+
+	/* checking - negative testing. */
+	res=sha1crypt_checkpass(buf, "abcdeg");
+	DEBUG("sha1crypt_checkpass() negative:%s (res=%d)\n", res ? "FAILED" : "PASSED", res);
+	if(res) {
+		ERROR_MSG("sha1crypt_checkpass() must fail on negative test.");
+		exit(1);
+	}
+
 }
 #endif
 /******************************************************************************
@@ -3320,7 +3435,7 @@ EXPORT struct user *user_lookup(const char *username) {
 EXPORT struct user *user_create(const char *username, const char *password, const char *email) {
 	struct user *u;
 	long id;
-	char password_crypt[SHA1CRYPT_MAX+1];
+	char password_crypt[SHA1PASSWD_MAX];
 
 	if(!username) {
 		ERROR_MSG("Username was NULL");
