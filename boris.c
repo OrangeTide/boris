@@ -526,6 +526,7 @@ static struct mud_config {
 	char *msgfile_newuser_deny;
 	char *default_channels;
 	unsigned webserver_port;
+	char *form_newuser_filename;
 } mud_config;
 
 /******************************************************************************
@@ -6282,22 +6283,22 @@ EXPORT struct form *form_load_from_file(const char *filename, void (*form_close)
 EXPORT int form_module_init(void) {
 	struct formitem *fi;
 
-	form_newuser_app=form_load_from_file("newuser.form", form_createaccount_close);
+	form_newuser_app=form_load_from_file(mud_config.form_newuser_filename, form_createaccount_close);
 	if(!form_newuser_app) {
-		ERROR_MSG("could not load newuser.form");
+		ERROR_FMT("could not load %s\n", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	}
 
 	fi=form_getitem(form_newuser_app, "USERNAME");
 	if(!fi) {
-		ERROR_MSG("newuser.form does not have a USERNAME field.");
+		ERROR_FMT("%s does not have a USERNAME field.\n", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	}
 	fi->form_check=form_createaccount_username_check;
 
 	fi=form_getitem(form_newuser_app, "PASSWORD");
 	if(!fi) {
-		ERROR_MSG("newuser.form does not have a PASSWORD field.");
+		ERROR_FMT("%s does not have a PASSWORD field.\n", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	}
 	fi->flags|=FORM_FLAG_HIDDEN; /* hidden */
@@ -6305,7 +6306,7 @@ EXPORT int form_module_init(void) {
 
 	fi=form_getitem(form_newuser_app, "PASSWORD2");
 	if(!fi) {
-		VERBOSE("warning: newuser.form does not have a PASSWORD2 field.\n");
+		VERBOSE("warning: %s does not have a PASSWORD2 field.\n", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	} else {
 		fi->flags|=FORM_FLAG_INVISIBLE; /* invisible */
@@ -6705,6 +6706,7 @@ EXPORT void mud_config_init(void) {
 	mud_config.msgfile_newuser_deny=strdup("\nNot accepting new user applications!\n\n");
 	mud_config.default_channels=strdup("@system,@wiz,OOC,auction,chat,newbie");
 	mud_config.webserver_port=0; /* default is to disable. */
+	mud_config.form_newuser_filename=strdup("data/forms/newuser.form");
 }
 
 /**
@@ -6733,6 +6735,7 @@ EXPORT void mud_config_shutdown(void) {
 	    &mud_config.msgfile_newuser_create,
 	    &mud_config.msgfile_newuser_deny,
 	    &mud_config.default_channels,
+	    &mud_config.form_newuser_filename,
 	};
 	unsigned i;
 	for(i=0;i<NR(targets);i++) {
@@ -6759,6 +6762,7 @@ EXPORT int mud_config_process(void) {
 	config_watch(&cfg, "eventlog.timeformat", do_config_string, &mud_config.eventlog_timeformat);
 	config_watch(&cfg, "channels.default", do_config_string, &mud_config.default_channels);
 	config_watch(&cfg, "webserver.port", do_config_uint, &mud_config.webserver_port);
+	config_watch(&cfg, "form.newuser.filename", do_config_string, &mud_config.form_newuser_filename);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", config_test_show, 0);
 #endif
