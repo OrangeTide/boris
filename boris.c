@@ -2,8 +2,12 @@
  * example of a very tiny MUD.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @version 0.2
+ * @version 0.3
  */
+/* major, minor and patch level for version. */
+#define BORIS_VERSION_MAJ 0
+#define BORIS_VERSION_MIN 3
+#define BORIS_VERSION_PAT 0
 /** @mainpage
  *
  * Design Documentation
@@ -190,8 +194,26 @@
 /** _make_name is used by var. */
 #define _make_name(x,y) _make_name2(x,y)
 
+/** _make_string2 is used by _make_string */
+#define _make_string2(x) #x
+
+/** _make_string is used to turn an value into a string. */
+#define _make_string(x) _make_string2(x)
+
 /** VAR() is used for making temp variables in macros. */
 #define VAR(x) _make_name(x,__LINE__)
+
+#if defined(BORIS_VERSION_PAT) && (BORIS_VERSION_PAT > 0)
+/** BORIS_VERSION_STR contains the version as a string. */
+#  define BORIS_VERSION_STR \
+	_make_string(BORIS_VERSION_MAJ) "." \
+	_make_string(BORIS_VERSION_MIN) "p" \
+	_make_string(BORIS_VERSION_PAT)
+#else
+#  define BORIS_VERSION_STR \
+	_make_string(BORIS_VERSION_MAJ) "." \
+	_make_string(BORIS_VERSION_MIN)
+#endif
 
 /* controls how external functions are exported */
 #ifndef NDEBUG
@@ -6795,6 +6817,10 @@ EXPORT int mud_config_process(void) {
  * Main - Option parsing and initialization
  ******************************************************************************/
 
+void show_version(void) {
+	puts("Version " BORIS_VERSION_STR " (built " __DATE__ ")");
+}
+
 /**
  * flag used for the main loop, zero to terminated.
  */
@@ -6858,6 +6884,10 @@ static int process_flag(int ch, const char *next_arg) {
 				usage();
 			}
 			return 1; /* uses next arg */
+		case 'V': /* print version and exit. */
+			show_version();
+			exit(0); /* */
+			return 0;
 		default:
 			ERROR_FMT("Unknown option -%c\n", ch);
 		case 'h':
@@ -6894,6 +6924,8 @@ static void process_args(int argc, char **argv) {
  * main - where it all starts.
  */
 int main(int argc, char **argv) {
+	show_version();
+
 	signal(SIGINT, sh_quit);
 	signal(SIGTERM, sh_quit);
 
