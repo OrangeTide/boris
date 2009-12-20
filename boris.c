@@ -2859,10 +2859,10 @@ int sha1_test(void) {
 #define SHA1CRYPT_GENSALT_MAX 16
 
 /** prefix for salted SHA1 password hash. */
-#define SHA1PASSWD_MAGIC "$ssha1$"
+#define SHA1PASSWD_MAGIC "{SSHA}"
 
 /** length of SHA1PASSWD_MAGIC. */
-#define SHA1PASSWD_MAGIC_LEN 7
+#define SHA1PASSWD_MAGIC_LEN 6
 
 /** maximum length of crypted password including null termination. */
 #define SHA1PASSWD_MAX (SHA1PASSWD_MAGIC_LEN+((SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_MAX+3)/4*4)*4/3+1)
@@ -2892,10 +2892,10 @@ static int sha1crypt_create_password(char *buf, size_t max, const char *plaintex
 		return 0; /**< salt too large. */
 	}
 
-	/* calculate SHA1 of plaintext+salt. */
+	/* calculate SHA1 of salt+plaintext. */
 	sha1_init(&ctx);
-	sha1_update(&ctx, plaintext, strlen(plaintext));
 	sha1_update(&ctx, salt, salt_len);
+	sha1_update(&ctx, plaintext, strlen(plaintext));
 	sha1_final(digest, &ctx);
 
 	/* append salt onto end of digest. */
@@ -2910,7 +2910,8 @@ static int sha1crypt_create_password(char *buf, size_t max, const char *plaintex
 	/** @todo return an error if snprintf truncated. */
 	snprintf(buf, max, "%s%s", SHA1PASSWD_MAGIC, tmp);
 
-	DEBUG("Password hash: \"%s\"\n", buf);
+	TRACE("Password hash: \"%s\"\n", buf);
+	HEXDUMP_TRACE(salt, salt_len, "Password salt(len=%d): ", salt_len);
 
 	return 1; /**< success. */
 }
@@ -2964,14 +2965,25 @@ EXPORT int sha1crypt_checkpass(const char *crypttext, const char *plaintext) {
 }
 
 #ifndef NTEST
+/* example:
+ * {SSHA}ZIb6984G1q5itn2VUoEb34Jxuq5LUntDZlwK */
 EXPORT void sha1crypt_test(void) {
 	char buf[SHA1PASSWD_MAX];
 	int res;
-	char salt[SHA1CRYPT_GENSALT_MAX];
+	char salt[SHA1CRYPT_GENSALT_LEN];
+	struct {
+		char *pass, *hash;
+	} examples[] = {
+		{ "secret", "{SSHA}2gDsLm/57U00KyShbiYsgvPIsQtzYWx0" },
+		{ "abcdef", "{SSHA}AZz7VpGpy0tnrooaGm++zs9zqgZiVHhbKEc=" },
+		{ "abcdef", "{SSHA}6Nrfz6LziwIo8HsSAkjm/nCeledLUntDZlw=" },
+		{ "abcdeg", "{SSHA}8Lqg317f9lLd0M3EnwIe7BHiH3liVHhbKEc="},
+	};
+	int i;
 
 	/* generate salt. */
 	sha1crypt_gensalt(sizeof salt, salt);
-	HEXDUMP(salt, sizeof salt, "%s(): testing sha1crypt_gensalt()", __func__);
+	HEXDUMP(salt, sizeof salt, "%s(): testing sha1crypt_gensalt() : salt=", __func__);
 
 	/* password creation and checking. - positive testing. */
 	sha1crypt_makepass(buf, sizeof buf, "abcdef");
@@ -2991,6 +3003,11 @@ EXPORT void sha1crypt_test(void) {
 		exit(1);
 	}
 
+	/* loop through all hardcoded examples. */
+	for(i=0;i<NR(examples);i++) {
+		res=sha1crypt_checkpass(examples[i].hash, examples[i].pass);
+		DEBUG("Example %d:%s (res=%d) hash:%s\n", i+1, !res ? "FAILED" : "PASSED", res, examples[i].hash);
+	}
 }
 #endif
 /******************************************************************************
