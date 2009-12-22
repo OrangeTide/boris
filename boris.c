@@ -5678,35 +5678,38 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 
 	DEBUG("cmd=\"%s\"\n", cmd);
 
-	if(!strcmp(cmd, "who")) {
-		telnetclient_puts(cl, "Not implemented");
+	if(!strcasecmp(cmd, "who")) {
+		telnetclient_puts(cl, "Not implemented\n");
 		return 1; /* success */
-	} else if(!strcmp(cmd, "quit")) {
+	} else if(!strcasecmp(cmd, "quit")) {
 		telnetclient_close(cl); /** @todo the close code needs to change the state so telnetclient_isstate does not end up being true for a future read? */
 		return 1; /* success */
-	} else if(!strcmp(cmd, "page")) {
-		telnetclient_puts(cl, "Not implemented");
+	} else if(!strcasecmp(cmd, "page")) {
+		telnetclient_puts(cl, "Not implemented\n");
 		return 1; /* success */
-	} else if(!strcmp(cmd, "say")) {
+	} else if(!strcasecmp(cmd, "say")) {
 		return command_do_say(cl, u, cmd, arg);
-	} else if(!strcmp(cmd, "emote")) {
+	} else if(!strcasecmp(cmd, "emote")) {
 		return command_do_emote(cl, u, cmd, arg);
-	} else if(!strcmp(cmd, "pose")) {
+	} else if(!strcasecmp(cmd, "pose")) {
 		return command_do_pose(cl, u, cmd, arg);
-	} else if(!strcmp(cmd, "chsay")) {
+	} else if(!strcasecmp(cmd, "chsay")) {
 		TODO("pass the channel name in a way that makes sense");
 		return command_do_chsay(cl, u, cmd, arg);
-	} else if(!strcmp(cmd, "sayto")) {
-		telnetclient_puts(cl, "Not implemented");
+	} else if(!strcasecmp(cmd, "sayto")) {
+		telnetclient_puts(cl, "Not implemented\n");
 		return 1; /* success */
-	} else if(!strcmp(cmd, "tell")) { /* can work over any distance */
-		telnetclient_puts(cl, "Not implemented");
+	} else if(!strcasecmp(cmd, "tell")) { /* can work over any distance */
+		telnetclient_puts(cl, "Not implemented\n");
 		return 1; /* success */
-	} else if(!strcmp(cmd, "whisper")) { /* only works in current room */
-		telnetclient_puts(cl, "Not implemented");
+	} else if(!strcasecmp(cmd, "whisper")) { /* only works in current room */
+		telnetclient_puts(cl, "Not implemented\n");
 		return 1; /* success */
-	} else if(!strcmp(cmd, "to")) {
-		telnetclient_puts(cl, "Not implemented");
+	} else if(!strcasecmp(cmd, "to")) {
+		telnetclient_puts(cl, "Not implemented\n");
+		return 1; /* success */
+	} else if(!strcasecmp(cmd, "help")) {
+		telnetclient_puts(cl, "Not implemented\n");
 		return 1; /* success */
 	} else {
 		telnetclient_puts(cl, mud_config.msg_invalidcommand);
@@ -6589,11 +6592,11 @@ static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const
 	char **target;
 	size_t len;
 
-	if(!strcmp(id, "prompt.menu")) {
+	if(!strcasecmp(id, "prompt.menu")) {
 		target=&mud_config.menu_prompt;
-	} else if(!strcmp(id, "prompt.form")) {
+	} else if(!strcasecmp(id, "prompt.form")) {
 		target=&mud_config.form_prompt;
-	} else if(!strcmp(id, "prompt.command")) {
+	} else if(!strcasecmp(id, "prompt.command")) {
 		target=&mud_config.command_prompt;
 	} else {
 		ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
@@ -6628,7 +6631,7 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 	};
 
 	for(i=0;i<NR(info);i++) {
-		if(!strcmp(id, info[i].id)) {
+		if(!strcasecmp(id, info[i].id)) {
 			free(*info[i].target);
 			len=strlen(value)+2; /* leave room for a newline */
 			*info[i].target=malloc(len);
@@ -6655,7 +6658,7 @@ static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, cons
 	};
 
 	for(i=0;i<NR(info);i++) {
-		if(!strcmp(id, info[i].id)) {
+		if(!strcasecmp(id, info[i].id)) {
 			free(*info[i].target);
 			*info[i].target=util_textfile_load(value);
 
