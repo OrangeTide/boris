@@ -5605,11 +5605,80 @@ static int command_do_emote(struct telnetclient *cl, struct user *u, const char 
 }
 
 /** undocumented - please add documentation. */
-static int command_do_chsay(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg) {
+static int command_do_chsay(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
+	TODO("pass the channel name in a way that makes sense");
 	TODO("Get user name");
 	TODO("Broadcast to everyone in a channel");
 	telnetclient_printf(cl, "%s says \"%s\"\n", telnetclient_username(cl), arg);
 	return 1; /* success */
+}
+
+/** undocumented - please add documentation. */
+static int command_do_quit(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED) {
+	/** @todo
+	 * the close code needs to change the state so telnetclient_isstate
+	 * does not end up being true for a future read?
+	 */
+	telnetclient_close(cl);
+	return 1; /* success */
+}
+
+/** undocumented - please add documentation. */
+static int command_not_implemented(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED) {
+	telnetclient_puts(cl, "Not implemented\n");
+	return 1; /* success */
+}
+
+static const struct command_table {
+	char *name; /**< full command name. */
+	int (*cb)(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg);
+} command_table[] = {
+	{ "who", command_not_implemented },
+	{ "quit", command_do_quit },
+	{ "page", command_not_implemented },
+	{ "say", command_do_say },
+	{ "yell", command_do_yell },
+	{ "emote", command_do_emote },
+	{ "pose", command_do_pose },
+	{ "chsay", command_do_chsay },
+	{ "sayto", command_not_implemented },
+	{ "tell", command_not_implemented },
+	{ "whisper", command_not_implemented },
+	{ "to", command_not_implemented },
+	{ "help", command_not_implemented },
+	{ "spoof", command_not_implemented },
+};
+
+/**
+ * table of short commands, they must start with a punctuation. ispunct()
+ */
+static const struct command_short_table {
+	char *shname; /**< short commands. */
+	char *name; /**< full command name. */
+} command_short_table[] = {
+	{ ":", "pose" },
+	{ "'", "say" },
+	{ "\"\"", "yell" },
+	{ "\"", "say" },
+	{ ",", "emote" },
+	{ ".", "chsay" },
+	{ ";", "spoof" },
+};
+
+/**
+ * use cmd to run a command from the command_table array.
+ */
+static int command_run(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg) {
+	unsigned i;
+	/* search for a long command. */
+	for(i=0;i<NR(command_table);i++) {
+		if(!strcasecmp(cmd, command_table[i].name)) {
+			return command_table[i].cb(cl, u, cmd, arg);
+		}
+	}
+
+	telnetclient_puts(cl, mud_config.msg_invalidcommand);
+	return 0; /* failure */
 }
 
 /**
@@ -5618,6 +5687,7 @@ static int command_do_chsay(struct telnetclient *cl, struct user *u, const char 
 static int command_execute(struct telnetclient *cl, struct user *u, const char *line) {
 	char cmd[64];
 	const char *e, *arg;
+	unsigned i;
 
 	assert(cl != NULL); /** @todo support cl as NULL for silent/offline commands */
 	assert(line != NULL);
@@ -5629,34 +5699,17 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 	TODO("can we define these 1 character commands as aliases?");
 
 	if(ispunct(line[0])) {
-		cmd[0]=line[0];
-		cmd[1]=0;
-		arg=line+1; /* point to where the args start if it's a 1 character command */
-		while(*arg && isspace(*arg)) arg++; /* ignore leading spaces */
-		if(line[0]==':') { /* pose : */
-			command_do_pose(cl, u, cmd, arg);
-			return 1; /* success */
-		} else if(line[0]=='"' && line[1]=='"') { /* yell "" */
-			cmd[0]=line[0];
-			cmd[1]=line[1];
-			cmd[2]=0;
-			arg=line+2; /* args start here for 2 character commands */
-			while(*arg && isspace(*arg)) arg++; /* ignore leading spaces */
-			return command_do_yell(cl, u, cmd, arg);
-		} else if(line[0]=='"') { /* say " */
-			return command_do_say(cl, u, cmd, arg);
-		} else if(line[0]==';') { /* spoof ; */
-			TODO("Implement this");
-		} else if(line[0]==',') { /* emote , */
-			return command_do_emote(cl, u, cmd, arg);
-		} else if(line[0]=='\'') { /* say ' */
-			return command_do_say(cl, u, cmd, arg);
-		} else if(line[0]=='.') { /* channel say */
-			TODO("check \".chan\" for CHSAY and copy into cmd");
-			return command_do_chsay(cl, u, cmd, arg);
-		} else {
-			telnetclient_puts(cl, mud_config.msg_invalidcommand);
-			return 0; /* failure */
+		for(i=0;i<NR(command_short_table);i++) {
+			const char *shname=command_short_table[i].shname;
+			int shname_len=strlen(shname);
+			if(!strncmp(line, shname, shname_len)) {
+				/* find start of arguments, after the short command. */
+				arg=line+shname_len;
+				/* ignore leading spaces */
+				while(*arg && isspace(*arg)) arg++;
+				/* use the name as the cmd. */
+				return command_run(cl, u, command_short_table[i].name, arg);
+			}
 		}
 	}
 
@@ -5678,47 +5731,7 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 
 	DEBUG("cmd=\"%s\"\n", cmd);
 
-	if(!strcasecmp(cmd, "who")) {
-		telnetclient_puts(cl, "Not implemented\n");
-		return 1; /* success */
-	} else if(!strcasecmp(cmd, "quit")) {
-		telnetclient_close(cl); /** @todo the close code needs to change the state so telnetclient_isstate does not end up being true for a future read? */
-		return 1; /* success */
-	} else if(!strcasecmp(cmd, "page")) {
-		telnetclient_puts(cl, "Not implemented\n");
-		return 1; /* success */
-	} else if(!strcasecmp(cmd, "say")) {
-		return command_do_say(cl, u, cmd, arg);
-	} else if(!strcasecmp(cmd, "emote")) {
-		return command_do_emote(cl, u, cmd, arg);
-	} else if(!strcasecmp(cmd, "pose")) {
-		return command_do_pose(cl, u, cmd, arg);
-	} else if(!strcasecmp(cmd, "chsay")) {
-		TODO("pass the channel name in a way that makes sense");
-		return command_do_chsay(cl, u, cmd, arg);
-	} else if(!strcasecmp(cmd, "sayto")) {
-		telnetclient_puts(cl, "Not implemented\n");
-		return 1; /* success */
-	} else if(!strcasecmp(cmd, "tell")) { /* can work over any distance */
-		telnetclient_puts(cl, "Not implemented\n");
-		return 1; /* success */
-	} else if(!strcasecmp(cmd, "whisper")) { /* only works in current room */
-		telnetclient_puts(cl, "Not implemented\n");
-		return 1; /* success */
-	} else if(!strcasecmp(cmd, "to")) {
-		telnetclient_puts(cl, "Not implemented\n");
-		return 1; /* success */
-	} else if(!strcasecmp(cmd, "help")) {
-		telnetclient_puts(cl, "Not implemented\n");
-		return 1; /* success */
-	} else {
-		telnetclient_puts(cl, mud_config.msg_invalidcommand);
-		return 0; /* failure */
-	}
-
-	ERROR_FMT("fell through command lookup on '%s'\n", line);
-	telnetclient_puts(cl, mud_config.msg_invalidcommand);
-	return 0; /* failure */
+	return command_run(cl, u, cmd, arg);
 }
 
 /** undocumented - please add documentation. */
