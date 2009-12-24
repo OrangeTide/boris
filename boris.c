@@ -3,6 +3,14 @@
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
  * @version 0.3
+ * @date 2008-2009
+ *
+ * Copyright 2008 Jon Mayo
+ *
+ * This work may be modified and/or redistributed, as long as
+ * this license and copyright text is retained. There is no
+ * warranty, express or implied. - FairEnough License.
+ *
  */
 /* major, minor and patch level for version. */
 #define BORIS_VERSION_MAJ 0
