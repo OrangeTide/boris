@@ -1,5 +1,5 @@
 /**
- * @file logbasic.c
+ * @file logging.c
  *
  * basic logging to stderr.
  *
@@ -78,6 +78,6 @@ static void set_level(int level) {
  * the only external symbol.
  */
 const struct plugin_basiclog_class plugin_class = {
-	.base_class = { PLUGIN_API, "logbasic", initialize, shutdown },
+	.base_class = { PLUGIN_API, "logging", initialize, shutdown },
 	.log_interface = { do_log, set_level }
 };
