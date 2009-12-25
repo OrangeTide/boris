@@ -39,7 +39,7 @@ OBJS_logbasic:=$(SRCS_logbasic:.c=.o)
 ALL_SRCS:=$(foreach n,$(MODULES),$(SRCS_$(n)))
 ALL_EXEC:=$(foreach n,$(MODULES),$(EXEC_$(n)))
 ALL_OBJS:=$(foreach n,$(MODULES),$(OBJS_$(n)))
-DEPS:=$(ALL_SRCS:.c=.d)
+DEPS:=$(ALL_SRCS:.c=.makedep)
 # default to non-verbose mode.
 V?=0
 ifeq ($(V),0)
@@ -55,9 +55,11 @@ clean :
 clean-all : clean
 	$(call Q,REMOVING $(DEPS))$(RM) $(DEPS)
 	$(call Q,REMOVING $(ALL_EXEC))$(RM) $(ALL_EXEC)
+documentation :
+	doxygen Doxyfile
 dumpinfo :
 	@echo DEPS=$(DEPS)
-	@echo ALL_SO=$(ALL_SO)
+	@echo ALL_EXEC=$(ALL_EXEC)
 	@echo ALL_OBJS=$(ALL_OBJS)
 help :
 	@echo "make all        Build everything."
@@ -65,7 +67,7 @@ help :
 	@echo "make clean-all  Clean everything."
 	@echo "make V=1        Verbose mode."
 	@echo "make dumpinfo   Report on internal makefile variables."
-.PHONY : all clean clean-all dumpinfo help
+.PHONY : all clean clean-all documentation dumpinfo help
 ##############################################################################
 # Generate LDLIBS, CFLAGS, CPPFLAGS for every target.
 
@@ -94,7 +96,7 @@ $(foreach n,$(MODULES),$(eval $(EXEC_$(n)) : $(OBJS_$(n))))
 	$(call Q,LINK $@ : $^)$(CC) $(LDFLAGS) $(TARGET_ARCH) $^ $(LOADLIBES) $(LDLIBS) -o $@
 % : %.c
 	$(call Q,COMPILE+LINK $@ : $^)$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ $(LOADLIBES) $(LDLIBS) -o $@
-%.d : %.c
+%.makedep : %.c
 	$(call Q,DEPENDS $^ -> $@)$(CC) -E $(CFLAGS) $(CPPFLAGS) -MM $^ -MF $@
 # only trigger dependies if not help, clean or clean-all
 ##############################################################################
