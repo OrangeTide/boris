@@ -83,7 +83,8 @@
  * - channel_group
  * - channel_member
  * - config - represent a configuration parser. uses config_watcher as entries.
- * - dll - open plug-ins (.dll or .so) uses @ref dll_open and @ref dll_close
+ * - dll - low-level api to open modules (.dll or .so). uses @ref dll_open and @ref dll_close
+ * - plugin - open plug-ins using dll.
  * - fdb - file database. holds data in regular files.
  * - form - uses formitem.
  * - form_state
@@ -224,6 +225,9 @@
 #else
 #error Must define either USE_BSD_SOCKETS or USE_WIN32_SOCKETS
 #endif
+
+#include "boris.h"
+#include "plugin.h"
 
 /******************************************************************************
  * Macros
@@ -611,6 +615,7 @@ static struct mud_config {
 	char *default_channels;
 	unsigned webserver_port;
 	char *form_newuser_filename;
+	char *plugins;
 } mud_config;
 
 /******************************************************************************
@@ -624,6 +629,42 @@ EXPORT int channel_member_part(struct channel_group *ch, struct channel_member_h
 EXPORT void channel_member_part_all(struct channel_member_head *mh);
 EXPORT int channel_member_join(struct channel_group *ch, struct channel_member_head *mh, struct telnetclient *cl);
 EXPORT struct channel_group *channel_system_get(unsigned n);
+EXPORT struct channel_group *channel_system_get(unsigned n);
+
+/******************************************************************************
+ * Services
+ ******************************************************************************/
+
+/**
+ * a default log function to use if none is defined.
+ */
+static void b_log_dummy(int priority UNUSED, const char *domain UNUSED, const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	fprintf(stderr, fmt, ap);
+	va_end(ap);
+	fputc('\n', stderr); /* assume there is no trainling newline. */
+}
+
+void (*b_log)(int priority, const char *domain, const char *fmt, ...)=b_log_dummy;
+
+/**
+ * detach the function pointer providing the log service.
+ */
+int service_detach_log(void (*log)(int priority, const char *domain, const char *fmt, ...)) {
+	if(log==b_log) {
+		b_log=b_log_dummy;
+		return 1;
+	}
+	return 0; /* was not attached. */
+}
+
+/**
+ * attach a function pointer to provide log service.
+ */
+void service_attach_log(void (*log)(int priority, const char *domain, const char *fmt, ...)) {
+	b_log=log ? log : b_log_dummy;
+}
 
 /******************************************************************************
  * Util - utility routines
@@ -800,13 +841,15 @@ EXPORT char *trim_whitespace(char *line) {
  */
 typedef HMODULE dll_handle_t;
 typedef FARPROC dll_func_t;
+typedef void *dll_symbol_t;
 #else
 #include <dlfcn.h>
 /**
  * handle for an open DLL used by dll_open() and dll_close().
  */
-typedef void *dll_handle_t;
-typedef void *dll_func_t;
+typedef struct { void *h; } dll_handle_t;
+typedef int (*dll_func_t)();
+typedef void *dll_symbol_t;
 #endif
 
 /**
@@ -839,9 +882,9 @@ static void dll_show_error(const char *reason) {
 #endif
 }
 
-
 /**
  * opens a file and updates the handle at h.
+ * file extension is optional, and it is best not to specify it.
  * @param h pointer to the handle to be updated. set to NULL on failure.
  * @param filename name of the DLL file to open. should not contain an
  *                 extension, that will be added.
@@ -862,14 +905,16 @@ EXPORT int dll_open(dll_handle_t *h, const char *filename) {
 	}
     /* TODO: convert filename to windows text encoding */
     *h=LoadLibrary(filename);
+    if(!*h) {
 #else
 	strcpy(path, filename);
 	if(!strstr(filename, ".so")) {
 		strcat(path, ".so");
 	}
-    *h=dlopen(path, RTLD_LOCAL);
+	TRACE("dlopen(%s)\n", path);
+    h->h=dlopen(path, RTLD_NOW|RTLD_LOCAL);
+    if(!h->h) {
 #endif
-    if(!*h) {
         dll_show_error(path);
         return 0;
     }
@@ -882,17 +927,19 @@ EXPORT int dll_open(dll_handle_t *h, const char *filename) {
  * @see dll_open
  */
 EXPORT void dll_close(dll_handle_t h) {
-	if(h) {
 #ifdef WIN32
+	if(h.h) {
 		if(!FreeLibrary(h)) {
 			dll_show_error("FreeLibrary()");
 		}
+	}
 #else
-		if(dlclose(h)) {
+	if(h.h) {
+		if(dlclose(h.h)) {
 			dll_show_error("dlclose()");
 		}
-#endif
 	}
+#endif
 }
 
 /**
@@ -902,22 +949,25 @@ EXPORT void dll_close(dll_handle_t h) {
  * @param name a symbol name, must be a function.
  * @return NULL on error. address of exported symbol on success.
  */
-EXPORT dll_func_t dll_func(dll_handle_t h, const char *name) {
-    dll_func_t ret;
+EXPORT dll_symbol_t dll_symbol(dll_handle_t h, const char *name) {
+    dll_symbol_t ret;
 #ifdef WIN32
     ret=GetProcAddress(h, name);
-    if(!ret) {
-        dll_show_error(name);
-    }
-    return ret;
 #else
-    ret=dlsym(h, name);
+    ret=dlsym(h.h, name);
+#endif
     if(!ret) {
         dll_show_error(name);
     }
     return ret;
-#endif
 }
+
+/* not used at this time. */
+#if 0
+EXPORT dll_func_t dll_func(dll_handle_t h, const char *name) {
+	return (int(*)())dll_symbol(h, name);
+}
+#endif
 
 /******************************************************************************
  * Debug and test routines
@@ -6824,6 +6874,7 @@ EXPORT void mud_config_init(void) {
 	mud_config.default_channels=strdup("@system,@wiz,OOC,auction,chat,newbie");
 	mud_config.webserver_port=0; /* default is to disable. */
 	mud_config.form_newuser_filename=strdup("data/forms/newuser.form");
+	mud_config.plugins=NULL;
 }
 
 /**
@@ -6853,6 +6904,7 @@ EXPORT void mud_config_shutdown(void) {
 	    &mud_config.msgfile_newuser_deny,
 	    &mud_config.default_channels,
 	    &mud_config.form_newuser_filename,
+	    &mud_config.plugins,
 	};
 	unsigned i;
 	for(i=0;i<NR(targets);i++) {
@@ -6869,6 +6921,7 @@ EXPORT int mud_config_process(void) {
 	struct config cfg;
 	config_setup(&cfg);
 	config_watch(&cfg, "server.port", do_config_port, 0);
+	config_watch(&cfg, "server.plugins", do_config_string, &mud_config.plugins);
 	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
 	config_watch(&cfg, "msg.*", do_config_msg, 0);
 	config_watch(&cfg, "msgfile.*", do_config_msgfile, 0);
@@ -6889,6 +6942,104 @@ EXPORT int mud_config_process(void) {
 	}
 	config_free(&cfg);
 	return 1; /* success */
+}
+
+/******************************************************************************
+ * Plugins
+ ******************************************************************************/
+
+#define PLUGIN_NAME_MAX 64
+
+struct plugin {
+	LIST_ENTRY(struct plugin) list;
+	dll_handle_t h;
+	char *name;
+	struct plugin_basic_class *plugin_class;
+};
+
+LIST_HEAD(struct plugin_list, struct plugin); /**< list of loaded plugin. */
+static struct plugin_list plugin_list;
+
+struct plugin *plugin_find(const char *name) {
+	struct plugin *curr;
+	assert(name != NULL);
+	for(curr=LIST_TOP(plugin_list);curr;curr=LIST_NEXT(curr, list)) {
+		assert(curr->name != NULL);
+		if(!strcasecmp(name, curr->name)) {
+			return curr;
+		}
+	}
+	return NULL; /* not found. */
+}
+
+/**
+ * @param name base name, with path or extension.
+ */
+int plugin_load(const char *name) {
+	struct plugin *pi;
+	dll_handle_t h;
+	struct plugin_basic_class *plugin_class;
+	char path[PATH_MAX];
+
+	/* look to see if it is loaded. */
+	pi=plugin_find(name);
+	if(pi) {
+		ERROR_FMT("plugin already loaded: %s\n", name);
+		return 0; /* can't decide if this is an error or not. */
+	}
+
+	/* force dlopen to look in current directory. */
+	snprintf(path, sizeof path, "./%s", name);
+
+	/* load it. */
+	if(!dll_open(&h, path)) {
+		ERROR_FMT("could not open plugin: %s\n", name);
+		return 0;
+	}
+
+	/* initialize the plugin. */
+	plugin_class=dll_symbol(h, "plugin_class");
+	if(!plugin_class || plugin_class->api_version!=PLUGIN_API || !plugin_class->initialize) {
+		dll_close(h);
+		ERROR_FMT("could not get class from plugin: %s\n", name);
+		return 0;
+	}
+	/* found the class guts - initialize the plugin once and only once. */
+	plugin_class->initialize();
+
+	/* add plugin to a list now that it has been initialized. */
+	pi=calloc(1, sizeof *pi);
+	pi->h=h;
+	pi->name=strdup(name);
+	pi->plugin_class=plugin_class;
+	LIST_INSERT_HEAD(&plugin_list, pi, list);
+
+	VERBOSE("Loaded plugin: %s\n", name);
+	return 1;
+}
+
+/**
+ * go through a space seperated list and load all the plugins.
+ * @param list string containing a list of plugins to load.
+ */
+int plugin_load_list(const char *list) {
+	char name[PLUGIN_NAME_MAX]; /**< hold a substring. */
+
+	while(*list) {
+		const char *e;
+		/* find start of next word. */
+		while(*list && isspace(*list)) list++;
+		for(e=list;*e && !isspace(*e);e++) ;
+		/* copy word out of string list. */
+		snprintf(name, sizeof name, "%.*s", e-list, list);
+		/* move to next position. */
+		list=e;
+		if(*list) list++;
+		if(!plugin_load(name)) {
+			return 0; /**< failure. */
+		}
+	}
+	return 1; /**< success. */
 }
 
 /******************************************************************************
@@ -7041,6 +7192,15 @@ int main(int argc, char **argv) {
 		ERROR_MSG("could not load configuration");
 		return EXIT_FAILURE;
 	}
+
+	b_log(B_LOG_INFO, NULL, "Test of default logging.\n");
+
+	if(!plugin_load_list(mud_config.plugins)) {
+		ERROR_MSG("could not load one or more plugins");
+		return EXIT_FAILURE;
+	}
+
+	b_log(B_LOG_INFO, NULL, "Test of logging plugin.\n");
 
 	if(!eventlog_init()) {
 		return EXIT_FAILURE;

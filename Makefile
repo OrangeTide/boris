@@ -10,14 +10,21 @@ CPPFLAGS+=-DNTRACE
 CPPFLAGS+=-DNTEST
 ##############################################################################
 # project configurations
-MODULES:=boris
+MODULES:=boris logbasic
+
 # boris
 EXEC_boris:=boris
-LDLIBS_boris:=-ldl
+LDLIBS_boris:=-ldl -rdynamic
 CPPFLAGS_boris:=-D_BSD_SOURCE
 CFLAGS_boris:=-pedantic -std=gnu99
 SRCS_boris:=boris.c
 OBJS_boris:=$(SRCS_boris:.c=.o)
+
+# logbasic.so plugin
+EXEC_logbasic:=logbasic.so
+SRCS_logbasic:=logbasic.c
+OBJS_logbasic:=$(SRCS_logbasic:.c=.o)
+
 ##############################################################################
 # Dec 24 2009
 #
