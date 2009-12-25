@@ -1793,7 +1793,7 @@ static FILE *eventlog_file;
 /**
  * initialize the eventlog component.
  */
-int eventlog_init(void) {
+EXPORT int eventlog_init(void) {
 	eventlog_file=fopen(mud_config.eventlog_filename, "a");
 	if(!eventlog_file) {
 		PERROR(mud_config.eventlog_filename);
@@ -1806,7 +1806,7 @@ int eventlog_init(void) {
 }
 
 /** undocumented - please add documentation. */
-void eventlog_shutdown(void) {
+EXPORT void eventlog_shutdown(void) {
 	if(eventlog_file) {
 		fclose(eventlog_file);
 		eventlog_file=0;
@@ -1814,7 +1814,7 @@ void eventlog_shutdown(void) {
 }
 
 /** undocumented - please add documentation. */
-void eventlog(const char *type, const char *fmt, ...) {
+EXPORT void eventlog(const char *type, const char *fmt, ...) {
 	va_list ap;
 	char buf[512];
 	int n;
@@ -1852,37 +1852,37 @@ void eventlog(const char *type, const char *fmt, ...) {
 /**
  * report that a connection has occured.
  */
-void eventlog_connect(const char *peer_str) {
+EXPORT void eventlog_connect(const char *peer_str) {
 	eventlog("CONNECT", "remote=%s\n", peer_str);
 }
 
 /** undocumented - please add documentation. */
-void eventlog_server_startup(void) {
+EXPORT void eventlog_server_startup(void) {
 	eventlog("STARTUP", "\n");
 }
 
 /** undocumented - please add documentation. */
-void eventlog_server_shutdown(void) {
+EXPORT void eventlog_server_shutdown(void) {
 	eventlog("SHUTDOWN", "\n");
 }
 
 /** undocumented - please add documentation. */
-void eventlog_login_failattempt(const char *username, const char *peer_str) {
+EXPORT void eventlog_login_failattempt(const char *username, const char *peer_str) {
 	eventlog("LOGINFAIL", "remote=%s name='%s'\n", peer_str, username);
 }
 
 /** undocumented - please add documentation. */
-void eventlog_signon(const char *username, const char *peer_str) {
+EXPORT void eventlog_signon(const char *username, const char *peer_str) {
 	eventlog("SIGNON", "remote=%s name='%s'\n", peer_str, username);
 }
 
 /** undocumented - please add documentation. */
-void eventlog_signoff(const char *username, const char *peer_str) {
+EXPORT void eventlog_signoff(const char *username, const char *peer_str) {
 	eventlog("SIGNOFF", "remote=%s name='%s'\n", peer_str, username);
 }
 
 /** undocumented - please add documentation. */
-void eventlog_toomany(void) {
+EXPORT void eventlog_toomany(void) {
 	/** @todo we could get the peername from the fd and log that? */
 	eventlog("TOOMANY", "\n");
 }
@@ -1890,22 +1890,22 @@ void eventlog_toomany(void) {
 /**
  * log commands that a user enters.
  */
-void eventlog_commandinput(const char *remote, const char *username, const char *line) {
+EXPORT void eventlog_commandinput(const char *remote, const char *username, const char *line) {
 	eventlog("COMMAND", "remote=\"%s\" user=\"%s\" command=\"%s\"\n", remote, username, line);
 }
 
 /** undocumented - please add documentation. */
-void eventlog_channel_new(const char *channel_name) {
+EXPORT void eventlog_channel_new(const char *channel_name) {
 	eventlog("CHANNEL-NEW", "channel=\"%s\"\n", channel_name);
 }
 
 /** undocumented - please add documentation. */
-void eventlog_channel_remove(const char *channel_name) {
+EXPORT void eventlog_channel_remove(const char *channel_name) {
 	eventlog("CHANNEL-REMOVE", "channel=\"%s\"\n", channel_name);
 }
 
 /** undocumented - please add documentation. */
-void eventlog_channel_join(const char *remote, const char *channel_name, const char *username) {
+EXPORT void eventlog_channel_join(const char *remote, const char *channel_name, const char *username) {
 	if(!remote) {
 		eventlog("CHANNEL-JOIN", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
 	} else  {
@@ -1914,7 +1914,7 @@ void eventlog_channel_join(const char *remote, const char *channel_name, const c
 }
 
 /** undocumented - please add documentation. */
-void eventlog_channel_part(const char *remote, const char *channel_name, const char *username) {
+EXPORT void eventlog_channel_part(const char *remote, const char *channel_name, const char *username) {
 	if(!remote) {
 		eventlog("CHANNEL-PART", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
 	} else  {
@@ -1925,7 +1925,7 @@ void eventlog_channel_part(const char *remote, const char *channel_name, const c
 /**
  * logs an HTTP GET action.
  */
-void eventlog_webserver_get(const char *remote, const char *uri) {
+EXPORT void eventlog_webserver_get(const char *remote, const char *uri) {
 	eventlog("WEBSITE-GET", "remote=\"%s\" uri=\"%s\"\n", remote?remote:"", uri?uri:"");
 }
 /******************************************************************************
@@ -2747,7 +2747,7 @@ struct sha1_ctx {
 /**
  * initialize the hash context.
  */
-int sha1_init(struct sha1_ctx *ctx) {
+EXPORT int sha1_init(struct sha1_ctx *ctx) {
 	if(!ctx) return 0; /* failure */
 
 	/* initialize h state. */
@@ -2827,7 +2827,7 @@ static void sha1_transform_chunk(struct sha1_ctx *ctx) {
 /**
  * hash more data to the stream.
  */
-int sha1_update(struct sha1_ctx *ctx, const void *data, size_t len) {
+EXPORT int sha1_update(struct sha1_ctx *ctx, const void *data, size_t len) {
 	if(!ctx||(!data&&!len)) return 0; /* failure */
 
 	while(len>0) {
@@ -2902,7 +2902,7 @@ static void sha1_append_length(struct sha1_ctx *ctx) {
 /**
  * finish up the hash, and pad in the special SHA-1 way with the length.
  */
-int sha1_final(unsigned char *md, struct sha1_ctx *ctx) {
+EXPORT int sha1_final(unsigned char *md, struct sha1_ctx *ctx) {
 	assert(ctx != NULL);
 	assert(md != NULL);
 
@@ -2934,7 +2934,7 @@ int sha1_final(unsigned char *md, struct sha1_ctx *ctx) {
  * @param md if NULL use a static array.
  * @return return md, of md is NULL then return static array.
  */
-unsigned char *sha1(const void *data, size_t len, unsigned char *md) {
+EXPORT unsigned char *sha1(const void *data, size_t len, unsigned char *md) {
 	struct sha1_ctx ctx;
 	static unsigned char tmp[SHA1_DIGEST_LENGTH];
 	sha1_init(&ctx);
@@ -2954,7 +2954,7 @@ static void sha1_print_digest(const unsigned char *md) {
 	printf("\n");
 }
 
-int sha1_test(void) {
+static int sha1_test(void) {
 	const char test1[]="The quick brown fox jumps over the lazy dog";
 	const unsigned char test1_digest[SHA1_DIGEST_LENGTH] = {
 		0x2f, 0xd4, 0xe1, 0xc6, 0x7a, 0x2d, 0x28, 0xfc, 0xed, 0x84, 0x9e, 0xe1, 0xbb, 0x76, 0xe7, 0x39, 0x1b, 0x93, 0xeb, 0x12,
@@ -3234,7 +3234,7 @@ EXPORT void attr_list_free(struct attr_list *al) {
 /**
  * creates a filename based on component and id.
  */
-void fdb_makename_str(char *fn, size_t max, const char *base, const char *id) {
+EXPORT void fdb_makename_str(char *fn, size_t max, const char *base, const char *id) {
 	char name[id?strlen(id)+1:6];
 	unsigned i;
 
@@ -3259,14 +3259,14 @@ void fdb_makename_str(char *fn, size_t max, const char *base, const char *id) {
 /**
  * creates a filename based on component and id.
  */
-void fdb_getbasename(char *fn, size_t max, const char *base) {
+EXPORT void fdb_getbasename(char *fn, size_t max, const char *base) {
 	snprintf(fn, max, "data/%s/", base);
 }
 
 /**
  * @return true if the file is a valid id filename.
  */
-int fdb_is_id(const char *filename) {
+EXPORT int fdb_is_id(const char *filename) {
 	for(;*filename;filename++) if(!isdigit(*filename)) return 0;
 	return 1; /* success */
 }
@@ -3305,7 +3305,7 @@ struct userdb_entry {
 /*=* user:globals *=*/
 
 /** undocumented - please add documentation. */
-LIST_HEAD(struct, struct userdb_entry) user_list;
+static LIST_HEAD(struct, struct userdb_entry) user_list;
 
 /** undocumented - please add documentation. */
 static struct freelist user_id_freelist;
@@ -6683,7 +6683,7 @@ static void webserver_new_event(struct socketio_handle *sh) {
 /**
  * initialize the webserver module by binding a listening socket for the server.
  */
-int webserver_init(int family, unsigned port) {
+EXPORT int webserver_init(int family, unsigned port) {
 	char port_str[16];
 	snprintf(port_str, sizeof port_str, "%u", port);
 	webserver_listen_handle=socketio_listen(family, SOCK_STREAM, NULL, port_str, webserver_new_event);
@@ -6697,7 +6697,7 @@ int webserver_init(int family, unsigned port) {
 /**
  * delete the the server's socketio_handle.
  */
-void webserver_shutdown(void) {
+EXPORT void webserver_shutdown(void) {
 	if(webserver_listen_handle) {
 		webserver_listen_handle->delete_flag=1;
 		socketio_delete_count++; /* tracks if clean-up phase should be done. */
@@ -6960,7 +6960,7 @@ struct plugin {
 LIST_HEAD(struct plugin_list, struct plugin); /**< list of loaded plugin. */
 static struct plugin_list plugin_list;
 
-struct plugin *plugin_find(const char *name) {
+static struct plugin *plugin_find(const char *name) {
 	struct plugin *curr;
 	assert(name != NULL);
 	for(curr=LIST_TOP(plugin_list);curr;curr=LIST_NEXT(curr, list)) {
@@ -6975,7 +6975,7 @@ struct plugin *plugin_find(const char *name) {
 /**
  * @param name base name, with path or extension.
  */
-int plugin_load(const char *name) {
+EXPORT int plugin_load(const char *name) {
 	struct plugin *pi;
 	dll_handle_t h;
 	struct plugin_basic_class *plugin_class;
@@ -7022,7 +7022,7 @@ int plugin_load(const char *name) {
  * go through a space seperated list and load all the plugins.
  * @param list string containing a list of plugins to load.
  */
-int plugin_load_list(const char *list) {
+EXPORT int plugin_load_list(const char *list) {
 	char name[PLUGIN_NAME_MAX]; /**< hold a substring. */
 
 	while(*list) {
