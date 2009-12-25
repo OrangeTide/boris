@@ -2,3 +2,5 @@
 gmon.out
 .*.swp
 junk*/
+*.o
+*.d
