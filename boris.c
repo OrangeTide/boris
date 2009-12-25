@@ -2039,7 +2039,20 @@ EXPORT int config_load(const char *filename, struct config *cfg) {
 			*e=0;
 		}
 
-		TODO("dequote the value part");
+		if(*value=='"') {
+			value++;
+			e=strchr(value, '"');
+			if(e) {
+				if(e[1]) {
+					ERROR_FMT("%s:%u:error in loading file:trailing garbage after quote\n", filename, line);
+					goto failure;
+				}
+				*e=0;
+			} else {
+				ERROR_FMT("%s:%u:error in loading file:missing quote\n", filename, line);
+				goto failure;
+			}
+		}
 
 		DEBUG("id='%s' value='%s'\n", buf, value);
 
