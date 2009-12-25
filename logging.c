@@ -58,6 +58,7 @@ static void do_log(int priority, const char *domain, const char *fmt, ...) {
 static void initialize(void) {
 	fprintf(stderr, "loaded %s\n", plugin_class.base_class.class_name);
 	service_attach_log(do_log);
+	b_log(B_LOG_INFO, "logging", "Logging system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 }
 
 static int shutdown(void) {
