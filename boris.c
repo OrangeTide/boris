@@ -6954,7 +6954,7 @@ struct plugin {
 	LIST_ENTRY(struct plugin) list;
 	dll_handle_t h;
 	char *name;
-	struct plugin_basic_class *plugin_class;
+	const struct plugin_basic_class *plugin_class;
 };
 
 LIST_HEAD(struct plugin_list, struct plugin); /**< list of loaded plugin. */
@@ -6978,7 +6978,7 @@ static struct plugin *plugin_find(const char *name) {
 EXPORT int plugin_load(const char *name) {
 	struct plugin *pi;
 	dll_handle_t h;
-	struct plugin_basic_class *plugin_class;
+	const struct plugin_basic_class *plugin_class;
 	char path[PATH_MAX];
 
 	/* look to see if it is loaded. */

@@ -1,5 +1,7 @@
 /**
- * @filer logbasic.c
+ * @file logbasic.c
+ *
+ * basic logging to stderr.
  *
  */
 #include <assert.h>
@@ -16,7 +18,7 @@ struct plugin_basiclog_class {
 	struct plugin_logging_interface log_interface;
 };
 
-extern struct plugin_basiclog_class plugin_class;
+extern const struct plugin_basiclog_class plugin_class;
 
 static int log_level=B_LOG_INFO;
 
@@ -75,7 +77,7 @@ static void set_level(int level) {
 /**
  * the only external symbol.
  */
-struct plugin_basiclog_class plugin_class = {
+const struct plugin_basiclog_class plugin_class = {
 	.base_class = { PLUGIN_API, "logbasic", initialize, shutdown },
 	.log_interface = { do_log, set_level }
 };
