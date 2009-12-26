@@ -267,7 +267,7 @@ static int fdb_write_pair(struct fdb_write_handle *h, const char *name, const ch
 	if(h->error_fl) return 0; /* ignore any more writes while there is an error. */
 
 	/* calculate the length of the escaped string. */
-	for(i=0;value_str[i];i++) {
+	for(i=0,escaped_len=0;value_str[i];i++) {
 		if(isprint(value_str[i]) && !isspace(value_str[i]) && value_str[i]!='%' && value_str[i]!='"') {
 			escaped_len++;
 		} else {
@@ -279,6 +279,11 @@ static int fdb_write_pair(struct fdb_write_handle *h, const char *name, const ch
 
 	/* apply the escapes */
 	escaped_value=malloc(escaped_len+1);
+	if(!escaped_value) {
+		PERROR("malloc()");
+		return 0;
+	}
+
 	for(i=0;*value_str;value_str++) {
 		if(isprint(*value_str) && !isspace(*value_str) && *value_str!='%' && *value_str!='"') {
 			escaped_value[i++]=*value_str;
@@ -289,6 +294,8 @@ static int fdb_write_pair(struct fdb_write_handle *h, const char *name, const ch
 			i+=3;
 		}
 	}
+	assert(escaped_value != NULL);
+	escaped_value[i]=0;
 
 	res=fprintf(h->f, "%-12s= %s\n", name, escaped_value);
 	free(escaped_value);
