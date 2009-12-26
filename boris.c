@@ -915,6 +915,7 @@ int parse_attr(const char *name, const char *value, struct attr_list *al) {
 typedef HMODULE dll_handle_t;
 typedef FARPROC dll_func_t;
 typedef void *dll_symbol_t;
+#define SOEXT ".dll"
 #else
 #include <dlfcn.h>
 /**
@@ -923,6 +924,11 @@ typedef void *dll_symbol_t;
 typedef struct { void *h; } dll_handle_t;
 typedef int (*dll_func_t)();
 typedef void *dll_symbol_t;
+#ifdef __APPLE__
+#define SOEXT ".dylib"
+#else
+#define SOEXT ".so"
+#endif
 #endif
 
 /**
@@ -973,16 +979,16 @@ EXPORT int dll_open(dll_handle_t *h, const char *filename) {
 		path[i]=filename[i]=='/'?'\\':filename[i];
 	}
 	path[i]=0; /* null terminate */
-	if(!strstr(filename, ".dll")) {
-		strcat(path, ".dll");
+	if(!strstr(filename, SOEXT)) {
+		strcat(path, SOEXT);
 	}
     /* TODO: convert filename to windows text encoding */
     *h=LoadLibrary(filename);
     if(!*h) {
 #else
 	strcpy(path, filename);
-	if(!strstr(filename, ".so")) {
-		strcat(path, ".so");
+	if(!strstr(filename, SOEXT)) {
+		strcat(path, SOEXT);
 	}
 	TRACE("dlopen(%s)\n", path);
     h->h=dlopen(path, RTLD_NOW|RTLD_LOCAL);

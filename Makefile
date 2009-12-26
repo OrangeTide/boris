@@ -1,5 +1,17 @@
 #!/usr/bin/make -f
 ##############################################################################
+# Makefile for building many projects at once.
+##############################################################################
+# OS specific boiler plate needed first.
+OS:=$(shell uname -s)
+ifeq ($(OS),Darwin)
+SOEXT:=dylib
+SOLDFLAGS:=-dynamiclib -Wl,-undefined,dynamic_lookup
+else
+SOEXT:=so
+SOLDFLAGS:=
+endif
+##############################################################################
 # global config
 CFLAGS:=-Wall -W -g
 # disable debugging.
@@ -21,7 +33,7 @@ SRCS_boris:=boris.c
 OBJS_boris:=$(SRCS_boris:.c=.o)
 
 # logging.so plugin
-EXEC_logging:=logging.so
+EXEC_logging:=logging.$(SOEXT)
 SRCS_logging:=logging.c
 OBJS_logging:=$(SRCS_logging:.c=.o)
 
@@ -31,7 +43,7 @@ SRCS_room:=room.c
 OBJS_room:=$(SRCS_room:.c=.o)
 
 # fdbfile.so plugin
-EXEC_fdbfile:=fdbfile.so
+EXEC_fdbfile:=fdbfile.$(SOEXT)
 SRCS_fdbfile:=fdbfile.c
 OBJS_fdbfile:=$(SRCS_fdbfile:.c=.o)
 
@@ -91,15 +103,15 @@ $(foreach n,$(MODULES),$(if $(CFLAGS_$(n)),$(foreach m,$(OBJS_$(n)),$(eval $(m) 
 $(foreach n,$(MODULES),$(if $(CPPFLAGS_$(n)),$(foreach m,$(OBJS_$(n)),$(eval $(m) : CPPFLAGS+=$(CPPFLAGS_$(n))))))
 
 # detect if target is a shared object, then make all deps position-independent.
-$(foreach n,$(MODULES),$(if $(filter %.so,$(EXEC_$(n))),$(foreach m,$(OBJS_$(n)),$(eval $(m) : CFLAGS+=-fPIC))))
+$(foreach n,$(MODULES),$(if $(filter %.$(SOEXT),$(EXEC_$(n))),$(foreach m,$(OBJS_$(n)),$(eval $(m) : CFLAGS+=-fPIC))))
 
 # define a rule for everything in MODULES
 $(foreach n,$(MODULES),$(eval $(EXEC_$(n)) : $(OBJS_$(n))))
 
 ##############################################################################
 # pattern rules
-%.so : %.o
-	$(call Q,SHAREDLIB $@ : $^)$(CC) $(CFLAGS) $(LDFLAGS) $(TARGET_ARCH) $(filter %.o %.a,$^) $(LOADLIBES) $(LDLIBS) -shared -o $@
+%.$(SOEXT) : %.o
+	$(call Q,SHAREDLIB $@ : $^)$(CC) $(CFLAGS) $(LDFLAGS) $(SOLDFLAGS) $(TARGET_ARCH) $(filter %.o %.a,$^) $(LOADLIBES) $(LDLIBS) -shared -o $@
 %.o : %.c
 	$(call Q,COMPILE $@ : $^)$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 % : %.o
