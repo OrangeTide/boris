@@ -3148,7 +3148,7 @@ EXPORT int attr_add(struct attr_list *al, const char *name, const char *value) {
 		free(item);
 		return 0; /**< out of memory. */
 	}
-	item->value=strdup(name);
+	item->value=strdup(value);
 	if(!item->value) {
 		PERROR("strdup()");
 		free(item->name);
