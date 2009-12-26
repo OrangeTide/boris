@@ -260,7 +260,7 @@ static void room_put(struct room *r) {
 	}
 }
 
-static void initialize(void) {
+static int initialize(void) {
 	struct fdb_iterator *it;
 	const char *id;
 

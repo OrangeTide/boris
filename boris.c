@@ -6976,8 +6976,13 @@ EXPORT int plugin_load(const char *name) {
 		ERROR_FMT("could not get class from plugin: %s\n", name);
 		return 0;
 	}
+
 	/* found the class guts - initialize the plugin once and only once. */
-	plugin_class->initialize();
+	if(!plugin_class->initialize()) {
+		dll_close(h);
+		ERROR_FMT("could not initialize plugin: %s\n", name);
+		return 0;
+	}
 
 	/* add plugin to a list now that it has been initialized. */
 	pi=calloc(1, sizeof *pi);

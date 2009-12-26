@@ -17,7 +17,7 @@
 struct plugin_basic_class {
 	unsigned api_version;
 	char *class_name;
-	void (*initialize)(void); /**< called before anything else. */
+	int (*initialize)(void); /**< called before anything else. */
 	int (*shutdown)(void); /**< called before unloading, return 0 to refuse. */
 };
 
