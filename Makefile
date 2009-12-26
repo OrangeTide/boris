@@ -10,7 +10,7 @@ CPPFLAGS+=-DNTRACE
 CPPFLAGS+=-DNTEST
 ##############################################################################
 # project configurations
-MODULES:=boris logging room
+MODULES:=boris logging fdbfile room
 
 # boris
 EXEC_boris:=boris
@@ -29,6 +29,11 @@ OBJS_logging:=$(SRCS_logging:.c=.o)
 EXEC_room:=room.so
 SRCS_room:=room.c
 OBJS_room:=$(SRCS_room:.c=.o)
+
+# fdbfile.so plugin
+EXEC_fdbfile:=fdbfile.so
+SRCS_fdbfile:=fdbfile.c
+OBJS_fdbfile:=$(SRCS_fdbfile:.c=.o)
 
 ##############################################################################
 # Dec 24 2009

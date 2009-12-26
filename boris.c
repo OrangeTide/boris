@@ -577,7 +577,7 @@ EXPORT struct channel_group *channel_system_get(unsigned n);
 EXPORT struct channel_group *channel_system_get(unsigned n);
 
 /******************************************************************************
- * Services
+ * dummy services - functions that are used as a default for services.
  ******************************************************************************/
 
 /**
@@ -591,7 +591,40 @@ static void b_log_dummy(int priority UNUSED, const char *domain UNUSED, const ch
 	fputc('\n', stderr); /* assume there is no trainling newline. */
 }
 
+/* dummy functions that return failure for everything. */
+static int dummy_fdb_domain_init(const char *domain UNUSED) { return 0; }
+static struct fdb_write_handle *dummy_fdb_write_begin(const char *domain UNUSED, const char *id UNUSED) { return NULL; }
+static int dummy_fdb_write_pair(struct fdb_write_handle *h UNUSED, const char *name UNUSED, const char *value_str UNUSED) { return 0; }
+static int dummy_fdb_write_format(struct fdb_write_handle *h UNUSED, const char *name UNUSED, const char *value_fmt UNUSED, ...) { return 0; }
+static int dummy_fdb_write_end(struct fdb_write_handle *h UNUSED) { return 0; }
+static void dummy_fdb_write_abort(struct fdb_write_handle *h UNUSED) { }
+static struct fdb_read_handle *dummy_fdb_read_begin(const char *domain UNUSED, const char *id UNUSED) { return NULL; }
+static int dummy_fdb_read_next(struct fdb_read_handle *h UNUSED, const char **name UNUSED, const char **value UNUSED) { return 0; }
+static int dummy_fdb_read_end(struct fdb_read_handle *h UNUSED) { return 0; }
+static struct fdb_iterator *dummy_fdb_iterator_begin(const char *domain UNUSED) { return NULL; }
+static const char *dummy_fdb_iterator_next(struct fdb_iterator *it UNUSED) { return NULL; }
+static void dummy_fdb_iterator_end(struct fdb_iterator *it UNUSED) { }
+
+/******************************************************************************
+ * Services
+ ******************************************************************************/
+
 void (*b_log)(int priority, const char *domain, const char *fmt, ...)=b_log_dummy;
+struct plugin_fdb_interface fdb = {
+	dummy_fdb_domain_init,
+	dummy_fdb_write_begin,
+	dummy_fdb_write_pair,
+	dummy_fdb_write_format,
+	dummy_fdb_write_end,
+	dummy_fdb_write_abort,
+	dummy_fdb_read_begin,
+	dummy_fdb_read_next,
+	dummy_fdb_read_end,
+	dummy_fdb_iterator_begin,
+	dummy_fdb_iterator_next,
+	dummy_fdb_iterator_end,
+};
+static const struct plugin_basic_class *fdb_owner;
 
 /**
  * detach the function pointer providing the log service.
@@ -609,6 +642,41 @@ int service_detach_log(void (*log)(int priority, const char *domain, const char 
  */
 void service_attach_log(void (*log)(int priority, const char *domain, const char *fmt, ...)) {
 	b_log=log ? log : b_log_dummy;
+}
+
+/**
+ * deattach an interface from fdb, but only if class is the current owner.
+ * if class is NULL or current owner, sets fdb to use dummy functions.
+ */
+void service_detach_fdb(const struct plugin_basic_class *cls) {
+	const struct plugin_fdb_interface dummy = {
+		dummy_fdb_domain_init,
+		dummy_fdb_write_begin,
+		dummy_fdb_write_pair,
+		dummy_fdb_write_format,
+		dummy_fdb_write_end,
+		dummy_fdb_write_abort,
+		dummy_fdb_read_begin,
+		dummy_fdb_read_next,
+		dummy_fdb_read_end,
+		dummy_fdb_iterator_begin,
+		dummy_fdb_iterator_next,
+		dummy_fdb_iterator_end,
+	};
+	if(!cls || fdb_owner==cls) {
+		fdb_owner=NULL;
+		fdb=dummy;
+	}
+}
+
+/**
+ * attach an interface to fdb.
+ */
+void service_attach_fdb(const struct plugin_basic_class *cls, const struct plugin_fdb_interface *interface) {
+	fdb_owner=cls;
+	if(interface) {
+		fdb=*interface;
+	}
 }
 
 /******************************************************************************
@@ -3148,7 +3216,7 @@ EXPORT int attr_add(struct attr_list *al, const char *name, const char *value) {
 		free(item);
 		return 0; /**< out of memory. */
 	}
-	item->value=strdup(name);
+	item->value=strdup(value);
 	if(!item->value) {
 		PERROR("strdup()");
 		free(item->name);
@@ -3183,50 +3251,6 @@ EXPORT void attr_list_free(struct attr_list *al) {
 		curr->value=NULL;
 		free(curr);
 	}
-}
-
-/******************************************************************************
- * fdb
- ******************************************************************************/
-
-/**
- * creates a filename based on component and id.
- */
-EXPORT void fdb_makename_str(char *fn, size_t max, const char *base, const char *id) {
-	char name[id?strlen(id)+1:6];
-	unsigned i;
-
-	if(!id) id="_nil_";
-
-	/* process id into a good filename */
-	for(i=0;i<sizeof name-1 && id[i];i++) {
-		TRACE("id='%s' i=%d\n", id, i);
-		if(isalnum(id[i])) {
-			name[i]=tolower(id[i]);
-		} else {
-			name[i]='_';
-		}
-	}
-	name[i]=0;
-	TRACE("name='%s' i=%d max=%d name_sz=%d\n", name, i, max, sizeof name);
-
-	snprintf(fn, max, "data/%s/%s", base, name);
-	TRACE("res='%s'\n", fn);
-}
-
-/**
- * creates a filename based on component and id.
- */
-EXPORT void fdb_getbasename(char *fn, size_t max, const char *base) {
-	snprintf(fn, max, "data/%s/", base);
-}
-
-/**
- * @return true if the file is a valid id filename.
- */
-EXPORT int fdb_is_id(const char *filename) {
-	for(;*filename;filename++) if(!isdigit(*filename)) return 0;
-	return 1; /* success */
 }
 
 /******************************************************************************
@@ -3318,52 +3342,51 @@ static struct user *user_defaults(void) {
 	return u;
 }
 
-/** undocumented - please add documentation. */
-static int user_ll_load_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
+/**
+ * parse a value string into a uint.
+ */
+static int user_ll_load_uint(const char *id, const char *value, unsigned *uint_p) {
 	char *endptr;
-	unsigned *uint_p=extra;
-	assert(extra != NULL);
+	assert(uint_p != NULL);
 	VERBOSE("%s():value=\"%s\"\n", __func__, value);
-	if(!extra) return -1; /* error */
+	if(!uint_p) return 0; /* error */
 
-	if(!*value) {
-		DEBUG_MSG("Empty string");
-		return -1; /* error - empty string */
+	if(!value || !*value) {
+		ERROR_FMT("%s:Empty string", id);
+		return 0; /* error - empty string */
 	}
 	*uint_p=strtoul(value, &endptr, 0);
 
 	if(*endptr!=0) {
-		DEBUG_MSG("Not a number");
-		return -1; /* error - empty string */
+		ERROR_FMT("%s:Not a number", id);
+		return 0; /* error - not a number */
 	}
 
-	return 0; /* success - terminate the callback chain */
+	return 1; /* success */
 }
 
 /** undocumented - please add documentation. */
-static int user_ll_load_str(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value) {
-	char **str_p=extra;
-	assert(extra != NULL);
-	if(!extra) return -1; /* error */
+static int user_ll_load_str(const char *id UNUSED, const char *value, char **str_p) {
+	assert(str_p != NULL);
+	assert(value != NULL);
+	if(!str_p) return 0; /* error */
 
 	if(*str_p) free(*str_p);
 	*str_p=strdup(value);
 	if(!*str_p) {
 		PERROR("strdup()");
-		return -1; /* error */
+		return 0; /* error */
 	}
 
-	return 0; /* success - terminate the callback chain */
+	return 1; /* success */
 }
 
 /**
  * add to an attribute list.
  */
-static int user_ll_load_attr(struct config *cfg UNUSED, void *extra, const char *id, const char *value) {
+static int user_ll_load_attr(const char *id, const char *value, struct attr_list *al) {
 	assert(extra != NULL);
-	/* if attr_add success, then terminate callback chain, if a duplicate was
-	 * found then continue on the chain. */
-	return !attr_add(extra, id, value);
+	return attr_add(al, id, value);
 }
 
 /**
@@ -3388,40 +3411,44 @@ static int user_ll_add(struct user *u) {
 
 /** undocumented - please add documentation. */
 static struct user *user_load_byname(const char *username) {
-	FILE *f;
-	char filename[PATH_MAX];
 	struct user *u;
-	struct config cfg;
+	struct fdb_read_handle *h;
+	const char *name, *value;
 
-	fdb_makename_str(filename, sizeof filename, "users", username);
-
-	config_setup(&cfg);
+	h=fdb.read_begin("users", username);
+	if(!h) {
+		ERROR_FMT("Could not find user \"%s\"\n", username);
+		return 0; /* failure. */
+	}
 
 	u=user_defaults(); /* allocate a default struct */
 	if(!u) {
-		DEBUG_MSG("Could not allocate user structure");
-		fclose(f);
+		ERROR_MSG("Could not allocate user structure");
+		fdb.read_end(h);
 		return 0; /* failure */
 	}
 
-
-	/* anything unmatched is just added to an extra_values list.
-	 * remembed: last entries added via config_watch are checked first.
-	 */
-	config_watch(&cfg, "*", user_ll_load_attr, &u->extra_values);
-	config_watch(&cfg, "id", user_ll_load_uint, &u->id);
-	config_watch(&cfg, "username", user_ll_load_str, &u->username);
-	config_watch(&cfg, "pwcrypt", user_ll_load_str, &u->password_crypt);
-	config_watch(&cfg, "email", user_ll_load_str, &u->email);
-	config_watch(&cfg, "acs.level", user_ll_load_uint, &u->acs.level);
-	config_watch(&cfg, "acs.flags", user_ll_load_uint, &u->acs.flags);
-
-	if(!config_load(filename, &cfg)) {
-		config_free(&cfg);
-		return 0; /* failure */
+	while(fdb.read_next(h, &name, &value)) {
+		if(!strcasecmp("id", name))
+			user_ll_load_uint(name, value, &u->id);
+		else if(!strcasecmp("username", name))
+			user_ll_load_str(name, value, &u->username);
+		else if(!strcasecmp("pwcrypt", name))
+			user_ll_load_str(name, value, &u->password_crypt);
+		else if(!strcasecmp("email", name))
+			user_ll_load_str(name, value, &u->email);
+		else if(!strcasecmp("acs.level", name))
+			sscanf(value, "%hhu", &u->acs.level); /* TODO: add error checking. */
+		else if(!strcasecmp("acs.flags", name))
+			user_ll_load_uint(name, value, &u->acs.flags);
+		else
+			user_ll_load_attr(name, value, &u->extra_values);
 	}
 
-	config_free(&cfg);
+	if(!fdb.read_end(h)) {
+		ERROR_FMT("Error loading user \"%s\"\n", username);
+		goto failure;
+	}
 
 	if(u->id<=0) {
 		ERROR_FMT("User id for user '%s' was not set or set to zero.\n", username);
@@ -3440,6 +3467,8 @@ static struct user *user_load_byname(const char *username) {
 		goto failure;
 	}
 
+	DEBUG("Loaded user '%s'\n", id);
+
 	return u; /* success */
 
 failure:
@@ -3449,48 +3478,34 @@ failure:
 
 /** undocumented - please add documentation. */
 static int user_write(const struct user *u) {
-	FILE *f;
-	char filename[PATH_MAX];
-	char tempname[PATH_MAX];
+	struct fdb_write_handle *h;
 	struct attr_entry *curr;
 
-	fdb_makename_str(filename, sizeof filename, "users", u->username);
-	/* open a temporary file first. */
-	snprintf(tempname, sizeof tempname, "%s~", filename);
-	f=fopen(tempname, "w");
-	if(!f) {
-		PERROR(tempname);
-		return 0; /* failure */
+	assert(u != NULL);
+	assert(u->username != NULL);
+
+	h=fdb.write_begin("users", u->username);
+	if(!h) {
+		ERROR_FMT("Could not write user \"%s\"\n", u->username);
+		return 0;
 	}
 
-	if(fprintf(f,
-		"id          = %u\n"
-		"username    = %s\n"
-		"pwcrypt     = %s\n"
-		"email       = %s\n"
-		"acs.level   = %u\n"
-		"acs.flags   = 0x%08x\n",
-		u->id, u->username, u->password_crypt, u->email, u->acs.level, u->acs.flags
-	)<0) {
-		PERROR(tempname);
-		fclose(f);
-		return 0; /* failure */
-	}
+	fdb.write_format(h, "id", "%u", u->id);
+	fdb.write_pair(h, "username", u->username);
+	fdb.write_pair(h, "pwcrypt", u->password_crypt);
+	fdb.write_pair(h, "email", u->email);
+	fdb.write_format(h, "acs.level", "%u", u->acs.level);
+	fdb.write_format(h, "acs.flags", "0x%08x", u->acs.flags);
 
 	for(curr=LIST_TOP(u->extra_values);curr;curr=LIST_NEXT(curr, list)) {
-		if(fprintf(f, "%-12s= %s\n", curr->name, curr->value)<0) {
-			PERROR(tempname);
-			fclose(f);
-			return 0; /* failure */
-		}
+		fdb.write_pair(h, curr->name, curr->value);
 	}
 
-	fclose(f);
-	/* everything was successful, rename the file. */
-	if(rename(tempname, filename)) {
-		PERROR(tempname);
+	if(fdb.write_end(h)) {
+		ERROR_FMT("Could not write user \"%s\"\n", u->username);
 		return 0; /* failure. */
 	}
+
 	return 1; /* success */
 }
 
@@ -3594,65 +3609,42 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 
 /** undocumented - please add documentation. */
 EXPORT int user_init(void) {
-	char pathname[PATH_MAX];
-	char tempname[PATH_MAX];
-	DIR *d;
-	struct dirent *de;
+	struct fdb_iterator *it;
+	const char *id;
 
 	LIST_INIT(&user_list);
 
 	freelist_init(&user_id_freelist, 0);
 	freelist_pool(&user_id_freelist, 1, 32768);
 
-	fdb_getbasename(pathname, sizeof pathname, "users");
-	if(MKDIR(pathname)==-1 && errno!=EEXIST) {
-		PERROR(pathname);
+	fdb.domain_init("users");
+
+	it=fdb.iterator_begin("users");
+	if(!it) {
 		return 0;
 	}
 
 	/* scan for account files */
-	d=opendir(pathname);
-	if(!d) {
-		PERROR(pathname);
-		return 0; /* failure */
-	}
 
-	while((de=readdir(d))) {
+	while((id=fdb.iterator_next(it))) {
 		struct user *u;
-		struct stat st;
 
-		if(de->d_name[0]=='.') continue; /* ignore hidden files */
-		if(de->d_name[0] && de->d_name[strlen(de->d_name)-1]=='~') {
-			VERBOSE("skip things that don't look like user files:%s\n", de->d_name);
-			continue; /* ignore temp files. */
-		}
-
-		snprintf(tempname, sizeof tempname, "%s%s", pathname, de->d_name);
-		if(stat(tempname, &st)) {
-			PERROR(tempname);
-			continue;
-		}
-
-		if(!S_ISREG(st.st_mode)) {
-			VERBOSE("Ignoring directories and other non-regular files:%s\n", de->d_name);
-			continue;
-		}
-
-		DEBUG("Found user record '%s'\n", de->d_name);
+		DEBUG("Found user record '%s'\n", id);
 		/* Load user file */
-		u=user_load_byname(de->d_name);
+		u=user_load_byname(id);
 		if(!u) {
-			ERROR_FMT("Could not load user from file '%s'\n", de->d_name);
-			closedir(d);
-			return 0; /* failure */
+			ERROR_FMT("Could not load user from file '%s'\n", id);
+			goto failure;
 		}
 		/** add all users to a list */
 		user_ll_add(u);
 	}
 
-	closedir(d);
-
+	fdb.iterator_end(it);
 	return 1; /* success */
+failure:
+	fdb.iterator_end(it);
+	return 0; /* failure */
 }
 
 /** undocumented - please add documentation. */
