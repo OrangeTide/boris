@@ -30,6 +30,8 @@ int service_detach_log(void (*log)(int priority, const char *domain, const char 
 void service_attach_log(void (*log)(int priority, const char *domain, const char *fmt, ...));
 void service_detach_fdb(const struct plugin_basic_class *cls);
 void service_attach_fdb(const struct plugin_basic_class *cls, const struct plugin_fdb_interface *interface);
+void service_detach_room(const struct plugin_basic_class *cls);
+void service_attach_room(const struct plugin_basic_class *cls, const struct plugin_room_interface *interface);
 
 struct attr_entry *attr_find(struct attr_list *al, const char *name);
 int attr_add(struct attr_list *al, const char *name, const char *value);

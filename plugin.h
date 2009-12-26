@@ -62,6 +62,10 @@ struct plugin_room_interface {
 	 * attr_get() is called again.
 	 */
 	const char *(*attr_get)(struct room *r, const char *name);
+	/**
+	 * save a room to disk (only if it is dirty).
+	 */
+	int (*save)(struct room *r);
 };
 
 struct plugin_fdb_interface {

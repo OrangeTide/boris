@@ -626,6 +626,9 @@ struct plugin_fdb_interface fdb = {
 };
 static const struct plugin_basic_class *fdb_owner;
 
+struct plugin_room_interface room;
+static const struct plugin_basic_class *room_owner;
+
 /**
  * detach the function pointer providing the log service.
  */
@@ -676,6 +679,20 @@ void service_attach_fdb(const struct plugin_basic_class *cls, const struct plugi
 	fdb_owner=cls;
 	if(interface) {
 		fdb=*interface;
+	}
+}
+
+void service_detach_room(const struct plugin_basic_class *cls) {
+	if(!cls || room_owner==cls) {
+		room_owner=NULL;
+		memset(&room, 0, sizeof room);
+	}
+}
+
+void service_attach_room(const struct plugin_basic_class *cls, const struct plugin_room_interface *interface) {
+	room_owner=cls;
+	if(interface) {
+		room=*interface;
 	}
 }
 
@@ -785,6 +802,22 @@ failure0:
 	return 0; /* failure */
 }
 
+/**
+ * copies a word into out, silently truncate word if it is too long.
+ * return updated position of s.
+ */
+EXPORT const char *util_getword(const char *s, char *out, size_t outlen) {
+	const char *b, *e;
+
+	/* get word */
+	for(b=s;isspace(*b);b++) ;
+	for(e=b;*e && !isspace(*e);e++) ;
+	snprintf(out, outlen, "%.*s", e-b, b);
+	b=e;
+	if(*b) b++;
+	return b;
+}
+
 /******************************************************************************
  * Util_strfile - utility routines for holding a file in one large string.
  ******************************************************************************/
@@ -853,7 +886,7 @@ EXPORT char *trim_whitespace(char *line) {
 int parse_uint(const char *name, const char *value, unsigned *uint_p) {
 	char *endptr;
 	assert(uint_p != NULL);
-	VERBOSE("%s():value=\"%s\"\n", __func__, value);
+
 	if(!uint_p) return 0; /* error */
 
 	if(!value || !*value) {
@@ -5708,6 +5741,35 @@ static int command_do_quit(struct telnetclient *cl, struct user *u UNUSED, const
 }
 
 /** undocumented - please add documentation. */
+static int command_do_roomget(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
+	struct room *r;
+	char roomnum_str[64];
+	unsigned roomnum;
+	char attrname[64];
+	const char *attrvalue;
+
+	arg=util_getword(arg, roomnum_str, sizeof roomnum_str);
+	roomnum=strtoul(roomnum_str, 0, 10); /* TODO: handle errors. */
+
+	arg=util_getword(arg, attrname, sizeof attrname);
+
+	r=room.get(roomnum);
+	if(!r) {
+		telnetclient_printf(cl, "room \"%s\" not found.\n", roomnum_str);
+		return 0;
+	}
+	attrvalue=room.attr_get(r, attrname);
+	if(attrvalue) {
+		telnetclient_printf(cl, "room \"%s\" \"%s\" = \"%s\"\n", roomnum_str, attrname, attrvalue);
+	} else {
+		telnetclient_printf(cl, "room \"%s\" attribute \"%s\" not found.\n", roomnum_str, attrname);
+	}
+	room.put(r);
+
+	return 1; /* success */
+}
+
+/** undocumented - please add documentation. */
 static int command_not_implemented(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED) {
 	telnetclient_puts(cl, "Not implemented\n");
 	return 1; /* success */
@@ -5731,6 +5793,7 @@ static const struct command_table {
 	{ "to", command_not_implemented },
 	{ "help", command_not_implemented },
 	{ "spoof", command_not_implemented },
+	{ "roomget", command_do_roomget },
 };
 
 /**
@@ -7170,14 +7233,17 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
-	b_log(B_LOG_INFO, NULL, "Test of default logging.\n");
-
 	if(!plugin_load_list(mud_config.plugins)) {
 		ERROR_MSG("could not load one or more plugins");
 		return EXIT_FAILURE;
 	}
 
-	b_log(B_LOG_INFO, NULL, "Test of logging plugin.\n");
+	/* check for missing plugins because they won't have their function
+	 * pointers initialized. */
+	if(!room_owner) {
+		b_log(B_LOG_CRIT, "room", "No room system loaded!");
+		return EXIT_FAILURE;
+	}
 
 	if(!eventlog_init()) {
 		return EXIT_FAILURE;

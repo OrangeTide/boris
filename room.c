@@ -120,6 +120,7 @@ static const char *room_attr_get(struct room *r, const char *name) {
 
 	if(!strcasecmp("id", name)) {
 		snprintf(numbuf, sizeof numbuf, "%u", r->id);
+		return numbuf;
 	} else if(!strcasecmp("name.short", name))
 		return r->name.short_str;
 	else if(!strcasecmp("name.long", name))
@@ -176,14 +177,13 @@ static struct room *room_load(int room_id) {
 	}
 
 	fdb.read_end(h);
-	return NULL;
+	return r;
 }
 
 static int room_save(struct room *r) {
 	struct attr_entry *curr;
 	struct fdb_write_handle *h;
 	char numbuf[22]; /* big enough for a signed 64-bit decimal */
-
 
 	assert(r != NULL);
 	if(!r->dirty_fl) return 1; /* already saved - don't do it again. */
@@ -200,11 +200,11 @@ static int room_save(struct room *r) {
 	if(r->name.short_str)
 		fdb.write_pair(h, "name.short", r->name.short_str);
 	if(r->name.long_str)
-		fdb.write_pair(h, "name.long", r->name.short_str);
+		fdb.write_pair(h, "name.long", r->name.long_str);
 	if(r->desc.short_str)
 		fdb.write_pair(h, "desc.short", r->desc.short_str);
 	if(r->desc.long_str)
-		fdb.write_pair(h, "desc.long", r->desc.short_str);
+		fdb.write_pair(h, "desc.long", r->desc.long_str);
 	if(r->owner)
 		fdb.write_pair(h, "owner", r->owner);
 	if(r->creator)
@@ -220,6 +220,7 @@ static int room_save(struct room *r) {
 	}
 
 	r->dirty_fl=0;
+	b_log(B_LOG_INFO, "room", "saved room \"%s\"", numbuf);
 	return 1;
 }
 
@@ -244,7 +245,10 @@ static struct room *room_get(unsigned room_id) {
 		LIST_INSERT_HEAD(&room_cache, curr, room_cache);
 		curr->refcount++;
 	}
-	return curr; /* failure. */
+	if(!curr) {
+		b_log(B_LOG_WARN, "room", "could not access room \"%u\"", room_id);
+	}
+	return curr;
 }
 
 /**
@@ -254,6 +258,7 @@ static void room_put(struct room *r) {
 	assert(r != NULL);
 
 	r->refcount--;
+	/* TODO: hold onto the room longer to support caching. */
 	if(r->refcount<=0) {
 		room_save(r);
 		room_ll_free(r);
@@ -271,18 +276,57 @@ static int initialize(void) {
 
 	it=fdb.iterator_begin("rooms");
 	if(!it) {
-		b_log(B_LOG_CRIT, "room", "ERROR:could not load rooms!");
+		b_log(B_LOG_CRIT, "room", "could not load rooms!");
+		return 0; /* could not load. */
 	}
 
+	/* preflight all of the rooms. */
 	while((id=fdb.iterator_next(it))) {
+		struct room *r;
+		unsigned room_id;
+		char *endptr;
 		b_log(B_LOG_DEBUG, "room", "Found room: \"%s\"", id);
+		room_id=strtoul(id, &endptr, 10);
+		if(*endptr) {
+			b_log(B_LOG_CRIT, "room", "room id \"%s\" is invalid!", id);
+			fdb.iterator_end(it);
+			return 0; /* could not load */
+		}
+		r=room_load(room_id);
+		if(!r) {
+			b_log(B_LOG_CRIT, "room", "could not load rooms!");
+			fdb.iterator_end(it);
+			return 0; /* could not load */
+		}
+		room_ll_free(r);
 	}
 	fdb.iterator_end(it);
+
+	service_attach_room(&plugin_class.base_class, &plugin_class.room_interface);
+	return 1;
 }
 
 static int shutdown(void) {
-	/* TODO: save all dirty objects and free all data. */
-	return 0; /* refuse to unload */
+	struct room *curr;
+	b_log(B_LOG_INFO, "room", "Room system shutting down..");
+
+	/* check to make sure no rooms are still in use. */
+	for(curr=LIST_TOP(room_cache);curr;curr=LIST_NEXT(curr, room_cache)) {
+		if(curr->refcount>0) {
+			b_log(B_LOG_ERROR, "room", "cannot shut down, room \"%u\" still in use.", curr->id);
+			return 0; /* refuse to unload */
+		}
+	}
+
+	/* save all dirty objects and free all data. */
+	while((curr=LIST_TOP(room_cache))) {
+		LIST_REMOVE(curr, room_cache);
+		room_save(curr);
+		room_ll_free(curr);
+	}
+	service_detach_room(&plugin_class.base_class);
+	b_log(B_LOG_INFO, "room", "Room system ended.");
+	return 1;
 }
 
 /******************************************************************************
@@ -291,5 +335,5 @@ static int shutdown(void) {
 
 const struct plugin_room_class plugin_class = {
 	.base_class = { PLUGIN_API, "room", initialize, shutdown },
-	.room_interface = { room_get, room_put, room_attr_set, room_attr_get }
+	.room_interface = { room_get, room_put, room_attr_set, room_attr_get, room_save }
 };
