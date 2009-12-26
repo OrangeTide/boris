@@ -49,9 +49,19 @@ struct plugin_room_interface {
 	/** find a room by id and return it.
 	 * increases reference count on a room.
 	 */
-	struct room *(*get_room)(int room_id);
+	struct room *(*get)(unsigned room_id);
 	/** reduce reference count on a room */
-	void (*put_room)(struct room *r);
+	void (*put)(struct room *r);
+	/**
+	 * set an attribute on a room.
+	 */
+	int (*attr_set)(struct room *r, const char *name, const char *value);
+	/**
+	 * get an attribute on a room.
+	 * value is temporary and may disappear if the room is flushed, changed or
+	 * attr_get() is called again.
+	 */
+	const char *(*attr_get)(struct room *r, const char *name);
 };
 
 struct plugin_fdb_interface {

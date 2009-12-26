@@ -844,6 +844,66 @@ EXPORT char *trim_whitespace(char *line) {
 }
 
 /******************************************************************************
+ * name-value parser routines.
+ ******************************************************************************/
+
+/**
+ * parse a value string into a uint.
+ */
+int parse_uint(const char *name, const char *value, unsigned *uint_p) {
+	char *endptr;
+	assert(uint_p != NULL);
+	VERBOSE("%s():value=\"%s\"\n", __func__, value);
+	if(!uint_p) return 0; /* error */
+
+	if(!value || !*value) {
+		ERROR_FMT("%s:Empty string", name);
+		return 0; /* error - empty string */
+	}
+	*uint_p=strtoul(value, &endptr, 0);
+
+	if(*endptr!=0) {
+		ERROR_FMT("%s:Not a number", name);
+		return 0; /* error - not a number */
+	}
+
+	return 1; /* success */
+}
+
+/**
+ * load a string into str_p, free()ing string at str_p first.
+ */
+int parse_str(const char *name UNUSED, const char *value, char **str_p) {
+	assert(str_p != NULL);
+	assert(value != NULL);
+	if(!str_p) return 0; /* error */
+
+	if(*str_p) free(*str_p);
+	*str_p=strdup(value);
+	if(!*str_p) {
+		PERROR("strdup()");
+		return 0; /* error */
+	}
+
+	return 1; /* success */
+}
+
+/**
+ * add to an attribute list.
+ */
+int parse_attr(const char *name, const char *value, struct attr_list *al) {
+	struct attr_entry *at;
+	assert(extra != NULL);
+	at=attr_find(al, name);
+	if(!at) {
+		return attr_add(al, name, value);
+	}
+	free(at->value);
+	at->value=strdup(value);
+	return 1; /* success. */
+}
+
+/******************************************************************************
  * DLL / Plug-in routines.
  ******************************************************************************/
 
@@ -3175,25 +3235,29 @@ EXPORT void sha1crypt_test(void) {
  ******************************************************************************/
 
 /**
- * holds an entry.
+ * find an attr by name.
  */
-struct attr_entry {
-	LIST_ENTRY(struct attr_entry) list;
-	char *name;
-	char *value;
-};
-
-LIST_HEAD(struct attr_list, struct attr_entry);
+struct attr_entry *attr_find(struct attr_list *al, const char *name) {
+	struct attr_entry *curr;
+	for(curr=LIST_TOP(*al);curr;curr=LIST_NEXT(curr, list)) {
+		/* case sensitive. */
+		if(!strcmp(curr->name, name)) {
+			return curr;
+		}
+	}
+	return NULL; /* not found. */
+}
 
 /**
  * add an entry to the end, preserves the order.
  * refuse to add a duplicate entry.
  */
-EXPORT int attr_add(struct attr_list *al, const char *name, const char *value) {
+int attr_add(struct attr_list *al, const char *name, const char *value) {
 	struct attr_entry *curr, *prev, *item;
 
 	assert(al != NULL);
 
+	/* track prev to use later as a tail. */
 	prev=NULL;
 	for(curr=LIST_TOP(*al);curr;curr=LIST_NEXT(curr, list)) {
 		/* case sensitive. */
@@ -3234,11 +3298,10 @@ EXPORT int attr_add(struct attr_list *al, const char *name, const char *value) {
 	return 1; /**< success. */
 }
 
-
 /**
  * free every element on the list.
  */
-EXPORT void attr_list_free(struct attr_list *al) {
+void attr_list_free(struct attr_list *al) {
 	struct attr_entry *curr;
 
 	assert(al != NULL);
@@ -3343,53 +3406,6 @@ static struct user *user_defaults(void) {
 }
 
 /**
- * parse a value string into a uint.
- */
-static int user_ll_load_uint(const char *id, const char *value, unsigned *uint_p) {
-	char *endptr;
-	assert(uint_p != NULL);
-	VERBOSE("%s():value=\"%s\"\n", __func__, value);
-	if(!uint_p) return 0; /* error */
-
-	if(!value || !*value) {
-		ERROR_FMT("%s:Empty string", id);
-		return 0; /* error - empty string */
-	}
-	*uint_p=strtoul(value, &endptr, 0);
-
-	if(*endptr!=0) {
-		ERROR_FMT("%s:Not a number", id);
-		return 0; /* error - not a number */
-	}
-
-	return 1; /* success */
-}
-
-/** undocumented - please add documentation. */
-static int user_ll_load_str(const char *id UNUSED, const char *value, char **str_p) {
-	assert(str_p != NULL);
-	assert(value != NULL);
-	if(!str_p) return 0; /* error */
-
-	if(*str_p) free(*str_p);
-	*str_p=strdup(value);
-	if(!*str_p) {
-		PERROR("strdup()");
-		return 0; /* error */
-	}
-
-	return 1; /* success */
-}
-
-/**
- * add to an attribute list.
- */
-static int user_ll_load_attr(const char *id, const char *value, struct attr_list *al) {
-	assert(extra != NULL);
-	return attr_add(al, id, value);
-}
-
-/**
  * insert a user into user_list, but only if it is not already on the list.
  */
 static int user_ll_add(struct user *u) {
@@ -3430,19 +3446,19 @@ static struct user *user_load_byname(const char *username) {
 
 	while(fdb.read_next(h, &name, &value)) {
 		if(!strcasecmp("id", name))
-			user_ll_load_uint(name, value, &u->id);
+			parse_uint(name, value, &u->id);
 		else if(!strcasecmp("username", name))
-			user_ll_load_str(name, value, &u->username);
+			parse_str(name, value, &u->username);
 		else if(!strcasecmp("pwcrypt", name))
-			user_ll_load_str(name, value, &u->password_crypt);
+			parse_str(name, value, &u->password_crypt);
 		else if(!strcasecmp("email", name))
-			user_ll_load_str(name, value, &u->email);
+			parse_str(name, value, &u->email);
 		else if(!strcasecmp("acs.level", name))
 			sscanf(value, "%hhu", &u->acs.level); /* TODO: add error checking. */
 		else if(!strcasecmp("acs.flags", name))
-			user_ll_load_uint(name, value, &u->acs.flags);
+			parse_uint(name, value, &u->acs.flags);
 		else
-			user_ll_load_attr(name, value, &u->extra_values);
+			parse_attr(name, value, &u->extra_values);
 	}
 
 	if(!fdb.read_end(h)) {
