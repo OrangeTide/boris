@@ -827,7 +827,7 @@ EXPORT const char *util_getword(const char *s, char *out, size_t outlen) {
 	/* get word */
 	for(b=s;isspace(*b);b++) ;
 	for(e=b;*e && !isspace(*e);e++) ;
-	snprintf(out, outlen, "%.*s", e-b, b);
+	snprintf(out, outlen, "%.*s", (int)(e-b), b);
 	b=e;
 	if(*b) b++;
 	return b;
@@ -2577,7 +2577,7 @@ did_not_pass:
 	while(*s) if(*s++=='|') goto retry; /* look for an | */
 	return 0;
 parse_failure:
-	ERROR_FMT("acs parser failure '%s' (off=%d)\n", acsstring, s-acsstring);
+	ERROR_FMT("acs parser failure '%s' (off=%ld)\n", acsstring, s-acsstring);
 	return 0;
 }
 
@@ -7112,7 +7112,7 @@ EXPORT int plugin_load_list(const char *list) {
 		while(*list && isspace(*list)) list++;
 		for(e=list;*e && !isspace(*e);e++) ;
 		/* copy word out of string list. */
-		snprintf(name, sizeof name, "%.*s", e-list, list);
+		snprintf(name, sizeof name, "%.*s", (int)(e-list), list);
 		/* move to next position. */
 		list=e;
 		if(*list) list++;
