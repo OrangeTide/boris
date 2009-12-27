@@ -2,7 +2,7 @@
  * example of a very tiny MUD.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @version 0.4
+ * @version 0.5
  * @date 2008-2009
  *
  * Copyright 2008 Jon Mayo
@@ -68,7 +68,7 @@
 
 /* major, minor and patch level for version. */
 #define BORIS_VERSION_MAJ 0
-#define BORIS_VERSION_MIN 4
+#define BORIS_VERSION_MIN 5
 #define BORIS_VERSION_PAT 0
 /** @mainpage
  *
