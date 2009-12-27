@@ -1551,9 +1551,6 @@ EXPORT void heapqueue_test(void) {
  * Freelist
  ******************************************************************************/
 
-/** bucket number to use for overflows. */
-#define FREELIST_OVERFLOW_BUCKET(flp) (NR((flp)->buckets)-1)
-
 /** undocumented - please add documentation. */
 struct freelist_extent {
 	unsigned length, offset; /* both are in block-sized units */
@@ -1562,50 +1559,20 @@ struct freelist_extent {
 /** undocumented - please add documentation. */
 struct freelist_entry {
 	LIST_ENTRY(struct freelist_entry) global; /* global list */
-	LIST_ENTRY(struct freelist_entry) bucket; /* bucket list */
 	struct freelist_extent extent;
 };
 
+#if !defined(NTEST) || !defined(NDEBUG)
 /** undocumented - please add documentation. */
-LIST_HEAD(struct freelist_listhead, struct freelist_entry);
-
-/** undocumented - please add documentation. */
-struct freelist {
-	/* single list ordered by offset to find adjacent chunks. */
-	struct freelist_listhead global;
-	/* buckets for each size, last entry is a catch-all for huge chunks */
-	unsigned nr_buckets;
-	struct freelist_listhead *buckets;
-};
-
-/** undocumented - please add documentation. */
-static unsigned freelist_ll_bucketnr(struct freelist *fl, unsigned count) {
-	unsigned ret;
-	if(fl->nr_buckets>1) {
-		ret=count/(fl->nr_buckets-1);
-		if(ret>=fl->nr_buckets) {
-			ret=FREELIST_OVERFLOW_BUCKET(fl);
-		}
-	} else {
-		ret=FREELIST_OVERFLOW_BUCKET(fl);
+static void freelist_dump(struct freelist *fl) {
+	struct freelist_entry *curr;
+	unsigned n;
+	fprintf(stderr, "::: Dumping freelist :::\n");
+	for(curr=LIST_TOP(fl->global),n=0;curr;curr=LIST_NEXT(curr, global),n++) {
+		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
 	}
-	return ret;
 }
-
-/** undocumented - please add documentation. */
-static void freelist_ll_bucketize(struct freelist *fl, struct freelist_entry *e) {
-	unsigned bucket_nr;
-
-	assert(e!=NULL);
-
-	bucket_nr=freelist_ll_bucketnr(fl, e->extent.length);
-
-	/* detach the entry */
-	LIST_REMOVE(e, bucket);
-
-	/* push entry on the top of the bucket */
-	LIST_INSERT_HEAD(&fl->buckets[bucket_nr], e, bucket);
-}
+#endif
 
 /**
  * lowlevel - detach and free an entry.
@@ -1614,9 +1581,7 @@ static void freelist_ll_free(struct freelist_entry *e) {
 	assert(e!=NULL);
 	assert(e->global._prev!=NULL);
 	assert(e->global._prev!=(void*)0x99999999);
-	assert(e->bucket._prev!=NULL);
 	LIST_REMOVE(e, global);
-	LIST_REMOVE(e, bucket);
 #ifndef NDEBUG
 	memset(e, 0x99, sizeof *e); /* fill with fake data before freeing */
 #endif
@@ -1638,7 +1603,6 @@ static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsi
 	}
 	new->extent.offset=ofs;
 	new->extent.length=count;
-	LIST_ENTRY_INIT(new, bucket);
 	LIST_INSERT_ATPTR(prev, new, global);
 	return new;
 }
@@ -1659,62 +1623,37 @@ static int freelist_ll_isbridge(struct freelist_extent *prev_ext, unsigned ofs, 
 }
 
 /** undocumented - please add documentation. */
-EXPORT void freelist_init(struct freelist *fl, unsigned nr_buckets) {
-	fl->nr_buckets=nr_buckets+1; /* add one for the overflow bucket */
-	fl->buckets=calloc(fl->nr_buckets, sizeof *fl->buckets);
+void freelist_init(struct freelist *fl) {
 	LIST_INIT(&fl->global);
 }
 
 /** undocumented - please add documentation. */
-EXPORT void freelist_free(struct freelist *fl) {
+void freelist_free(struct freelist *fl) {
 	while(LIST_TOP(fl->global)) {
 		freelist_ll_free(LIST_TOP(fl->global));
 	}
 	assert(LIST_TOP(fl->global)==NULL);
-
-#ifndef NDEBUG
-	{
-		unsigned i;
-		for(i=0;i<fl->nr_buckets;i++) {
-			assert(LIST_TOP(fl->buckets[i])==NULL);
-		}
-	}
-#endif
 }
 
 /** allocate memory from the pool.
  * @return offset of the allocation. return -1 on failure.
  */
-EXPORT long freelist_alloc(struct freelist *fl, unsigned count) {
-	unsigned bucketnr, ofs;
-	struct freelist_entry **bucketptr, *curr;
-
-	assert(count!=0);
-
-	bucketnr=freelist_ll_bucketnr(fl, count);
-	bucketptr=&LIST_TOP(fl->buckets[bucketnr]);
-
-	for(;bucketnr<=FREELIST_OVERFLOW_BUCKET(fl);bucketnr++) {
-		assert(bucketnr<=FREELIST_OVERFLOW_BUCKET(fl));
-		assert(bucketptr!=NULL);
-
-		if(*bucketptr) { /* found an entry - cut the front of it off to alloc */
-			curr=*bucketptr;
-			DEBUG("curr->extent.length:%u count:%u\n", curr->extent.length, count);
-			assert(curr->extent.length>=count);
+long freelist_alloc(struct freelist *fl, unsigned count) {
+	struct freelist_entry *curr;
+	/* find the first entry that is big enough */
+	for(curr=LIST_TOP(fl->global);curr;curr=LIST_NEXT(curr, global)) {
+		if(curr->extent.length>=count) {
+			unsigned ofs;
 			ofs=curr->extent.offset;
 			curr->extent.offset+=count;
 			curr->extent.length-=count;
 			if(curr->extent.length==0) {
 				freelist_ll_free(curr);
-			} else {
-				/* place in a new bucket */
-				freelist_ll_bucketize(fl, curr);
 			}
-			return ofs;
+			return ofs; /* success */
 		}
 	}
-	return -1;
+	return -1; /* failure */
 }
 
 /** adds a piece to the freelist pool.
@@ -1730,7 +1669,7 @@ EXPORT long freelist_alloc(struct freelist *fl, unsigned count) {
  *
  * WARNING: passing bad parameters will result in strange data in the list
  */
-EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
+void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 	struct freelist_entry *new, *curr, *last;
 
 	TRACE_ENTER();
@@ -1815,11 +1754,6 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
 			new=freelist_ll_new(&LIST_TOP(fl->global), ofs, count);
 		}
 	}
-
-	/* push entry into bucket */
-	if(new) {
-		freelist_ll_bucketize(fl, new);
-	}
 }
 
 /**
@@ -1827,62 +1761,57 @@ EXPORT void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count) {
  * (assumes that freelist_pool assembles adjacent regions into the largest
  * possible contigious spaces)
  */
-EXPORT int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count) {
-	unsigned bucketnr;
-	struct freelist_entry **bucketptr, *curr;
+int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count) {
+	struct freelist_entry *curr;
 
 	assert(count!=0);
 
 	DEBUG("thwacking %u:%u\n", ofs, count);
 
-	bucketnr=freelist_ll_bucketnr(fl, count);
-	bucketptr=&LIST_TOP(fl->buckets[bucketnr]);
-	for(;bucketnr<=FREELIST_OVERFLOW_BUCKET(fl);bucketnr++) {
-		assert(bucketnr<=FREELIST_OVERFLOW_BUCKET(fl));
-		assert(bucketptr!=NULL);
+#ifndef NDEBUG
+	freelist_dump(fl);
+#endif
+	for(curr=LIST_TOP(fl->global);curr;curr=LIST_NEXT(curr, global)) {
+		DEBUG("checking for %u:%u in curr=%u:%u\n", ofs, count, curr->extent.offset, curr->extent.length);
+		if(curr->extent.offset<=ofs && curr->extent.offset+curr->extent.length>=ofs+count) {
+			TRACE("Found entry to thwack at %u:%u for %u:%u\n", curr->extent.offset, curr->extent.length, ofs, count);
 
-		for(curr=*bucketptr;curr;curr=LIST_NEXT(curr, global)) {
-			if(curr->extent.offset<=ofs && curr->extent.length>=count+curr->extent.offset-ofs) {
-				TRACE("Found entry to thwack at %u:%u for %u:%u\n", curr->extent.offset, curr->extent.length, ofs, count);
+			/* four possible cases:
+			 * 1. heads and lengths are the same - free extent
+			 * 2. heads are the same, but lengths differ - chop head and shrink
+			 * 3. tails are the same - shrink
+			 * 4. extent gets split into two extents
+			 */
+			if(curr->extent.offset==ofs && curr->extent.length==count) {
+				/* 1. heads and lengths are the same - free extent */
+				freelist_ll_free(curr);
+				return 1; /* success */
+			} else if(curr->extent.offset==ofs) {
+				/* 2. heads are the same, but lengths differ - slice off head */
+				curr->extent.offset+=count;
+				curr->extent.length-=count;
+				return 1; /* success */
+			} else if((curr->extent.offset+curr->extent.length)==(ofs+count)) {
+				/* 3. tails are the same - shrink */
+				curr->extent.length-=count;
+				return 1; /* success */
+			} else { /* 4. extent gets split into two extents */
+				struct freelist_extent new; /* second part */
 
-				/* four possible cases:
-				 * 1. heads and lengths are the same - free extent
-				 * 2. heads are the same, but lengths differ - shrink and rebucket
-				 * 3. tails are the same - shrink and rebucket
-				 * 4. extent gets split into two extents
-				 */
-				if(curr->extent.offset==ofs && curr->extent.length==count) {
-					/* 1. heads and lengths are the same - free extent */
-					freelist_ll_free(curr);
-					return 1; /* success */
-				} else if(curr->extent.offset==ofs) {
-					/* 2. heads are the same, but lengths differ - shrink and rebucket */
-					curr->extent.length-=count;
-					freelist_ll_bucketize(fl, curr);
-					return 1; /* success */
-				} else if((curr->extent.offset+curr->extent.length)==(ofs+count)) {
-					/* 3. tails are the same - shrink and rebucket */
-					curr->extent.offset+=count;
-					freelist_ll_bucketize(fl, curr);
-					return 1; /* success */
-				} else { /* 4. extent gets split into two extents */
-					struct freelist_extent new; /* second part */
+				/* make curr the first part, and create a new one after
+				 * ofs:count for the second */
 
-					/* make curr the first part, and create a new one after
-					 * ofs:count for the second */
-
-					new.offset=ofs+count;
-					new.length=(curr->extent.offset+curr->extent.length)-new.offset;
-					DEBUG("ofs=%d curr.offset=%d\n", ofs, curr->extent.offset);
-					assert(ofs > curr->extent.offset);
-					curr->extent.length=ofs-curr->extent.offset;
-					freelist_ll_bucketize(fl, curr);
-					freelist_pool(fl, new.offset, new.length);
-					return 1; /* success */
-				}
-				DEBUG_MSG("Should not be possible to get here");
-				DIE();
+				new.offset=ofs+count;
+				new.length=(curr->extent.offset+curr->extent.length)-new.offset;
+				DEBUG("ofs=%d curr.offset=%d\n", ofs, curr->extent.offset);
+				assert(curr->extent.length >= count+new.length);
+				curr->extent.length-=count;
+				curr->extent.length-=new.length;
+				freelist_pool(fl, new.offset, new.length);
+				return 1; /* success */
 			}
+			DEBUG_MSG("Should not be possible to get here");
+			DIE();
 		}
 	}
 	DEBUG_MSG("failed.");
@@ -1891,20 +1820,10 @@ EXPORT int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count) {
 
 #ifndef NTEST
 /** undocumented - please add documentation. */
-EXPORT void freelist_dump(struct freelist *fl) {
-	struct freelist_entry *curr;
-	unsigned n;
-	fprintf(stderr, "::: Dumping freelist :::\n");
-	for(curr=LIST_TOP(fl->global),n=0;curr;curr=LIST_NEXT(curr, global),n++) {
-		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
-	}
-}
-
-/** undocumented - please add documentation. */
 EXPORT void freelist_test(void) {
 	struct freelist fl;
 	unsigned n;
-	freelist_init(&fl, 1024);
+	freelist_init(&fl);
 	fprintf(stderr, "::: Making some fragments :::\n");
 	for(n=0;n<60;n+=12) {
 		freelist_pool(&fl, n, 6);
@@ -3737,7 +3656,7 @@ EXPORT int user_init(void) {
 
 	LIST_INIT(&user_list);
 
-	freelist_init(&user_id_freelist, 0);
+	freelist_init(&user_id_freelist);
 	freelist_pool(&user_id_freelist, 1, 32768);
 
 	fdb.domain_init("users");

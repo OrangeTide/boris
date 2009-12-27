@@ -30,6 +30,9 @@
 #define DOMAIN_ROOM "rooms"
 #define DOMAIN_CHARACTER "chars"
 
+/** max id in any domain */
+#define ID_MAX 32767
+
 /******************************************************************************
  * Types
  ******************************************************************************/
@@ -61,6 +64,17 @@ struct description_string {
 	char *long_str;
 };
 
+
+struct freelist_entry;
+/** undocumented - please add documentation. */
+LIST_HEAD(struct freelist_listhead, struct freelist_entry);
+
+/** undocumented - please add documentation. */
+struct freelist {
+	/* single list ordered by offset to find adjacent chunks. */
+	struct freelist_listhead global;
+};
+
 /******************************************************************************
  * Protos
  ******************************************************************************/
@@ -86,4 +100,13 @@ int parse_str(const char *name, const char *value, char **str_p);
 int parse_attr(const char *name, const char *value, struct attr_list *al);
 int value_set(const char *value, enum value_type type, void *p);
 const char *value_get(enum value_type type, void *p);
+
+void freelist_init(struct freelist *fl);
+void freelist_free(struct freelist *fl);
+long freelist_alloc(struct freelist *fl, unsigned count);
+void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count);
+int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count);
+#ifndef NTEST
+void freelist_test(void);
+#endif
 #endif
