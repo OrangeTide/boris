@@ -71,11 +71,13 @@ struct plugin_room_interface {
 struct plugin_fdb_interface {
 	int (*domain_init)(const char *domain);
 	struct fdb_write_handle *(*write_begin)(const char *domain, const char *id);
+	struct fdb_write_handle *(*write_begin_uint)(const char *domain, unsigned id);
 	int (*write_pair)(struct fdb_write_handle *h, const char *name, const char *value_str);
 	int (*write_format)(struct fdb_write_handle *h, const char *name, const char *value_fmt, ...);
 	int (*write_end)(struct fdb_write_handle *h);
 	void (*write_abort)(struct fdb_write_handle *h);
 	struct fdb_read_handle *(*read_begin)(const char *domain, const char *id);
+	struct fdb_read_handle *(*read_begin_uint)(const char *domain, unsigned id);
 	int (*read_next)(struct fdb_read_handle *h, const char **name, const char **value);
 	int (*read_end)(struct fdb_read_handle *h);
 	struct fdb_iterator *(*iterator_begin)(const char *domain);

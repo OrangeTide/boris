@@ -252,6 +252,15 @@ static struct fdb_write_handle *fdb_write_begin(const char *domain, const char *
 }
 
 /**
+ * same as fdb_write_begin() but takes a uint.
+ */
+static struct fdb_write_handle *fdb_write_begin_uint(const char *domain, unsigned id) {
+	char numbuf[22]; /* big enough for a signed 64-bit decimal */
+	snprintf(numbuf, sizeof numbuf, "%u", id);
+	return fdb_write_begin(domain, numbuf);
+}
+
+/**
  * write a string to an open record.
  * you can only use a name once per transaction (begin/end)
  */
@@ -402,6 +411,12 @@ static struct fdb_read_handle *fdb_read_begin(const char *domain, const char *id
 	ret->line=malloc(ret->alloc_len);
 
 	return ret;
+}
+
+static struct fdb_read_handle *fdb_read_begin_uint(const char *domain, unsigned id) {
+	char numbuf[22]; /* big enough for a signed 64-bit decimal */
+	snprintf(numbuf, sizeof numbuf, "%u", id);
+	return fdb_read_begin(domain, numbuf);
 }
 
 /**
@@ -642,11 +657,13 @@ const struct plugin_fdb_class plugin_class = {
 	.fdb_interface = {
 		fdb_domain_init,
 		fdb_write_begin,
+		fdb_write_begin_uint,
 		fdb_write_pair,
 		fdb_write_format,
 		fdb_write_end,
 		fdb_write_abort,
 		fdb_read_begin,
+		fdb_read_begin_uint,
 		fdb_read_next,
 		fdb_read_end,
 		fdb_iterator_begin,

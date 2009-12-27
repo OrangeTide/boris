@@ -594,11 +594,13 @@ static void b_log_dummy(int priority UNUSED, const char *domain UNUSED, const ch
 /* dummy functions that return failure for everything. */
 static int dummy_fdb_domain_init(const char *domain UNUSED) { return 0; }
 static struct fdb_write_handle *dummy_fdb_write_begin(const char *domain UNUSED, const char *id UNUSED) { return NULL; }
+static struct fdb_write_handle *dummy_fdb_write_begin_uint(const char *domain UNUSED, unsigned id UNUSED) { return NULL; }
 static int dummy_fdb_write_pair(struct fdb_write_handle *h UNUSED, const char *name UNUSED, const char *value_str UNUSED) { return 0; }
 static int dummy_fdb_write_format(struct fdb_write_handle *h UNUSED, const char *name UNUSED, const char *value_fmt UNUSED, ...) { return 0; }
 static int dummy_fdb_write_end(struct fdb_write_handle *h UNUSED) { return 0; }
 static void dummy_fdb_write_abort(struct fdb_write_handle *h UNUSED) { }
 static struct fdb_read_handle *dummy_fdb_read_begin(const char *domain UNUSED, const char *id UNUSED) { return NULL; }
+static struct fdb_read_handle *dummy_fdb_read_begin_uint(const char *domain UNUSED, unsigned id UNUSED) { return NULL; }
 static int dummy_fdb_read_next(struct fdb_read_handle *h UNUSED, const char **name UNUSED, const char **value UNUSED) { return 0; }
 static int dummy_fdb_read_end(struct fdb_read_handle *h UNUSED) { return 0; }
 static struct fdb_iterator *dummy_fdb_iterator_begin(const char *domain UNUSED) { return NULL; }
@@ -613,11 +615,13 @@ void (*b_log)(int priority, const char *domain, const char *fmt, ...)=b_log_dumm
 struct plugin_fdb_interface fdb = {
 	dummy_fdb_domain_init,
 	dummy_fdb_write_begin,
+	dummy_fdb_write_begin_uint,
 	dummy_fdb_write_pair,
 	dummy_fdb_write_format,
 	dummy_fdb_write_end,
 	dummy_fdb_write_abort,
 	dummy_fdb_read_begin,
+	dummy_fdb_read_begin_uint,
 	dummy_fdb_read_next,
 	dummy_fdb_read_end,
 	dummy_fdb_iterator_begin,
@@ -655,11 +659,13 @@ void service_detach_fdb(const struct plugin_basic_class *cls) {
 	const struct plugin_fdb_interface dummy = {
 		dummy_fdb_domain_init,
 		dummy_fdb_write_begin,
+		dummy_fdb_write_begin_uint,
 		dummy_fdb_write_pair,
 		dummy_fdb_write_format,
 		dummy_fdb_write_end,
 		dummy_fdb_write_abort,
 		dummy_fdb_read_begin,
+		dummy_fdb_read_begin_uint,
 		dummy_fdb_read_next,
 		dummy_fdb_read_end,
 		dummy_fdb_iterator_begin,
