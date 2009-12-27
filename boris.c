@@ -2577,7 +2577,7 @@ did_not_pass:
 	while(*s) if(*s++=='|') goto retry; /* look for an | */
 	return 0;
 parse_failure:
-	ERROR_FMT("acs parser failure '%s' (off=%ld)\n", acsstring, s-acsstring);
+	ERROR_FMT("acs parser failure '%s' (off=%td)\n", acsstring, s-acsstring);
 	return 0;
 }
 
