@@ -24,6 +24,7 @@ CPPFLAGS+=-DNTEST
 # project configurations
 MODULES:=\
 	boris \
+	character \
 	example \
 	fdbfile \
 	logging \
@@ -37,6 +38,11 @@ CPPFLAGS_boris:=-D_BSD_SOURCE
 CFLAGS_boris:=-pedantic -std=gnu99
 SRCS_boris:=boris.c
 OBJS_boris:=$(SRCS_boris:.c=.o)
+
+# character.so plugin
+EXEC_character:=character.$(SOEXT)
+SRCS_character:=character.c
+OBJS_character:=$(SRCS_character:.c=.o)
 
 # logging.so plugin
 EXEC_logging:=logging.$(SOEXT)

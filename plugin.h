@@ -85,4 +85,32 @@ struct plugin_fdb_interface {
 	void (*iterator_end)(struct fdb_iterator *it);
 };
 
+struct plugin_character_interface {
+	/**
+	 * find a character by id and return it.
+	 * increases reference count on a character.
+	 */
+	struct character *(*get)(unsigned character_id);
+	/** reduce reference count on a character */
+	void (*put)(struct character *ch);
+	/**
+	 * create a new character with next available id.
+	 * increases reference count on a character.
+	 */
+	struct character *(*new)(void);
+	/**
+	 * set an attribute on a character.
+	 */
+	int (*attr_set)(struct character *ch, const char *name, const char *value);
+	/**
+	 * get an attribute on a character.
+	 * value is temporary and may disappear if the character is flushed,
+	 * changed or attr_get() is called again.
+	 */
+	const char *(*attr_get)(struct character *ch, const char *name);
+	/**
+	 * save a character to disk (only if it is dirty).
+	 */
+	int (*save)(struct character *ch);
+};
 #endif

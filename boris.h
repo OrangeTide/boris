@@ -74,6 +74,8 @@ void service_detach_fdb(const struct plugin_basic_class *cls);
 void service_attach_fdb(const struct plugin_basic_class *cls, const struct plugin_fdb_interface *interface);
 void service_detach_room(const struct plugin_basic_class *cls);
 void service_attach_room(const struct plugin_basic_class *cls, const struct plugin_room_interface *interface);
+void service_detach_character(const struct plugin_basic_class *cls);
+void service_attach_character(const struct plugin_basic_class *cls, const struct plugin_character_interface *interface);
 
 struct attr_entry *attr_find(struct attr_list *al, const char *name);
 int attr_add(struct attr_list *al, const char *name, const char *value);

@@ -624,6 +624,9 @@ static const struct plugin_basic_class *fdb_owner;
 struct plugin_room_interface room;
 static const struct plugin_basic_class *room_owner;
 
+struct plugin_character_interface character;
+static const struct plugin_basic_class *character_owner;
+
 /**
  * detach the function pointer providing the log service.
  */
@@ -690,6 +693,20 @@ void service_attach_room(const struct plugin_basic_class *cls, const struct plug
 	room_owner=cls;
 	if(interface) {
 		room=*interface;
+	}
+}
+
+void service_detach_character(const struct plugin_basic_class *cls) {
+	if(!cls || character_owner==cls) {
+		character_owner=NULL;
+		memset(&character, 0, sizeof character);
+	}
+}
+
+void service_attach_character(const struct plugin_basic_class *cls, const struct plugin_character_interface *interface) {
+	character_owner=cls;
+	if(interface) {
+		character=*interface;
 	}
 }
 
@@ -5820,6 +5837,54 @@ static int command_do_roomget(struct telnetclient *cl, struct user *u, const cha
 	return 1; /* success */
 }
 
+static int command_do_character(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
+	struct character *ch;
+	char act[64];
+	char tmp[64];
+	unsigned ch_id;
+
+	assert(arg != NULL);
+
+	arg=util_getword(arg, act, sizeof act);
+	if(!strcasecmp(act, "new")) {
+		ch=character.new();
+		telnetclient_printf(cl, "Created character %s.\n", character.attr_get(ch, "id"));
+		character.put(ch);
+	} else if(!strcasecmp(act, "get")) {
+		arg=util_getword(arg, tmp, sizeof tmp);
+		ch_id=strtoul(tmp, 0, 10); /* TODO: handle errors. */
+		ch=character.get(ch_id);
+		if(ch) {
+			/* get attribute name. */
+			arg=util_getword(arg, tmp, sizeof tmp);
+			telnetclient_printf(cl, "Character %u \"%s\" = \"%s\"\n", ch_id, tmp, character.attr_get(ch, tmp));
+			character.put(ch);
+		} else {
+			telnetclient_printf(cl, "Unknown character \"%s\"\n", tmp);
+		}
+	} else if(!strcasecmp(act, "set")) {
+		arg=util_getword(arg, tmp, sizeof tmp);
+		ch_id=strtoul(tmp, 0, 10); /* TODO: handle errors. */
+		ch=character.get(ch_id);
+		if(ch) {
+			/* get attribute name. */
+			arg=util_getword(arg, tmp, sizeof tmp);
+			/* find start of value. */
+			while(*arg && isspace(*arg)) arg++;
+			if(!character.attr_set(ch, tmp, arg)) {
+				telnetclient_printf(cl, "Could not set \"%s\" on character %u.\n", tmp, ch_id);
+			}
+			character.put(ch);
+		} else {
+			telnetclient_printf(cl, "Unknown character \"%s\"\n", tmp);
+		}
+	} else {
+		telnetclient_printf(cl, "unknown action \"%s\"\n", act);
+	}
+
+	return 1; /* success */
+}
+
 /** undocumented - please add documentation. */
 static int command_not_implemented(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED) {
 	telnetclient_puts(cl, "Not implemented\n");
@@ -5845,6 +5910,7 @@ static const struct command_table {
 	{ "help", command_not_implemented },
 	{ "spoof", command_not_implemented },
 	{ "roomget", command_do_roomget },
+	{ "char", command_do_character },
 };
 
 /**
@@ -7293,6 +7359,10 @@ int main(int argc, char **argv) {
 	 * pointers initialized. */
 	if(!room_owner) {
 		b_log(B_LOG_CRIT, "room", "No room system loaded!");
+		return EXIT_FAILURE;
+	}
+	if(!character_owner) {
+		b_log(B_LOG_CRIT, "character", "No character system loaded!");
 		return EXIT_FAILURE;
 	}
 
