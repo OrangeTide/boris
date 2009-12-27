@@ -1,3 +1,14 @@
+/**
+ * @file list.h
+ *
+ * Linked list macros.
+ *
+ * @author Jon Mayo <jon.mayo@gmail.com>
+ * @date 2009 Dec 27
+ *
+ * This file is PUBLIC DOMAIN. No copyright is claimed.
+ *
+ */
 #ifndef LIST_H
 #define LIST_H
 

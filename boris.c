@@ -1,5 +1,6 @@
 /** @file boris.c
- * example of a very tiny MUD.
+ *
+ * A plugin oriented MUD.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
  * @version 0.5

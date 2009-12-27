@@ -1,9 +1,11 @@
 /**
  * @file example.c
- * @author Your Name <your@email>
- * @date 2009 Dec 26
+ *
  * A example of a plugin that does nothing. It can be used as a template for
  * new plugins.
+ *
+ * @author Your Name <your@email>
+ * @date 2009 Dec 27
  *
  * This file is PUBLIC DOMAIN. No copyright is claimed.
  *

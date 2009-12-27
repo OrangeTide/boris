@@ -1,3 +1,15 @@
+/**
+ * @file boris.h
+ *
+ * A plugin oriented MUD.
+ *
+ * @author Jon Mayo <jon.mayo@gmail.com>
+ * @date 2009 Dec 27
+ *
+ * Copyright 2009 Jon Mayo
+ * Ms-RL : See COPYING.txt for complete license text.
+ *
+ */
 #ifndef BORIS_H
 #define BORIS_H
 #include "plugin.h"
