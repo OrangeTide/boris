@@ -940,7 +940,11 @@ int parse_str(const char *name UNUSED, const char *value, char **str_p) {
  */
 int parse_attr(const char *name, const char *value, struct attr_list *al) {
 	struct attr_entry *at;
-	assert(extra != NULL);
+
+	assert(name != NULL);
+	assert(value != NULL);
+	assert(al != NULL);
+
 	at=attr_find(al, name);
 	if(!at) {
 		return attr_add(al, name, value);
@@ -3225,7 +3229,7 @@ EXPORT void sha1crypt_test(void) {
 		{ "abcdef", "{SSHA}6Nrfz6LziwIo8HsSAkjm/nCeledLUntDZlw=" },
 		{ "abcdeg", "{SSHA}8Lqg317f9lLd0M3EnwIe7BHiH3liVHhbKEc="},
 	};
-	int i;
+	unsigned i;
 
 	/* generate salt. */
 	sha1crypt_gensalt(sizeof salt, salt);
@@ -3509,7 +3513,7 @@ static struct user *user_load_byname(const char *username) {
 		goto failure;
 	}
 
-	DEBUG("Loaded user '%s'\n", id);
+	DEBUG("Loaded user '%s'\n", username);
 
 	return u; /* success */
 
