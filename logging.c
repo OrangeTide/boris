@@ -1,7 +1,12 @@
 /**
  * @file logging.c
+ * @author Jon Mayo <jon.mayo@gmail.com>
+ * @date 2009 Dec 26
  *
- * basic logging to stderr.
+ * Plugin that provides basic logging to stderr.
+ *
+ * Copyright 2009 Jon Mayo
+ * Ms-RL : See COPYING.txt for complete license text.
  *
  */
 #include <assert.h>

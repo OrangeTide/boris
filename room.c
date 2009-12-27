@@ -1,7 +1,12 @@
 /**
  * @file room.c
+ * @author Jon Mayo <jon.mayo@gmail.com>
+ * @date 2009 Dec 26
  *
- * basic room support.
+ * Plugin that provides basic room support.
+ *
+ * Copyright 2009 Jon Mayo
+ * Ms-RL : See COPYING.txt for complete license text.
  *
  */
 #include <assert.h>
