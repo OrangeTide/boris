@@ -68,6 +68,7 @@ static const struct {
 /** list of all loaded characters. */
 static struct character_cache character_cache;
 
+static struct freelist character_id_freelist;
 /******************************************************************************
  * Functions
  ******************************************************************************/
@@ -154,7 +155,7 @@ static const char *character_attr_get(struct character *ch, const char *name) {
 /**
  * load a character from fdb.
  */
-static struct character *character_load(int character_id) {
+static struct character *character_load(unsigned character_id) {
 	struct character *ch;
 	struct fdb_read_handle *h;
 	const char *name, *value;
@@ -184,6 +185,12 @@ static struct character *character_load(int character_id) {
 	}
 
 	fdb.read_end(h);
+
+	if(character_id!=ch->id) {
+		b_log(B_LOG_ERROR, "character", "could not load character \"%u\" (bad, missing or mismatched id)", character_id);
+		character_ll_free(ch);
+		return NULL;
+	}
 	return ch;
 }
 
@@ -261,7 +268,7 @@ static struct character *character_get(unsigned character_id) {
  * reduce reference count of character.
  */
 static void character_put(struct character *ch) {
-	assert(r != NULL);
+	assert(ch != NULL);
 
 	ch->refcount--;
 	/* TODO: hold onto the character longer to support caching. */
@@ -273,12 +280,19 @@ static void character_put(struct character *ch) {
 
 static struct character *character_new(void) {
 	struct character *ret;
+	long id;
 
 	ret=character_ll_alloc();
 	if(!ret) return NULL;
 
-	/* TODO: allocate next entry from a pool. */
-	ret->id=1234;
+	/* allocate next entry from a pool. */
+	id=freelist_alloc(&character_id_freelist, 1);
+	if(id<0) {
+		b_log(B_LOG_CRIT, "character", "could not allocate new character id.");
+		character_ll_free(ret);
+		return NULL;
+	}
+	ret->id=id;
 
 	/* save character immediately on creation. */
 	ret->dirty_fl=1;
@@ -291,12 +305,67 @@ static struct character *character_new(void) {
 }
 
 /**
+ * preflight all of the characters by loading every one of them.
+ */
+static int character_preflight(void) {
+	struct fdb_iterator *it;
+	const char *id;
+
+	it=fdb.iterator_begin(DOMAIN_CHARACTER);
+	if(!it) {
+		b_log(B_LOG_CRIT, "character", "could not load characters!");
+		return 0; /* could not load. */
+	}
+
+	while((id=fdb.iterator_next(it))) {
+		struct character *ch;
+		unsigned character_id;
+		char *endptr;
+		b_log(B_LOG_DEBUG, "character", "Found character: \"%s\"", id);
+		character_id=strtoul(id, &endptr, 10);
+		if(*endptr) {
+			b_log(B_LOG_CRIT, "character", "character id \"%s\" is invalid!", id);
+			fdb.iterator_end(it);
+			return 0; /* could not load */
+		}
+		ch=character_load(character_id);
+		if(!ch) {
+			b_log(B_LOG_CRIT, "character", "could not load character id \"%u\"", character_id);
+			fdb.iterator_end(it);
+			return 0; /* could not load */
+		}
+		/* compare ch->id with character_id */
+		if(ch->id!=character_id) {
+			b_log(B_LOG_CRIT, "character", "bad or non-matching character id \"%u\"", character_id);
+			character_ll_free(ch);
+			fdb.iterator_end(it);
+		}
+		/* allocate id from the pool */
+		if(!freelist_thwack(&character_id_freelist, ch->id, 1)) {
+			b_log(B_LOG_CRIT, "character", "bad or duplicate character id \"%u\"", character_id);
+			character_ll_free(ch);
+			fdb.iterator_end(it);
+			return 0; /* could not load */
+		}
+		character_ll_free(ch);
+	}
+	fdb.iterator_end(it);
+	return 1; /* success */
+}
+/**
  *
  */
 static int initialize(void) {
 	b_log(B_LOG_INFO, "character", "Character plugin loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	freelist_init(&character_id_freelist);
+	freelist_pool(&character_id_freelist, 1, ID_MAX);
+
 	fdb.domain_init(DOMAIN_CHARACTER);
-	/* TODO: load all characters to check and to configure pool space. */
+	/* load all characters to check and to configure pool space. */
+	if(!character_preflight()) {
+		b_log(B_LOG_CRIT, "character", "could not load characters!");
+		return 0;
+	}
 	service_attach_character(&plugin_class.base_class, &plugin_class.character_interface);
 	return 1;
 }
