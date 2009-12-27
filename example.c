@@ -1,3 +1,17 @@
+/**
+ * @file example.c
+ * @author Your Name <your@email>
+ * @date 2009 Dec 26
+ * A example of a plugin that does nothing. It can be used as a template for
+ * new plugins.
+ *
+ * This file is PUBLIC DOMAIN. No copyright is claimed.
+ *
+ * NOTICE:
+ * Because this is a template to be reused by others, it is PUBLIC DOMAIN.
+ * Modified versions of this file may be copyrighted, and as such this notice
+ * should be removed.
+ */
 #include <stdlib.h>
 #include "boris.h"
 
