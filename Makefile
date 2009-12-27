@@ -50,7 +50,7 @@ SRCS_logging:=logging.c
 OBJS_logging:=$(SRCS_logging:.c=.o)
 
 # room.so plugin
-EXEC_room:=room.so
+EXEC_room:=room.$(SOEXT)
 SRCS_room:=room.c
 OBJS_room:=$(SRCS_room:.c=.o)
 
