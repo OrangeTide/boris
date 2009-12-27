@@ -239,15 +239,6 @@
 
 /*=* General purpose macros *=*/
 
-/** get number of elements in an array. */
-#define NR(x) (sizeof(x)/sizeof*(x))
-
-/** round up on a boundry. */
-#define ROUNDUP(a,n) (((a)+(n)-1)/(n)*(n))
-
-/** round down on a boundry. */
-#define ROUNDDOWN(a,n) ((a)-((a)%(n)))
-
 /** make four ASCII characters into a 32-bit integer. */
 #define FOURCC(a,b,c,d)	( \
 	((uint_least32_t)(d)<<24) \
@@ -940,6 +931,60 @@ int parse_attr(const char *name, const char *value, struct attr_list *al) {
 	free(at->value);
 	at->value=strdup(value);
 	return 1; /* success. */
+}
+
+/**
+ * set a value into p according to type.
+ */
+int value_set(const char *value, enum value_type type, void *p) {
+	assert(p != NULL);
+	assert(value != NULL);
+
+	if(!p || !value) return 0; /* error */
+
+	switch(type) {
+		case VALUE_TYPE_STRING: {
+			if(*(char**)p) free(*(char**)p);
+			*(char**)p=strdup(value);
+			if(!*(char**)p) {
+				PERROR("strdup()");
+				return 0; /* error */
+			}
+			return 1; /* success */
+		}
+		case VALUE_TYPE_UINT: {
+			char *endptr;
+			if(!*value) {
+				ERROR_MSG("Empty string");
+				return 0; /* error - empty string */
+			}
+			*(unsigned*)p=strtoul(value, &endptr, 0);
+			if(*endptr!=0) {
+				ERROR_FMT("Not a number:\"%s\"\n", value);
+				return 0; /* error - not a number */
+			}
+			return 1; /* success */
+		}
+	}
+
+	return 0; /* failure. */
+}
+
+/**
+ * convert a value at p into a string according to type.
+ * string returned is temporary and can change if an object is modified or if
+ * this function is called again.
+ */
+const char *value_get(enum value_type type, void *p) {
+	static char numbuf[22]; /* big enough for a signed 64-bit decimal */
+	switch(type) {
+		case VALUE_TYPE_STRING:
+			return *(char**)p;
+		case VALUE_TYPE_UINT:
+			snprintf(numbuf, sizeof numbuf, "%u", *(unsigned*)p);
+			return numbuf;
+	}
+	return NULL;
 }
 
 /******************************************************************************
