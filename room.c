@@ -148,7 +148,7 @@ static const char *room_attr_get(struct room *r, const char *name) {
 	return NULL; /* failure - not found. */
 }
 
-static struct room *room_load(int room_id) {
+static struct room *room_load(unsigned room_id) {
 	struct room *r;
 	char numbuf[22]; /* big enough for a signed 64-bit decimal */
 	struct fdb_read_handle *h;
@@ -183,9 +183,27 @@ static struct room *room_load(int room_id) {
 	}
 
 	fdb.read_end(h);
+
+	/* r->id wasn't set, this is a problem. */
+	if(!r->id) {
+		b_log(B_LOG_ERROR, "room", "id not set for room \"%u\"", room_id);
+		room_ll_free(r);
+		return NULL;
+	}
+
+	/* r->id doesn't match the file the room is stored under. */
+	if(r->id!=room_id) {
+		b_log(B_LOG_ERROR, "room", "id was set to \"%u\" but should be \"%u\"", r->id, room_id);
+		room_ll_free(r);
+		return NULL;
+	}
+
 	return r;
 }
 
+/**
+ * write a room structure to disk, if it is not dirty (dirty_fl).
+ */
 static int room_save(struct room *r) {
 	struct attr_entry *curr;
 	struct fdb_write_handle *h;
@@ -193,6 +211,12 @@ static int room_save(struct room *r) {
 
 	assert(r != NULL);
 	if(!r->dirty_fl) return 1; /* already saved - don't do it again. */
+
+	/* refuse to save room 0. */
+	if(!r->id) {
+		b_log(B_LOG_ERROR, "room", "attempted to save room \"%u\", but it is reserved", r->id);
+		return 0;
+	}
 
 	snprintf(numbuf, sizeof numbuf, "%u", r->id);
 
@@ -236,6 +260,9 @@ static int room_save(struct room *r) {
  */
 static struct room *room_get(unsigned room_id) {
 	struct room *curr;
+
+	/* refuse to open room 0. */
+	if(!room_id) return NULL;
 
 	/* look for room in the cache. */
 	for(curr=LIST_TOP(room_cache);curr;curr=LIST_NEXT(curr, room_cache)) {
