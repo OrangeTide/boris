@@ -50,6 +50,16 @@ EXEC_character:=character.$(SOEXT)
 SRCS_character:=character.c
 OBJS_character:=$(SRCS_character:.c=.o)
 
+# example.so plugin that does nothing
+EXEC_example:=example.$(SOEXT)
+SRCS_example:=example.c
+OBJS_example:=$(SRCS_example:.c=.o)
+
+# fdbfile.so plugin
+EXEC_fdbfile:=fdbfile.$(SOEXT)
+SRCS_fdbfile:=fdbfile.c
+OBJS_fdbfile:=$(SRCS_fdbfile:.c=.o)
+
 # logging.so plugin
 EXEC_logging:=logging.$(SOEXT)
 SRCS_logging:=logging.c
@@ -59,16 +69,6 @@ OBJS_logging:=$(SRCS_logging:.c=.o)
 EXEC_room:=room.$(SOEXT)
 SRCS_room:=room.c
 OBJS_room:=$(SRCS_room:.c=.o)
-
-# fdbfile.so plugin
-EXEC_fdbfile:=fdbfile.$(SOEXT)
-SRCS_fdbfile:=fdbfile.c
-OBJS_fdbfile:=$(SRCS_fdbfile:.c=.o)
-
-# example.so plugin that does nothing
-EXEC_example:=example.$(SOEXT)
-SRCS_example:=example.c
-OBJS_example:=$(SRCS_example:.c=.o)
 
 ##############################################################################
 # Dec 24 2009
