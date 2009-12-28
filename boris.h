@@ -68,6 +68,10 @@ struct attr_entry {
 	char *value;
 };
 
+/**
+ * attribute list.
+ * it's just a list of name=value pairs (all strings)
+ */
 LIST_HEAD(struct attr_list, struct attr_entry);
 
 /**
@@ -86,15 +90,27 @@ struct description_string {
 	char *long_str;
 };
 
-/** undocumented - please add documentation. */
+/**
+ * head for a list of number ranges.
+ */
 LIST_HEAD(struct freelist_listhead, struct freelist_entry);
 
-/** undocumented - please add documentation. */
+/**
+ * a pool of number ranges.
+ * originally there were many lists, bucketed by length, but it grew cumbersome.
+ */
 struct freelist {
 	/* single list ordered by offset to find adjacent chunks. */
 	struct freelist_listhead global;
 };
 
+/**
+ * used to subscribe to a channel.
+ * see channel.join() and channel.part().
+ *
+ * HINT: a fancy macro using offsetof() and casting could be used to find the
+ * pointer of the containing struct and avoid the need for the void *p.
+ */
 struct channel_member {
 	void (*send)(struct channel_member *cm, struct channel *ch, const char *msg);
 	void *p;
