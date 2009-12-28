@@ -24,6 +24,7 @@ CPPFLAGS+=-DNTEST
 # project configurations
 MODULES:=\
 	boris \
+	channel \
 	character \
 	example \
 	fdbfile \
@@ -38,6 +39,11 @@ CPPFLAGS_boris:=-D_BSD_SOURCE
 CFLAGS_boris:=-pedantic -std=gnu99
 SRCS_boris:=boris.c
 OBJS_boris:=$(SRCS_boris:.c=.o)
+
+# channel.so plugin
+EXEC_channel:=channel.$(SOEXT)
+SRCS_channel:=channel.c
+OBJS_channel:=$(SRCS_channel:.c=.o)
 
 # character.so plugin
 EXEC_character:=character.$(SOEXT)

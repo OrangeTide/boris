@@ -12,6 +12,16 @@
  */
 #ifndef BORIS_H
 #define BORIS_H
+/******************************************************************************
+ * Forward declarations
+ ******************************************************************************/
+struct channel;
+struct channel_member;
+struct freelist_entry;
+
+/******************************************************************************
+ * Includes
+ ******************************************************************************/
 #include "plugin.h"
 #include "list.h"
 
@@ -76,8 +86,6 @@ struct description_string {
 	char *long_str;
 };
 
-
-struct freelist_entry;
 /** undocumented - please add documentation. */
 LIST_HEAD(struct freelist_listhead, struct freelist_entry);
 
@@ -85,6 +93,11 @@ LIST_HEAD(struct freelist_listhead, struct freelist_entry);
 struct freelist {
 	/* single list ordered by offset to find adjacent chunks. */
 	struct freelist_listhead global;
+};
+
+struct channel_member {
+	void (*send)(struct channel_member *cm, struct channel *ch, const char *msg);
+	void *p;
 };
 
 /******************************************************************************
@@ -102,6 +115,8 @@ void service_detach_room(const struct plugin_basic_class *cls);
 void service_attach_room(const struct plugin_basic_class *cls, const struct plugin_room_interface *interface);
 void service_detach_character(const struct plugin_basic_class *cls);
 void service_attach_character(const struct plugin_basic_class *cls, const struct plugin_character_interface *interface);
+void service_detach_channel(const struct plugin_basic_class *cls);
+void service_attach_channel(const struct plugin_basic_class *cls, const struct plugin_channel_interface *interface);
 
 struct attr_entry *attr_find(struct attr_list *al, const char *name);
 int attr_add(struct attr_list *al, const char *name, const char *value);
@@ -121,4 +136,5 @@ int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count);
 #ifndef NTEST
 void freelist_test(void);
 #endif
+
 #endif

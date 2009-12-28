@@ -121,4 +121,14 @@ struct plugin_character_interface {
 	 */
 	int (*save)(struct character *ch);
 };
+
+struct plugin_channel_interface {
+	int (*join)(struct channel *ch, struct channel_member *cm);
+	void (*part)(struct channel *ch, struct channel_member *cm);
+	/**
+	 * get a channel associated with a public(global) name.
+	 */
+	struct channel *(*public)(const char *name);
+	int (*broadcast)(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...);
+};
 #endif

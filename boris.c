@@ -472,11 +472,6 @@ struct socketio_handle;
 
 struct menuitem;
 
-struct channel_group;
-
-/** undocumented - please add documentation. */
-LIST_HEAD(struct channel_member_head, struct channel_member); /* membership for channels */
-
 /** undocumented - please add documentation. */
 struct menuinfo {
 	LIST_HEAD(struct, struct menuitem) items;
@@ -562,11 +557,6 @@ EXPORT void telnetclient_close(struct telnetclient *cl);
 EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
 EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 static void form_menu_lineinput(struct telnetclient *cl, const char *line);
-EXPORT int channel_member_part(struct channel_group *ch, struct channel_member_head *mh);
-EXPORT void channel_member_part_all(struct channel_member_head *mh);
-EXPORT int channel_member_join(struct channel_group *ch, struct channel_member_head *mh, struct telnetclient *cl);
-EXPORT struct channel_group *channel_system_get(unsigned n);
-EXPORT struct channel_group *channel_system_get(unsigned n);
 
 /******************************************************************************
  * dummy services - functions that are used as a default for services.
@@ -627,6 +617,9 @@ static const struct plugin_basic_class *room_owner;
 
 struct plugin_character_interface character;
 static const struct plugin_basic_class *character_owner;
+
+struct plugin_channel_interface channel;
+static const struct plugin_basic_class *channel_owner;
 
 /**
  * detach the function pointer providing the log service.
@@ -708,6 +701,20 @@ void service_attach_character(const struct plugin_basic_class *cls, const struct
 	character_owner=cls;
 	if(interface) {
 		character=*interface;
+	}
+}
+
+void service_detach_channel(const struct plugin_basic_class *cls) {
+	if(!cls || channel_owner==cls) {
+		channel_owner=NULL;
+		memset(&channel, 0, sizeof channel);
+	}
+}
+
+void service_attach_channel(const struct plugin_basic_class *cls, const struct plugin_channel_interface *interface) {
+	channel_owner=cls;
+	if(interface) {
+		channel=*interface;
 	}
 }
 
@@ -4764,7 +4771,9 @@ struct telnetclient {
 		} menu;
 	} state;
 	struct user *user;
-	struct channel_member_head member_list; /* membership for channels */
+	unsigned nr_channel; /**< number of channels monitoring. */
+	struct channel **channel; /**< pointer to every monitoring channel. */
+	struct channel_member channel_member;
 };
 
 /**
@@ -4825,9 +4834,57 @@ static void telnetclient_clear_statedata(struct telnetclient *cl) {
 	memset(&cl->state, 0, sizeof cl->state);
 }
 
+static int telnetclient_channel_add(struct telnetclient *cl, struct channel *ch) {
+	struct channel **newlist;
+
+	assert(cl != NULL);
+
+	if(!ch) return 1; /* adding NULL is ignored. */
+	if(!channel.join(ch, &cl->channel_member)) return 0; /* could not join channel. */
+
+	newlist=realloc(cl->channel, sizeof *cl->channel * (cl->nr_channel+1));
+	if(!newlist) {
+		PERROR("realloc()");
+		return 0; /* could not allocate. */
+	}
+
+	cl->channel=newlist;
+	cl->channel[cl->nr_channel++]=ch;
+	return 1; /* success */
+}
+
+static int telnetclient_channel_remove(struct telnetclient *cl, struct channel *ch) {
+	unsigned i;
+
+	assert(cl != NULL);
+
+	if(!ch) return 1; /* removng NULL is ignored. */
+
+	for(i=0;i<cl->nr_channel;i++) {
+		if(cl->channel[i]==ch) {
+			DEBUG("channel.part(%p, %p)\n", cl->channel[i], &cl->channel_member);
+
+			channel.part(cl->channel[i], &cl->channel_member);
+
+			cl->channel[i]=NULL;
+			assert(cl->nr_channel > 0); /* can't enter this condition when no channels. */
+			cl->channel[i]=cl->channel[--cl->nr_channel];
+
+			if(!cl->nr_channel) {
+				/* if not in any channels then free the array. */
+				free(cl->channel);
+				cl->channel=NULL;
+			}
+			return 1; /* success */
+		}
+	}
+	return 0; /* not found. */
+}
+
 /** undocumented - please add documentation. */
 static void telnetclient_free(struct socketio_handle *sh, void *p) {
 	struct telnetclient *client=p;
+
 	assert(client!=NULL);
 	if(!client)
 		return;
@@ -4847,6 +4904,15 @@ static void telnetclient_free(struct socketio_handle *sh, void *p) {
 		ERROR_MSG("WARNING: delete_flag was not set before freeing");
 	}
 
+	/* forcefully leave all channels */
+	/* TODO: nobody is notified that we left, this is not ideal. */
+	client->channel_member.send=NULL;
+	client->channel_member.p=NULL;
+	DEBUG("client->nr_channel=%d\n", client->nr_channel);
+	while(client->nr_channel) {
+		telnetclient_channel_remove(client, client->channel[0]);
+	}
+
 	telnetclient_clear_statedata(client); /* free data associated with current state */
 
 	/* break connection to the extra data pointer */
@@ -4858,8 +4924,6 @@ static void telnetclient_free(struct socketio_handle *sh, void *p) {
 
 	user_put(&client->user);
 
-	channel_member_part_all(&client->member_list);
-
 	TODO("free any other data structures associated with client"); /* be vigilant about memory leaks */
 
 #ifndef NDEBUG
@@ -4867,6 +4931,19 @@ static void telnetclient_free(struct socketio_handle *sh, void *p) {
 #endif
 
 	free(client);
+}
+
+static void telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const char *msg) {
+	struct telnetclient *cl;
+
+	assert(cm != NULL);
+	assert(msg != NULL);
+
+	if(!cm) return;
+	cl=cm->p;
+
+	/* TODO: fill in a channel name? */
+	telnetclient_printf(cl, "[%p] %s\n", (void*)ch, msg);
 }
 
 /** undocumented - please add documentation. */
@@ -4888,12 +4965,16 @@ static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh) {
 	cl->prompt_string=NULL;
 	cl->sh=sh;
 	cl->user=NULL;
-	LIST_INIT(&cl->member_list);
+
+	cl->nr_channel=0;
+	cl->channel=NULL;
+	cl->channel_member.send=telnetclient_channel_send;
+	cl->channel_member.p=cl;
 
 	sh->extra=cl;
 	sh->extra_free=telnetclient_free;
 
-	channel_member_join(channel_system_get(0), &cl->member_list, cl);
+	telnetclient_channel_add(cl, channel.public(0));
 
 	return cl;
 failed:
@@ -5274,290 +5355,6 @@ EXPORT void telnetclient_prompt_refresh_all(void) {
 }
 
 /******************************************************************************
- * Channels
- ******************************************************************************/
-
-/** undocumented - please add documentation. */
-#define CHANNEL_FLAG_PERMANENT 1
-
-/**
- * a client has one of these for every channel they belong to.
- */
-struct channel_member {
-	LIST_ENTRY(struct channel_member) client_membership; /* client's list */
-	struct telnetclient *cl; /* we could use a function pointer and void* to allow a more generic strategy */
-	/** channel's list */
-	LIST_ENTRY(struct channel_member) groups;
-	struct channel_group *group_head; /* pointer to the channel head */
-};
-
-/**
- * head for list of members.
- *   to delete this all members must be detached, because they have a reference to the head.
- */
-struct channel_group {
-	/** @todo work out how to use a channel group with a room */
-	char *name; /** channel name */
-	LIST_HEAD(struct, struct channel_member) member_list; /** undocumented - please add documentation. */
-	LIST_ENTRY(struct channel_group) channels; /** undocumented - please add documentation. */
-	unsigned flags[BITFIELD(32, unsigned)];
-};
-
-/** undocumented - please add documentation. */
-static LIST_HEAD(struct, struct channel_group) channel_global_list;
-
-/**
- * array of system channels.
- */
-static struct channel_group **channel_system;
-
-/**
- * number of system channels for channel_system array.
- * @see channel_group
- */
-static unsigned nr_channel_system;
-
-/** undocumented - please add documentation. */
-EXPORT struct channel_group *channel_group_lookup(const char *name) {
-	struct channel_group *curr;
-	for(curr=LIST_TOP(channel_global_list);curr;curr=LIST_NEXT(curr, channels)) {
-		if(curr->name && !strcasecmp(curr->name, name)) {
-			return curr;
-		}
-	}
-	return NULL;
-}
-
-/** undocumented - please add documentation. */
-EXPORT struct channel_group *channel_group_create(const char *name) {
-	struct channel_group *ret;
-
-	/* check if channel exists and return that instead */
-	if((ret=channel_group_lookup(name))) {
-		ERROR_FMT("WARNING:channel '%s' already exists\n", name);
-		return ret;
-	}
-
-	/* channel doesn't exist, create it */
-	ret=malloc(sizeof *ret);
-	if(!ret) {
-		PERROR("malloc()");
-		return NULL;
-	}
-	JUNKINIT(ret, sizeof *ret);
-
-	ret->name=strdup(name);
-	if(!ret->name) {
-		PERROR("strdup()");
-		free(ret);
-		return NULL;
-	}
-
-	memset(ret->flags, 0, sizeof ret->flags);
-
-	LIST_INIT(&ret->member_list);
-	LIST_ENTRY_INIT(ret, channels);
-
-	LIST_INSERT_HEAD(&channel_global_list, ret, channels);
-
-	eventlog_channel_new(name);
-
-	return ret;
-}
-
-/** undocumented - please add documentation. */
-EXPORT void channel_group_free(struct channel_group *ch) {
-	struct channel_member *curr;
-	if(!ch) return; /* ignore NULL */
-
-	eventlog_channel_remove(ch->name);
-
-	while((curr=LIST_TOP(ch->member_list))) {
-		channel_member_part(ch, &curr->cl->member_list);
-	}
-
-	LIST_REMOVE(ch, channels);
-
-	free(ch->name);
-	free(ch);
-}
-
-/**
- * fetch a system channel
- */
-EXPORT struct channel_group *channel_system_get(unsigned n) {
-	if(n<nr_channel_system) {
-		return channel_system[n];
-	}
-	return 0;
-}
-
-/**
- * initialize some default channels
- */
-EXPORT int channel_module_init(void) {
-	const char *s, *e;
-	char buf[128];
-	struct channel_group *g;
-	unsigned count=0;
-
-	assert(LIST_TOP(channel_global_list) == NULL);
-
-	/* create some default groups */
-	for(s=mud_config.default_channels;*s;s=*e?e+1:e) {
-
-		while(isspace(*s)) s++; /* trim leading spaces */
-
-		e=strchr(s, ','); /* find the next delimiter */
-		if(!e) e=s+strlen(s); /* if not found use end of string */
-
-		while(e>s && isspace(e[-1])) e--; /* trim trailing spaces */
-
-		if(e-s>(int)sizeof buf-1) goto failure; /* confirm the length */
-
-		/* copy string */
-		assert(s <= e);
-		memcpy(buf, s, (size_t)(e-s));
-		buf[e-s]=0;
-
-		if(!*buf) continue; /* ignore empty channel names */
-
-		g=channel_group_create(buf);
-		if(!g) goto failure;
-		BITSET(g->flags, CHANNEL_FLAG_PERMANENT); /* default channels are permanent */
-		count++;
-	}
-
-	/* make an array for looking up system channels */
-	nr_channel_system=count;
-	channel_system=calloc(count, sizeof *channel_system);
-
-	/* load the system channels in the same order that they were specified in the configuration */
-	for(g=LIST_TOP(channel_global_list);count>0;g=LIST_NEXT(g, channels)) {
-		TRACE("count=%d g=%p name=%s\n", count, (void*)g, g->name);
-		assert(g != NULL);
-		channel_system[--count]=g;
-	}
-
-	return 1; /* success */
-failure:
-	ERROR_MSG("Could not create default channels.");
-	return 0;
-}
-
-/**
- * find membership in a channel
- */
-EXPORT struct channel_member *channel_member_check(struct channel_group *ch, struct channel_member_head *mh) {
-	struct channel_member *curr;
-	for(curr=LIST_TOP(*mh);curr;curr=LIST_NEXT(curr, client_membership)) {
-		if(curr->group_head==ch) {
-			return curr; /* found membership */
-		}
-	}
-	return 0; /* not a member of this channel */
-}
-
-/**
- * add membership for a channel
- */
-EXPORT int channel_member_join(struct channel_group *ch, struct channel_member_head *mh, struct telnetclient *cl) {
-	struct channel_member *new;
-
-	if(channel_member_check(ch, mh)) {
-		return 0; /* already a member */
-	}
-
-	/* allocate the entry */
-	new=malloc(sizeof *new);
-	if(!new) {
-		PERROR("malloc()");
-		return 0;
-	}
-	JUNKINIT(new, sizeof *new);
-
-	new->group_head=ch;
-	new->cl=cl;
-
-	LIST_INSERT_HEAD(mh, new, client_membership);
-	LIST_INSERT_HEAD(&ch->member_list, new, groups);
-
-	/** @todo log the system channel number if there is no name */
-	eventlog_channel_join(cl&&cl->sh?cl->sh->name:NULL, ch->name, "<USER>");
-
-	TRACE("join (ch=%p) (mem=%p)\n", (void*)ch, (void*)new);
-
-	return 1; /* success */
-}
-
-/** undocumented - please add documentation. */
-EXPORT int channel_member_part(struct channel_group *ch, struct channel_member_head *mh) {
-	struct channel_member *curr;
-
-	curr=channel_member_check(ch, mh);
-
-	if(!curr) {
-		return 0; /* failure */
-	}
-
-	/** @todo log the system channel number if there is no name */
-	eventlog_channel_part(curr->cl&&curr->cl->sh?curr->cl->sh->name:NULL, ch->name, "<USER>");
-
-	LIST_REMOVE(curr, client_membership);
-	LIST_REMOVE(curr, groups);
-	free(curr);
-
-	/* remove the channel if it is empty */
-	if(!BITTEST(ch->flags, CHANNEL_FLAG_PERMANENT) && !LIST_TOP(ch->member_list)) {
-		assert(LIST_TOP(ch->member_list) == NULL); /* recursion can occur between remove and part otherwise */
-		channel_group_free(ch);
-	}
-
-	return 1; /* success */
-}
-
-/** undocumented - please add documentation. */
-EXPORT void channel_member_part_all(struct channel_member_head *mh) {
-	struct channel_member *curr;
-	while((curr=LIST_TOP(*mh))) {
-		channel_member_part(curr->group_head, &curr->cl->member_list);
-	}
-}
-
-/**
- * send a message to a channel, excluding one member.
- * @return a count of the number receiving the message
- */
-EXPORT int channel_broadcast(struct channel_group *ch, struct channel_member *exclude_member, const char *fmt, ...) {
-	struct channel_member *curr, *next;
-	int count;
-	va_list ap;
-
-	TRACE("Enter (ch=%p) (mem=%p)\n", (void*)ch, (void*)exclude_member);
-
-	if(!ch) return 0; /* ignore NULL */
-
-	va_start(ap, fmt);
-	for(count=0,curr=LIST_TOP(ch->member_list);curr;curr=next,count++) {
-		assert((void*)ch != (void*)curr); /* check that two different lists are not crossed */
-		assert(ch == curr->group_head); /* member entries must match current channel */
-
-		next=LIST_NEXT(curr, groups);
-
-		TRACE("curr-member=%p\n", (void*)curr);
-
-		if(curr!=exclude_member && curr->cl) {
-			telnetclient_vprintf(curr->cl, fmt, ap);
-		}
-	}
-	va_end(ap);
-
-	TRACE("sent message to %d players\n", count);
-
-	return count;
-}
-
-/******************************************************************************
  * Menus
  ******************************************************************************/
 
@@ -5697,11 +5494,13 @@ static int command_do_yell(struct telnetclient *cl, struct user *u, const char *
 
 /** undocumented - please add documentation. */
 static int command_do_say(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg) {
-	struct channel_group *ch;
+	struct channel *ch;
+	struct channel_member *exclude_list[1];
 	TODO("Get user name");
 	telnetclient_printf(cl, "You say \"%s\"\n", arg);
-	ch=channel_system_get(0);
-	channel_broadcast(ch, channel_member_check(ch, &cl->member_list), "%s says \"%s\"\n", telnetclient_username(cl), arg);
+	ch=channel.public(0);
+	exclude_list[0]=&cl->channel_member; /* don't send message to self. */
+	channel.broadcast(ch, exclude_list, 1, "%s says \"%s\"\n", telnetclient_username(cl), arg);
 	return 1; /* success */
 }
 
@@ -7289,15 +7088,15 @@ int main(int argc, char **argv) {
 		b_log(B_LOG_CRIT, "character", "No character system loaded!");
 		return EXIT_FAILURE;
 	}
+	if(!channel_owner) {
+		b_log(B_LOG_CRIT, "channel", "No channel system loaded!");
+		return EXIT_FAILURE;
+	}
 
 	if(!eventlog_init()) {
 		return EXIT_FAILURE;
 	}
 	atexit(eventlog_shutdown);
-
-	if(!channel_module_init()) {
-		return EXIT_FAILURE;
-	}
 
 	if(!user_init()) {
 		ERROR_MSG("could not initialize users");
