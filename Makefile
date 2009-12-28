@@ -15,7 +15,7 @@ endif
 # global config
 CFLAGS:=-Wall -W -g
 # disable debugging.
-CPPFLAGS+=-DNDEBUG
+#CPPFLAGS+=-DNDEBUG
 # disable tracing.
 CPPFLAGS+=-DNTRACE
 # disable unit tests.
