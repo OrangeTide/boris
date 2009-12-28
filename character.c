@@ -37,6 +37,8 @@ struct character {
 	unsigned id;
 	struct description_string name, desc;
 	char *owner, *controllers;
+	unsigned room_current; /**< id of the current room. */
+	unsigned room_home; /**< id of the home room used for certain kinds of resets. */
 	struct attr_list extra_values;
 };
 
@@ -64,6 +66,8 @@ static const struct {
 	{"desc.long", VALUE_TYPE_STRING, offsetof(struct character, desc.long_str), },
 	{"owner", VALUE_TYPE_STRING, offsetof(struct character, owner), },
 	{"controllers", VALUE_TYPE_STRING, offsetof(struct character, controllers), },
+	{"room.current", VALUE_TYPE_UINT, offsetof(struct character, room_current), },
+	{"room.home", VALUE_TYPE_UINT, offsetof(struct character, room_home), },
 };
 
 /** list of all loaded characters. */
