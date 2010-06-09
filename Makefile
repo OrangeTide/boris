@@ -37,7 +37,7 @@ EXEC_boris:=boris
 LDLIBS_boris:=-ldl -rdynamic
 CPPFLAGS_boris:=-D_BSD_SOURCE
 CFLAGS_boris:=-pedantic -std=gnu99
-SRCS_boris:=boris.c
+SRCS_boris:=boris.c sha1.c sha1crypt.c base64.c
 OBJS_boris:=$(SRCS_boris:.c=.o)
 
 # channel.so plugin
