@@ -1,0 +1,100 @@
+2011/06/23 - version 2 - Jon Mayo
+
+Compiling
+---------
+
+$ make
+
+* if compiling for windows, uncomment the define about stricmp
+
+Design
+------
+StackVM is a Harvard-architecture 2-stack machine patterned after FORTH virtual
+machines and processors.
+
+Registers
+---------
+PC	- program counter
+S	- data stack (aka D-stack)
+R	- return stack (the second stack, aka R-stack)
+A	- scratch register
+B	- scratch register
+NEXT_PC	- scratch register
+
+* none of these registers are directly visible to programs.
+
+Stacks
+------
+there are two stacks, every stack entry is 32-bits.
+
+the contents of the stack cannot be directly accessed.
+only Push or Pop may be performed.
+
+* if not specified, assumed D-stack
+
+Instruct Set
+------------
+
+each instruction is 1 byte.
+* some instruction are followed by 2 bytes (LIT, Jxx), generally the value is
+  treated as a signed 16-bit value where the sign is extended to 32-bits (or
+  whatever).
+* one instruction (SYS) is followed by 1 byte, which is the system call number
+  to trigger
+
+This is useful for doing relative offsets for branching/jumps (relative to the
+PC).
+
+NOP	- 0x00 do nothing
+JMP	- 0x01 jump to relative(signed) 16-bit address
+JEQ	- 0x02 pop 2 values, if A == B then jump to relative(signed) 16-bit address
+JNE	- 0x03 pop 2 values, if A != B then jump to relative(signed) 16-bit address
+JLT	- 0x04 pop 2 values, if A < B then jump to relative(signed) 16-bit address
+JLE	- 0x05 pop 2 values, if A <= B then jump to relative(signed) 16-bit address
+JGT	- 0x06 pop 2 values, if A > B then jump to relative(signed) 16-bit address
+JGE	- 0x07 pop 2 values, if A >= B then jump to relative(signed) 16-bit address
+CALL	- 0x08 pop value from D-stack, push current PC onto R-stack, go to value.
+RET	- 0x09 pop absolute value from R-stack and go to that address
+LOAD	- 0x0A pop address, read value at memory location, push value onto D-stack
+STORE	- 0x0B pop address and value, write value to memory location.
+LIT	- 0x0C push 16-bit value sign extended to 32-bits onto D-stack
+NOT	- 0x0D pop value, bitwise NOT, push result
+XOR	- 0x0E pop value, bitwise XOR, push result
+AND	- 0x0F pop 2 values, bitwise AND, push result
+ADD	- 0x10 pop 2 values, addition, push result
+SHL	- 0x11 pop value, push value * 2
+SHR	- 0x12 pop value, push value / 2
+DUP	- 0x13 duplicate top value on the stack
+DROP	- 0x14 pop value and do nothing
+TOR	- 0x15 pop value from D-stack, push value to R-stack, also known as >R )
+FROMR	- 0x16 pop value from R-stack, push value to D-stack, also known as R> )
+COPYR	- 0x17 peek value from R-stack and push it to D-stack, also known as R@
+OVER	- 0x18 read 2nd value on the stack, push value. (A B -> A B A)
+SWAP	- 0x19 pop 2 values, push them in reverse order
+DUPR	- 0x1A duplicate top value on R-stack
+NIP	- 0x1B pop 2 values, push second value. (SWAP DROP)
+TUCK	- 0x1C pop 2 values, push second, push first, push second (SWAP OVER)
+SYS	- 0x1D system call.
+OR	- 0x1E pop 2 values, bitwise OR, push result
+SUB	- 0x1F pop 2 values, subtraction, push result
+
+
+System Calls
+------------
+0	- EXIT
+1	- PUTC - pop value, write as character
+2	- CR - print newline
+3	- PRINT_NUM - pop value, write as decimal number
+
+
+File syntax
+-----------
+file holds a list of tokens, a token may be a mneumonic(as above), a signed
+number or # and a number.
+
+the # form is used when an argument must be a full 32-bit value. by default
+numbers are treated as 16-bit values when appended into the code area.
+
+a semicolon(;) may be used to start a comment.
+
+
