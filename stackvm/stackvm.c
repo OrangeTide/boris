@@ -1,3 +1,5 @@
+/* stackvm.c - small demonstration language */
+/* PUBLIC DOMAIN - Jon Mayo - June 23, 2011 */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

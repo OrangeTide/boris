@@ -1,4 +1,5 @@
 2011/06/23 - version 2 - Jon Mayo
+2012/09/29 - Released PUBLIC DOMAIN
 
 Compiling
 ---------
