@@ -1,5 +1,7 @@
 /* stackvm.c - small demonstration language */
-/* PUBLIC DOMAIN - Jon Mayo - June 23, 2011 */
+/* PUBLIC DOMAIN - Jon Mayo
+ * original: June 23, 2011
+ * updated: June 11, 2014 */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,11 +20,28 @@
 #define ERROR_STACK_OVERFLOW	(1 << 3)
 #define ERROR_SYSCALL		(1 << 4)
 
+/* TODO: use real routines instead of magic values */
+#define DICT_CFA_INSERT_OPCODE ((struct dictdef *)0x01)
+
+/* dictionary definition */
+struct dictdef {
+	char name[16];
+	struct dictdef *next;
+	int action;
+	struct dictdef *code_field;
+	union {
+		struct {
+			size_t opcode_len;
+			unsigned char opcode[16]; /* TODO: dynamically allocate an array */
+		};
+	} parameter_field ;
+};
+
 typedef unsigned vmword_t;
 
 static const char *progname; /* basename of argv[0] */
 static const char *vm_filename;
-static struct {
+static struct vm {
 	/* code is a read-only area for instructions */
 	unsigned char *code;
 	size_t code_len;
@@ -39,7 +58,11 @@ static struct {
 	vmword_t r;
 	vmword_t rstack[64];
 } vm;
-static char *name_to_opcode[] = {
+static struct dictdef *dict_head; /* TODO: keep inside the vm structure */
+#define OP_RET 9
+#define OP_LIT 12
+#define OP_SYS 29
+static char *opcode_to_name[] = {
 	"NOP", "JUMP", "JEQ", "JNE",
 	"JLE", "JLT", "JGE", "JGT",
 	"CALL", "RET", "LOAD", "STORE",
@@ -49,6 +72,101 @@ static char *name_to_opcode[] = {
 	"OVER", "SWAP", "DUPR", "NIP",
 	"TUCK", "SYS", "OR", "SUB",
 };
+
+struct dictdef *dict_new(const char *name)
+{
+	struct dictdef *d = calloc(1, sizeof(*d));
+	if (!d)
+		return NULL;
+	strncpy(d->name, name, sizeof(d->name) - 1);
+	d->name[sizeof(d->name) - 1] = 0;
+	d->action = 0; /* nothing/error */
+	d->next = dict_head;
+	dict_head = d;
+	return d;
+}
+
+/* wraps up steps to create a definition for assembly opcodes */
+struct dictdef *dict_new_opcode(const char *name, size_t oplen, unsigned char *op)
+{
+	struct dictdef *d = dict_new(name);
+	if (!d)
+		return NULL;
+	d->code_field = DICT_CFA_INSERT_OPCODE;
+	d->parameter_field.opcode_len = oplen;
+	unsigned i;
+	for (i = 0; i < oplen && i < sizeof(d->parameter_field.opcode); i++)
+		d->parameter_field.opcode[i] = op[i];
+	return d;
+}
+
+struct dictdef *dict_lookup(const char *name)
+{
+	struct dictdef *cur = dict_head;
+	while (cur) {
+		if (!strcmp(cur->name, name))
+			return cur;
+		cur = cur->next;
+	}
+	return NULL;
+}
+
+static void dict_generate_from_opcode_to_name(void)
+{
+	unsigned i;
+	for (i = 0; i < ARRAY_SIZE(opcode_to_name); i++) {
+		unsigned char op[1] = { i };
+		struct dictdef *d = dict_new_opcode(opcode_to_name[i], sizeof(op), op);
+		assert(d != NULL);
+	}
+}
+
+/* read two bytes in little endian order,
+ * use a little bitmath to sign extend the value */
+static short read_short(const void *buf)
+{
+	unsigned m = ((const unsigned char*)buf)[0];
+	m |= (unsigned)((const unsigned char*)buf)[1] << 8;
+	return (m ^ 0x8000) - 0x8000;
+}
+
+/* TODO: include a length so we don't read beyond the instructions array */
+static const char *disassemble_opcode(const unsigned char *instructions, unsigned *consumed)
+{
+	static char buf[256];
+
+	unsigned op = *instructions++;
+	if (op < ARRAY_SIZE(opcode_to_name)) {
+		const char *name = opcode_to_name[op];
+		if (op == OP_LIT) {
+			short v = read_short(instructions);
+			snprintf(buf, sizeof(buf), "%s %hd", name, v);
+			*consumed = 3;
+			return buf;
+		} else if (op == OP_SYS) {
+			unsigned short v = read_short(instructions);
+			snprintf(buf, sizeof(buf), "%s %hu", name, v);
+			*consumed = 3;
+			return buf;
+		} else {
+			*consumed = 1;
+			return name;
+		}
+	}
+	return "UNKNOWN"; // TODO: return a number value
+}
+
+static void disassemble(FILE *out, const unsigned char *opcode, size_t bytes)
+{
+	fprintf(out, "---8<--- start of disassembly (len=%zd) ---8<---\n", bytes);
+	while (bytes > 0) {
+		unsigned oplen;
+		fprintf(out, "%s\n", disassemble_opcode(opcode, &oplen));
+		opcode += oplen;
+		bytes -= oplen;
+	}
+	fprintf(out, "---8<--- end of disassembly ---8<---\n");
+}
 
 static void rpush(vmword_t val)
 {
@@ -166,6 +284,7 @@ static void vm_run(void)
 	vmword_t next_pc; /* scratch area */
 	vmword_t a; /* scratch area */
 	vmword_t b; /* scratch area */
+	vmword_t top_r = vm.r; /* exit if we RET past here */
 
 	/* append_code_xxx() leaves vm.pc to point at the end of code */
 	vm.code_len = vm.pc;
@@ -232,6 +351,8 @@ static void vm_run(void)
 			vm.pc = dpop();
 			break;
 		case 0x09: /* RET */
+			if (vm.r == top_r)
+				goto finished; /* return up to the caller */
 			vm.pc = rpop();
 			break;
 		case 0x0a: /* LOAD */
@@ -326,7 +447,7 @@ static void vm_run(void)
 			vm.status |= ERROR_INVALID_OPCODE;
 		}
 	}
-
+finished:
 	if ((vm.status & ~STATUS_FINISHED)) {
 		fprintf(stderr, "%s:error 0x%x (pc=0x%x)\n", vm_filename,
 			vm.status, vm.pc);
@@ -337,14 +458,32 @@ static void vm_run(void)
 static void append_code_byte(unsigned b)
 {
 	if (vm.pc >= vm.code_len) {
-		vm.code_len = vm.pc * 2;
-		vm.code = realloc(vm.code, vm.code_len);
-		if (!vm.code) {
+		size_t code_len = vm.code_len ? vm.code_len * 2 : 1;
+		while (vm.pc >= code_len)
+			code_len *= 2;
+		unsigned char *code = vm.code;
+		code = realloc(code, code_len);
+		if (!code) {
 			perror("realloc()");
 			exit(EXIT_FAILURE);
+			// TODO: catch error
 		}
+		fprintf(stderr, "new_code=%p new_code_len=%zd old_code_len=%zd\n", code, code_len, vm.code_len);
+		if (code_len > vm.code_len)
+			memset(code + vm.code_len, OP_RET, code_len - vm.code_len);
+		vm.code_len = code_len;
+		vm.code = code;
 	}
 	vm.code[vm.pc++] = b;
+}
+
+static void append_code_seq(size_t oplen, const unsigned char *op)
+{
+	while (oplen > 0) {
+		append_code_byte(*op);
+		op++;
+		oplen--;
+	}
 }
 
 static void append_code_short(short s)
@@ -372,11 +511,14 @@ static void append_code_vmword(vmword_t w)
 /* process an incoming token */
 static int vm_token(const char *token)
 {
-	unsigned i;
-	for (i = 0; i < ARRAY_SIZE(name_to_opcode); i++) {
-		if (!strcasecmp(name_to_opcode[i], token)) {
-			append_code_byte(i);
+	struct dictdef *d = dict_lookup(token);
+	if (d) {
+		if (d->code_field == DICT_CFA_INSERT_OPCODE) {
+			append_code_seq(d->parameter_field.opcode_len, d->parameter_field.opcode);
 			return 1;
+		} else {
+			fprintf(stderr, "%s:unknown action %p\n", token, d->code_field);
+			return 0;
 		}
 	}
 	fprintf(stderr, "%s:unknown token '%s'\n", vm_filename, token);
@@ -463,10 +605,12 @@ int main(int argc, char **argv)
 {
 	process_args(argc, argv);
 
+	dict_generate_from_opcode_to_name();
 	if (!vm_load(vm_filename)) {
 		fprintf(stderr, "%s:could not load file\n", vm_filename);
 		return EXIT_FAILURE;
 	}
+	disassemble(stdout, vm.code, vm.code_len);
 
 	vm_run();
 
