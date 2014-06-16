@@ -39,9 +39,7 @@ struct dictdef {
 
 typedef unsigned vmword_t;
 
-static const char *progname; /* basename of argv[0] */
-static const char *vm_filename;
-static struct vm {
+struct vm {
 	/* code is a read-only area for instructions */
 	unsigned char *code;
 	size_t code_len;
@@ -57,7 +55,10 @@ static struct vm {
 	vmword_t dstack[64];
 	vmword_t r;
 	vmword_t rstack[64];
-} vm;
+};
+
+static const char *progname; /* basename of argv[0] */
+static const char *vm_filename;
 static struct dictdef *dict_head; /* TODO: keep inside the vm structure */
 #define OP_RET 9
 #define OP_LIT 12
@@ -168,54 +169,54 @@ static void disassemble(FILE *out, const unsigned char *opcode, size_t bytes)
 	fprintf(out, "---8<--- end of disassembly ---8<---\n");
 }
 
-static void rpush(vmword_t val)
+static void rpush(struct vm *vm, vmword_t val)
 {
-	if (vm.r < ARRAY_SIZE(vm.rstack))
-		vm.rstack[vm.r++] = val;
+	if (vm->r < ARRAY_SIZE(vm->rstack))
+		vm->rstack[vm->r++] = val;
 	else
-		vm.status |= ERROR_STACK_OVERFLOW;
+		vm->status |= ERROR_STACK_OVERFLOW;
 }
 
-static vmword_t rpeek(void)
+static vmword_t rpeek(struct vm *vm)
 {
-	assert(vm.r < ARRAY_SIZE(vm.rstack));
-	if (vm.r)
-		return vm.rstack[vm.r - 1];
-	vm.status |= ERROR_STACK_UNDERFLOW;
+	assert(vm->r < ARRAY_SIZE(vm->rstack));
+	if (vm->r)
+		return vm->rstack[vm->r - 1];
+	vm->status |= ERROR_STACK_UNDERFLOW;
 	return 0xdeadbeef;
 }
 
-static vmword_t rpop(void)
+static vmword_t rpop(struct vm *vm)
 {
-	if (vm.r)
-		return vm.rstack[--vm.r];
-	vm.status |= ERROR_STACK_UNDERFLOW;
+	if (vm->r)
+		return vm->rstack[--vm->r];
+	vm->status |= ERROR_STACK_UNDERFLOW;
 	return 0xdeadbeef;
 }
 
-static void dpush(vmword_t val)
+static void dpush(struct vm *vm, vmword_t val)
 {
-	if (vm.d < ARRAY_SIZE(vm.dstack))
-		vm.dstack[vm.d++] = val;
+	if (vm->d < ARRAY_SIZE(vm->dstack))
+		vm->dstack[vm->d++] = val;
 	else
-		vm.status |= ERROR_STACK_OVERFLOW;
+		vm->status |= ERROR_STACK_OVERFLOW;
 }
 
-static vmword_t dpeek(unsigned ofs)
+static vmword_t dpeek(struct vm *vm, unsigned ofs)
 {
-	assert(vm.d < ARRAY_SIZE(vm.dstack));
+	assert(vm->d < ARRAY_SIZE(vm->dstack));
 	assert(ofs > 0); /* must be 1 or greater */
-	if (vm.d >= ofs)
-		return vm.dstack[vm.d - ofs];
-	vm.status |= ERROR_STACK_UNDERFLOW;
+	if (vm->d >= ofs)
+		return vm->dstack[vm->d - ofs];
+	vm->status |= ERROR_STACK_UNDERFLOW;
 	return 0xdeadbeef;
 }
 
-static vmword_t dpop(void)
+static vmword_t dpop(struct vm *vm)
 {
-	if (vm.d)
-		return vm.dstack[--vm.d];
-	vm.status |= ERROR_STACK_UNDERFLOW;
+	if (vm->d)
+		return vm->dstack[--vm->d];
+	vm->status |= ERROR_STACK_UNDERFLOW;
 	return 0xdeadbeef;
 }
 
@@ -227,294 +228,292 @@ static size_t make_mask(size_t len)
 	return ret;
 }
 
-static void write_data_vmword(vmword_t offset, vmword_t value)
+static void write_data_vmword(struct vm *vm, vmword_t offset, vmword_t value)
 {
-	vm.heap[offset & vm.heap_mask] = value;
+	vm->heap[offset & vm->heap_mask] = value;
 }
 
-static vmword_t read_data_vmword(vmword_t offset)
+static vmword_t read_data_vmword(struct vm *vm, vmword_t offset)
 {
-	return vm.heap[offset & vm.heap_mask];
+	return vm->heap[offset & vm->heap_mask];
 }
 
-static unsigned char read_code_byte(vmword_t offset)
+static unsigned char read_code_byte(struct vm *vm, vmword_t offset)
 {
-	offset &= vm.code_mask; /* make offset in bounds for array */
-	return vm.code[offset];
+	offset &= vm->code_mask; /* make offset in bounds for array */
+	return vm->code[offset];
 }
 
 /* read two bytes from code in little endian order,
  * use a little bitmath to sign extend the value */
-static short read_code_short(vmword_t offset)
+static short read_code_short(struct vm *vm, vmword_t offset)
 {
 	unsigned m;
 
-	offset &= vm.code_mask; /* make offset in bounds for array */
-	m = vm.code[offset];
-	offset = (offset + 1 ) & vm.code_mask;
-	m |= (unsigned)vm.code[offset] << 8;
+	offset &= vm->code_mask; /* make offset in bounds for array */
+	m = vm->code[offset];
+	offset = (offset + 1 ) & vm->code_mask;
+	m |= (unsigned)vm->code[offset] << 8;
 
 	return (m ^ 0x8000) - 0x8000;
 }
 
-static void vm_sys(unsigned num)
+static void vm_sys(struct vm *vm, unsigned num)
 {
 	switch (num) {
 	case 0: /* EXIT - cause interpreter to exit cleanly */
-		vm.status |= STATUS_FINISHED;
+		vm->status |= STATUS_FINISHED;
 		break;
 	case 1: /* PUTC - output a character */
-		printf("%c", dpop());
+		printf("%c", dpop(vm));
 		fflush(stdout);
 		break;
 	case 2: /* CR - carriage return */
 		printf("\n");
 		break;
 	case 3: /* PRINT_NUM - output a number */
-		printf(" %d", dpop());
+		printf(" %d", dpop(vm));
 		fflush(stdout);
 		break;
 	default:
-		vm.status |= ERROR_SYSCALL;
+		vm->status |= ERROR_SYSCALL;
 	}
 }
 
-static void vm_run(void)
+static void vm_run(struct vm *vm)
 {
 	vmword_t next_pc; /* scratch area */
 	vmword_t a; /* scratch area */
 	vmword_t b; /* scratch area */
-	vmword_t top_r = vm.r; /* exit if we RET past here */
+	vmword_t top_r = vm->r; /* exit if we RET past here */
 
 	/* append_code_xxx() leaves vm.pc to point at the end of code */
-	vm.code_len = vm.pc;
+	vm->code_len = vm->pc;
 
 	/* the interpreter will only use _mask, not _len for checks */
-	vm.code_mask = make_mask(vm.code_len);
-	vm.heap_mask = make_mask(vm.heap_len);
+	vm->code_mask = make_mask(vm->code_len);
+	vm->heap_mask = make_mask(vm->heap_len);
 
-	vm.pc = 0;
-	vm.status = 0;
+	vm->pc = 0;
+	vm->status = 0;
 
-	while (!vm.status) {
-		vm.pc &= vm.code_mask; /* keep PC in bounds */
-		switch (vm.code[vm.pc++]) {
+	while (!vm->status) {
+		vm->pc &= vm->code_mask; /* keep PC in bounds */
+		switch (vm->code[vm->pc++]) {
 		case 0x00: /* NOP */
 			break;
 		case 0x01: /* JMP */
-			vm.pc += read_code_short(vm.pc);
+			vm->pc += read_code_short(vm, vm->pc);
 			break;
 		case 0x02: /* JEQ - jump if equal */
-			a = dpop();
-			b = dpop();
-			next_pc = vm.pc + read_code_short(vm.pc);
+			a = dpop(vm);
+			b = dpop(vm);
+			next_pc = vm->pc + read_code_short(vm, vm->pc);
 			if (a == b)
-				vm.pc = next_pc;
+				vm->pc = next_pc;
 			break;
 		case 0x03: /* JNE */
-			a = dpop();
-			b = dpop();
-			next_pc = vm.pc + read_code_short(vm.pc);
+			a = dpop(vm);
+			b = dpop(vm);
+			next_pc = vm->pc + read_code_short(vm, vm->pc);
 			if (a != b)
-				vm.pc = next_pc;
+				vm->pc = next_pc;
 			break;
 		case 0x04: /* JLE */
-			a = dpop();
-			b = dpop();
-			next_pc = vm.pc + read_code_short(vm.pc);
+			a = dpop(vm);
+			b = dpop(vm);
+			next_pc = vm->pc + read_code_short(vm, vm->pc);
 			if (a <= b)
-				vm.pc = next_pc;
+				vm->pc = next_pc;
 			break;
 		case 0x05: /* JLT */
-			a = dpop();
-			b = dpop();
-			next_pc = vm.pc + read_code_short(vm.pc);
+			a = dpop(vm);
+			b = dpop(vm);
+			next_pc = vm->pc + read_code_short(vm, vm->pc);
 			if (a < b)
-				vm.pc = next_pc;
+				vm->pc = next_pc;
 			break;
 		case 0x06: /* JGE */
-			a = dpop();
-			b = dpop();
-			next_pc = vm.pc + read_code_short(vm.pc);
+			a = dpop(vm);
+			b = dpop(vm);
+			next_pc = vm->pc + read_code_short(vm, vm->pc);
 			if (a >= b)
-				vm.pc = next_pc;
+				vm->pc = next_pc;
 			break;
 		case 0x07: /* JGT */
-			a = dpop();
-			b = dpop();
-			next_pc = vm.pc + read_code_short(vm.pc);
+			a = dpop(vm);
+			b = dpop(vm);
+			next_pc = vm->pc + read_code_short(vm, vm->pc);
 			if (a > b)
-				vm.pc = next_pc;
+				vm->pc = next_pc;
 			break;
 		case 0x08: /* CALL */
-			rpush(vm.pc);
-			vm.pc = dpop();
+			rpush(vm, vm->pc);
+			vm->pc = dpop(vm);
 			break;
 		case 0x09: /* RET */
-			if (vm.r == top_r)
+			if (vm->r == top_r)
 				goto finished; /* return up to the caller */
-			vm.pc = rpop();
+			vm->pc = rpop(vm);
 			break;
 		case 0x0a: /* LOAD */
-			dpush(read_data_vmword(dpop()));
+			dpush(vm, read_data_vmword(vm, dpop(vm)));
 			break;
 		case 0x0b: /* STORE */
-			a = dpop(); /* addr */
-			b = dpop(); /* value */
-			write_data_vmword(a, b);
+			a = dpop(vm); /* addr */
+			b = dpop(vm); /* value */
+			write_data_vmword(vm, a, b);
 			break;
 		case 0x0c: /* LIT */
-			dpush(read_code_short(vm.pc));
-			vm.pc += 2;
+			dpush(vm, read_code_short(vm, vm->pc));
+			vm->pc += 2;
 			break;
 		case 0x0d: /* COM */
-			dpush(~dpop());
+			dpush(vm, ~dpop(vm));
 			break;
 		case 0x0e: /* XOR */
-			a = dpop();
-			b = dpop();
-			dpush(a ^ b);
+			a = dpop(vm);
+			b = dpop(vm);
+			dpush(vm, a ^ b);
 			break;
 		case 0x0f: /* AND */
-			a = dpop();
-			b = dpop();
-			dpush(a & b);
+			a = dpop(vm);
+			b = dpop(vm);
+			dpush(vm, a & b);
 			break;
 		case 0x10: /* ADD */
-			a = dpop();
-			b = dpop();
-			dpush(a + b);
+			a = dpop(vm);
+			b = dpop(vm);
+			dpush(vm, a + b);
 			break;
 		case 0x11: /* SHL */
-			dpush(dpop() << 1);
+			dpush(vm, dpop(vm) << 1);
 			break;
 		case 0x12: /* SHR */
-			dpush(dpop() >> 1);
+			dpush(vm, dpop(vm) >> 1);
 			break;
 		case 0x13: /* DUP */
-			dpush(dpeek(1));
+			dpush(vm, dpeek(vm, 1));
 			break;
 		case 0x14: /* DROP */
-			dpop();
+			dpop(vm);
 			break;
 		case 0x15: /* TOR */
-			rpush(dpop());
+			rpush(vm, dpop(vm));
 			break;
 		case 0x16: /* FROMR */
-			dpush(rpop());
+			dpush(vm, rpop(vm));
 			break;
 		case 0x17: /* COPYR */
-			dpush(rpeek());
+			dpush(vm, rpeek(vm));
 			break;
 		case 0x18: /* OVER */
-			dpush(dpeek(2));
+			dpush(vm, dpeek(vm, 2));
 			break;
 		case 0x19: /* SWAP */
-			a = dpop();
-			b = dpop();
-			dpush(a);
-			dpush(b);
+			a = dpop(vm);
+			b = dpop(vm);
+			dpush(vm, a);
+			dpush(vm, b);
 			break;
 		case 0x1a: /* DUPR */
-			rpush(rpeek());
+			rpush(vm, rpeek(vm));
 			break;
 		case 0x1b: /* NIP */
-			a = dpop();
-			b = dpop();
-			dpush(a);
+			a = dpop(vm);
+			b = dpop(vm);
+			dpush(vm, a);
 			break;
 		case 0x1c: /* TUCK */
-			a = dpop();
-			b = dpop();
-			dpush(a);
-			dpush(b);
-			dpush(a);
+			a = dpop(vm);
+			b = dpop(vm);
+			dpush(vm, a);
+			dpush(vm, b);
+			dpush(vm, a);
 			break;
 		case 0x1d: /* SYS */
-			vm_sys(read_code_byte(vm.pc++));
+			vm_sys(vm, read_code_byte(vm, vm->pc++));
 			break;
 		case 0x1e: /* OR */
-			a = dpop();
-			b = dpop();
-			dpush(a | b);
+			a = dpop(vm);
+			b = dpop(vm);
+			dpush(vm, a | b);
 			break;
 		case 0x1f: /* SUB */
-			a = dpop();
-			b = dpop();
-			dpush(b - a);
+			a = dpop(vm);
+			b = dpop(vm);
+			dpush(vm, b - a);
 			break;
 		default:
-			vm.status |= ERROR_INVALID_OPCODE;
+			vm->status |= ERROR_INVALID_OPCODE;
 		}
 	}
 finished:
-	if ((vm.status & ~STATUS_FINISHED)) {
+	if ((vm->status & ~STATUS_FINISHED)) {
 		fprintf(stderr, "%s:error 0x%x (pc=0x%x)\n", vm_filename,
-			vm.status, vm.pc);
+			vm->status, vm->pc);
 	}
 }
 
 /* use vm.pc to append a byte, grow vm.code_len to fit */
-static void append_code_byte(unsigned b)
+static void append_code_byte(struct vm *vm, unsigned b)
 {
-	if (vm.pc >= vm.code_len) {
-		size_t code_len = vm.code_len ? vm.code_len * 2 : 1;
-		while (vm.pc >= code_len)
+	if (vm->pc >= vm->code_len) {
+		size_t code_len = vm->code_len ? vm->code_len * 2 : 1;
+		while (vm->pc >= code_len)
 			code_len *= 2;
-		unsigned char *code = vm.code;
+		unsigned char *code = vm->code;
 		code = realloc(code, code_len);
 		if (!code) {
 			perror("realloc()");
 			exit(EXIT_FAILURE);
 			// TODO: catch error
 		}
-		fprintf(stderr, "new_code=%p new_code_len=%zd old_code_len=%zd\n", code, code_len, vm.code_len);
-		if (code_len > vm.code_len)
-			memset(code + vm.code_len, OP_RET, code_len - vm.code_len);
-		vm.code_len = code_len;
-		vm.code = code;
+		fprintf(stderr, "new_code=%p new_code_len=%zd old_code_len=%zd\n", code, code_len, vm->code_len);
+		if (code_len > vm->code_len)
+			memset(code + vm->code_len, OP_RET, code_len - vm->code_len);
+		vm->code_len = code_len;
+		vm->code = code;
 	}
-	vm.code[vm.pc++] = b;
+	vm->code[vm->pc++] = b;
 }
 
-static void append_code_seq(size_t oplen, const unsigned char *op)
+static void append_code_short(struct vm *vm, short s)
+{
+	vmword_t w = s;
+	append_code_byte(vm, w & 255);
+	w >>= 8;
+	append_code_byte(vm, w & 255);
+}
+
+/* store a word in little endian order */
+static void append_code_vmword(struct vm *vm, vmword_t w)
+{
+	append_code_byte(vm, w & 255);
+	w >>= 8;
+	append_code_byte(vm, w & 255);
+	w >>= 8;
+	append_code_byte(vm, w & 255);
+	w >>= 8;
+	append_code_byte(vm, w & 255);
+}
+
+static void append_code_seq(struct vm *vm, size_t oplen, const unsigned char *op)
 {
 	while (oplen > 0) {
-		append_code_byte(*op);
+		append_code_byte(vm, *op);
 		op++;
 		oplen--;
 	}
 }
 
-static void append_code_short(short s)
-{
-	vmword_t w = s;
-	append_code_byte(w & 255);
-	w >>= 8;
-	append_code_byte(w & 255);
-	w >>= 8;
-}
-
-/* store a word in little endian order */
-static void append_code_vmword(vmword_t w)
-{
-	append_code_byte(w & 255);
-	w >>= 8;
-	append_code_byte(w & 255);
-	w >>= 8;
-	append_code_byte(w & 255);
-	w >>= 8;
-	append_code_byte(w & 255);
-}
-
-
 /* process an incoming token */
-static int vm_token(const char *token)
+static int vm_token(struct vm *vm, const char *token)
 {
 	struct dictdef *d = dict_lookup(token);
 	if (d) {
 		if (d->code_field == DICT_CFA_INSERT_OPCODE) {
-			append_code_seq(d->parameter_field.opcode_len, d->parameter_field.opcode);
+			append_code_seq(vm, d->parameter_field.opcode_len, d->parameter_field.opcode);
 			return 1;
 		} else {
 			fprintf(stderr, "%s:unknown action %p\n", token, d->code_field);
@@ -525,11 +524,13 @@ static int vm_token(const char *token)
 	return 0;
 }
 
-static int vm_load(const char *filename)
+static int vm_load(struct vm *vm, const char *filename)
 {
 	FILE *f;
 	char token[64];
 	long value;
+
+	memset(vm, 0, sizeof(*vm));
 
 	f = fopen(filename, "r");
 	if (!f) {
@@ -540,11 +541,11 @@ static int vm_load(const char *filename)
 	while (1) {
 		fscanf(f, " ;%*[^\n]"); /* ignore comments */
 		if (fscanf(f, " %ld", &value) == 1) {
-			append_code_short(value);
+			append_code_short(vm, value);
 		} else if (fscanf(f, " #%ld", &value) == 1) {
-			append_code_vmword(value);
+			append_code_vmword(vm, value);
 		} else if (fscanf(f, " %63[^ \t\n]", token) == 1) {
-			if (!vm_token(token))
+			if (!vm_token(vm, token))
 				break;
 		} else if (feof(f)) {
 			fclose(f);
@@ -569,6 +570,8 @@ static void usage(void)
 	exit(EXIT_FAILURE);
 }
 
+static size_t heap_len;
+
 static void process_args(int argc, char **argv)
 {
 	int i;
@@ -583,7 +586,7 @@ static void process_args(int argc, char **argv)
 				if (*s == 'h') {
 					usage();
 				} else if (*s == 'm' && i + 1 < argc) {
-					vm.heap_len = strtol(argv[++i], 0, 0);
+					heap_len = strtol(argv[++i], 0, 0);
 				} else {
 					fprintf(stderr, "%s:bad flag '%c'\n",
 						progname, *s);
@@ -603,16 +606,18 @@ static void process_args(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+	struct vm vm;
 	process_args(argc, argv);
+	vm.heap_len = heap_len;
 
 	dict_generate_from_opcode_to_name();
-	if (!vm_load(vm_filename)) {
+	if (!vm_load(&vm, vm_filename)) {
 		fprintf(stderr, "%s:could not load file\n", vm_filename);
 		return EXIT_FAILURE;
 	}
 	disassemble(stdout, vm.code, vm.code_len);
 
-	vm_run();
+	vm_run(&vm);
 
 	return EXIT_SUCCESS;
 }
