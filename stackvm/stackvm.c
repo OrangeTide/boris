@@ -55,10 +55,10 @@ struct vm {
 	vmword_t dstack[64];
 	vmword_t r;
 	vmword_t rstack[64];
+	/* bootstrap and input parameters */
+	const char *vm_filename;
 };
 
-static const char *progname; /* basename of argv[0] */
-static const char *vm_filename;
 static struct dictdef *dict_head; /* TODO: keep inside the vm structure */
 #define OP_RET 9
 #define OP_LIT 12
@@ -450,7 +450,7 @@ static void vm_run(struct vm *vm)
 	}
 finished:
 	if ((vm->status & ~STATUS_FINISHED)) {
-		fprintf(stderr, "%s:error 0x%x (pc=0x%x)\n", vm_filename,
+		fprintf(stderr, "%s:error 0x%x (pc=0x%x)\n", vm->vm_filename,
 			vm->status, vm->pc);
 	}
 }
@@ -520,7 +520,7 @@ static int vm_token(struct vm *vm, const char *token)
 			return 0;
 		}
 	}
-	fprintf(stderr, "%s:unknown token '%s'\n", vm_filename, token);
+	fprintf(stderr, "%s:unknown token '%s'\n", vm->vm_filename, token);
 	return 0;
 }
 
@@ -531,6 +531,7 @@ static int vm_load(struct vm *vm, const char *filename)
 	long value;
 
 	memset(vm, 0, sizeof(*vm));
+	vm->vm_filename = filename;
 
 	f = fopen(filename, "r");
 	if (!f) {
@@ -564,13 +565,17 @@ static int vm_load(struct vm *vm, const char *filename)
 
 }
 
+/*** Main ***/
+
+static const char *progname; /* basename of argv[0] */
+static size_t opt_heap_len;
+static const char *opt_vm_filename;
+
 static void usage(void)
 {
 	fprintf(stderr, "%s [-m maxheap] <file.vm>\n", progname);
 	exit(EXIT_FAILURE);
 }
-
-static size_t heap_len;
 
 static void process_args(int argc, char **argv)
 {
@@ -586,21 +591,21 @@ static void process_args(int argc, char **argv)
 				if (*s == 'h') {
 					usage();
 				} else if (*s == 'm' && i + 1 < argc) {
-					heap_len = strtol(argv[++i], 0, 0);
+					opt_heap_len = strtol(argv[++i], 0, 0);
 				} else {
 					fprintf(stderr, "%s:bad flag '%c'\n",
 						progname, *s);
 					usage();
 				}
 			}
-		} else if (!vm_filename) { /* require exactly 1 filename */
-			vm_filename = argv[i];
+		} else if (!opt_vm_filename) { /* require exactly 1 filename */
+			opt_vm_filename = argv[i];
 		} else {
 			usage();
 		}
 	}
 
-	if (!vm_filename)
+	if (!opt_vm_filename)
 		usage();
 }
 
@@ -608,11 +613,11 @@ int main(int argc, char **argv)
 {
 	struct vm vm;
 	process_args(argc, argv);
-	vm.heap_len = heap_len;
+	vm.heap_len = opt_heap_len;
 
 	dict_generate_from_opcode_to_name();
-	if (!vm_load(&vm, vm_filename)) {
-		fprintf(stderr, "%s:could not load file\n", vm_filename);
+	if (!vm_load(&vm, opt_vm_filename)) {
+		fprintf(stderr, "%s:could not load file\n", opt_vm_filename);
 		return EXIT_FAILURE;
 	}
 	disassemble(stdout, vm.code, vm.code_len);
