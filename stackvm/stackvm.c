@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 /* #define strcasecmp stricmp */
 
@@ -60,6 +61,7 @@ struct vm {
 };
 
 static struct dictdef *dict_head; /* TODO: keep inside the vm structure */
+
 #define OP_RET 9
 #define OP_LIT 12
 #define OP_SYS 29
@@ -73,6 +75,10 @@ static char *opcode_to_name[] = {
 	"OVER", "SWAP", "DUPR", "NIP",
 	"TUCK", "SYS", "OR", "SUB",
 };
+
+/* location of useful heap globals */
+#define TOK_BUF_OFFSET 0
+#define TOK_BUF_LENGTH 64
 
 struct dictdef *dict_new(const char *name)
 {
@@ -244,6 +250,13 @@ static unsigned char read_code_byte(struct vm *vm, vmword_t offset)
 	return vm->code[offset];
 }
 
+/* offset must be word aligned */
+static char *read_string(struct vm *vm, vmword_t offset, size_t len)
+{
+	// TODO: check for overflow and null termination
+	return (char*)&vm->heap[(offset / sizeof(vmword_t)) & vm->heap_mask];
+}
+
 /* read two bytes from code in little endian order,
  * use a little bitmath to sign extend the value */
 static short read_code_short(struct vm *vm, vmword_t offset)
@@ -261,20 +274,29 @@ static short read_code_short(struct vm *vm, vmword_t offset)
 static void vm_sys(struct vm *vm, unsigned num)
 {
 	switch (num) {
-	case 0: /* EXIT - cause interpreter to exit cleanly */
+	case 0: /* EXIT ( -- ) : cause interpreter to exit cleanly */
 		vm->status |= STATUS_FINISHED;
 		break;
-	case 1: /* PUTC - output a character */
+	case 1: /* PUTC ( c -- ) : output a character */
 		printf("%c", dpop(vm));
 		fflush(stdout);
 		break;
-	case 2: /* CR - carriage return */
+	case 2: /* CR ( -- ) : carriage return */
 		printf("\n");
 		break;
-	case 3: /* PRINT_NUM - output a number */
+	case 3: /* PRINT_NUM ( n -- ) : output a number */
 		printf(" %d", dpop(vm));
 		fflush(stdout);
 		break;
+	case 4: /* READ_TOK ( -- s ) : read a token */
+		// TODO: copy next token into this address
+		dpush(vm, TOK_BUF_OFFSET);
+		break;
+	case 5: { /* LOOKUP_DICT ( s -- xt ) : look up a dictionary entry */
+		char *tok = read_string(vm, dpop(vm), TOK_BUF_LENGTH); // TODO: verify safety of the string
+		dpush(vm, (intptr_t)dict_lookup(tok)); // TODO: create a handle for execution tokens instead of a raw pointer
+		break;
+	}
 	default:
 		vm->status |= ERROR_SYSCALL;
 	}
