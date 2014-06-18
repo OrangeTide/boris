@@ -13,3 +13,4 @@ clean :: ; $(RM) stackvm $(O.stackvm)
 tests :: stackvm hello.vm math.vm
 	./stackvm hello.vm
 	./stackvm math.vm
+	echo "Hello World" | ./stackvm token.vm

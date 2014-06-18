@@ -1,0 +1,20 @@
+LIT 0 LIT 0 STORE \ set length of token buffer to 0
+LIT 64 LIT 1 STORE
+\ [0] - start of loop
+SYS 6 \ GETC							\ [0]
+DUP								\ [3]
+LIT 10 \ newline						\ [4]
+JEQ 29								\ [7]
+DUP								\ [10]
+LIT 32 \ space							\ [11]
+JEQ 23								\ [14]
+LIT 0 LOAD \ get current length					\ [17]
+DUP								\ [21]
+LIT 1 ADD							\ [22]
+LIT 0 STORE							\ [26]
+LIT 1 ADD STORE							\ [30]
+JMP -36								\ [35]
+\ [37] - point of exit loop
+\ debug code, print the string we collected as a token
+LIT 0 SYS 7 \ PUTSTR
+SYS 2 \ CR
