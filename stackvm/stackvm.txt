@@ -1,101 +1,110 @@
-2011/06/23 - version 2 - Jon Mayo
-2012/09/29 - Released PUBLIC DOMAIN
+Instruction Set Architecture
+============================
+00	UNDEF		undefined
+01	IGNORE		no-op
+02	BREAK		debugger break
+03	ENTER x		adjust call frame by x
+04	LEAVE x		leave call frame
+05	CALL		( a -- )
+06	PUSH		push zero ( -- 0 )
+07	POP		drop item ( n -- )
+08	CONST x		push constant ( -- n )
+09	LOCAL x		index local frame by x ( -- n )
+0A	JUMP		( a -- )
+0B	EQ j		integer equal ( a b -- )
+0C	NE j		integer not equal ( a b -- )
+0D	LTI j		integer less ( ai bi -- )
+0E	LEI j		integer less or equal ( ai bi -- )
+0F	GTI j		integer greater than ( ai bi -- )
+10	GEI j		integer greater or equal ( ai bi -- )
+11	LTU j		unsigned less than ( au bu -- )
+12	LEU j		unsigned less equal ( au bu -- )
+13	GTU j		unsigned greater than ( au bu -- )
+14	GEU j		unsigned greater or equal ( au bu -- )
+15	EQF j		float equal ( af bf -- )
+16	NEF j		float not equal
+17	LTF j		float less than
+18	LEF j		float less or equal
+19	GTF j		float greater than
+1A	GEF j		float greater or equal
+1B	LOAD1		read byte from memory ( a -- b )
+1C	LOAD2		read short from memory ( a -- s )
+1D	LOAD4		read word from memory ( a -- i )
+1E	STORE1		store byte into memory ( a b -- )
+1F	STORE2		store short into memory ( a s -- )
+20	STORE4		store word info memory ( a i -- )
+21	ARG b		store TOS into arg position ( n -- )
+22	BLOCK_COPY x	( r2 r1 r0 -- )
+23	SEX8		sign extend 8-bit ( b -- i )
+24	SEX16		sign extend 16-bit ( s -- i )
+25	NEGI		integer negate ( i -- i )
+26	ADD		addition ( au bu -- u )
+27	SUB		subtract ( au bu -- u )
+28	DIVI		integer divide ( n d -- q )
+29	DIVU		unsigned divide ( n d -- q )
+2A	MODI		integer modulo ( n d -- m )
+2B	MODU		unsigned modulo ( n d -- m )
+2C	MULI		integer multiply ( a b -- i )
+2D	MULU		unsigned multiply ( a b -- u )
+2E	BAND		bitwise-AND ( a b -- u )
+2F	BOR		bitwise-OR ( a b -- u )
+30	BXOR		bitwise-XOR ( a b -- u )
+31	BCOM		bitwise complement ( u -- u )
+32	LSH		left shift ( n shft -- n )
+33	RSHI		arithmetic right shift ( n shift -- n )
+34	RSHU		bitwise right shift ( n shift -- n )
+35	NEGF		float negate ( f -- f )
+36	ADDF		float addition ( af bf -- f )
+37	SUBF		float subtraction ( af bf -- f )
+38	DIVF		float division ( n d -- q )
+39	MULF		float multiplication ( a b -- f )
+3A	CVIF		convert integer to float ( i -- f )
+3B	CVFI		convert float to integer ( f -- i )
 
-Compiling
----------
 
-$ make
+File Format
+===========
+len	field name
+---	----------
+4	magic 0x12721444 or 0x44147212
+4	instruction count
+4	CODE segment size
+4	CODE segment offset
+4	DATA segment size
+4	DATA segment offset
+4	LIT segment size
+4	BSS segment size
 
-* if compiling for windows, uncomment the define about stricmp
 
-Design
-------
-StackVM is a Harvard-architecture 2-stack machine patterned after FORTH virtual
-machines and processors.
-
-Registers
----------
-PC	- program counter
-S	- data stack (aka D-stack)
-R	- return stack (the second stack, aka R-stack)
-A	- scratch register
-B	- scratch register
-NEXT_PC	- scratch register
-
-* none of these registers are directly visible to programs.
-
-Stacks
-------
-there are two stacks, every stack entry is 32-bits.
-
-the contents of the stack cannot be directly accessed.
-only Push or Pop may be performed.
-
-* if not specified, assumed D-stack
-
-Instruct Set
-------------
-
-each instruction is 1 byte.
-* some instruction are followed by 2 bytes (LIT, Jxx), generally the value is
-  treated as a signed 16-bit value where the sign is extended to 32-bits (or
-  whatever).
-* one instruction (SYS) is followed by 1 byte, which is the system call number
-  to trigger
-
-This is useful for doing relative offsets for branching/jumps (relative to the
-PC).
-
-NOP	- 0x00 do nothing
-JMP	- 0x01 jump to relative(signed) 16-bit address
-JEQ	- 0x02 pop 2 values, if A == B then jump to relative(signed) 16-bit address
-JNE	- 0x03 pop 2 values, if A != B then jump to relative(signed) 16-bit address
-JLT	- 0x04 pop 2 values, if A < B then jump to relative(signed) 16-bit address
-JLE	- 0x05 pop 2 values, if A <= B then jump to relative(signed) 16-bit address
-JGT	- 0x06 pop 2 values, if A > B then jump to relative(signed) 16-bit address
-JGE	- 0x07 pop 2 values, if A >= B then jump to relative(signed) 16-bit address
-CALL	- 0x08 pop value from D-stack, push current PC onto R-stack, go to value.
-RET	- 0x09 pop absolute value from R-stack and go to that address
-LOAD	- 0x0A pop address, read value at memory location, push value onto D-stack
-STORE	- 0x0B pop address and value, write value to memory location.
-LIT	- 0x0C push 16-bit value sign extended to 32-bits onto D-stack
-NOT	- 0x0D pop value, bitwise NOT, push result
-XOR	- 0x0E pop value, bitwise XOR, push result
-AND	- 0x0F pop 2 values, bitwise AND, push result
-ADD	- 0x10 pop 2 values, addition, push result
-SHL	- 0x11 pop value, push value * 2
-SHR	- 0x12 pop value, push value / 2
-DUP	- 0x13 duplicate top value on the stack
-DROP	- 0x14 pop value and do nothing
-TOR	- 0x15 pop value from D-stack, push value to R-stack, also known as >R )
-FROMR	- 0x16 pop value from R-stack, push value to D-stack, also known as R> )
-COPYR	- 0x17 peek value from R-stack and push it to D-stack, also known as R@
-OVER	- 0x18 read 2nd value on the stack, push value. (A B -> A B A)
-SWAP	- 0x19 pop 2 values, push them in reverse order
-DUPR	- 0x1A duplicate top value on R-stack
-NIP	- 0x1B pop 2 values, push second value. (SWAP DROP)
-TUCK	- 0x1C pop 2 values, push second, push first, push second (SWAP OVER)
-SYS	- 0x1D system call.
-OR	- 0x1E pop 2 values, bitwise OR, push result
-SUB	- 0x1F pop 2 values, subtraction, push result
+Call Frame Format
+=================
+                         +---------------+ \
+top of address space --> | arg...        |  \
+                         | arg1          |   \
+                         | arg0          |    \
+                         +---------------+     \
+                         | N/A           |      >-- vm entry call
+SP at entry -----------> | saved PC (-1) |     /
+                         +---------------+    /
+                         | local...      |   /
+                         | local1        |  /
+SP after ENTER (????)--> | local0        | /
+                         +---------------+ \
+                         | arg...        |  \
+                         | arg1          |   \
+                         | arg0          |    \
+                         +---------------+     \
+                         | saved SP      |      >-- second function call
+SP at entry -----------> | saved PC      |     /
+                         +---------------+    /
+                         | local...      |   /
+                         | local1        |  /
+SP after ENTER (????)--> | local0        | /
+                         +---------------+
 
 
 System Calls
-------------
-0	- EXIT
-1	- PUTC - pop value, write as character
-2	- CR - print newline
-3	- PRINT_NUM - pop value, write as decimal number
-
-
-File syntax
------------
-file holds a list of tokens, a token may be a mneumonic(as above), a signed
-number or # and a number.
-
-the # form is used when an argument must be a full 32-bit value. by default
-numbers are treated as 16-bit values when appended into the code area.
-
-a semicolon(;) may be used to start a comment.
-
-
+============
+The VM permits calling external (native) functions by doing a CALL to a negative
+address. -1 is traditionally used to indicate an exit from the VM, -2 and beyond
+are free to be used for any purposes.
