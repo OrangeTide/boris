@@ -12,7 +12,7 @@
 static void do_dump(int sig)
 {
 	dprintf(STDERR_FILENO, "=== Signal %s : start of backtrace ===\n",
-		strsignal(sig));
+	        strsignal(sig));
 	void *buf[64];
 	int count = backtrace(buf, 64);
 	backtrace_symbols_fd(buf, count, STDERR_FILENO);

@@ -98,83 +98,85 @@ static char *opcode_to_name[] = {
 static unsigned opcode_length(unsigned char op)
 {
 	unsigned len = 1;
+
 	switch (op) {
-		case 0x00: /* UNDEF*/
-		case 0x01: /* IGNORE */
-		case 0x02: /* BREAK */
-			break;
-		case 0x03: /* ENTER */
-		case 0x04: /* LEAVE */
-			len = 5;
-			break;
-		case 0x05: /* CALL */
-		case 0x06: /* PUSH */
-		case 0x07: /* POP */
-			break;
-		case 0x08: /* CONST x */
-		case 0x09: /* LOCAL x */
-			len = 5;
-			break;
-		case 0x0a: /* JUMP */
-			break;
-		case 0x0b: /* EQ x */
-		case 0x0c: /* NE x */
-		case 0x0d: /* LTI x */
-		case 0x0e: /* LEI x */
-		case 0x0f: /* GTI x */
-		case 0x10: /* GEI x */
-		case 0x11: /* LTU x */
-		case 0x12: /* LEU x */
-		case 0x13: /* GTU x */
-		case 0x14: /* GEU x */
-		case 0x15: /* EQF x */
-		case 0x16: /* NEF x */
-		case 0x17: /* LTF x */
-		case 0x18: /* LEF x */
-		case 0x19: /* GTF x */
-		case 0x1a: /* GEF x */
-			len = 5;
-			break;
-		case 0x1b: /* LOAD1 */
-		case 0x1c: /* LOAD2 */
-		case 0x1d: /* LOAD4 */
-		case 0x1e: /* STORE1 */
-		case 0x1f: /* STORE2 */
-		case 0x20: /* STORE4 */
-			break;
-		case 0x21: /* ARG x */
-			len = 2;
-			break;
-		case 0x22: /* BLOCK_COPY x */
-		case 0x23: /* SEX8 */
-		case 0x24: /* SEX16 */
-		case 0x25: /* NEGI */
-		case 0x26: /* ADD */
-		case 0x27: /* SUB */
-		case 0x28: /* DIVI */
-		case 0x29: /* DIVU */
-		case 0x2a: /* MODI */
-		case 0x2b: /* MODU */
-		case 0x2c: /* MULI */
-		case 0x2d: /* MULU */
-		case 0x2e: /* BAND */
-		case 0x2f: /* BOR */
-		case 0x30: /* BXOR */
-		case 0x31: /* BCOM */
-		case 0x32: /* LSH */
-		case 0x33: /* RSHI */
-		case 0x34: /* RSHU */
-		case 0x35: /* NEGF */
-		case 0x36: /* ADDF */
-		case 0x37: /* SUBF */
-		case 0x38: /* DIVF */
-		case 0x39: /* MULF */
-		case 0x3a: /* CVIF */
-		case 0x3b: /* CVFI */
-			break;
-		default:
-			return 0; /* failure */
+	case 0x00: /* UNDEF*/
+	case 0x01: /* IGNORE */
+	case 0x02: /* BREAK */
+		break;
+	case 0x03: /* ENTER */
+	case 0x04: /* LEAVE */
+		len = 5;
+		break;
+	case 0x05: /* CALL */
+	case 0x06: /* PUSH */
+	case 0x07: /* POP */
+		break;
+	case 0x08: /* CONST x */
+	case 0x09: /* LOCAL x */
+		len = 5;
+		break;
+	case 0x0a: /* JUMP */
+		break;
+	case 0x0b: /* EQ x */
+	case 0x0c: /* NE x */
+	case 0x0d: /* LTI x */
+	case 0x0e: /* LEI x */
+	case 0x0f: /* GTI x */
+	case 0x10: /* GEI x */
+	case 0x11: /* LTU x */
+	case 0x12: /* LEU x */
+	case 0x13: /* GTU x */
+	case 0x14: /* GEU x */
+	case 0x15: /* EQF x */
+	case 0x16: /* NEF x */
+	case 0x17: /* LTF x */
+	case 0x18: /* LEF x */
+	case 0x19: /* GTF x */
+	case 0x1a: /* GEF x */
+		len = 5;
+		break;
+	case 0x1b: /* LOAD1 */
+	case 0x1c: /* LOAD2 */
+	case 0x1d: /* LOAD4 */
+	case 0x1e: /* STORE1 */
+	case 0x1f: /* STORE2 */
+	case 0x20: /* STORE4 */
+		break;
+	case 0x21: /* ARG x */
+		len = 2;
+		break;
+	case 0x22: /* BLOCK_COPY x */
+	case 0x23: /* SEX8 */
+	case 0x24: /* SEX16 */
+	case 0x25: /* NEGI */
+	case 0x26: /* ADD */
+	case 0x27: /* SUB */
+	case 0x28: /* DIVI */
+	case 0x29: /* DIVU */
+	case 0x2a: /* MODI */
+	case 0x2b: /* MODU */
+	case 0x2c: /* MULI */
+	case 0x2d: /* MULU */
+	case 0x2e: /* BAND */
+	case 0x2f: /* BOR */
+	case 0x30: /* BXOR */
+	case 0x31: /* BCOM */
+	case 0x32: /* LSH */
+	case 0x33: /* RSHI */
+	case 0x34: /* RSHU */
+	case 0x35: /* NEGF */
+	case 0x36: /* ADDF */
+	case 0x37: /* SUBF */
+	case 0x38: /* DIVF */
+	case 0x39: /* MULF */
+	case 0x3a: /* CVIF */
+	case 0x3b: /* CVFI */
+		break;
+	default:
+		return 0; /* failure */
 	}
+
 	return len;
 }
 
@@ -187,15 +189,19 @@ static unsigned count_instructions(const unsigned char *opbytes, size_t oplen)
 	while (oplen > 0) {
 		// trace("opbytes=%p oplen=%zd total=%d\n", opbytes, oplen, total);
 		unsigned result = opcode_length(*opbytes);
+
 		if (result > oplen)
 			return 0; /* truncated instruction */
+
 		if (!result)
 			return 0; /* illegal instruction */
+
 		assert(result <= 5);
 		opbytes += result;
 		oplen -= result;
 		total++;
 	}
+
 	trace("total=%d\n", total);
 	return total;
 }
@@ -204,18 +210,20 @@ static const char *disassemble_opcode(const struct vm_op *op)
 {
 	static char buf[256];
 	unsigned b = op->op;
+
 	if (b < ARRAY_SIZE(opcode_to_name)) {
 		if (opcode_length(b) > 1) {
 			unsigned p = op->param;
 			snprintf(buf, sizeof(buf), "%s %d [0x%02x %#x]",
-				opcode_to_name[b], p, b, p);
+			         opcode_to_name[b], p, b, p);
 		} else {
 			snprintf(buf, sizeof(buf), "%s [0x%02x]",
-				opcode_to_name[b], b);
+			         opcode_to_name[b], b);
 		}
 	} else {
 		snprintf(buf, sizeof(buf), "0x%02hhx", b & 255);
 	}
+
 	return buf;
 }
 
@@ -223,9 +231,11 @@ static void disassemble(FILE *out, const struct vm_op *ops, size_t ops_len, vmwo
 {
 	unsigned i;
 	fprintf(out, "---8<--- start of disassembly (len=%zd) ---8<---\n", ops_len);
+
 	for (i = 0; i < ops_len; i++)
 		fprintf(out, "%06x: %s\n",
-			baseaddr + i, disassemble_opcode(ops + i));
+		        baseaddr + i, disassemble_opcode(ops + i));
+
 	fprintf(out, "---8<--- end of disassembly ---8<---\n");
 }
 
@@ -233,8 +243,10 @@ static void disassemble(FILE *out, const struct vm_op *ops, size_t ops_len, vmwo
 static size_t make_mask(size_t len)
 {
 	size_t ret = 0;
+
 	while (ret + 1 < len)
 		ret = (ret << 1) | 1;
+
 	return ret;
 }
 
@@ -244,6 +256,7 @@ static inline int check_code_bounds(struct vm *vm, vmword_t ofs)
 		vm->status |= ERROR_OUT_OF_BOUNDS;
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -253,6 +266,7 @@ static inline int check_data_bounds(struct vm *vm, vmword_t ofs)
 		vm->status |= ERROR_OUT_OF_BOUNDS;
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -260,6 +274,7 @@ static inline int check_stack_bounds(struct vm *vm)
 {
 	if (vm->psp < vm->stack_bottom)
 		return -1;
+
 	return check_data_bounds(vm, vm->psp);
 }
 
@@ -267,6 +282,7 @@ static inline int check_stack_bounds(struct vm *vm)
 static void opush(struct vm *vm, vmword_t val)
 {
 	trace("%s:PUSH %d\n", vm->vm_filename, val);
+
 	if (vm->op_stack < ARRAY_SIZE(vm->stack))
 		vm->stack[vm->op_stack++] = val;
 	else
@@ -282,6 +298,7 @@ static vmword_t opeek(struct vm *vm, int index)
 
 	if (ofs < vm->op_stack)
 		return vm->stack[ofs];
+
 	vm->status |= ERROR_STACK_UNDERFLOW;
 	return 0xdeadbeef;
 }
@@ -294,6 +311,7 @@ static vmword_t opop(struct vm *vm)
 		trace("%s:POP %d\n", vm->vm_filename, val);
 		return val;
 	}
+
 	vm->status |= ERROR_STACK_UNDERFLOW;
 	return 0xdeadbeef;
 }
@@ -302,7 +320,7 @@ static vmword_t opop(struct vm *vm)
 static void opushf(struct vm *vm, vmsingle_t val)
 {
 	if (vm->op_stack < ARRAY_SIZE(vm->stack))
-		vm->stack[vm->op_stack++] = *(vmword_t*)&val;
+		vm->stack[vm->op_stack++] = *(vmword_t*) & val;
 	else
 		vm->status |= ERROR_STACK_OVERFLOW;
 }
@@ -312,6 +330,7 @@ static vmsingle_t opopf(struct vm *vm)
 {
 	if (vm->op_stack)
 		return *(vmsingle_t*)(vm->stack + --vm->op_stack);
+
 	vm->status |= ERROR_STACK_UNDERFLOW;
 	return NAN;
 }
@@ -319,24 +338,30 @@ static vmsingle_t opopf(struct vm *vm)
 static inline void dwrite4(struct vm *vm, vmword_t ofs, vmword_t val)
 {
 	trace("%s:write %d (%#x) : %d\n", vm->vm_filename, ofs, ofs, val);
+
 	if (check_data_bounds(vm, ofs) || check_data_bounds(vm, ofs + 3))
 		return;
+
 	if (ofs & 3) {
 		vm->status |= ERROR_UNALIGNED;
 		return;
 	}
+
 	vm->heap.words[ofs >> 2] = val;
 }
 
 static inline void dwrite2(struct vm *vm, vmword_t ofs, uint16_t val)
 {
 	trace("%s:write %d (%#x) : %d\n", vm->vm_filename, ofs, ofs, val);
+
 	if (check_data_bounds(vm, ofs) || check_data_bounds(vm, ofs + 1))
 		return;
+
 	if (ofs & 1) {
 		vm->status |= ERROR_UNALIGNED;
 		return;
 	}
+
 	vm->heap.halfs[ofs >> 1] = val;
 }
 
@@ -353,10 +378,12 @@ static inline vmword_t dread4(struct vm *vm, vmword_t ofs)
 		vm->status |= ERROR_OUT_OF_BOUNDS;
 		return 0xdeadbeef;
 	}
+
 	if (ofs & 3) {
 		vm->status |= ERROR_UNALIGNED;
 		return 0xdeadbeef;
 	}
+
 	vmword_t val = vm->heap.words[ofs >> 2];
 	trace("%s:read %d (%#x) : %d\n", vm->vm_filename, ofs, ofs, val);
 	return val;
@@ -369,10 +396,12 @@ static inline uint16_t dread2(struct vm *vm, vmword_t ofs)
 		vm->status |= ERROR_OUT_OF_BOUNDS;
 		return 0xdead;
 	}
+
 	if (ofs & 1) {
 		vm->status |= ERROR_UNALIGNED;
 		return 0xbeef;
 	}
+
 	return vm->heap.halfs[ofs >> 1];
 }
 
@@ -382,6 +411,7 @@ static inline uint8_t dread1(struct vm *vm, vmword_t ofs)
 		vm->status |= ERROR_OUT_OF_BOUNDS;
 		return 0xde;
 	}
+
 	return vm->heap.bytes[ofs];
 }
 
@@ -390,8 +420,10 @@ static void ppoke(struct vm *vm, int index, vmword_t val)
 {
 	// unsigned ofs = vm->psp - index - 4; // TODO: is this correct?
 	unsigned ofs = vm->psp - index; // TODO: is this correct?
+
 	if (check_data_bounds(vm, ofs))
 		return;
+
 	trace("%s:write %d (%#x) : %d\n", vm->vm_filename, ofs, ofs, val);
 	dwrite4(vm, ofs, val);
 }
@@ -415,9 +447,9 @@ static void vm_run_slice(struct vm *vm)
 	vmsingle_t bf; /* scratch area */
 
 	debug("code_mask=0x%08zx code_len=0x%08zx\n",
-		vm->code_mask, vm->code_len);
+	      vm->code_mask, vm->code_len);
 	debug("heap_mask=0x%08zx heap_len=0x%08zx\n",
-		vm->heap_mask, vm->heap_len);
+	      vm->heap_mask, vm->heap_len);
 	/* the interpreter should only use _mask, not _len for checks */
 	assert(vm->code_mask == make_mask(vm->code_len));
 	assert(vm->heap_mask == make_mask(vm->heap_len));
@@ -426,13 +458,17 @@ static void vm_run_slice(struct vm *vm)
 		struct vm_op *op = &vm->code[vm->pc++];
 		{ /* debug only */
 			vmword_t top = ~0;
+
 			if (vm->op_stack)
 				top = vm->stack[vm->op_stack - 1];
+
 			debug("PC:pc=%d (%#x) op=%s top=%d (%#x) psp=%d (%#x)\n",
-				vm->pc - 1, vm->pc - 1, disassemble_opcode(op),
-				top, top, vm->psp, vm->psp);
+			      vm->pc - 1, vm->pc - 1, disassemble_opcode(op),
+			      top, top, vm->psp, vm->psp);
 		}
-		switch (op->op) {;
+
+		switch (op->op) {
+			;
 		case 0x00: /* UNDEF*/
 			break;
 		case 0x01: /* IGNORE */
@@ -462,8 +498,10 @@ static void vm_run_slice(struct vm *vm)
 			*/
 			b = vm->psp ;
 			a = dread4(vm, b);
+
 			if ((int)a == -1)
 				vm->status = STATUS_FINISHED;
+
 			// TODO: handle other negative values for reentrant vm_call
 			trace("LEAVE to %d (%#x) from %d (%#x)\n", a, a, vm->pc, vm->pc);
 			vm->pc = a;
@@ -472,6 +510,7 @@ static void vm_run_slice(struct vm *vm)
 			dwrite4(vm, vm->psp + 4, vm->psp); /* save the old SP */
 			dwrite4(vm, vm->psp, vm->pc); /* save the old PC */
 			a = opop(vm);
+
 			if ((int32_t)a < 0) {
 				// TODO: the original would store as byte offset, not instruction index
 				dwrite4(vm, vm->psp + 4, -1 - vm->pc); /* save the old PC */
@@ -482,6 +521,7 @@ static void vm_run_slice(struct vm *vm)
 				vm->pc = a;
 				check_code_bounds(vm, vm->pc);
 			}
+
 			break;
 		case 0x06: /* PUSH - push a 0 onto data stack */
 			opush(vm, 0);
@@ -503,98 +543,130 @@ static void vm_run_slice(struct vm *vm)
 		case 0x0b: /* EQ x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (b == a)
 				vm->pc = op->param;
+
 			break;
 		case 0x0c: /* NE x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (b != a)
 				vm->pc = op->param;
+
 			break;
 		case 0x0d: /* LTI x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if ((int)b < (int)a)
 				vm->pc = op->param;
+
 			break;
 		case 0x0e: /* LEI x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if ((int)b <= (int)a)
 				vm->pc = op->param;
+
 			break;
 		case 0x0f: /* GTI x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if ((int)b > (int)a)
 				vm->pc = op->param;
+
 			break;
 		case 0x10: /* GEI x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if ((int)b >= (int)a)
 				vm->pc = op->param;
+
 			break;
 		case 0x11: /* LTU x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (b < a)
 				vm->pc = op->param;
+
 			break;
 		case 0x12: /* LEU x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (b <= a)
 				vm->pc = op->param;
+
 			break;
 		case 0x13: /* GTU x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (b > a)
 				vm->pc = op->param;
+
 			break;
 		case 0x14: /* GEU x */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (b >= a)
 				vm->pc = op->param;
+
 			break;
 		case 0x15: /* EQF x */
 			af = opopf(vm);
 			bf = opopf(vm);
+
 			if (bf == af)
 				vm->pc = op->param;
+
 			break;
 		case 0x16: /* NEF x */
 			af = opopf(vm);
 			bf = opopf(vm);
+
 			if (bf != af)
 				vm->pc = op->param;
+
 			break;
 		case 0x17: /* LTF x */
 			af = opopf(vm);
 			bf = opopf(vm);
+
 			if (bf < af)
 				vm->pc = op->param;
+
 			break;
 		case 0x18: /* LEF x */
 			af = opopf(vm);
 			bf = opopf(vm);
+
 			if (bf <= af)
 				vm->pc = op->param;
+
 			break;
 		case 0x19: /* GTF x */
 			af = opopf(vm);
 			bf = opopf(vm);
+
 			if (bf > af)
 				vm->pc = op->param;
+
 			break;
 		case 0x1a: /* GEF x */
 			af = opopf(vm);
 			bf = opopf(vm);
+
 			if (bf >= af)
 				vm->pc = op->param;
+
 			break;
 		case 0x1b: /* LOAD1 */
 			a = opop(vm);
@@ -637,9 +709,9 @@ static void vm_run_slice(struct vm *vm)
 		case 0x22: /* BLOCK_COPY x - copy x bytes */
 			a = opop(vm); /* src */
 			b = opop(vm); /* dest */
-			#if 0 // TODO: implement this
+#if 0 // TODO: implement this
 			block_copy(vm, b, a, op->param);
-			#endif
+#endif
 			abort(); // TODO: implement this
 			break;
 		case 0x23: /* SEX8 */
@@ -667,34 +739,42 @@ static void vm_run_slice(struct vm *vm)
 		case 0x28: /* DIVI */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (a) // TODO: check for INT_MIN / -1
 				opush(vm, (int)b / (int)a);
 			else
 				vm->status |= ERROR_MATH_ERROR;
+
 			break;
 		case 0x29: /* DIVU */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (a)
 				opush(vm, b / a);
 			else
 				vm->status |= ERROR_MATH_ERROR;
+
 			break;
 		case 0x2a: /* MODI */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (a) // TODO: check for INT_MIN / -1
 				opush(vm, (int)b % (int)a);
 			else
 				vm->status |= ERROR_MATH_ERROR;
+
 			break;
 		case 0x2b: /* MODU */
 			a = opop(vm);
 			b = opop(vm);
+
 			if (a)
 				opush(vm, b % a);
 			else
 				vm->status |= ERROR_MATH_ERROR;
+
 			break;
 		case 0x2c: /* MULI */
 			a = opop(vm);
@@ -777,6 +857,7 @@ static void vm_run_slice(struct vm *vm)
 			vm->status |= ERROR_INVALID_OPCODE;
 		}
 	}
+
 // finished: // TODO: LEAVE -1 could jump here instead of using flags
 	if ((vm->status & ~STATUS_FINISHED))
 		error("%s:error 0x%x (pc=0x%x)\n", vm->vm_filename, vm->status, vm->pc);
@@ -786,6 +867,7 @@ static void vm_run_slice(struct vm *vm)
 		info("%s:not finished!\n", vm->vm_filename);
 		vm->status |= ERROR_UNFINISHED;
 	}
+
 	free(vm->heap.bytes);
 	vm->heap.bytes = NULL;
 }
@@ -806,11 +888,13 @@ static void vm_call(struct vm *vm, unsigned nr_args, ...)
 	/* store return address and old stack */
 	dwrite4(vm, vm->psp, -1);
 	dwrite4(vm, vm->psp + 4, old_psp);
+
 	/* store args */
 	for (i = 0; i < nr_args; i++) {
 		vmword_t val = va_arg(ap, vmword_t);
 		dwrite4(vm, vm->psp + 8 + (i * 4), val);
 	}
+
 	// TODO: optionally vm_run() until complete and return result
 	va_end(ap);
 }
@@ -850,12 +934,15 @@ static int load_data_segment(struct vm *vm, FILE *f, const char *filename, const
 	vm->heap_len = heap_len;
 	vm->heap_mask = heap_len ? heap_len - 1 : 0;
 	vm->heap.bytes = malloc(vm->heap_len);
+
 	if (fseek(f, data_offset, SEEK_SET))
 		goto failure_perror;
+
 	if (fread(vm->heap.bytes, 1, data_length, f) != (size_t)data_length)
 		goto failure_perror; // TODO: check errno and print short read msg
+
 	memset(vm->heap.bytes + data_length, 0x00,
-		vm->heap_mask - data_length);
+	       vm->heap_mask - data_length);
 	return 0;
 failure_perror:
 	perror(filename);
@@ -866,6 +953,7 @@ void vm_free(struct vm *vm)
 {
 	if (!vm)
 		return;
+
 	free(vm->vm_filename);
 	vm->vm_filename = NULL;
 	free(vm->heap.bytes);
@@ -886,37 +974,41 @@ static int vm_load(struct vm *vm, const char *filename)
 	memset(vm, 0, sizeof(*vm));
 
 	f = fopen(filename, "rb");
+
 	if (!f) {
 		perror(filename);
 		return 0;
 	}
+
 	vm->vm_filename = strdup(filename);
 
 	header_len = fread(&header, 1, sizeof(header), f);
+
 	if (header_len >= 36 && header.magic == VM_MAGIC_VER2) {
 		header_version = 2;
 	} else if (header_len >= 32 && header.magic == VM_MAGIC) {
 		header_version = 1;
 	} else {
 		error("%s:not a valid VM file (magic=0x%08" PRIx32 " len=%zd)\n",
-			 filename, header.magic, header_len);
+		      filename, header.magic, header_len);
 		goto failure;
 	}
 
 	info("code_length=%d data_length=%d lit_length=%d bss_length=%d\n",
-		header.code_length, header.data_length, header.lit_length,
-		header.bss_length);
+	     header.code_length, header.data_length, header.lit_length,
+	     header.bss_length);
 
 	/* validate */
+
 	/* checks that none of the sizes are negative
 	 * checks that bss_length has room for PROGRAM_STACK_SIZE.
 	 */
-	if (header.code_length < 0 || header.data_length < 0 ||
-		 header.lit_length < 0 ||
-		 header.bss_length < PROGRAM_STACK_SIZE ||
-		 (header_version >= 2 && header.jtrg_length < 0)) {
+	if (header.code_length < 0 || header.data_length < 0 || header.lit_length < 0
+	                || header.bss_length < PROGRAM_STACK_SIZE
+	                || (header_version >= 2 && header.jtrg_length < 0)) {
 		goto failure;
 	}
+
 	/* TODO: validate these:
 	instruction_count;
 	code_offset;
@@ -927,14 +1019,17 @@ static int vm_load(struct vm *vm, const char *filename)
 	/* load data segment */
 	int e;
 	e = load_data_segment(vm, f, filename, &header);
+
 	if (e)
 		goto failure_freevm;
 
 	/* load code segment */
 	size_t codebuf_len = header.code_length;
 	unsigned char *codebuf = malloc(codebuf_len);
+
 	if (fseek(f, header.code_offset, SEEK_SET))
 		goto failure_perror;
+
 	if (fread(codebuf, 1, codebuf_len, f) != codebuf_len)
 		goto failure_perror; // TODO: check errno and print short msg
 
@@ -946,16 +1041,20 @@ static int vm_load(struct vm *vm, const char *filename)
 	vm->code = malloc(code_size * sizeof(*vm->code));
 	unsigned i;
 	unsigned n = 0;
+
 	for (i = 0; i < instruction_count; i++) {
 		if (n >= codebuf_len) {
 			error("incorrect instruction count at %d (i=%d cnt=%d)\n", n, i, instruction_count);
 			goto failure_freecodebuf;
 		}
+
 		unsigned oplen = opcode_length(codebuf[n]);
+
 		if (oplen > codebuf_len - n) {
 			error("trucated opcode sequence at offset %d!\n", n);
 			goto failure_freecodebuf;
 		}
+
 		if (oplen == 0) {
 			error("invalid opcode at offset %d!\n", n);
 			goto failure_freecodebuf;
@@ -965,22 +1064,25 @@ static int vm_load(struct vm *vm, const char *filename)
 			vm->code[i].param = codebuf[n + 1];
 		} else if (oplen == 5) { /* 32-bit parameter */
 			vm->code[i].param =
-				codebuf[n + 1] |
-				((vmword_t)codebuf[n + 2] << 8) |
-				((vmword_t)codebuf[n + 3] << 16) |
-				((vmword_t)codebuf[n + 4] << 24);
+			        codebuf[n + 1] |
+			        ((vmword_t)codebuf[n + 2] << 8) |
+			        ((vmword_t)codebuf[n + 3] << 16) |
+			        ((vmword_t)codebuf[n + 4] << 24);
 		} else {
 			error("opcode size %d is not supported!\n", oplen);
 			goto failure_freecodebuf;
 		}
+
 		// trace("i=%d n=%d oplen=%d\n", i, n, oplen);
 		vm->code[i].op = codebuf[n];
 		n += oplen;
 	}
+
 	for (; i < code_size; i++) {
 		vm->code[i].op = 0x02; /* BREAK */
 		vm->code[i].param = 0;
 	}
+
 	vm->code_len = instruction_count;
 	vm->code_mask = make_mask(code_size);
 	free(codebuf);
@@ -1030,6 +1132,7 @@ static void process_args(int argc, char **argv)
 	for (i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') { /* parse flags */
 			const char *s;
+
 			for (s = &argv[i][1]; *s; s++) {
 				if (*s == 'h') {
 					usage();
@@ -1059,19 +1162,24 @@ int main(int argc, char **argv)
 		error("%s:could not load file\n", opt_vm_filename);
 		return EXIT_FAILURE;
 	}
+
 	if (1)
 		vm_disassemble(&vm);
+
 	vm_call(&vm, 2, 500, 800); /* result should be 1800 (500+500+800) */
 	// TODO: call in a loop
 	vm_run_slice(&vm);
 	vmword_t result = 0xdeadbeef;
+
 	if (vm.status == STATUS_FINISHED)
 		result = opop(&vm);
+
 	if (vm.status != STATUS_FINISHED) {
 		info("%s:VM failure\n", vm.vm_filename);
 		vm_free(&vm);
 		return EXIT_FAILURE;
 	}
+
 	info("%s:VM success:result=%d\n", vm.vm_filename, result);
 	vm_free(&vm);
 	return EXIT_SUCCESS;
