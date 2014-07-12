@@ -18,8 +18,9 @@ O.stackvm := $(S.stackvm:%.c=%.o)
 stackvm : $(O.stackvm)
 all :: stackvm
 clean :: ; $(RM) stackvm $(O.stackvm)
-tests :: stackvm ex1.qvm
+tests :: stackvm ex1.qvm ex2.qvm
 	./stackvm ex1.qvm
+	./stackvm ex2.qvm
 
 ## use the q3vm tools:
 TOOLSDIR := tools
@@ -42,5 +43,11 @@ tools-clean-all : ; $(MAKE) -C $(TOOLSDIR) clean
 
 ## tests
 
+# ex1
 all :: ex1.qvm
 clean :: ; $(RM) ex1.qvm ex1.asm
+
+# ex2
+all :: ex2.qvm
+clean :: ; $(RM) ex2.qvm ex2.asm
+ex2.qvm : ex2.asm ex2_syscalls.asm

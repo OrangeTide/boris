@@ -52,7 +52,16 @@ struct vm_op {
 	int param;
 };
 
+struct vm;
+
+/* environment holds infomation common to multiple VMs */
+struct vm_env {
+	unsigned nr_syscalls;
+	void (**syscalls)(struct vm *vm);
+};
+
 struct vm {
+	const struct vm_env *env;
 	/* code is a read-only area for instructions */
 	struct vm_op *code;
 	size_t code_len;
@@ -92,6 +101,40 @@ static char *opcode_to_name[] = {
 	"RSHU", "NEGF", "ADDF", "SUBF",
 	"DIVF", "MULF", "CVIF", "CVFI",
 };
+
+static struct vm_env *vm_env_new(unsigned nr_syscalls)
+{
+
+	struct vm_env *env = calloc(1, sizeof(*env));
+	assert(env != NULL);
+	env->nr_syscalls = nr_syscalls;
+	env->syscalls = calloc(sizeof(*env->syscalls), nr_syscalls);
+	assert(env->syscalls != NULL);
+	return env;
+}
+
+static int vm_env_register(struct vm_env *env, int syscall_num, void (*sc)(struct vm *vm))
+{
+	assert(syscall_num < 0);
+	unsigned ofs = -1 - syscall_num;
+	if (ofs >= env->nr_syscalls)
+		return -1;
+	env->syscalls[ofs] = sc;
+	return 0;
+}
+
+static int vm_env_call(const struct vm_env *env, int syscall_num, struct vm *vm)
+{
+	assert(syscall_num < 0);
+	unsigned ofs = -1 - syscall_num;
+	if (ofs >= env->nr_syscalls)
+		return -1;
+	void (*sc)(struct vm *vm) = env->syscalls[ofs];
+	if (!sc) // TODO: catch this as an error
+		return -1;
+	sc(vm); // TODO: check for errors
+	return 0;
+}
 
 /* returns number of bytes an opcode will consume.
  * 0 if an unknown or illegal opcode. */
@@ -516,7 +559,13 @@ static void vm_run_slice(struct vm *vm)
 				dwrite4(vm, vm->psp + 4, -1 - vm->pc); /* save the old PC */
 				// TODO: do system call if program counter is negative
 				vm->pc = 0xdeadbeef; /* system call better clean this up */
-				abort(); // TODO: implement this
+				if (vm->env) {
+					vm_env_call(vm->env, a, vm);
+					// TODO: check results
+				} else {
+					// TODO: catch this as an error
+					abort(); // TODO: implement this
+				}
 			} else {
 				vm->pc = a;
 				check_code_bounds(vm, vm->pc);
@@ -1152,16 +1201,39 @@ static void process_args(int argc, char **argv)
 		usage();
 }
 
+static void sys_trap_print(struct vm *vm)
+{
+	trace("TODO\n");
+	// TODO: get arguments from the VM
+	abort(); // TODO: implement this
+}
+
+static void sys_trap_error(struct vm *vm)
+{
+	trace("TODO\n");
+	// TODO: get arguments from the VM
+	abort(); // TODO: implement this
+}
+
 int main(int argc, char **argv)
 {
+	struct vm_env *env;
 	struct vm vm;
 	enable_stack_dump();
 	process_args(argc, argv);
+
+	env = vm_env_new(100);
+	assert(env != NULL);
+	vm_env_register(env, -1, sys_trap_print);
+	vm_env_register(env, -2, sys_trap_error);
 
 	if (!vm_load(&vm, opt_vm_filename)) {
 		error("%s:could not load file\n", opt_vm_filename);
 		return EXIT_FAILURE;
 	}
+
+	/* TODO: add an API that gives a more elegant way to set the env. */
+	vm.env = env;
 
 	if (1)
 		vm_disassemble(&vm);
