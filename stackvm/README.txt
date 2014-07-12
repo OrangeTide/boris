@@ -10,6 +10,9 @@ Running the tests
 
 $ make tests
 
-You will need to have q3vm utilities from Quake3 to build the tests. You can
-build them in the ioquake3 source and copy the binaries q3asm and q3lcc
-into tools/ directory.
+You will need to have tools (lcc compiler and q3 assembler) installed to run the test.
+Ideally git submodule can get them for you:
+
+$ git submodule update
+
+The source for the tools is at git://github.com/OrangeTide/stackvm-tools.git
