@@ -11,16 +11,22 @@ clean ::
 clean-all :: clean
 tests ::
 
-##
+## the stackvm library
+S.libstackvm := stackvm.c stackdump.c
+O.libstackvm := $(S.libstackvm:%.c=%.o)
+libstackvm.a : libstackvm.a($(O.libstackvm))
+all :: libstackvm.a
+clean :: ; $(RM) libstackvm.a $(O.libstackvm)
 
-S.stackvm := stackvm.c stackdump.c
-O.stackvm := $(S.stackvm:%.c=%.o)
-stackvm : $(O.stackvm)
-all :: stackvm
-clean :: ; $(RM) stackvm $(O.stackvm)
-tests :: stackvm ex1.qvm ex2.qvm
-	./stackvm ex1.qvm
-	./stackvm ex2.qvm
+## a test implementation and some tests
+S.demovm := demovm.c stackdump.c
+O.demovm := $(S.demovm:%.c=%.o)
+demovm : $(O.demovm) libstackvm.a
+all :: demovm
+clean :: ; $(RM) demovm $(O.demovm)
+tests :: demovm ex1.qvm ex2.qvm
+	./demovm ex1.qvm
+	./demovm ex2.qvm
 
 ## use the q3vm tools:
 TOOLSDIR := tools
