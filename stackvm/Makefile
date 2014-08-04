@@ -24,9 +24,10 @@ O.demovm := $(S.demovm:%.c=%.o)
 demovm : $(O.demovm) libstackvm.a
 all :: demovm
 clean :: ; $(RM) demovm $(O.demovm)
-tests :: demovm ex1.qvm ex2.qvm
+tests :: demovm ex1.qvm ex2.qvm ex3.qvm
 	./demovm ex1.qvm
 	./demovm ex2.qvm
+	./demovm ex3.qvm
 
 ## use the q3vm tools:
 TOOLSDIR := tools
@@ -57,3 +58,8 @@ clean :: ; $(RM) ex1.qvm ex1.asm
 all :: ex2.qvm
 clean :: ; $(RM) ex2.qvm ex2.asm
 ex2.qvm : ex2.asm ex2_syscalls.asm
+
+# ex3
+all :: ex3.qvm
+clean :: ; $(RM) ex3.qvm ex3.asm
+ex3.qvm : ex3.asm ex2_syscalls.asm

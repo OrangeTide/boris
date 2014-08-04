@@ -62,7 +62,8 @@ static void sys_trap_print(struct vm *vm)
 	size_t slen;
 	const char *s = vm_string(vm, s_addr, &slen);
 	assert(s != NULL);
-	printf("SysPrint:%.*s\n", (int)slen, s);
+	printf("***** SysPrint:%.*s\n", (int)slen, s);
+	vm_push(vm, 0);
 }
 
 static void sys_trap_error(struct vm *vm)
@@ -71,8 +72,36 @@ static void sys_trap_error(struct vm *vm)
 	size_t slen;
 	const char *s = vm_string(vm, s_addr, &slen);
 	assert(s != NULL);
-	printf("SysError:%.*s\n", (int)slen, s);
+	printf("***** SysError:%.*s\n", (int)slen, s);
 	vm_abort(vm);
+	vm_push(vm, 0);
+}
+
+static void sys_trap_callback(struct vm *vm)
+{
+	vmword_t n_args = vm_arg(vm, 0);
+	vmword_t func = vm_arg(vm, 1);
+	vmword_t args[n_args];
+	unsigned i;
+
+	/* save args into an array */
+	info("Callback:n_args=%d func=%#x\n", n_args, func);
+	assert(n_args < 15); /* arbitrary limit */
+	for (i = 0; i < n_args; i++) {
+		vmword_t a = vm_arg(vm, 2 + i);
+		args[i] = a;
+	}
+	vm_call_array(vm, func, n_args, args);
+	// TODO: run the vm, and get a return value
+	int e;
+	e = vm_run_slice(vm);
+	info("Callback:e=%d status=%#x\n", e, vm_status(vm));
+	if (e == 1) {
+		// assume the function we called in vm_run_slice left data on stack
+		vmword_t result = vm_pop(vm);
+		info("Callback:result=%d\n", result);
+		vm_push(vm, result);
+	}
 }
 
 int main(int argc, char **argv)
@@ -84,6 +113,7 @@ int main(int argc, char **argv)
 	assert(env != NULL);
 	vm_env_register(env, -1, sys_trap_print);
 	vm_env_register(env, -2, sys_trap_error);
+	vm_env_register(env, -3, sys_trap_callback);
 
 	struct vm *vm = vm_new(env);
 	if (!vm_load(vm, opt_vm_filename)) {
@@ -94,16 +124,20 @@ int main(int argc, char **argv)
 	if (1)
 		vm_disassemble(vm);
 
-	vm_call(vm, 2, 500, 800); /* result should be 1800 (500+500+800) */
-	// TODO: call in a loop
-	vm_run_slice(vm);
+	vm_call(vm, 0, 2, 500, 800); /* result should be 1800 (500+500+800) */
+	int e;
+	do {
+		e = vm_run_slice(vm);
+	} while (e == 0);
+
 	vmword_t result = 0xdeadbeef;
 
 	if (vm_status(vm) == VM_STATUS_FINISHED)
-		result = vm_opop(vm);
+		result = vm_pop(vm);
 
 	if (vm_status(vm) != VM_STATUS_FINISHED) {
-		info("%s:VM failure\n", vm_filename(vm));
+		info("%s:VM failure (err=%#x)\n",
+			vm_filename(vm), vm_status(vm));
 		vm_free(vm);
 		vm = NULL;
 		return EXIT_FAILURE;

@@ -2,6 +2,7 @@ code
 
 equ trap_Print -1
 equ trap_Error -2
+equ trap_Callback -3
 
 equ memset -101
 equ memcpy -102

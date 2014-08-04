@@ -25,6 +25,11 @@
 #define debug(format, ...) fprintf(stderr, "DEBUG:%s():%d:" format, __func__, __LINE__, ## __VA_ARGS__)
 #define trace(format, ...) fprintf(stderr, "TRACE:%s():%d:" format, __func__, __LINE__, ## __VA_ARGS__)
 
+#define vm_error_set(vm, flag) do { \
+		trace("set error:%#x\n", (flag)); \
+		(vm)->status |= (flag); \
+	} while(0)
+
 /* #define strcasecmp stricmp */
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof *(a))
@@ -64,7 +69,7 @@ struct vm {
 	int status; /* stop loop when non-zero */
 	vmword_t pc; /* program counter */
 	vmword_t psp; /* program stack pointer */
-	vmword_t stack_bottom; /* end of the program stack */
+	vmword_t stack_bottom; /* end of the program stack */ // TODO: rename this
 	vmword_t stack[VM_STACK_SIZE] __attribute__ ((aligned (__BIGGEST_ALIGNMENT__))); /* op stack */
 	unsigned op_stack;
 	/* bootstrap and input parameters */
@@ -110,20 +115,72 @@ int vm_env_register(struct vm_env *env, int syscall_num, void (*sc)(struct vm *v
 	return 0;
 }
 
+static inline vmword_t dread4(struct vm *vm, vmword_t ofs);
+
+static void vm_enter(struct vm *vm, unsigned local_size)
+{
+	vm->psp -= local_size;
+	// TODO: check bounds
+}
+
+/* return 0 if returning normally, or 1 if from a syscall */
+static int vm_leave(struct vm *vm, unsigned local_size)
+{
+	vm->psp += local_size; /* remove the frame added by ENTER */
+	vmword_t psp = vm->psp;
+	vmword_t pc = dread4(vm, psp);
+	trace("LEAVE to %d (%#x) from %d (%#x)\n", pc, pc, vm->pc, vm->pc);
+	trace("LEAVE stack=%d\n", vm->op_stack);
+	assert(pc != 0xdeadbeef);
+	vm->pc = pc;
+	if ((int)pc == -1) {
+		info("%s:finished or returning to call\n", vm->vm_filename);
+		return 1;
+	}
+	return 0;
+}
+
 static void opush(struct vm *vm, vmword_t val);
 
 static int vm_env_call(const struct vm_env *env, int syscall_num, struct vm *vm)
 {
+	fprintf(stderr, "======== VM Call #%d : Start ========\n",
+		-1 - syscall_num);
+	debug("pc=%d (%#x) psp=%d (%#x)\n", vm->pc, vm->pc, vm->psp, vm->psp);
 	assert(syscall_num < 0);
 	unsigned ofs = -1 - syscall_num;
 	if (ofs >= env->nr_syscalls)
-		return -1;
+		goto out_error;
 	void (*sc)(struct vm *vm) = env->syscalls[ofs];
 	if (!sc) // TODO: catch this as an error
-		return -1;
+		goto out_error;
+	unsigned old_stack = vm->op_stack;
+	unsigned local_size = 0;
+	vm_enter(vm, local_size);
 	sc(vm); // TODO: check for errors
-	opush(vm, 0); // TODO: move this into the syscall and error check the stack
+	if (vm->status)
+		goto out_error;
+	if (vm->op_stack != old_stack + 1) {
+		trace("syscall did not leave correct amount of data on stack. old=%d new=%d\n",
+			old_stack, vm->op_stack);
+		vm->op_stack = old_stack;
+		opush(vm, 0);
+		// TODO: set an error flag instead of trying to fix it.
+	}
+#if 0
+	vm_leave(vm, local_size); /* I think it should be this */
+	// TODO: maybe we could do the equivalent of ENTER and use a local variable to old the real PC
+	// then restore that PC here.
+#else
+	vm_leave(vm, 0); // broken
+#endif
+	fprintf(stderr, "======== VM Call #%d : Success ========\n", ofs);
+	debug("pc=%d (%#x) psp=%d (%#x)\n", vm->pc, vm->pc, vm->psp, vm->psp);
 	return 0;
+out_error:
+	fprintf(stderr, "======== VM Call #%d : Error ========\n", ofs);
+	debug("pc=%d (%#x) psp=%d (%#x)\n", vm->pc, vm->pc, vm->psp, vm->psp);
+	return -1;
 }
 
 /* returns number of bytes an opcode will consume.
@@ -283,20 +340,26 @@ static size_t make_mask(size_t len)
 	return ret;
 }
 
-static inline int check_code_bounds(struct vm *vm, vmword_t ofs)
+static inline int _check_code_bounds(const char *func, unsigned line, struct vm *vm, vmword_t ofs)
 {
 	if (ofs & ~vm->code_mask) {
-		vm->status |= VM_ERROR_OUT_OF_BOUNDS;
+		error("%s():%d:ofs=%d (%#x)\n", func, line, ofs, ofs);
+		vm_error_set(vm, VM_ERROR_OUT_OF_BOUNDS);
 		return -1;
 	}
 
 	return 0;
 }
 
+#define check_code_bounds(vm, ofs) do { \
+	if (ofs & ~vm->code_mask) { \
+		vm_error_set(vm, VM_ERROR_OUT_OF_BOUNDS); \
+	} } while (0)
+
 static inline int check_data_bounds(struct vm *vm, vmword_t ofs)
 {
 	if (ofs & ~vm->heap_mask) {
-		vm->status |= VM_ERROR_OUT_OF_BOUNDS;
+		vm_error_set(vm, VM_ERROR_OUT_OF_BOUNDS);
 		return -1;
 	}
 
@@ -319,7 +382,7 @@ static void opush(struct vm *vm, vmword_t val)
 	if (vm->op_stack < ARRAY_SIZE(vm->stack))
 		vm->stack[vm->op_stack++] = val;
 	else
-		vm->status |= VM_ERROR_STACK_OVERFLOW;
+		vm_error_set(vm, VM_ERROR_STACK_OVERFLOW);
 }
 
 #if 0
@@ -333,7 +396,7 @@ static vmword_t opeek(struct vm *vm, int index)
 	if (ofs < vm->op_stack)
 		return vm->stack[ofs];
 
-	vm->status |= VM_ERROR_STACK_UNDERFLOW;
+	vm_error_set(vm, VM_ERROR_STACK_UNDERFLOW);
 	return 0xdeadbeef;
 }
 #endif
@@ -347,7 +410,7 @@ static vmword_t opop(struct vm *vm)
 		return val;
 	}
 
-	vm->status |= VM_ERROR_STACK_UNDERFLOW;
+	vm_error_set(vm, VM_ERROR_STACK_UNDERFLOW);
 	return 0xdeadbeef;
 }
 
@@ -357,7 +420,7 @@ static void opushf(struct vm *vm, vmsingle_t val)
 	if (vm->op_stack < ARRAY_SIZE(vm->stack))
 		vm->stack[vm->op_stack++] = *(vmword_t*) & val;
 	else
-		vm->status |= VM_ERROR_STACK_OVERFLOW;
+		vm_error_set(vm, VM_ERROR_STACK_OVERFLOW);
 }
 
 /* pop a value from the op stack */
@@ -366,7 +429,7 @@ static vmsingle_t opopf(struct vm *vm)
 	if (vm->op_stack)
 		return *(vmsingle_t*)(vm->stack + --vm->op_stack);
 
-	vm->status |= VM_ERROR_STACK_UNDERFLOW;
+	vm_error_set(vm, VM_ERROR_STACK_UNDERFLOW);
 	return NAN;
 }
 
@@ -378,7 +441,7 @@ static inline void dwrite4(struct vm *vm, vmword_t ofs, vmword_t val)
 		return;
 
 	if (ofs & 3) {
-		vm->status |= VM_ERROR_UNALIGNED;
+		vm_error_set(vm, VM_ERROR_UNALIGNED);
 		return;
 	}
 
@@ -393,7 +456,7 @@ static inline void dwrite2(struct vm *vm, vmword_t ofs, uint16_t val)
 		return;
 
 	if (ofs & 1) {
-		vm->status |= VM_ERROR_UNALIGNED;
+		vm_error_set(vm, VM_ERROR_UNALIGNED);
 		return;
 	}
 
@@ -410,17 +473,17 @@ static inline vmword_t dread4(struct vm *vm, vmword_t ofs)
 {
 	// TODO: use one function to check range
 	if (check_data_bounds(vm, ofs) || check_data_bounds(vm, ofs + 3)) {
-		vm->status |= VM_ERROR_OUT_OF_BOUNDS;
+		vm_error_set(vm, VM_ERROR_OUT_OF_BOUNDS);
 		return 0xdeadbeef;
 	}
 
 	if (ofs & 3) {
-		vm->status |= VM_ERROR_UNALIGNED;
+		vm_error_set(vm, VM_ERROR_UNALIGNED);
 		return 0xdeadbeef;
 	}
 
 	vmword_t val = vm->heap.words[ofs >> 2];
-	trace("%s:read %d (%#x) : %d\n", vm->vm_filename, ofs, ofs, val);
+//	trace("%s:read %d (%#x) : %d\n", vm->vm_filename, ofs, ofs, val);
 	return val;
 }
 
@@ -428,12 +491,12 @@ static inline uint16_t dread2(struct vm *vm, vmword_t ofs)
 {
 	// TODO: use one function to check range
 	if (check_data_bounds(vm, ofs) || check_data_bounds(vm, ofs + 1)) {
-		vm->status |= VM_ERROR_OUT_OF_BOUNDS;
+		vm_error_set(vm, VM_ERROR_OUT_OF_BOUNDS);
 		return 0xdead;
 	}
 
 	if (ofs & 1) {
-		vm->status |= VM_ERROR_UNALIGNED;
+		vm_error_set(vm, VM_ERROR_UNALIGNED);
 		return 0xbeef;
 	}
 
@@ -444,7 +507,7 @@ static inline uint8_t *dmemptr(struct vm *vm, vmword_t ofs, size_t len)
 {
 	if (check_data_bounds(vm, ofs) ||
 		(len > 0 && check_data_bounds(vm, ofs + len - 1))) {
-		vm->status |= VM_ERROR_OUT_OF_BOUNDS;
+		vm_error_set(vm, VM_ERROR_OUT_OF_BOUNDS);
 		error("%s:ofs=%#x len=%d\n", vm->vm_filename, ofs, (int)len);
 		return NULL;
 	}
@@ -454,7 +517,7 @@ static inline uint8_t *dmemptr(struct vm *vm, vmword_t ofs, size_t len)
 static inline uint8_t dread1(struct vm *vm, vmword_t ofs)
 {
 	if (check_data_bounds(vm, ofs)) {
-		vm->status |= VM_ERROR_OUT_OF_BOUNDS;
+		vm_error_set(vm, VM_ERROR_OUT_OF_BOUNDS);
 		return 0xde;
 	}
 
@@ -488,13 +551,14 @@ static void vm_stacktrace(const struct vm *vm)
 }
 #endif
 
-// TODO: limit number of cycles or amount of time for this slice
-void vm_run_slice(struct vm *vm)
+/* return 1 if finished (re-entrant), 0 if not finished, and -1 on error. */
+int vm_run_slice(struct vm *vm)
 {
 	vmword_t a; /* scratch area */
 	vmword_t b; /* scratch area */
 	vmsingle_t af; /* scratch area */
 	vmsingle_t bf; /* scratch area */
+	int e;
 
 	debug("code_mask=0x%08zx code_len=0x%08zx\n",
 	      vm->code_mask, vm->code_len);
@@ -504,7 +568,7 @@ void vm_run_slice(struct vm *vm)
 	assert(vm->code_mask == make_mask(vm->code_len));
 	assert(vm->heap_mask == make_mask(vm->heap_len));
 
-	while (!vm->status && !check_code_bounds(vm, vm->pc)) {
+	while (!vm->status && !_check_code_bounds(__func__, __LINE__, vm, vm->pc)) {
 		struct vm_op *op = &vm->code[vm->pc++];
 		{ /* debug only */
 			vmword_t top = ~0;
@@ -528,33 +592,12 @@ void vm_run_slice(struct vm *vm)
 			break;
 		case 0x03: /* ENTER - increase program stack by amount */
 			vm->psp -= op->param;
-			// TODO: this is interesting, it skips 2 stack frames: vm->psp -= op->param - 4;
 			break;
 		case 0x04: /* LEAVE - shrink program stack by amount */
-			vm->psp += op->param; /* remove the frame added by ENTER */
-			/*
-			trace("LEAVE:psp=%d %d %d %d %d %d %d %d %d %d\n",
-				dread4(vm, vm->psp + 0),
-				dread4(vm, vm->psp + 4),
-				dread4(vm, vm->psp + 8),
-				dread4(vm, vm->psp + 12),
-				dread4(vm, vm->psp + 16),
-				dread4(vm, vm->psp + 20),
-				dread4(vm, vm->psp + 24),
-				dread4(vm, vm->psp + 28),
-				dread4(vm, vm->psp + 32),
-				dread4(vm, vm->psp + 36)
-				);
-			*/
-			b = vm->psp ;
-			a = dread4(vm, b);
-
-			if ((int)a == -1)
-				vm->status = VM_STATUS_FINISHED;
-
-			// TODO: handle other negative values for reentrant vm_call
-			trace("LEAVE to %d (%#x) from %d (%#x)\n", a, a, vm->pc, vm->pc);
-			vm->pc = a;
+			if (vm_leave(vm, op->param)) {
+				e = 1; /* finished - results on stack */
+				goto out;
+			}
 			break;
 		case 0x05: /* CALL */
 			dwrite4(vm, vm->psp + 4, vm->psp); /* save the old SP */
@@ -564,18 +607,20 @@ void vm_run_slice(struct vm *vm)
 			if ((int32_t)a < 0) {
 				vmword_t old_pc = vm->pc;
 				// TODO: the original would store as byte offset, not instruction index
-				dwrite4(vm, vm->psp + 4, -1 - vm->pc); /* save the old PC */
+				// dwrite4(vm, vm->psp + 4, -1 - vm->pc); /* save the old PC */
 				// TODO: do system call if program counter is negative
 				vm->pc = 0xdeadbeef; /* system call better clean this up */
 				if (vm->env) {
 					if (vm_env_call(vm->env, a, vm))
-						vm->status |= VM_ERROR_BAD_SYSCALL;
+						vm_error_set(vm, VM_ERROR_BAD_SYSCALL);
 				} else {
 					// TODO: catch this as an error
 					error("%s:environment not set during system call (pc=%#x call=%d)\n",
 						vm->vm_filename, old_pc, (int)a);
-					vm->status |= VM_ERROR_BAD_ENVIRONMENT;
+					vm_error_set(vm, VM_ERROR_BAD_ENVIRONMENT);
 				}
+				info("**** %s:restoring PC(%#x) to %#x\n",
+					vm->vm_filename, vm->pc, old_pc);
 				vm->pc = old_pc;
 			} else {
 				vm->pc = a;
@@ -803,7 +848,7 @@ void vm_run_slice(struct vm *vm)
 			if (a) // TODO: check for INT_MIN / -1
 				opush(vm, (int)b / (int)a);
 			else
-				vm->status |= VM_ERROR_MATH_ERROR;
+				vm_error_set(vm, VM_ERROR_MATH_ERROR);
 
 			break;
 		case 0x29: /* DIVU */
@@ -813,7 +858,7 @@ void vm_run_slice(struct vm *vm)
 			if (a)
 				opush(vm, b / a);
 			else
-				vm->status |= VM_ERROR_MATH_ERROR;
+				vm_error_set(vm, VM_ERROR_MATH_ERROR);
 
 			break;
 		case 0x2a: /* MODI */
@@ -823,7 +868,7 @@ void vm_run_slice(struct vm *vm)
 			if (a) // TODO: check for INT_MIN / -1
 				opush(vm, (int)b % (int)a);
 			else
-				vm->status |= VM_ERROR_MATH_ERROR;
+				vm_error_set(vm, VM_ERROR_MATH_ERROR);
 
 			break;
 		case 0x2b: /* MODU */
@@ -833,7 +878,7 @@ void vm_run_slice(struct vm *vm)
 			if (a)
 				opush(vm, b % a);
 			else
-				vm->status |= VM_ERROR_MATH_ERROR;
+				vm_error_set(vm, VM_ERROR_MATH_ERROR);
 
 			break;
 		case 0x2c: /* MULI */
@@ -914,49 +959,82 @@ void vm_run_slice(struct vm *vm)
 			opush(vm, a);
 			break;
 		default:
-			vm->status |= VM_ERROR_INVALID_OPCODE;
+			vm_error_set(vm, VM_ERROR_INVALID_OPCODE);
 		}
 	}
 
 // finished: // TODO: LEAVE -1 could jump here instead of using flags
-	if ((vm->status & ~VM_STATUS_FINISHED))
+	if (vm->status)
 		error("%s:error 0x%x (pc=0x%x)\n", vm->vm_filename, vm->status, vm->pc);
-	else if (vm->status == VM_STATUS_FINISHED)
-		info("%s:finished!\n", vm->vm_filename);
-	else {
+	else
 		info("%s:not finished!\n", vm->vm_filename);
-		vm->status |= VM_ERROR_UNFINISHED;
+	e = vm->status ? -1 : 0;
+out:
+	trace("%s:run slice e=%d status=%#x\n", vm->vm_filename, e, vm->status);
+	/* dump some of the stack on error */
+	if (e < 0) {
+		error("%s:pstack trace:\n", vm->vm_filename);
+		debug("pc=%d (%#x) psp=%d (%#x) bottom=%#x op_stk=%d\n",
+		      vm->pc, vm->pc, vm->psp, vm->psp, vm->stack_bottom, vm->op_stack);
+		if (vm->pc >= vm->stack_bottom) {
+			warn("PC is in stack region!\n");
+		}
+		int i;
+		for (i = -16; i < 24; i += 4) {
+			vmword_t a = dread4(vm, vm->psp + i);
+			fprintf(stderr, "psp%+-4d: %d (%#x)\n",
+				i, (int)a, (unsigned)a);
+		}
 	}
-
-	free(vm->heap.bytes);
-	vm->heap.bytes = NULL;
+	return e;
 }
 
-void vm_call(struct vm *vm, unsigned nr_args, ...)
+static inline void arg_write(struct vm *vm, int i, vmword_t val)
 {
-	va_list ap;
-	assert(vm != NULL);
-	unsigned i;
+	dwrite4(vm, vm->psp + 8 + (i * 4), val);
+}
 
-	va_start(ap, nr_args);
-	// TODO: find entry point
-	vm->pc = 0;
+static void prepare_call(struct vm *vm, vmword_t entry, unsigned nr_args)
+{
+	assert(vm != NULL);
+	// TODO: turn this into a syscall if entry address is negative
+	vm->pc = entry;
 	/* make space for args and return */
-	vmword_t old_psp = vm->psp;
+	vmword_t old_psp = vm->psp - 8;
 	vm->psp -= 8 + (4 * nr_args);
 	check_stack_bounds(vm);
 	/* store return address and old stack */
 	dwrite4(vm, vm->psp, -1);
 	dwrite4(vm, vm->psp + 4, old_psp);
+}
 
+void vm_call(struct vm *vm, vmword_t entry, unsigned nr_args, ...)
+{
+	va_list ap;
+	unsigned i;
+
+	prepare_call(vm, entry, nr_args);
+	va_start(ap, nr_args);
 	/* store args */
 	for (i = 0; i < nr_args; i++) {
 		vmword_t val = va_arg(ap, vmword_t);
-		dwrite4(vm, vm->psp + 8 + (i * 4), val);
+		arg_write(vm, i, val);
 	}
-
-	// TODO: optionally vm_run() until complete and return result
 	va_end(ap);
+	// TODO: optionally vm_run() until complete and return result
+}
+
+void vm_call_array(struct vm *vm, vmword_t entry, unsigned nr_args, const vmword_t args[])
+{
+	unsigned i;
+
+	assert(vm != NULL);
+	assert(args != NULL);
+	prepare_call(vm, entry, nr_args);
+	/* store args */
+	for (i = 0; i < nr_args; i++)
+		arg_write(vm, i, args[i]);
+	// TODO: optionally vm_run() until complete and return result
 }
 
 static inline unsigned roundup_pow2(unsigned n)
@@ -1199,19 +1277,30 @@ const char *vm_filename(const struct vm *vm)
 	return vm ? vm->vm_filename : NULL;
 }
 
-vmword_t vm_opop(struct vm *vm)
+vmword_t vm_pop(struct vm *vm)
 {
 	return opop(vm);
 }
 
-vmsingle_t vm_opopf(struct vm *vm)
+vmsingle_t vm_popf(struct vm *vm)
 {
 	return opopf(vm);
+}
+
+void vm_push(struct vm *vm, vmword_t n)
+{
+	opush(vm, n);
+}
+
+void vm_pushf(struct vm *vm, vmsingle_t f)
+{
+	opushf(vm, f);
 }
 
 /* return arg on the current call frame */
 vmword_t vm_arg(struct vm *vm, int num)
 {
+	// TODO: num += 0 / 4; // use local_size to adjust
 	vmword_t arg = dread4(vm, vm->psp + 8 + (num * 4));
 	trace("%s:arg[%d]=%#x\n", vm->vm_filename, num, arg);
 	return arg;
@@ -1232,7 +1321,7 @@ char *vm_string(struct vm *vm, vmword_t addr, size_t *len)
 	if (!e) {
 		// TODO: print some useful diagnostic message. pc=%#x syscall=%d
 		error("%s:string not null terminated:addr=%#x\n", vm->vm_filename, addr);
-		vm->status |= VM_ERROR_OUT_OF_BOUNDS;
+		vm_error_set(vm, VM_ERROR_OUT_OF_BOUNDS);
 		return NULL;
 	}
 	if (len)
@@ -1244,7 +1333,7 @@ char *vm_string(struct vm *vm, vmword_t addr, size_t *len)
 /* terminates the current VM */
 void vm_abort(struct vm *vm)
 {
-	vm->status |= VM_STATUS_ABORT;
+	vm_error_set(vm, VM_ERROR_ABORT);
 	info("%s:ABORTED!\n", vm->vm_filename);
 	// TODO: print pc=%#x and syscall=%d
 }
