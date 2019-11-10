@@ -1,7 +1,7 @@
 /* stackvm.c - small demonstration language */
 /* PUBLIC DOMAIN - Jon Mayo
  * original: June 23, 2011
- * updated: July 11, 2014 */
+ * updated: November 10, 2019 */
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
