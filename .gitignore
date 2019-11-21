@@ -2,5 +2,12 @@
 gmon.out
 .*.swp
 junk*/
+
 *.o
-*.d
+*.a
+*.so
+*.dll
+*.lib
+*.exe
+
+*.makedep
