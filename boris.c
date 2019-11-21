@@ -377,7 +377,7 @@
 #  define DEBUG(msg, ...) fprintf(stderr, "DEBUG:%s():%d:" msg, __func__, __LINE__, ## __VA_ARGS__);
 
 /** DEBUG_MSG prints a string and newline to stderr if NDEBUG is not defined. */
-#  define DEBUG_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
+#  define DEBUG_MSG(msg) fprintf(stderr, "DEBUG:%s():%d:" msg "\n", __func__, __LINE__);
 
 /** HEXDUMP() outputs a message and block of hexdump data to stderr if NDEBUG is not defined. */
 #  define HEXDUMP(data, len, ...) do { fprintf(stderr, __VA_ARGS__); util_hexdump(stderr, data, len); } while(0)
@@ -759,6 +759,7 @@ EXPORT int util_fnmatch(const char *pattern, const char *string, int flags) {
 			break;
 		case '[': case ']': case '\\':
 			TODO("support [] and \\");
+			/* fall through */
 		default:
 			if((flags&UTIL_FNM_CASEFOLD) ? tolower(*string++)!=tolower(c) : *string++!=c) return UTIL_FNM_NOMATCH;
 	}
@@ -4551,8 +4552,10 @@ EXPORT int socketio_dispatch(long msec) {
 			assert((unsigned)fd < socketio_fdset_sz);
 			FD_CLR(fd, socketio_writefds);
 			DEBUG("Write-ready %s\n", curr->name);
+			if(curr->delete_flag) {
+				/* ignore soon-to-be closed socket */
+			} if(curr->write_event) {
 			/* perform the write handler */
-			if(curr->write_event) {
 				curr->write_event(curr, fd, curr->extra);
 			}
 			nr--;
@@ -4564,8 +4567,11 @@ EXPORT int socketio_dispatch(long msec) {
 			assert((unsigned)fd < socketio_fdset_sz);
 			FD_CLR(fd, socketio_readfds);
 			DEBUG("Read-ready %s\n", curr->name);
-			/* perform the read handler */
-			if(curr->read_event) {
+
+			if(curr->delete_flag) {
+				/* ignore soon-to-be closed socket */
+			} else if(curr->read_event) {
+				/* perform the read handler */
 				curr->read_event(curr, fd, curr->extra);
 			}
 			nr--;
@@ -5238,6 +5244,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p) {
 			return 0; /* unterminated IAC SB sequence */
 		case SE:
 			ERROR_MSG("found IAC SE without IAC SB, ignoring it.");
+			/* fall through */
 		default:
 			if(len>=3)
 				return 2; /* treat anything we don't know about as a 2-byte operation */
@@ -5747,7 +5754,7 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 	while(*arg && isspace(*arg)) arg++; /* ignore leading spaces */
 	assert(e >= line);
 	if((unsigned)(e-line)>sizeof cmd-1) { /* first word is too long */
-		DEBUG("Command length %d is too long, truncating\n", e-line);
+		DEBUG("Command length %td is too long, truncating\n", e-line);
 		e=line+sizeof cmd-1;
 	}
 	memcpy(cmd, line, (unsigned)(e-line));
@@ -6429,6 +6436,107 @@ EXPORT int game_init(void) {
 }
 
 /******************************************************************************
+ * Http parser
+ ******************************************************************************/
+
+/* return 0 if more data is needed. return -1 on error. */
+static int http_parse(const char *request, size_t len) {
+	const char *s, *end;
+
+	s=request;
+	end=request+len-1;
+
+	/* method */
+	if(s > end)
+		return 0;
+	if (!isalpha(*s))
+		return -1; /* improperly formed */
+	for(;isalpha(*s);s++) {
+		if(s > end)
+			return 0;
+	}
+	DEBUG_MSG("HTTP Request: METHOD - TODO");
+	/* a single space */
+	if(s > end)
+		return 0;
+	if(*s != ' ')
+		return -1; /* improperly formed */
+	s++;
+	/* URI */
+	if(s > end)
+		return 0;
+	/* accept any non-whitespace into the URI */
+	if (isspace(*s))
+		return -1; /* improperly formed */
+	for(;!isspace(*s);s++) {
+		if(s > end)
+			return 0;
+	}
+	DEBUG_MSG("HTTP Request: URI - TODO");
+	/* a single space */
+	if(s > end)
+		return 0;
+	if(*s != ' ')
+		return -1; /* improperly formed */
+	s++;
+	/* http version */
+	if(s > end)
+		return 0;
+	/** @todo check for exactly: HTTP/1.1 */
+	if (isspace(*s))
+		return -1; /* improperly formed */
+	for(;!isspace(*s);s++) {
+		if(s > end)
+			return 0;
+	}
+	/* CRLF */
+	if(s > end)
+		return 0;
+	if(*s != '\r')
+		return -1; /* improperly formed */
+	s++;
+	if(s > end)
+		return 0;
+	if(*s != '\n')
+		return -1; /* improperly formed */
+	s++;
+	DEBUG_MSG("HTTP Request - end of method line");
+	/* message headers ... */
+	while(s <= end) {
+		/* terminated by line beginning with CRLF */
+		if (*s == '\r') {
+			s++;
+			if(s > end)
+				return 0;
+			if(*s != '\n')
+				return -1; /* improperly formed */
+			DEBUG_MSG("HTTP request Success!");
+			return 1; /* success! */
+		}
+		/* header field */
+		if(s > end)
+			return 0;
+		/** @todo don't silently ignore the headers. */
+		for(;*s != '\r';s++) {
+			if(s > end)
+				return 0; /* short */
+		}
+		s++;
+		if(s > end)
+			return 0; /* short */
+		if(*s == '\n') {
+			s++;
+			/** @todo do something with this header field */
+			DEBUG_MSG("HTTP Header field: TODO");
+		} else {
+			return -1; /* improperly formed */
+		}
+	}
+
+	return 0;
+}
+
+/******************************************************************************
  * Webserver
  ******************************************************************************/
 
@@ -6458,6 +6566,9 @@ struct webserver {
 	 * put the refcounts to expire the cache entry.
 	 *
 	 */
+	unsigned state;
+	unsigned write_pos, read_pos;
+	char request[8192];
 };
 
 /**
@@ -6497,18 +6608,37 @@ static void webserver_read_event(struct socketio_handle *sh, SOCKET fd, void *ex
 	}
 
 	/** @todo implement something to parse the input. use an HTTP parser state machine. */
+	if(ws->state == 0) { /* 0 = parsing request */
+		if(ws->read_pos + res > sizeof(ws->request)) {
+			webserver_close(ws);
+			return;
+		}
+		memcpy(ws->request + ws->read_pos, data, res);
+		ws->read_pos += res;
 
-	eventlog_webserver_get(sh->name, "/"); /**< @todo log the right URI. */
+		int http_result = http_parse(ws->request, ws->read_pos);
+		if(http_result < 0) {
+			ERROR_MSG("WARNING: bad HTTP request header");
+			webserver_close(ws);
+			return;
+		} else if(http_result > 0) {
+			/* pretend we have read in a useful request and also pretened we have
+			 * pushed some data into a buffer to deliever.
+			 */
 
-	/* pretend we have read in a useful request and also pretened we have
-	 * pushed some data into a buffer to deliever.
-	 */
+			eventlog_webserver_get(sh->name, "/"); /**< @todo log the right URI. */
 
-	/* go into write mode to send our message. */
-	socketio_writeready(fd);
+			/** @todo made up some non-zero number to get webserver_write_event() to work. */
+			ws->state = 2;
+			/* go into write mode to send our message. */
+			socketio_writeready(fd);
+		}
+	}
 
-	/* keep sucking down data. */
-	socketio_readready(fd);
+	if(!ws->state) {
+		/* keep sucking down data. */
+		socketio_readready(fd);
+	}
 }
 
 /**
@@ -6519,29 +6649,42 @@ static void webserver_write_event(struct socketio_handle *sh, SOCKET fd, void *e
 	int res;
 	const char data[]=
 		"HTTP/1.1 200 OK\r\n"
+		"Server: " __FILE__ "\r\n"
 		"Connection: close\r\n"
 		"Content-Type: text/plain\r\n"
 		"\r\n"
 		"Hello World. This is my webserver!\r\n";
+	size_t data_len = strlen(data);
 
 	assert(sh != NULL);
 	assert(ws != NULL);
 	assert(fd != INVALID_SOCKET);
 	assert(!sh->delete_flag);
+	assert(ws->write_pos <= data_len);
 
-	res=socketio_send(fd, data, strlen(data));
+	res=socketio_send(fd, data + ws->write_pos, data_len - ws->write_pos);
 	if(res<0) {
 		sh->delete_flag=1;
 		return; /* client write failure */
 	}
 
+	/* update the position in our output buffer (data[]) */
+	ws->write_pos += res;
+
 	/**
-	 * @todo check if res<len. the buffer wasn't completely transfered then set the socket
-	 * as write-ready.
-	 * socketio_writeready(sh->fd);
+	 * check if res<len. the buffer wasn't completely transfered then set the socket
+	 * as write-ready, else close the completed connection.
 	 */
 
-	webserver_close(ws);
+	if (ws->write_pos < data_len) {
+		socketio_writeready(sh->fd);
+	} else if (ws->write_pos == data_len) {
+		/*
+		ws->write_pos = 0;
+		ws->state = 0;
+		*/
+		webserver_close(ws);
+	}
 }
 
 /**
@@ -7040,6 +7183,7 @@ static int process_flag(int ch, const char *next_arg) {
 			return 0;
 		default:
 			ERROR_FMT("Unknown option -%c\n", ch);
+			/* fall through */
 		case 'h':
 			usage();
 	}

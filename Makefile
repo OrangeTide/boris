@@ -35,7 +35,7 @@ MODULES:=\
 # boris
 EXEC_boris:=boris
 LDLIBS_boris:=-ldl -rdynamic
-CPPFLAGS_boris:=-D_BSD_SOURCE
+CPPFLAGS_boris:=-D_DEFAULT_SOURCE
 CFLAGS_boris:=-pedantic -std=gnu99
 SRCS_boris:=boris.c
 OBJS_boris:=$(SRCS_boris:.c=.o)
