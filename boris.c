@@ -2454,6 +2454,7 @@ static struct freelist user_id_freelist;
 
 /*=* user:prototypes. *=*/
 
+EXPORT int user_illegal(const char *username);
 EXPORT int user_exists(const char *username);
 
 /*=* user:internal functions *=*/
@@ -2517,6 +2518,8 @@ static int user_ll_add(struct user *u) {
 	}
 
 	ent=calloc(1, sizeof *ent);
+	if(!ent)
+		return 0; /**< failure. */
 	ent->u=u;
 	LIST_INSERT_HEAD(&user_list, ent, list);
 	return 1; /**< success. */
@@ -2614,7 +2617,7 @@ static int user_write(const struct user *u) {
 		fdb.write_pair(h, curr->name, curr->value);
 	}
 
-	if(fdb.write_end(h)) {
+	if(!fdb.write_end(h)) {
 		ERROR_FMT("Could not write user \"%s\"\n", u->username);
 		return 0; /* failure. */
 	}
@@ -2624,9 +2627,32 @@ static int user_write(const struct user *u) {
 
 /*=* user:external functions *=*/
 
+/** test to see if a username is illegal.
+ * username must start with a letter. Remaining character can only be letters,
+ * numbers, and _ */
+EXPORT int user_illegal(const char *username) {
+	const char *s;
+
+	if(!username || !*username)
+		return 1; // illegal username
+
+	s = username;
+	if(!isalpha(*s))
+		return 1; // illegal username
+	while(*++s) {
+		if(!isalnum(*s) && *s != '_')
+			return 1; // illegal username
+	}
+
+	return 0; // OK - it's good
+}
+
 /** test to see if a user exists. */
 EXPORT int user_exists(const char *username) {
 	struct userdb_entry *curr;
+
+	if(user_illegal(username))
+		return 0; /**< illegal users never exist */
 
 	for(curr=LIST_TOP(user_list);curr;curr=LIST_NEXT(curr, list)) {
 		const struct user *u=curr->u;
@@ -2675,10 +2701,13 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 	long id;
 	char password_crypt[SHA1PASSWD_MAX];
 
-	if(!username) {
-		ERROR_MSG("Username was NULL");
+	if(!username || !*username) {
+		ERROR_MSG("Username was NULL or empty");
 		return NULL; /* failure */
 	}
+
+	if(user_illegal(username))
+		return NULL; /**< illegal users never exist */
 
 	if(user_exists(username)) {
 		ERROR_FMT("Username '%s' already exists.\n", username);
@@ -5493,7 +5522,7 @@ static int http_parse(const char *request, size_t len) {
 	/* method */
 	if(s > end)
 		return 0;
-	if (!isalpha(*s))
+	if(!isalpha(*s))
 		return -1; /* improperly formed */
 	for(;isalpha(*s);s++) {
 		if(s > end)
@@ -5510,7 +5539,7 @@ static int http_parse(const char *request, size_t len) {
 	if(s > end)
 		return 0;
 	/* accept any non-whitespace into the URI */
-	if (isspace(*s))
+	if(isspace(*s))
 		return -1; /* improperly formed */
 	for(;!isspace(*s);s++) {
 		if(s > end)
@@ -5527,7 +5556,7 @@ static int http_parse(const char *request, size_t len) {
 	if(s > end)
 		return 0;
 	/** @todo check for exactly: HTTP/1.1 */
-	if (isspace(*s))
+	if(isspace(*s))
 		return -1; /* improperly formed */
 	for(;!isspace(*s);s++) {
 		if(s > end)
@@ -5548,7 +5577,7 @@ static int http_parse(const char *request, size_t len) {
 	/* message headers ... */
 	while(s <= end) {
 		/* terminated by line beginning with CRLF */
-		if (*s == '\r') {
+		if(*s == '\r') {
 			s++;
 			if(s > end)
 				return 0;
@@ -5720,9 +5749,9 @@ static void webserver_write_event(struct socketio_handle *sh, SOCKET fd, void *e
 	 * as write-ready, else close the completed connection.
 	 */
 
-	if (ws->write_pos < data_len) {
+	if(ws->write_pos < data_len) {
 		socketio_writeready(sh->fd);
-	} else if (ws->write_pos == data_len) {
+	} else if(ws->write_pos == data_len) {
 		/*
 		ws->write_pos = 0;
 		ws->state = 0;
