@@ -1,3 +1,23 @@
+/**
+ * @file sha1.h
+ *
+ * SHA-1 hashing routines.
+ * see RFC3174 for the SHA-1 algorithm.
+ *
+ * @author Jon Mayo <jon.mayo@gmail.com>
+ * @date 2019 Nov 21
+ *
+ * Written in 2009 by Jon Mayo <jon.mayo@gmail.com>
+ *
+ * To the extent possible under law, the author(s) have dedicated all copyright
+ * and related and neighboring rights to this software to the public domain
+ * worldwide.  This software is distributed without any warranty.
+ *
+ * You should have received a copy of the CC0 Public Domain Dedication along with
+ * this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
+ */
+#ifndef SHA1_H_
+#define SHA1_H_
 #include <stdint.h>
 
 /**
@@ -21,8 +41,8 @@ struct sha1_ctx {
 	unsigned data_len; /**< number of bytes used in data. (not the number of words/elements) */
 };
 
-/* sha1.c */
 int sha1_init(struct sha1_ctx *ctx);
 int sha1_update(struct sha1_ctx *ctx, const void *data, size_t len);
 int sha1_final(unsigned char *md, struct sha1_ctx *ctx);
 unsigned char *sha1(const void *data, size_t len, unsigned char *md);
+#endif

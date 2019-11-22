@@ -2,17 +2,19 @@
  * @file example.c
  *
  * A example of a plugin that does nothing. It can be used as a template for
- * new plugins.
+ * new plugins. You may remove the notices and replace them with your own.
  *
  * @author Your Name <your@email>
  * @date 2009 Dec 27
  *
- * This file is PUBLIC DOMAIN. No copyright is claimed.
+ * Written in 2009 by Jon Mayo <jon.mayo@gmail.com>
  *
- * NOTICE:
- * Because this is a template to be reused by others, it is PUBLIC DOMAIN.
- * Modified versions of this file may be copyrighted, and as such this notice
- * should be removed.
+ * To the extent possible under law, the author(s) have dedicated all copyright
+ * and related and neighboring rights to this software to the public domain
+ * worldwide.  This software is distributed without any warranty.
+ *
+ * You should have received a copy of the CC0 Public Domain Dedication along with
+ * this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
  */
 #include <stdlib.h>
 #include "boris.h"
