@@ -11,3 +11,5 @@ junk*/
 *.exe
 
 *.makedep
+
+data/users/
