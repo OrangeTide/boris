@@ -417,8 +417,6 @@ static int fdb_write_end(struct fdb_write_handle *h)
 	}
 
 	if(h->error_fl) {
-		free(filename);
-
 		/* remove the temp file. */
 		if(!remove(h->filename_tmp)) {
 			perror(h->filename_tmp);
