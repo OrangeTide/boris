@@ -35,12 +35,14 @@ extern const struct plugin_example_class plugin_class;
 /******************************************************************************
  * Functions
  ******************************************************************************/
-static int initialize(void) {
+static int initialize(void)
+{
 	b_log(B_LOG_INFO, "example", "Example plugin loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	return 1;
 }
 
-static int shutdown(void) {
+static int shutdown(void)
+{
 	b_log(B_LOG_INFO, "example", "Example plugin shutting down...");
 	b_log(B_LOG_INFO, "example", "Example plugin ended.");
 	return 1;

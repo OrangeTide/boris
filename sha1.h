@@ -35,8 +35,8 @@
  */
 struct sha1_ctx {
 	uint_least32_t
-		h[5], /**< five hash state values for 160-bits. */
-		data[SHA1_LBLOCK]; /**< load data into chunks here. */
+	h[5], /**< five hash state values for 160-bits. */
+	data[SHA1_LBLOCK]; /**< load data into chunks here. */
 	uint_least64_t cnt; /**< total so far in bits. */
 	unsigned data_len; /**< number of bytes used in data. (not the number of words/elements) */
 };
