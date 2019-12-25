@@ -51,6 +51,6 @@ struct config {
 
 void config_setup(struct config *cfg);
 void config_free(struct config *cfg);
-void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg,void *extra,const char *id,const char *value ), void *extra);
+void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value ), void *extra);
 int config_load(const char *filename, struct config *cfg);
 #endif

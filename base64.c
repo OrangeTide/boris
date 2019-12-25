@@ -23,45 +23,57 @@
 #include "boris.h"
 #include "debug.h"
 
-static const uint8_t base64enc_tab[64]= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const uint8_t base64enc_tab[64] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 static uint8_t *base64dec_tab; /* initialized by base64_decode. */
 
 /**
  * base64_encodes as ./0123456789a-zA-Z.
  *
  */
-int base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
+int base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out)
+{
 	unsigned ii, io;
 	uint_least32_t v;
 	unsigned rem;
 
-	for(io=0,ii=0,v=0,rem=0;ii<in_len;ii++) {
+	for(io = 0, ii = 0, v = 0, rem = 0; ii < in_len; ii++) {
 		unsigned char ch;
-		ch=in[ii];
-		v=(v<<8)|ch;
-		rem+=8;
-		while(rem>=6) {
-			rem-=6;
-			if(io>=out_len) return -1; /* truncation is failure */
-			out[io++]=base64enc_tab[(v>>rem)&63];
+		ch = in[ii];
+		v = (v << 8) | ch;
+		rem += 8;
+
+		while(rem >= 6) {
+			rem -= 6;
+
+			if(io >= out_len) return -1; /* truncation is failure */
+
+			out[io++] = base64enc_tab[(v >> rem) & 63];
 		}
 	}
+
 	if(rem) {
-		v<<=(6-rem);
-		if(io>=out_len) return -1; /* truncation is failure */
-		out[io++]=base64enc_tab[v&63];
+		v <<= (6 - rem);
+
+		if(io >= out_len) return -1; /* truncation is failure */
+
+		out[io++] = base64enc_tab[v & 63];
 	}
-	while(io&3) {
-		if(io>=out_len) return -1; /* truncation is failure */
-		out[io++]='=';
+
+	while(io & 3) {
+		if(io >= out_len) return -1; /* truncation is failure */
+
+		out[io++] = '=';
 	}
-	if(io>=out_len) return -1; /* no room for null terminator */
-	out[io]=0;
+
+	if(io >= out_len) return -1; /* no room for null terminator */
+
+	out[io] = 0;
 	return io;
 }
 
 /* decode a base64 string in one shot */
-int base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out) {
+int base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out)
+{
 	unsigned ii, io;
 	uint_least32_t v;
 	unsigned rem;
@@ -69,36 +81,50 @@ int base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *
 	/* initialize base64dec_tab if not initialized. */
 	if(!base64dec_tab) {
 		unsigned i;
-		base64dec_tab=malloc(256);
+		base64dec_tab = malloc(256);
+
 		if(!base64dec_tab) {
 			PERROR("malloc()");
 			return 0;
 		}
+
 		memset(base64dec_tab, 255, 256); /**< use 255 indicates a bad value. */
 
-		for(i=0;i<NR(base64enc_tab);i++) {
-			base64dec_tab[base64enc_tab[i]]=i;
+		for(i = 0; i < NR(base64enc_tab); i++) {
+			base64dec_tab[base64enc_tab[i]] = i;
 		}
 	}
 
-	for(io=0,ii=0,v=0,rem=0;ii<in_len;ii++) {
+	for(io = 0, ii = 0, v = 0, rem = 0; ii < in_len; ii++) {
 		unsigned char ch;
+
 		if(isspace(in[ii])) continue;
-		if(in[ii]=='=') break; /* stop at = */
-		ch=base64dec_tab[(unsigned)in[ii]];
-		if(ch==255) break; /* stop at a parse error */
-		v=(v<<6)|ch;
-		rem+=6;
-		if(rem>=8) {
-			rem-=8;
-			if(io>=out_len) return -1; /* truncation is failure */
-			out[io++]=(v>>rem)&255;
+
+		if(in[ii] == '=') break; /* stop at = */
+
+		ch = base64dec_tab[(unsigned)in[ii]];
+
+		if(ch == 255) break; /* stop at a parse error */
+
+		v = (v << 6) | ch;
+		rem += 6;
+
+		if(rem >= 8) {
+			rem -= 8;
+
+			if(io >= out_len) return -1; /* truncation is failure */
+
+			out[io++] = (v >> rem) & 255;
 		}
 	}
-	if(rem>=8) {
-		rem-=8;
-		if(io>=out_len) return -1; /* truncation is failure */
-		out[io++]=(v>>rem)&255;
+
+	if(rem >= 8) {
+		rem -= 8;
+
+		if(io >= out_len) return -1; /* truncation is failure */
+
+		out[io++] = (v >> rem) & 255;
 	}
+
 	return io;
 }
