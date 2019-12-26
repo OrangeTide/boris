@@ -1,0 +1,37 @@
+#!/bin/sh
+set -e
+TAREXT=bz2
+DS="$(date +%Y%m%d)"
+VER="$(awk '/@version/ { print $3 }' *.c)"
+if [ -z "$VER" ]; then
+  BN="$(basename "$(pwd)")-$DS"
+  TARFILE="$BN.tar.$TAREXT"
+else
+  BN="$(basename "$(pwd)")-$VER"
+  TARFILE="$BN-$DS.tar.$TAREXT"
+fi
+
+case "$TAREXT" in
+	gz)
+		COMPRESSCMD="gzip -c"
+		;;
+	bz2)
+		COMPRESSCMD="bzip2 -z9"
+		;;
+	xz)
+		COMPRESSCMD="xz -z"
+		;;
+	*)
+		echo "Unknown output format $TAREXT" >&2
+		exit 1
+		;;
+esac
+git archive --format=tar --prefix="$BN"/ HEAD | $COMPRESSCMD >"$TARFILE"
+
+echo "Filename: $TARFILE"
+if [ -n "$VER" ]; then
+  echo "Version: $VER"
+fi
+
+SIZE="$(stat -c '%s' "$TARFILE")"
+echo "Size: $SIZE"
