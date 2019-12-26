@@ -5,7 +5,7 @@
  * see RFC3174 for the SHA-1 algorithm.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Nov 21
+ * @date 2019 Dec 25
  *
  * Written in 2009 by Jon Mayo <jon.mayo@gmail.com>
  *
@@ -45,7 +45,8 @@
  */
 int sha1_init(struct sha1_ctx *ctx)
 {
-	if(!ctx) return 0; /* failure */
+	if (!ctx)
+		return 0; /* failure */
 
 	/* initialize h state. */
 	ctx->h[0] = 0x67452301lu;
@@ -74,14 +75,14 @@ static void sha1_transform_chunk(struct sha1_ctx *ctx)
 	assert(ctx != NULL);
 
 	/* load a, b, c, d, e with the current hash state. */
-	for(i = 0; i < 5; i++) {
+	for (i = 0; i < 5; i++) {
 		v[i] = ctx->h[i];
 	}
 
-	for(i = 0; i < 80; i++) {
+	for (i = 0; i < 80; i++) {
 		unsigned t = i & 15;
 
-		if(i < 16) {
+		if (i < 16) {
 			/* load 16 words of data into w[]. */
 			w[i] = ctx->data[i];
 		} else {
@@ -90,13 +91,13 @@ static void sha1_transform_chunk(struct sha1_ctx *ctx)
 			w[t] = ROL32(w[t], 1); /* left rotate 1. */
 		}
 
-		if(i < 20) {
+		if (i < 20) {
 			f = (v[1] & v[2]) | (~v[1] & v[3]);
 			k = SHA1_K0;
-		} else if(i < 40) {
+		} else if (i < 40) {
 			f = v[1] ^ v[2] ^ v[3];
 			k = SHA1_K1;
-		} else if(i < 60) {
+		} else if (i < 60) {
 			f = (v[1] & v[2]) | (v[1] & v[3]) | (v[2] & v[3]);
 			k = SHA1_K2;
 		} else {
@@ -115,7 +116,7 @@ static void sha1_transform_chunk(struct sha1_ctx *ctx)
 	}
 
 	/* add a, b, c, d, e to the hash state. */
-	for(i = 0; i < 5; i++) {
+	for (i = 0; i < 5; i++) {
 		ctx->h[i] += v[i];
 	}
 
@@ -127,15 +128,17 @@ static void sha1_transform_chunk(struct sha1_ctx *ctx)
  */
 int sha1_update(struct sha1_ctx *ctx, const void *data, size_t len)
 {
-	if(!ctx || (!data && !len)) return 0; /* failure */
+	if (!ctx || (!data && !len))
+		return 0; /* failure */
 
-	while(len > 0) {
+	while (len > 0) {
 		/* load a chunk into ctx->data[]. return on short chunk.
 		 * load data in endian neutral way.
 		 */
 
-		while(ctx->data_len < 4 * SHA1_LBLOCK) {
-			if(len <= 0) return 1; /* continue this later. */
+		while (ctx->data_len < 4 * SHA1_LBLOCK) {
+			if (len <= 0)
+				return 1; /* continue this later. */
 
 			/* fill out the buffer in big-endian order. */
 			switch((ctx->cnt / 8) % 4) {
@@ -193,7 +196,7 @@ static void sha1_append_length(struct sha1_ctx *ctx)
 	/* insert 1 bit followed by 0s. */
 	sha1_update(ctx, "\x80", 1); /* binary 10000000. */
 
-	while(ctx->cnt % 512 != 448) {
+	while (ctx->cnt % 512 != 448) {
 		sha1_update(ctx, "", 1); /* insert 0. */
 	}
 
@@ -216,10 +219,10 @@ int sha1_final(unsigned char *md, struct sha1_ctx *ctx)
 	assert(ctx->cnt % 512 == 0);
 
 	/* combine h0, h1, h2, h3, h4 into digest. */
-	if(md) {
+	if (md) {
 		unsigned i;
 
-		for(i = 0; i < 5; i++) {
+		for (i = 0; i < 5; i++) {
 			/* big-endian */
 			md[i * 4] = ctx->h[i] >> 24;
 			md[i * 4 + 1] = ctx->h[i] >> 16;
@@ -247,7 +250,7 @@ unsigned char *sha1(const void *data, size_t len, unsigned char *md)
 	sha1_init(&ctx);
 	sha1_update(&ctx, data, len);
 
-	if(!md) md = tmp;
+	if (!md) md = tmp;
 
 	sha1_final(md, &ctx);
 	return md;
@@ -258,10 +261,10 @@ static void sha1_print_digest(const unsigned char *md)
 {
 	unsigned i;
 
-	for(i = 0; i < SHA1_DIGEST_LENGTH; i++) {
+	for (i = 0; i < SHA1_DIGEST_LENGTH; i++) {
 		printf("%02X", md[i]);
 
-		if(i < SHA1_DIGEST_LENGTH - 1) printf(":");
+		if (i < SHA1_DIGEST_LENGTH - 1) printf(":");
 	}
 
 	printf("\n");
@@ -277,7 +280,7 @@ static int sha1_test(void)
 
 	memset(digest, 0, sizeof digest);
 
-	if(!sha1(test1, strlen(test1), digest)) {
+	if (!sha1(test1, strlen(test1), digest)) {
 		printf("failed.\n");
 		return 0;
 	}

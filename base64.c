@@ -4,7 +4,7 @@
  * Base64 encode and decode routines
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2009 Dec 13
+ * @date 2019 Dec 25
  *
  * Written in 2009 by Jon Mayo <jon.mayo@gmail.com>
  *
@@ -36,36 +36,40 @@ int base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *
 	uint_least32_t v;
 	unsigned rem;
 
-	for(io = 0, ii = 0, v = 0, rem = 0; ii < in_len; ii++) {
+	for (io = 0, ii = 0, v = 0, rem = 0; ii < in_len; ii++) {
 		unsigned char ch;
 		ch = in[ii];
 		v = (v << 8) | ch;
 		rem += 8;
 
-		while(rem >= 6) {
+		while (rem >= 6) {
 			rem -= 6;
 
-			if(io >= out_len) return -1; /* truncation is failure */
+			if (io >= out_len)
+				return -1; /* truncation is failure */
 
 			out[io++] = base64enc_tab[(v >> rem) & 63];
 		}
 	}
 
-	if(rem) {
+	if (rem) {
 		v <<= (6 - rem);
 
-		if(io >= out_len) return -1; /* truncation is failure */
+		if (io >= out_len)
+			return -1; /* truncation is failure */
 
 		out[io++] = base64enc_tab[v & 63];
 	}
 
-	while(io & 3) {
-		if(io >= out_len) return -1; /* truncation is failure */
+	while (io & 3) {
+		if (io >= out_len)
+			return -1; /* truncation is failure */
 
 		out[io++] = '=';
 	}
 
-	if(io >= out_len) return -1; /* no room for null terminator */
+	if (io >= out_len)
+		return -1; /* no room for null terminator */
 
 	out[io] = 0;
 	return io;
@@ -79,49 +83,54 @@ int base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *
 	unsigned rem;
 
 	/* initialize base64dec_tab if not initialized. */
-	if(!base64dec_tab) {
+	if (!base64dec_tab) {
 		unsigned i;
 		base64dec_tab = malloc(256);
 
-		if(!base64dec_tab) {
+		if (!base64dec_tab) {
 			PERROR("malloc()");
 			return 0;
 		}
 
 		memset(base64dec_tab, 255, 256); /**< use 255 indicates a bad value. */
 
-		for(i = 0; i < NR(base64enc_tab); i++) {
+		for (i = 0; i < NR(base64enc_tab); i++) {
 			base64dec_tab[base64enc_tab[i]] = i;
 		}
 	}
 
-	for(io = 0, ii = 0, v = 0, rem = 0; ii < in_len; ii++) {
+	for (io = 0, ii = 0, v = 0, rem = 0; ii < in_len; ii++) {
 		unsigned char ch;
 
-		if(isspace(in[ii])) continue;
+		if (isspace(in[ii]))
+			continue;
 
-		if(in[ii] == '=') break; /* stop at = */
+		if (in[ii] == '=')
+			break; /* stop at = */
 
 		ch = base64dec_tab[(unsigned)in[ii]];
 
-		if(ch == 255) break; /* stop at a parse error */
+		if (ch == 255)
+			break; /* stop at a parse error */
 
 		v = (v << 6) | ch;
 		rem += 6;
 
-		if(rem >= 8) {
+		if (rem >= 8) {
 			rem -= 8;
 
-			if(io >= out_len) return -1; /* truncation is failure */
+			if (io >= out_len)
+				return -1; /* truncation is failure */
 
 			out[io++] = (v >> rem) & 255;
 		}
 	}
 
-	if(rem >= 8) {
+	if (rem >= 8) {
 		rem -= 8;
 
-		if(io >= out_len) return -1; /* truncation is failure */
+		if (io >= out_len)
+			return -1; /* truncation is failure */
 
 		out[io++] = (v >> rem) & 255;
 	}

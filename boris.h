@@ -4,7 +4,7 @@
  * A plugin oriented MUD.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Nov 21
+ * @date 2019 Dec 25
  *
  * Copyright (c) 2009-2019 Jon Mayo
  *

@@ -4,7 +4,7 @@
  * fdb - database using text files as the backend.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Nov 21
+ * @date 2019 Dec 25
  *
  * Copyright (c) 2009-2019, Jon Mayo
  *
@@ -95,7 +95,6 @@ struct fdb_iterator {
 	char *domain;
 };
 
-
 /**
  * return true if 2 characters are valid hexidecimal.
  */
@@ -127,7 +126,8 @@ static void unescape(char *str)
 	char *e;
 
 	/* remove trailing whitespace */
-	for(e = str + strlen(str); e > str && isspace(e[-1]); e--) ;
+	for (e = str + strlen(str); e > str && isspace(e[-1]); e--)
+		;
 
 	*e = 0;
 
@@ -135,9 +135,9 @@ static void unescape(char *str)
 	 * line is the input pointer,
 	 * e is the output pointer.
 	 */
-	for(e = str; *str; str++) {
-		if(*str == '%') {
-			if(ishex(str + 1)) {
+	for (e = str; *str; str++) {
+		if (*str == '%') {
+			if (ishex(str + 1)) {
 				*e++ = unhex(str + 1);
 				str += 2;
 			} else {
@@ -149,7 +149,6 @@ static void unescape(char *str)
 	}
 
 	*e = 0;
-
 }
 
 /**
@@ -158,7 +157,9 @@ static void unescape(char *str)
 static char *fdb_basepath(const char *domain)
 {
 	char path[PATH_MAX];
+
 	snprintf(path, sizeof path, "data/%s", domain);
+
 	return strdup(path);
 }
 
@@ -168,7 +169,9 @@ static char *fdb_basepath(const char *domain)
 static char *fdb_makepath(const char *domain, const char *id)
 {
 	char path[PATH_MAX];
+
 	snprintf(path, sizeof path, "data/%s/%s", domain, id);
+
 	return strdup(path);
 }
 
@@ -178,7 +181,9 @@ static char *fdb_makepath(const char *domain, const char *id)
 static char *fdb_makepath_tmp(const char *domain, const char *id)
 {
 	char path[PATH_MAX];
+
 	snprintf(path, sizeof path, "data/%s/%s.tmp", domain, id);
+
 	return strdup(path);
 }
 
@@ -190,11 +195,12 @@ static int fdb_istempname(const char *filename)
 {
 	size_t len, extlen = strlen(".tmp");
 
-	if(!filename) return 0;
+	if (!filename)
+		return 0;
 
 	len = strlen(filename);
 
-	if(len > extlen && !strcmp(filename + len - extlen, ".tmp"))
+	if (len > extlen && !strcmp(filename + len - extlen, ".tmp"))
 		return 1; /* found extension. */
 
 	return 0; /* not a temp filename. */
@@ -234,17 +240,21 @@ static int fdb_parse_line(char *line, const char **name, const char **value)
 {
 	char *e, *b;
 
-	while(isspace(*line)) line++;
+	while (isspace(*line))
+		line++;
 
 	*name = line;
 
 	/* name part */
-	for(e = line; *e && *e != '='; e++) ;
+	for (e = line; *e && *e != '='; e++)
+		;
 
-	if(!*e) return 0; /* failure. */
+	if (!*e)
+		return 0; /* failure. */
 
 	/* remove trailing whitespace */
-	for(b = e; b > line && isspace(b[-1]); b--) ;
+	for (b = e; b > line && isspace(b[-1]); b--)
+		;
 
 	*b = 0;
 
@@ -252,7 +262,8 @@ static int fdb_parse_line(char *line, const char **name, const char **value)
 	line = e;
 
 	/* value part */
-	while(isspace(*line)) line++;
+	while (isspace(*line))
+		line++;
 
 	*value = line;
 
@@ -271,13 +282,14 @@ static int fdb_domain_init(const char *domain)
 	char *pathname;
 	pathname = fdb_basepath(domain);
 
-	if(MKDIR(pathname) == -1 && errno != EEXIST) {
+	if (MKDIR(pathname) == -1 && errno != EEXIST) {
 		PERROR(pathname);
 		free(pathname);
 		return 0;
 	}
 
 	free(pathname);
+
 	return 1; /* success */
 }
 /**
@@ -292,7 +304,7 @@ static struct fdb_write_handle *fdb_write_begin(const char *domain, const char *
 	filename_tmp = fdb_makepath_tmp(domain, id);
 	f = fopen(filename_tmp, "w");
 
-	if(!f) {
+	if (!f) {
 		PERROR(filename_tmp);
 		free(filename_tmp);
 		return 0; /* failure. */
@@ -332,11 +344,12 @@ static int fdb_write_pair(struct fdb_write_handle *h, const char *name, const ch
 	assert(name != NULL);
 	assert(value_str != NULL);
 
-	if(h->error_fl) return 0; /* ignore any more writes while there is an error. */
+	if (h->error_fl)
+		return 0; /* ignore any more writes while there is an error. */
 
 	/* calculate the length of the escaped string. */
-	for(i = 0, escaped_len = 0; value_str[i]; i++) {
-		if(isprint(value_str[i]) && !isspace(value_str[i]) && value_str[i] != '%' && value_str[i] != '"') {
+	for (i = 0, escaped_len = 0; value_str[i]; i++) {
+		if (isprint(value_str[i]) && !isspace(value_str[i]) && value_str[i] != '%' && value_str[i] != '"') {
 			escaped_len++;
 		} else {
 			escaped_len += 3;
@@ -348,13 +361,13 @@ static int fdb_write_pair(struct fdb_write_handle *h, const char *name, const ch
 	/* apply the escapes */
 	escaped_value = malloc(escaped_len + 1);
 
-	if(!escaped_value) {
+	if (!escaped_value) {
 		PERROR("malloc()");
 		return 0;
 	}
 
-	for(i = 0; *value_str; value_str++) {
-		if(isprint(*value_str) && !isspace(*value_str) && *value_str != '%' && *value_str != '"') {
+	for (i = 0; *value_str; value_str++) {
+		if (isprint(*value_str) && !isspace(*value_str) && *value_str != '%' && *value_str != '"') {
 			escaped_value[i++] = *value_str;
 		} else {
 			/* insert an escape. */
@@ -370,7 +383,8 @@ static int fdb_write_pair(struct fdb_write_handle *h, const char *name, const ch
 	res = fprintf(h->f, "%-12s= %s\n", name, escaped_value);
 	free(escaped_value);
 
-	if(res < 0) h->error_fl = 1; /* error occured. */
+	if (res < 0)
+		h->error_fl = 1; /* error occured. */
 
 	return res >= 0;
 }
@@ -385,11 +399,13 @@ static int fdb_write_format(struct fdb_write_handle *h, const char *name, const 
 	char buf[FDB_VALUE_MAX]; /**< holds the largest possible value. */
 	va_list ap;
 
-	if(h->error_fl) return 0; /* ignore any more writes while there is an error. */
+	if (h->error_fl)
+		return 0; /* ignore any more writes while there is an error. */
 
 	va_start(ap, value_fmt);
 	vsnprintf(buf, sizeof buf, value_fmt, ap);
 	va_end(ap);
+
 	return fdb_write_pair(h, name, buf);
 }
 
@@ -407,8 +423,8 @@ static int fdb_write_end(struct fdb_write_handle *h)
 	assert(h->id != NULL);
 
 	/* close the temp file. */
-	if(h->f) {
-		if(fclose(h->f)) {
+	if (h->f) {
+		if (fclose(h->f)) {
 			perror(h->filename_tmp);
 			h->error_fl = 1;
 		}
@@ -416,9 +432,9 @@ static int fdb_write_end(struct fdb_write_handle *h)
 		h->f = NULL;
 	}
 
-	if(h->error_fl) {
+	if (h->error_fl) {
 		/* remove the temp file. */
-		if(!remove(h->filename_tmp)) {
+		if (!remove(h->filename_tmp)) {
 			perror(h->filename_tmp);
 		}
 
@@ -431,7 +447,7 @@ static int fdb_write_end(struct fdb_write_handle *h)
 		/* move temp file over the real file. */
 		filename = fdb_makepath(h->domain, h->id);
 
-		if(rename(h->filename_tmp, filename)) {
+		if (rename(h->filename_tmp, filename)) {
 			perror(h->filename_tmp);
 			free(filename);
 			fdb_write_handle_free(h);
@@ -467,7 +483,7 @@ static struct fdb_read_handle *fdb_read_begin(const char *domain, const char *id
 	filename = fdb_makepath(domain, id);
 	f = fopen(filename, "r");
 
-	if(!f) {
+	if (!f) {
 		PERROR(filename);
 		free(filename);
 		return 0; /* failure. */
@@ -487,7 +503,9 @@ static struct fdb_read_handle *fdb_read_begin(const char *domain, const char *id
 static struct fdb_read_handle *fdb_read_begin_uint(const char *domain, unsigned id)
 {
 	char numbuf[22]; /* big enough for a signed 64-bit decimal */
+
 	snprintf(numbuf, sizeof numbuf, "%u", id);
+
 	return fdb_read_begin(domain, numbuf);
 }
 
@@ -505,9 +523,9 @@ static int fdb_read_next(struct fdb_read_handle *h, const char **name, const cha
 	h->line_number++;
 	ofs = 0;
 
-	while(!feof(h->f)) {
-		if(!fgets(h->line + ofs, h->alloc_len - ofs, h->f)) {
-			if(ofs) {
+	while (!feof(h->f)) {
+		if (!fgets(h->line + ofs, h->alloc_len - ofs, h->f)) {
+			if (ofs) {
 				VERBOSE("%s:%d:missing newline before EOF.\n", h->filename, h->line_number);
 				h->error_fl = 1;
 			}
@@ -517,7 +535,7 @@ static int fdb_read_next(struct fdb_read_handle *h, const char **name, const cha
 
 		newofs = ofs + strlen(h->line + ofs);
 
-		if(strchr(h->line + ofs, '\n')) {
+		if (strchr(h->line + ofs, '\n')) {
 			/* complete line has been read. */
 			return fdb_parse_line(h->line, name, value);
 		}
@@ -525,14 +543,14 @@ static int fdb_read_next(struct fdb_read_handle *h, const char **name, const cha
 		ofs = newofs;
 
 		/* if buffer is more than half used, double it. */
-		if(newofs * 2 >= h->alloc_len) {
+		if (newofs * 2 >= h->alloc_len) {
 			char *newline;
 			size_t newlen;
 			/* round up in 4K chunks. */
 			newlen = ((newofs * 2) + 4096 - 1) * 4096 / 4096;
 			newline = realloc(h->line, newlen);
 
-			if(!newline) {
+			if (!newline) {
 				PERROR(h->filename);
 				h->error_fl = 1;
 				return 0;
@@ -558,12 +576,13 @@ static int fdb_read_end(struct fdb_read_handle *h)
 
 	ret = !h->error_fl;
 
-	if(h->f) {
+	if (h->f) {
 		fclose(h->f);
 		h->f = NULL;
 	}
 
 	fdb_read_handle_free(h);
+
 	return ret;
 }
 
@@ -582,7 +601,7 @@ static struct fdb_iterator *fdb_iterator_begin(const char *domain)
 
 	d = opendir(pathname);
 
-	if(!d) {
+	if (!d) {
 		PERROR(pathname);
 		free(pathname);
 		return 0; /* failure */
@@ -590,7 +609,7 @@ static struct fdb_iterator *fdb_iterator_begin(const char *domain)
 
 	it = calloc(1, sizeof * it);
 
-	if(!it) {
+	if (!it) {
 		PERROR("calloc()");
 		free(pathname);
 		return 0;
@@ -600,6 +619,7 @@ static struct fdb_iterator *fdb_iterator_begin(const char *domain)
 	it->pathname = pathname;
 	it->curr_id = NULL;
 	it->domain = strdup(domain);
+
 	return it;
 }
 
@@ -620,15 +640,17 @@ static const char *fdb_iterator_next(struct fdb_iterator *it)
 next:
 	de = readdir(it->d);
 
-	if(!de) return NULL;
+	if (!de)
+		return NULL;
 
-	if(de->d_name[0] == '.') goto next; /* ignore hidden files */
+	if (de->d_name[0] == '.')
+		goto next; /* ignore hidden files */
 
-	if(fdb_istempname(de->d_name)) {
+	if (fdb_istempname(de->d_name)) {
 		goto next; /* ignore temp files. */
 	}
 
-	if(de->d_name[0] && de->d_name[strlen(de->d_name) - 1] == '~') {
+	if (de->d_name[0] && de->d_name[strlen(de->d_name) - 1] == '~') {
 		VERBOSE("skip things that don't look like data files:%s\n", de->d_name);
 		goto next; /* ignore temp files. */
 	}
@@ -636,7 +658,7 @@ next:
 	/* stat the file - ignore directories and non-regular files. */
 	filename = fdb_makepath(it->domain, de->d_name);
 
-	if(stat(filename, &st)) {
+	if (stat(filename, &st)) {
 		PERROR(filename);
 		free(filename);
 		goto next;
@@ -644,12 +666,13 @@ next:
 
 	free(filename);
 
-	if(!S_ISREG(st.st_mode)) {
+	if (!S_ISREG(st.st_mode)) {
 		VERBOSE("Ignoring directories and other non-regular files:%s\n", de->d_name);
 		goto next;
 	}
 
 	free(it->curr_id);
+
 	return it->curr_id = strdup(de->d_name);
 }
 
@@ -678,14 +701,15 @@ static int fdb_test1(void)
 	fdb_domain_init("room");
 
 	h = fdb_write_begin("room", "123");
-
-	if(!h) return 0;
+	if (!h)
+		return 0;
 
 	fdb_write_format(h, "id", "%d", 123);
 	fdb_write_pair(h, "owner", "orange");
 	fdb_write_pair(h, "description", "  Hello World\nThis is great stuff.");
 
 	fdb_write_end(h);
+
 	return 1;
 }
 
@@ -693,15 +717,17 @@ static int fdb_test2(void)
 {
 	struct fdb_iterator *it;
 	const char *id;
+
 	it = fdb_iterator_begin("users");
+	if (!it)
+		return 0;
 
-	if(!it) return 0;
-
-	while((id = fdb_iterator_next(it))) {
+	while ((id = fdb_iterator_next(it))) {
 		VERBOSE("Found item \"%s\"\n", id);
 	}
 
 	fdb_iterator_end(it);
+
 	return 1;
 }
 
@@ -715,15 +741,15 @@ static int fdb_test3(void)
 
 	h = fdb_read_begin("room", "123");
 
-	if(!h) return 0;
+	if (!h) return 0;
 
-	while(fdb_read_next(h, &name, &id)) {
+	while (fdb_read_next(h, &name, &id)) {
 		VERBOSE("Read \"%s\"=\"%s\"\n", name, id);
 	}
 
 	res = fdb_read_end(h);
 
-	if(!res) {
+	if (!res) {
 		VERBOSE("Read failure.\n");
 	}
 
@@ -737,19 +763,23 @@ int main()
 {
 	VERBOSE("*** TEST 1 ***\n");
 
-	if(!fdb_test1()) goto failure;
+	if (!fdb_test1())
+		goto failure;
 
 	VERBOSE("*** TEST 2 ***\n");
 
-	if(!fdb_test2()) goto failure;
+	if (!fdb_test2())
+		goto failure;
 
 	VERBOSE("*** TEST 3 ***\n");
 
-	if(!fdb_test3()) goto failure;
+	if (!fdb_test3())
+		goto failure;
 
 	return 0;
 failure:
 	fprintf(stderr, "It didn't work.\n");
+
 	return 1;
 }
 #else
@@ -758,12 +788,14 @@ static int initialize(void)
 	fprintf(stderr, "loaded %s\n", plugin_class.base_class.class_name);
 	service_attach_fdb(&plugin_class.base_class, &plugin_class.fdb_interface);
 	b_log(B_LOG_INFO, "logging", "FDB-file system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+
 	return 1;
 }
 
 static int shutdown(void)
 {
 	service_detach_fdb(&plugin_class.base_class);
+
 	return 1;
 }
 

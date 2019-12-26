@@ -4,7 +4,7 @@
  * SHA-1 password hashing
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2009 Dec 13
+ * @date 2019 Dec 25
  *
  * Written in 2009 by Jon Mayo <jon.mayo@gmail.com>
  *
@@ -31,7 +31,7 @@ static void sha1crypt_gensalt(size_t salt_len, void *salt)
 {
 	size_t i;
 
-	for(i = 0; i < salt_len; i++) {
+	for (i = 0; i < salt_len; i++) {
 		/* TODO: use better random salt */
 		((unsigned char*)salt)[i] = (rand() % 96) + ' ';
 	}
@@ -45,7 +45,7 @@ static int sha1crypt_create_password(char *buf, size_t max, const char *plaintex
 	/** round up to a multiple of 4, then multiply by 4/3. */
 	char tmp[((SHA1_DIGEST_LENGTH + SHA1CRYPT_GENSALT_MAX + 3) / 4 * 4) * 4 / 3 + 1];
 
-	if(salt_len > SHA1CRYPT_GENSALT_MAX) {
+	if (salt_len > SHA1CRYPT_GENSALT_MAX) {
 		ERROR_MSG("Salt is too large.");
 		return 0; /**< salt too large. */
 	}
@@ -60,7 +60,7 @@ static int sha1crypt_create_password(char *buf, size_t max, const char *plaintex
 	memcpy(digest + SHA1_DIGEST_LENGTH, salt, salt_len);
 
 	/* encode digest+salt into buf. */
-	if(base64_encode(SHA1_DIGEST_LENGTH + salt_len, digest, sizeof tmp, tmp) < 0) {
+	if (base64_encode(SHA1_DIGEST_LENGTH + salt_len, digest, sizeof tmp, tmp) < 0) {
 		ERROR_MSG("Buffer cannot hold password.");
 		return 0; /**< no room. */
 	}
@@ -100,7 +100,7 @@ int sha1crypt_checkpass(const char *crypttext, const char *plaintext)
 	crypttext_len = strlen(crypttext);
 
 	/* check for password magic at beginning. */
-	if(crypttext_len <= SHA1PASSWD_MAGIC_LEN || strncmp(crypttext, SHA1PASSWD_MAGIC, SHA1PASSWD_MAGIC_LEN)) {
+	if (crypttext_len <= SHA1PASSWD_MAGIC_LEN || strncmp(crypttext, SHA1PASSWD_MAGIC, SHA1PASSWD_MAGIC_LEN)) {
 		ERROR_MSG("not a SHA1 crypt.");
 		return 0; /**< bad base64 string, too large or too small. */
 	}
@@ -108,7 +108,7 @@ int sha1crypt_checkpass(const char *crypttext, const char *plaintext)
 	/* get salt from password, and skip over magic. */
 	res = base64_decode(crypttext_len - SHA1PASSWD_MAGIC_LEN, crypttext + SHA1PASSWD_MAGIC_LEN, sizeof digest, digest);
 
-	if(res < 0 || res < SHA1_DIGEST_LENGTH) {
+	if (res < 0 || res < SHA1_DIGEST_LENGTH) {
 		ERROR_MSG("crypt decode error.");
 		return 0; /**< bad base64 string, too large or too small. */
 	}
@@ -118,7 +118,7 @@ int sha1crypt_checkpass(const char *crypttext, const char *plaintext)
 	/* saltlength = total - digest */
 	res = sha1crypt_create_password(tmp, sizeof tmp, plaintext, res - SHA1_DIGEST_LENGTH, salt);
 
-	if(!res) {
+	if (!res) {
 		ERROR_MSG("crypt decode error2.");
 		return 0; /**< couldn't encode? weird. this shouldn't ever happen. */
 	}
@@ -128,6 +128,8 @@ int sha1crypt_checkpass(const char *crypttext, const char *plaintext)
 }
 
 #ifndef NTEST
+#include "boris.h"
+
 /* example:
  * {SSHA}ZIb6984G1q5itn2VUoEb34Jxuq5LUntDZlwK */
 void sha1crypt_test(void)
@@ -155,7 +157,7 @@ void sha1crypt_test(void)
 	res = sha1crypt_checkpass(buf, "abcdef");
 	DEBUG("sha1crypt_checkpass() positive:%s (res=%d)\n", !res ? "FAILED" : "PASSED", res);
 
-	if(!res) {
+	if (!res) {
 		ERROR_MSG("sha1crypt_checkpass() must succeed on positive test.");
 		exit(1);
 	}
@@ -164,13 +166,13 @@ void sha1crypt_test(void)
 	res = sha1crypt_checkpass(buf, "abcdeg");
 	DEBUG("sha1crypt_checkpass() negative:%s (res=%d)\n", res ? "FAILED" : "PASSED", res);
 
-	if(res) {
+	if (res) {
 		ERROR_MSG("sha1crypt_checkpass() must fail on negative test.");
 		exit(1);
 	}
 
 	/* loop through all hardcoded examples. */
-	for(i = 0; i < NR(examples); i++) {
+	for (i = 0; i < NR(examples); i++) {
 		res = sha1crypt_checkpass(examples[i].hash, examples[i].pass);
 		DEBUG("Example %d:%s (res=%d) hash:%s\n", i + 1, !res ? "FAILED" : "PASSED", res, examples[i].hash);
 	}
