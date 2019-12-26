@@ -4,7 +4,7 @@
  * Config loader
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Nov 21
+ * @date 2019 Dec 25
  *
  * Copyright (c) 2009-2019, Jon Mayo
  *
@@ -50,7 +50,7 @@ void config_free(struct config *cfg)
 	struct config_watcher *curr;
 	assert(cfg != NULL);
 
-	while((curr = LIST_TOP(cfg->watchers))) {
+	while ((curr = LIST_TOP(cfg->watchers))) {
 		LIST_REMOVE(curr, list);
 		free(curr->mask);
 		free(curr);
@@ -88,25 +88,25 @@ int config_load(const char *filename, struct config *cfg)
 
 	f = fopen(filename, "r");
 
-	if(!f) {
+	if (!f) {
 		PERROR(filename);
 		return 0;
 	}
 
 	line = 0;
 
-	while(line++, fgets(buf, sizeof buf, f)) {
+	while (line++, fgets(buf, sizeof buf, f)) {
 		/* strip comments - honors '' and "" quoting */
-		for(e = buf, quote = 0; *e; e++) {
-			if(!quote && *e == '"')
+		for (e = buf, quote = 0; *e; e++) {
+			if (!quote && *e == '"')
 				quote = *e;
-			else if(!quote && *e == '\'')
+			else if (!quote && *e == '\'')
 				quote = *e;
-			else if(quote == '\'' && *e == '\'')
+			else if (quote == '\'' && *e == '\'')
 				quote = 0;
-			else if(quote == '"' && *e == '"')
+			else if (quote == '"' && *e == '"')
 				quote = 0;
-			else if(!quote && ( *e == '#' || (*e == '/' && e[1] == '/' ))) {
+			else if (!quote && ( *e == '#' || (*e == '/' && e[1] == '/' ))) {
 				*e = 0; /* found a comment */
 				break;
 			}
@@ -115,19 +115,19 @@ int config_load(const char *filename, struct config *cfg)
 		/* strip trailing white space */
 		e = buf + strlen(buf);
 
-		while(e > buf && isspace(*--e)) {
+		while (e > buf && isspace(*--e)) {
 			*e = 0;
 		}
 
 		/* ignore blank lines */
-		if(*buf == 0) {
+		if (*buf == 0) {
 			TRACE("%s:%d:ignoring blank line\n", filename, line);
 			continue;
 		}
 
 		e = strchr(buf, '=');
 
-		if(!e) {
+		if (!e) {
 			/* invalid directive */
 			ERROR_FMT("%s:%d:invalid directive\n", filename, line);
 			goto failure;
@@ -136,21 +136,21 @@ int config_load(const char *filename, struct config *cfg)
 		/* move through the leading space of the value part */
 		value = e + 1;
 
-		while(isspace(*value)) value++;
+		while (isspace(*value)) value++;
 
 		/* strip trailing white space from id part */
 		*e = 0; /* null terminate the id part */
 
-		while(e > buf && isspace(*--e)) {
+		while (e > buf && isspace(*--e)) {
 			*e = 0;
 		}
 
-		if(*value == '"') {
+		if (*value == '"') {
 			value++;
 			e = strchr(value, '"');
 
-			if(e) {
-				if(e[1]) {
+			if (e) {
+				if (e[1]) {
 					ERROR_FMT("%s:%u:error in loading file:trailing garbage after quote\n", filename, line);
 					goto failure;
 				}
@@ -165,14 +165,14 @@ int config_load(const char *filename, struct config *cfg)
 		DEBUG("id='%s' value='%s'\n", buf, value);
 
 		/* check the masks */
-		for(curr = LIST_TOP(cfg->watchers); curr; curr = LIST_NEXT(curr, list)) {
-			if(!util_fnmatch(curr->mask, buf, UTIL_FNM_CASEFOLD) && curr->func) {
+		for (curr = LIST_TOP(cfg->watchers); curr; curr = LIST_NEXT(curr, list)) {
+			if (!util_fnmatch(curr->mask, buf, UTIL_FNM_CASEFOLD) && curr->func) {
 				int res;
 				res = curr->func(cfg, curr->extra, buf, value);
 
-				if(!res) {
+				if (!res) {
 					break; /* return 0 from the callback will terminate the list */
-				} else if(res < 0) {
+				} else if (res < 0) {
 					ERROR_FMT("%s:%u:error in loading file\n", filename, line);
 					goto failure;
 				}
@@ -196,7 +196,7 @@ static int config_test_show(struct config *cfg UNUSED, void *extra UNUSED, const
 }
 
 /** test the config system. */
-static void config_test(void)
+void config_test(void)
 {
 	struct config cfg;
 	config_setup(&cfg);

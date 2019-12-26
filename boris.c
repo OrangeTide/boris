@@ -4,8 +4,8 @@
  * A plugin oriented MUD.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @version 0.5
- * @date 2019 Nov 21
+ * @version 0.6
+ * @date 2019 Dec 25
  *
  * Copyright (c) 2008-2019, Jon Mayo
  *
@@ -34,7 +34,7 @@
 
 /* major, minor and patch level for version. */
 #define BORIS_VERSION_MAJ 0
-#define BORIS_VERSION_MIN 5
+#define BORIS_VERSION_MIN 6
 #define BORIS_VERSION_PAT 0
 /** @mainpage
  *
@@ -266,14 +266,14 @@
 		(dest)[(offset)+1]=(VAR(tmp)/65536L)%256; \
 		(dest)[(offset)+2]=(VAR(tmp)/256)%256; \
 		(dest)[(offset)+3]=VAR(tmp)%256; \
-	} while(0)
+	} while (0)
 
 /** WRite Big-Endian 16-bit value. */
 #define WR_BE16(dest, offset, value) do { \
 		unsigned VAR(tmp)=value; \
 		(dest)[offset]=(VAR(tmp)/256)%256; \
 		(dest)[(offset)+1]=VAR(tmp)%256; \
-	} while(0)
+	} while (0)
 
 /** WRite Big-Endian 64-bit value. */
 #define WR_BE64(dest, offset, value) do { \
@@ -286,7 +286,7 @@
 		(dest)[(offset)+5]=((VAR(tmp))>>16)&255; \
 		(dest)[(offset)+6]=((VAR(tmp))>>8)&255; \
 		(dest)[(offset)+7]=(VAR(tmp))&255; \
-	} while(0)
+	} while (0)
 
 /** ReaD Big-Endian 16-bit value. */
 #define RD_BE16(src, offset) ((((src)[offset]&255u)<<8)|((src)[(offset)+1]&255u))
@@ -346,13 +346,13 @@
  */
 #define REFCOUNT_PUT(obj, free_action) do { \
 		assert((obj)->REFCOUNT_NAME>0); \
-		if(--(obj)->REFCOUNT_NAME<=0) { \
+		if (--(obj)->REFCOUNT_NAME<=0) { \
 			free_action; \
 		} \
-	} while(0)
+	} while (0)
 
 /** increment the reference count on struct obj. */
-#define REFCOUNT_GET(obj) do { (obj)->REFCOUNT_NAME++; } while(0)
+#define REFCOUNT_GET(obj) do { (obj)->REFCOUNT_NAME++; } while (0)
 
 /*=* Compiler macros *=*/
 #ifdef __GNUC__
@@ -483,51 +483,64 @@ static int dummy_fdb_domain_init(const char *domain UNUSED)
 {
 	return 0;
 }
+
 static struct fdb_write_handle *dummy_fdb_write_begin(const char *domain UNUSED, const char *id UNUSED)
 {
 	return NULL;
 }
+
 static struct fdb_write_handle *dummy_fdb_write_begin_uint(const char *domain UNUSED, unsigned id UNUSED)
 {
 	return NULL;
 }
+
 static int dummy_fdb_write_pair(struct fdb_write_handle *h UNUSED, const char *name UNUSED, const char *value_str UNUSED)
 {
 	return 0;
 }
+
 static int dummy_fdb_write_format(struct fdb_write_handle *h UNUSED, const char *name UNUSED, const char *value_fmt UNUSED, ...)
 {
 	return 0;
 }
+
 static int dummy_fdb_write_end(struct fdb_write_handle *h UNUSED)
 {
 	return 0;
 }
+
 static void dummy_fdb_write_abort(struct fdb_write_handle *h UNUSED) { }
+
 static struct fdb_read_handle *dummy_fdb_read_begin(const char *domain UNUSED, const char *id UNUSED)
 {
 	return NULL;
 }
+
 static struct fdb_read_handle *dummy_fdb_read_begin_uint(const char *domain UNUSED, unsigned id UNUSED)
 {
 	return NULL;
 }
+
 static int dummy_fdb_read_next(struct fdb_read_handle *h UNUSED, const char **name UNUSED, const char **value UNUSED)
 {
 	return 0;
 }
+
 static int dummy_fdb_read_end(struct fdb_read_handle *h UNUSED)
 {
 	return 0;
 }
+
 static struct fdb_iterator *dummy_fdb_iterator_begin(const char *domain UNUSED)
 {
 	return NULL;
 }
+
 static const char *dummy_fdb_iterator_next(struct fdb_iterator *it UNUSED)
 {
 	return NULL;
 }
+
 static void dummy_fdb_iterator_end(struct fdb_iterator *it UNUSED) { }
 
 /******************************************************************************
@@ -567,7 +580,7 @@ static const struct plugin_basic_class *channel_owner;
  */
 int service_detach_log(void (*log)(int priority, const char *domain, const char *fmt, ...))
 {
-	if(log == b_log) {
+	if (log == b_log) {
 		b_log = b_log_dummy;
 		return 1;
 	}
@@ -606,7 +619,7 @@ void service_detach_fdb(const struct plugin_basic_class *cls)
 		dummy_fdb_iterator_end,
 	};
 
-	if(!cls || fdb_owner == cls) {
+	if (!cls || fdb_owner == cls) {
 		fdb_owner = NULL;
 		fdb = dummy;
 	}
@@ -619,14 +632,14 @@ void service_attach_fdb(const struct plugin_basic_class *cls, const struct plugi
 {
 	fdb_owner = cls;
 
-	if(interface) {
+	if (interface) {
 		fdb = *interface;
 	}
 }
 
 void service_detach_room(const struct plugin_basic_class *cls)
 {
-	if(!cls || room_owner == cls) {
+	if (!cls || room_owner == cls) {
 		room_owner = NULL;
 		memset(&room, 0, sizeof room);
 	}
@@ -636,14 +649,14 @@ void service_attach_room(const struct plugin_basic_class *cls, const struct plug
 {
 	room_owner = cls;
 
-	if(interface) {
+	if (interface) {
 		room = *interface;
 	}
 }
 
 void service_detach_character(const struct plugin_basic_class *cls)
 {
-	if(!cls || character_owner == cls) {
+	if (!cls || character_owner == cls) {
 		character_owner = NULL;
 		memset(&character, 0, sizeof character);
 	}
@@ -653,14 +666,14 @@ void service_attach_character(const struct plugin_basic_class *cls, const struct
 {
 	character_owner = cls;
 
-	if(interface) {
+	if (interface) {
 		character = *interface;
 	}
 }
 
 void service_detach_channel(const struct plugin_basic_class *cls)
 {
-	if(!cls || channel_owner == cls) {
+	if (!cls || channel_owner == cls) {
 		channel_owner = NULL;
 		memset(&channel, 0, sizeof channel);
 	}
@@ -670,7 +683,7 @@ void service_attach_channel(const struct plugin_basic_class *cls, const struct p
 {
 	channel_owner = cls;
 
-	if(interface) {
+	if (interface) {
 		channel = *interface;
 	}
 }
@@ -687,16 +700,16 @@ int parse_uint(const char *name, const char *value, unsigned *uint_p)
 	char *endptr;
 	assert(uint_p != NULL);
 
-	if(!uint_p) return 0; /* error */
+	if (!uint_p) return 0; /* error */
 
-	if(!value || !*value) {
+	if (!value || !*value) {
 		ERROR_FMT("%s:Empty string", name);
 		return 0; /* error - empty string */
 	}
 
 	*uint_p = strtoul(value, &endptr, 0);
 
-	if(*endptr != 0) {
+	if (*endptr != 0) {
 		ERROR_FMT("%s:Not a number", name);
 		return 0; /* error - not a number */
 	}
@@ -712,13 +725,13 @@ int parse_str(const char *name UNUSED, const char *value, char **str_p)
 	assert(str_p != NULL);
 	assert(value != NULL);
 
-	if(!str_p) return 0; /* error */
+	if (!str_p) return 0; /* error */
 
-	if(*str_p) free(*str_p);
+	if (*str_p) free(*str_p);
 
 	*str_p = strdup(value);
 
-	if(!*str_p) {
+	if (!*str_p) {
 		PERROR("strdup()");
 		return 0; /* error */
 	}
@@ -739,7 +752,7 @@ int parse_attr(const char *name, const char *value, struct attr_list *al)
 
 	at = attr_find(al, name);
 
-	if(!at) {
+	if (!at) {
 		return attr_add(al, name, value);
 	}
 
@@ -756,15 +769,15 @@ int value_set(const char *value, enum value_type type, void *p)
 	assert(p != NULL);
 	assert(value != NULL);
 
-	if(!p || !value) return 0; /* error */
+	if (!p || !value) return 0; /* error */
 
 	switch(type) {
 	case VALUE_TYPE_STRING: {
-		if(*(char**)p) free(*(char**)p);
+		if (*(char**)p) free(*(char**)p);
 
 		*(char**)p = strdup(value);
 
-		if(!*(char**)p) {
+		if (!*(char**)p) {
 			PERROR("strdup()");
 			return 0; /* error */
 		}
@@ -775,14 +788,14 @@ int value_set(const char *value, enum value_type type, void *p)
 	case VALUE_TYPE_UINT: {
 		char *endptr;
 
-		if(!*value) {
+		if (!*value) {
 			ERROR_MSG("Empty string");
 			return 0; /* error - empty string */
 		}
 
 		*(unsigned*)p = strtoul(value, &endptr, 0);
 
-		if(*endptr != 0) {
+		if (*endptr != 0) {
 			ERROR_FMT("Not a number:\"%s\"\n", value);
 			return 0; /* error - not a number */
 		}
@@ -858,7 +871,7 @@ static void dll_show_error(const char *reason)
 	        | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, GetLastError(),
 	        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpMsgBuf, 0, NULL);
 
-	if(reason) {
+	if (reason) {
 		fprintf(stderr, "%s:%s\n", reason, lpMsgBuf);
 	} else {
 		fprintf(stderr, "%s\n", lpMsgBuf);
@@ -869,8 +882,8 @@ static void dll_show_error(const char *reason)
 	const char *msg;
 	msg = dlerror();
 
-	if(msg) {
-		if(reason) {
+	if (msg) {
+		if (reason) {
 			fprintf(stderr, "%s:%s\n", reason, msg);
 		} else {
 			fprintf(stderr, "%s\n", msg);
@@ -896,31 +909,31 @@ EXPORT int dll_open(dll_handle_t *h, const char *filename)
 	unsigned i;
 
 	/* convert / to \ in the filename, as required by LoadLibrary(). */
-	for(i = 0; filename[i] && i < sizeof path - 1; i++) {
+	for (i = 0; filename[i] && i < sizeof path - 1; i++) {
 		path[i] = filename[i] == '/' ? '\\' : filename[i];
 	}
 
 	path[i] = 0; /* null terminate */
 
-	if(!strstr(filename, SOEXT)) {
+	if (!strstr(filename, SOEXT)) {
 		strcat(path, SOEXT);
 	}
 
 	/* TODO: convert filename to windows text encoding */
 	*h = LoadLibrary(filename);
 
-	if(!*h) {
+	if (!*h) {
 #else
 	strcpy(path, filename);
 
-	if(!strstr(filename, SOEXT)) {
+	if (!strstr(filename, SOEXT)) {
 		strcat(path, SOEXT);
 	}
 
 	TRACE("dlopen(%s)\n", path);
 	h->h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
 
-	if(!h->h) {
+	if (!h->h) {
 #endif
 		dll_show_error(path);
 		return 0;
@@ -938,16 +951,16 @@ EXPORT void dll_close(dll_handle_t h)
 {
 #ifdef WIN32
 
-	if(h.h) {
-		if(!FreeLibrary(h)) {
+	if (h.h) {
+		if (!FreeLibrary(h)) {
 			dll_show_error("FreeLibrary()");
 		}
 	}
 
 #else
 
-	if(h.h) {
-		if(dlclose(h.h)) {
+	if (h.h) {
+		if (dlclose(h.h)) {
 			dll_show_error("dlclose()");
 		}
 	}
@@ -971,7 +984,7 @@ EXPORT dll_symbol_t dll_symbol(dll_handle_t h, const char *name)
 	ret = dlsym(h.h, name);
 #endif
 
-	if(!ret) {
+	if (!ret) {
 		dll_show_error(name);
 	}
 
@@ -1007,9 +1020,9 @@ static const char *util_convertnumber(unsigned n, unsigned base, unsigned pad)
 	char *o; /* output */
 	size_t len;
 
-	if(base < 2) base = 2;
+	if (base < 2) base = 2;
 
-	if(base > sizeof tab) base = sizeof tab;
+	if (base > sizeof tab) base = sizeof tab;
 
 	o = number_buffer + sizeof number_buffer;
 	*--o = 0;
@@ -1017,12 +1030,12 @@ static const char *util_convertnumber(unsigned n, unsigned base, unsigned pad)
 	do {
 		*--o = tab[n % base];
 		n /= base;
-	} while(n);
+	} while (n);
 
 	len = number_buffer + sizeof number_buffer - 1 - o;
 
-	if(pad && len < pad) {
-		for(pad = pad - len; pad; pad--) {
+	if (pad && len < pad) {
+		for (pad = pad - len; pad; pad--) {
 			*--o = tab[0];
 		}
 	}
@@ -1040,10 +1053,10 @@ static void util_hexdump(FILE *f, const void *data, int len)
 {
 	fprintf(f, "[%d]", len);
 
-	while(len > 0) {
+	while (len > 0) {
 		unsigned char ch = *(unsigned char*)data;
 
-		if(isprint(ch)) {
+		if (isprint(ch)) {
 			fprintf(f, " '%c'", ch);
 		} else {
 			fprintf(f, " 0x%02hhx", ch);
@@ -1073,24 +1086,24 @@ EXPORT int shvar_eval(char *out, size_t len, const char *src, const char *(*matc
 	const char *old;
 	char key[SHVAR_ID_MAX];
 
-	while(*src && len > 0) {
-		if(*src == SHVAR_ESCAPE) {
+	while (*src && len > 0) {
+		if (*src == SHVAR_ESCAPE) {
 			const char *key_start, *key_end;
 			old = src; /* save old position */
 			src++;
 
-			if(*src == '{' || *src == '(') {
+			if (*src == '{' || *src == '(') {
 				char end_char;
 				end_char = *src == '{' ? '}' : ')';
 				src++;
 				key_start = key_end = src;
 
-				while(*src != end_char) {
-					if(!*src) {
+				while (*src != end_char) {
+					if (!*src) {
 						size_t tmplen;
 						tmplen = strlen(old);
 
-						if(tmplen >= len) tmplen = len - 1;
+						if (tmplen >= len) tmplen = len - 1;
 
 						memcpy(out, old, tmplen);
 						out[tmplen] = 0;
@@ -1102,15 +1115,15 @@ EXPORT int shvar_eval(char *out, size_t len, const char *src, const char *(*matc
 
 				key_end = src;
 				src++;
-			} else if(*src == SHVAR_ESCAPE) {
+			} else if (*src == SHVAR_ESCAPE) {
 				*out++ = *src++;
 				len--;
 				continue;
 			} else {
 				key_start = src;
 
-				while(*src && len > 0) {
-					if(!isalnum(*src) && *src != '_') {
+				while (*src && len > 0) {
+					if (!isalnum(*src) && *src != '_') {
 						break;
 					}
 
@@ -1120,7 +1133,7 @@ EXPORT int shvar_eval(char *out, size_t len, const char *src, const char *(*matc
 				key_end = src;
 			}
 
-			if(match && key_end >= key_start) {
+			if (match && key_end >= key_start) {
 				const char *tmp;
 				size_t tmplen;
 				assert(key_start <= key_end);
@@ -1128,10 +1141,10 @@ EXPORT int shvar_eval(char *out, size_t len, const char *src, const char *(*matc
 				key[key_end - key_start] = 0;
 				tmp = match(key);
 
-				if(tmp) {
+				if (tmp) {
 					tmplen = strlen(tmp);
 
-					if(tmplen > len) return 0; /* failure */
+					if (tmplen > len) return 0; /* failure */
 
 					memcpy(out, tmp, tmplen);
 					out += tmplen;
@@ -1144,7 +1157,7 @@ EXPORT int shvar_eval(char *out, size_t len, const char *src, const char *(*matc
 		}
 	}
 
-	if(len > 0) {
+	if (len > 0) {
 		*out++ = 0;
 		len--;
 		return *src == 0;
@@ -1201,16 +1214,16 @@ static int heapqueue_ll_siftdown(unsigned i, struct heapqueue_elm *elm)
 	assert(elm != NULL);
 	assert(i < heap_len || i == 0);
 
-	while(HEAPQUEUE_LEFT(i) < heap_len) { /* keep going until at a leaf node */
+	while (HEAPQUEUE_LEFT(i) < heap_len) { /* keep going until at a leaf node */
 		unsigned child = HEAPQUEUE_LEFT(i);
 
 		/* compare left and right(child+1) - use the smaller of the two */
-		if(child + 1 < heap_len && heapqueue_greaterthan(&heap[child], &heap[child + 1])) {
+		if (child + 1 < heap_len && heapqueue_greaterthan(&heap[child], &heap[child + 1])) {
 			child++; /* left is bigger than right, use right */
 		}
 
 		/* child is the smallest child, if elm is smaller or equal then we're done */
-		if(!(heapqueue_greaterthan(elm, &heap[child]))) { /* elm <= child */
+		if (!(heapqueue_greaterthan(elm, &heap[child]))) { /* elm <= child */
 			break;
 		}
 
@@ -1234,7 +1247,7 @@ static int heapqueue_ll_siftup(unsigned i, struct heapqueue_elm *elm)
 	assert(elm != NULL);
 	assert(i < heap_len);
 
-	while(i > 0 && heapqueue_greaterthan(&heap[HEAPQUEUE_PARENT(i)], elm)) { /* Compare the element with parent */
+	while (i > 0 && heapqueue_greaterthan(&heap[HEAPQUEUE_PARENT(i)], elm)) { /* Compare the element with parent */
 		/* swap element with parent and keep going (keep tracking the "hole") */
 		heap[i] = heap[HEAPQUEUE_PARENT(i)];
 		i = HEAPQUEUE_PARENT(i);
@@ -1274,14 +1287,14 @@ EXPORT int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret)
 	/* i now holds the position of the last entry, we will move this "hole" until
 	 * it is in the correct place for last */
 
-	if(i > 0 && heapqueue_greaterthan(&heap[HEAPQUEUE_PARENT(i)], last)) {
+	if (i > 0 && heapqueue_greaterthan(&heap[HEAPQUEUE_PARENT(i)], last)) {
 		/* we already did the compare, so we'll perform the first move here */
 		TRACE("swap hole %d with entry %d\n", i, HEAPQUEUE_PARENT(i));
 		heap[i] = heap[HEAPQUEUE_PARENT(i)]; /* move parent down */
 		i = heapqueue_ll_siftup(HEAPQUEUE_PARENT(i), last); /* sift the "hole" up */
-	} else if(HEAPQUEUE_RIGHT(i) < heap_len && (heapqueue_greaterthan(last, &heap[HEAPQUEUE_RIGHT(i)]) || heapqueue_greaterthan(last, &heap[HEAPQUEUE_LEFT(i)]))) {
+	} else if (HEAPQUEUE_RIGHT(i) < heap_len && (heapqueue_greaterthan(last, &heap[HEAPQUEUE_RIGHT(i)]) || heapqueue_greaterthan(last, &heap[HEAPQUEUE_LEFT(i)]))) {
 		/* if right is on the list, then left is as well */
-		if(heapqueue_greaterthan(&heap[HEAPQUEUE_LEFT(i)], &heap[HEAPQUEUE_RIGHT(i)])) {
+		if (heapqueue_greaterthan(&heap[HEAPQUEUE_LEFT(i)], &heap[HEAPQUEUE_RIGHT(i)])) {
 			/* left is larger - use the right hole */
 			TRACE("swap hole %d with entry %d\n", i, HEAPQUEUE_RIGHT(i));
 			heap[i] = heap[HEAPQUEUE_RIGHT(i)]; /* move right up */
@@ -1292,7 +1305,7 @@ EXPORT int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret)
 			heap[i] = heap[HEAPQUEUE_LEFT(i)]; /* move left up */
 			i = heapqueue_ll_siftdown(HEAPQUEUE_LEFT(i), last); /* sift the "hole" down */
 		}
-	} else if(HEAPQUEUE_LEFT(i) < heap_len && heapqueue_greaterthan(last, &heap[HEAPQUEUE_LEFT(i)])) {
+	} else if (HEAPQUEUE_LEFT(i) < heap_len && heapqueue_greaterthan(last, &heap[HEAPQUEUE_LEFT(i)])) {
 		/* at this point there is no right node */
 		TRACE("swap hole %d with entry %d\n", i, HEAPQUEUE_LEFT(i));
 		heap[i] = heap[HEAPQUEUE_LEFT(i)]; /* move left up */
@@ -1329,7 +1342,7 @@ EXPORT int heapqueue_dequeue(struct heapqueue_elm *ret)
 	unsigned i;
 	assert(ret != NULL);
 
-	if(heap_len <= 0)
+	if (heap_len <= 0)
 		return 0; /* nothing to dequeue */
 
 	*ret = heap[0]; /* we have to copy the root element somewhere because we're removing it */
@@ -1350,8 +1363,8 @@ static int heapqueue_isvalid(void)
 {
 	unsigned i;
 
-	for(i = 1; i < heap_len; i++) {
-		if(heapqueue_greaterthan(&heap[HEAPQUEUE_PARENT(i)], &heap[i])) {
+	for (i = 1; i < heap_len; i++) {
+		if (heapqueue_greaterthan(&heap[HEAPQUEUE_PARENT(i)], &heap[i])) {
 			DEBUG("Bad heap at %d\n", i);
 			return 0; /* not a valid heap */
 		}
@@ -1366,7 +1379,7 @@ static void heapqueue_dump(void)
 	unsigned i;
 	fprintf(stderr, "::: Dumping heapqueue :::\n");
 
-	for(i = 0; i < heap_len; i++) {
+	for (i = 0; i < heap_len; i++) {
 		printf("%03u = %4u (p:%d l:%d r:%d)\n", i, heap[i].d, i > 0 ? (int)HEAPQUEUE_PARENT(i) : -1, HEAPQUEUE_LEFT(i), HEAPQUEUE_RIGHT(i));
 	}
 
@@ -1387,13 +1400,13 @@ EXPORT void heapqueue_test(void)
 #ifndef NDEBUG
 
 	/* fill remaining with fake data */
-	for(i = heap_len; i < NR(heap); i++) {
+	for (i = heap_len; i < NR(heap); i++) {
 		heap[i].d = 0xdead;
 	}
 
 #endif
 
-	for(i = 0; i < NR(testdata); i++) {
+	for (i = 0; i < NR(testdata); i++) {
 		elm.d = testdata[i];
 		heapqueue_enqueue(&elm);
 	}
@@ -1401,11 +1414,11 @@ EXPORT void heapqueue_test(void)
 	heapqueue_dump();
 
 	/* test the cancel function and randomly delete everything */
-	while(heap_len > 0) {
+	while (heap_len > 0) {
 		unsigned valid;
 		i = rand() % heap_len;
 
-		if(heapqueue_cancel(i, &tmp)) {
+		if (heapqueue_cancel(i, &tmp)) {
 			printf("canceled at %d (data=%d)\n", i, tmp.d);
 		} else {
 			printf("canceled at %d failed!\n", i);
@@ -1416,7 +1429,7 @@ EXPORT void heapqueue_test(void)
 		valid = heapqueue_isvalid();
 
 		// printf("heap valid? %d (%d entries)\n", valid, heap_len);
-		if(!valid) {
+		if (!valid) {
 			printf("BAD HEAP!!!\n");
 			heapqueue_dump();
 			break;
@@ -1426,13 +1439,13 @@ EXPORT void heapqueue_test(void)
 	heapqueue_dump();
 
 	/* load the queue with test data again */
-	for(i = 0; i < NR(testdata); i++) {
+	for (i = 0; i < NR(testdata); i++) {
 		elm.d = testdata[i];
 		heapqueue_enqueue(&elm);
 	}
 
 	/* do a normal dequeue of everything */
-	while(heapqueue_dequeue(&tmp)) {
+	while (heapqueue_dequeue(&tmp)) {
 		printf("removed head (data=%d)\n", tmp.d);
 	}
 
@@ -1463,7 +1476,7 @@ static void freelist_dump(struct freelist *fl)
 	unsigned n;
 	fprintf(stderr, "::: Dumping freelist :::\n");
 
-	for(curr = LIST_TOP(fl->global), n = 0; curr; curr = LIST_NEXT(curr, global), n++) {
+	for (curr = LIST_TOP(fl->global), n = 0; curr; curr = LIST_NEXT(curr, global), n++) {
 		printf("[%05u] ofs: %6d len: %6d\n", n, curr->extent.offset, curr->extent.length);
 	}
 }
@@ -1495,7 +1508,7 @@ static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsi
 	new = malloc(sizeof * new);
 	assert(new != NULL);
 
-	if(!new) {
+	if (!new) {
 		PERROR("malloc()");
 		return 0;
 	}
@@ -1531,7 +1544,7 @@ void freelist_init(struct freelist *fl)
 /** deallocate all entries on the freelist. */
 void freelist_free(struct freelist *fl)
 {
-	while(LIST_TOP(fl->global)) {
+	while (LIST_TOP(fl->global)) {
 		freelist_ll_free(LIST_TOP(fl->global));
 	}
 
@@ -1546,14 +1559,14 @@ long freelist_alloc(struct freelist *fl, unsigned count)
 	struct freelist_entry *curr;
 
 	/* find the first entry that is big enough */
-	for(curr = LIST_TOP(fl->global); curr; curr = LIST_NEXT(curr, global)) {
-		if(curr->extent.length >= count) {
+	for (curr = LIST_TOP(fl->global); curr; curr = LIST_NEXT(curr, global)) {
+		if (curr->extent.length >= count) {
 			unsigned ofs;
 			ofs = curr->extent.offset;
 			curr->extent.offset += count;
 			curr->extent.length -= count;
 
-			if(curr->extent.length == 0) {
+			if (curr->extent.length == 0) {
 				freelist_ll_free(curr);
 			}
 
@@ -1588,11 +1601,11 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 	last = NULL;
 	new = NULL;
 
-	for(curr = LIST_TOP(fl->global); curr; curr = LIST_NEXT(curr, global)) {
+	for (curr = LIST_TOP(fl->global); curr; curr = LIST_NEXT(curr, global)) {
 		assert(curr != last);
 		assert(curr != (void*)0x99999999);
 
-		if(last) {
+		if (last) {
 			assert(LIST_NEXT(last, global) == curr); /* sanity check */
 		}
 
@@ -1605,11 +1618,11 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 		);
 		*/
 
-		if(ofs == curr->extent.offset) {
+		if (ofs == curr->extent.offset) {
 			ERROR_FMT("overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
 			TODO("make something out of this");
 			DIE();
-		} else if(last && freelist_ll_isbridge(&last->extent, ofs, count, &curr->extent)) {
+		} else if (last && freelist_ll_isbridge(&last->extent, ofs, count, &curr->extent)) {
 			/* |......|XXX|.......|		bridge */
 			DEBUG("|......|XXX|.......|		bridge. last=%u+%u curr=%u+%u new=%u+%u\n", last->extent.length, last->extent.offset, curr->extent.offset, curr->extent.length, ofs, count);
 			/* we are dealing with 3 entries, the last, the new and the current */
@@ -1622,7 +1635,7 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 			assert(LIST_NEXT(last, global) != curr); /* deleting it must take it off the list */
 			new = curr = last;
 			break;
-		} else if(curr->extent.offset == ofs + count) {
+		} else if (curr->extent.offset == ofs + count) {
 			/* |.....|_XXX|.......|		grow-next */
 			DEBUG("|.....|_XXX|.......|		grow-next. curr=%u+%u new=%u+%u\n", curr->extent.offset, curr->extent.length, ofs, count);
 			/* merge new entry into a following entry */
@@ -1630,15 +1643,15 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 			curr->extent.length += count;
 			new = curr;
 			break;
-		} else if(last && curr->extent.offset + curr->extent.length == ofs) {
+		} else if (last && curr->extent.offset + curr->extent.length == ofs) {
 			/* |......|XXX_|......|		grow-prev */
 			DEBUG("|......|XXX_|......|		grow-prev. curr=%u+%u new=%u+%u\n", curr->extent.offset, curr->extent.length, ofs, count);
 			/* merge the new entry into the end of the previous entry */
 			curr->extent.length += count;
 			new = curr;
 			break;
-		} else if(ofs < curr->extent.offset) {
-			if(ofs + count > curr->extent.offset) {
+		} else if (ofs < curr->extent.offset) {
+			if (ofs + count > curr->extent.offset) {
 				ERROR_FMT("overlap detected in freelist %p at %u+%u!\n", (void*)fl, ofs, count);
 				TODO("make something out of this");
 				DIE();
@@ -1653,9 +1666,9 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 		last = curr; /* save this for finding a bridge */
 	}
 
-	if(!curr) {
-		if(last) {
-			if(last->extent.offset + last->extent.length == ofs) {
+	if (!curr) {
+		if (last) {
+			if (last->extent.offset + last->extent.length == ofs) {
 				DEBUG("|......|XXX_|......|		grow-prev. last=%u+%u new=%u+%u\n", last->extent.offset, last->extent.length, ofs, count);
 				last->extent.length += count;
 				new = last;
@@ -1687,10 +1700,10 @@ int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count)
 	freelist_dump(fl);
 #endif
 
-	for(curr = LIST_TOP(fl->global); curr; curr = LIST_NEXT(curr, global)) {
+	for (curr = LIST_TOP(fl->global); curr; curr = LIST_NEXT(curr, global)) {
 		DEBUG("checking for %u:%u in curr=%u:%u\n", ofs, count, curr->extent.offset, curr->extent.length);
 
-		if(curr->extent.offset <= ofs && curr->extent.offset + curr->extent.length >= ofs + count) {
+		if (curr->extent.offset <= ofs && curr->extent.offset + curr->extent.length >= ofs + count) {
 			TRACE("Found entry to thwack at %u:%u for %u:%u\n", curr->extent.offset, curr->extent.length, ofs, count);
 
 			/* four possible cases:
@@ -1699,16 +1712,16 @@ int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count)
 			 * 3. tails are the same - shrink
 			 * 4. extent gets split into two extents
 			 */
-			if(curr->extent.offset == ofs && curr->extent.length == count) {
+			if (curr->extent.offset == ofs && curr->extent.length == count) {
 				/* 1. heads and lengths are the same - free extent */
 				freelist_ll_free(curr);
 				return 1; /* success */
-			} else if(curr->extent.offset == ofs) {
+			} else if (curr->extent.offset == ofs) {
 				/* 2. heads are the same, but lengths differ - slice off head */
 				curr->extent.offset += count;
 				curr->extent.length -= count;
 				return 1; /* success */
-			} else if((curr->extent.offset + curr->extent.length) == (ofs + count)) {
+			} else if ((curr->extent.offset + curr->extent.length) == (ofs + count)) {
 				/* 3. tails are the same - shrink */
 				curr->extent.length -= count;
 				return 1; /* success */
@@ -1746,19 +1759,19 @@ EXPORT void freelist_test(void)
 	freelist_init(&fl);
 	fprintf(stderr, "::: Making some fragments :::\n");
 
-	for(n = 0; n < 60; n += 12) {
+	for (n = 0; n < 60; n += 12) {
 		freelist_pool(&fl, n, 6);
 	}
 
 	fprintf(stderr, "::: Filling in gaps :::\n");
 
-	for(n = 0; n < 60; n += 12) {
+	for (n = 0; n < 60; n += 12) {
 		freelist_pool(&fl, n + 6, 6);
 	}
 
 	fprintf(stderr, "::: Walking backwards :::\n");
 
-	for(n = 120; n > 60;) {
+	for (n = 120; n > 60;) {
 		n -= 6;
 		freelist_pool(&fl, n, 6);
 	}
@@ -1768,7 +1781,7 @@ EXPORT void freelist_test(void)
 	/* test freelist_alloc() */
 	fprintf(stderr, "::: Allocating :::\n");
 
-	for(n = 0; n < 60; n += 6) {
+	for (n = 0; n < 60; n += 6) {
 		long ofs;
 		ofs = freelist_alloc(&fl, 6);
 		TRACE("alloc: %lu+%u\n", ofs, 6);
@@ -1778,7 +1791,7 @@ EXPORT void freelist_test(void)
 
 	fprintf(stderr, "::: Allocating :::\n");
 
-	for(n = 0; n < 60; n += 6) {
+	for (n = 0; n < 60; n += 6) {
 		long ofs;
 		ofs = freelist_alloc(&fl, 6);
 		TRACE("alloc: %lu+%u\n", ofs, 6);
@@ -1823,7 +1836,7 @@ EXPORT int eventlog_init(void)
 {
 	eventlog_file = fopen(mud_config.eventlog_filename, "a");
 
-	if(!eventlog_file) {
+	if (!eventlog_file) {
 		PERROR(mud_config.eventlog_filename);
 		return 0; /* failure */
 	}
@@ -1836,7 +1849,7 @@ EXPORT int eventlog_init(void)
 /** clean up eventlog module and close the logging file. */
 EXPORT void eventlog_shutdown(void)
 {
-	if(eventlog_file) {
+	if (eventlog_file) {
 		fclose(eventlog_file);
 		eventlog_file = 0;
 	}
@@ -1855,18 +1868,18 @@ EXPORT void eventlog(const char *type, const char *fmt, ...)
 	n = vsnprintf(buf, sizeof buf, fmt, ap);
 	va_end(ap);
 
-	if(n < 0) {
+	if (n < 0) {
 		ERROR_MSG("vsnprintf() failure");
 		return; /* failure */
 	}
 
-	if(n >= (int)sizeof buf) { /* output was truncated */
+	if (n >= (int)sizeof buf) { /* output was truncated */
 		n = strlen(buf);
 	}
 
 	/* make certain the last character is a newline */
-	if(n > 0 && buf[n - 1] != '\n') {
-		if(n == sizeof buf) n--;
+	if (n > 0 && buf[n - 1] != '\n') {
+		if (n == sizeof buf) n--;
 
 		buf[n] = '\n';
 		buf[n + 1] = 0;
@@ -1876,7 +1889,7 @@ EXPORT void eventlog(const char *type, const char *fmt, ...)
 	time(&t);
 	strftime(timestamp, sizeof timestamp, mud_config.eventlog_timeformat, gmtime(&t));
 
-	if(fprintf(eventlog_file ? eventlog_file : stderr, "%s:%s:%s", timestamp, type, buf) < 0) {
+	if (fprintf(eventlog_file ? eventlog_file : stderr, "%s:%s:%s", timestamp, type, buf) < 0) {
 		/* there was a write error */
 		PERROR(eventlog_file ? mud_config.eventlog_filename : "stderr");
 	}
@@ -1951,7 +1964,7 @@ EXPORT void eventlog_channel_remove(const char *channel_name)
 /** report a user joining a public channel. */
 EXPORT void eventlog_channel_join(const char *remote, const char *channel_name, const char *username)
 {
-	if(!remote) {
+	if (!remote) {
 		eventlog("CHANNEL-JOIN", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
 	} else  {
 		eventlog("CHANNEL-JOIN", "remote=\"%s\" channel=\"%s\" user=\"%s\"\n", remote, channel_name, username);
@@ -1961,7 +1974,7 @@ EXPORT void eventlog_channel_join(const char *remote, const char *channel_name, 
 /** report a user leaving a public channel. */
 EXPORT void eventlog_channel_part(const char *remote, const char *channel_name, const char *username)
 {
-	if(!remote) {
+	if (!remote) {
 		eventlog("CHANNEL-PART", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
 	} else  {
 		eventlog("CHANNEL-PART", "remote=\"%s\" channel=\"%s\" user=\"%s\"\n", remote, channel_name, username);
@@ -2010,7 +2023,7 @@ EXPORT void bitmap_free(struct bitmap *bitmap)
 {
 	assert(bitmap != NULL); /* catch when calling free on NULL */
 
-	if(bitmap) {
+	if (bitmap) {
 		free(bitmap->bitmap);
 		bitmap_init(bitmap);
 	}
@@ -2029,12 +2042,12 @@ EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits)
 	DEBUG("Allocating %zd bytes\n", newbits / CHAR_BIT);
 	tmp = realloc(bitmap->bitmap, newbits / CHAR_BIT);
 
-	if(!tmp) {
+	if (!tmp) {
 		PERROR("realloc()");
 		return 0; /* failure */
 	}
 
-	if(bitmap->bitmap_allocbits < newbits) {
+	if (bitmap->bitmap_allocbits < newbits) {
 		/* clear out the new bits */
 		size_t len;
 		len = (newbits - bitmap->bitmap_allocbits) / CHAR_BIT;
@@ -2059,7 +2072,7 @@ EXPORT void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len)
 	unsigned head_ofs, head_len;
 
 	/* allocate more */
-	if(ofs + len > bitmap->bitmap_allocbits) {
+	if (ofs + len > bitmap->bitmap_allocbits) {
 		bitmap_resize(bitmap, ofs + len);
 	}
 
@@ -2069,17 +2082,17 @@ EXPORT void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len)
 	head_len = len > BITMAP_BITSIZE - ofs ? BITMAP_BITSIZE - ofs : len;
 
 	/* head */
-	if(head_len < BITMAP_BITSIZE) {
+	if (head_len < BITMAP_BITSIZE) {
 		len -= head_len;
 		mask = ~(~((~0U) << head_len) << head_ofs);
 		*p++ &= mask;
 	}
 
-	for(; len >= BITMAP_BITSIZE; len -= BITMAP_BITSIZE) {
+	for (; len >= BITMAP_BITSIZE; len -= BITMAP_BITSIZE) {
 		*p++ = 0U;
 	}
 
-	if(len > 0) {
+	if (len > 0) {
 		/* tail */
 		mask = ~((~0U) >> (BITMAP_BITSIZE - len));
 		mask = (~0U) >> len;
@@ -2099,7 +2112,7 @@ EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len)
 	unsigned head_ofs, head_len;
 
 	/* allocate more */
-	if(ofs + len > bitmap->bitmap_allocbits) {
+	if (ofs + len > bitmap->bitmap_allocbits) {
 		bitmap_resize(bitmap, ofs + len);
 	}
 
@@ -2109,17 +2122,17 @@ EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len)
 	head_len = len > BITMAP_BITSIZE - ofs ? BITMAP_BITSIZE - ofs : len;
 
 	/* head */
-	if(head_len < BITMAP_BITSIZE) {
+	if (head_len < BITMAP_BITSIZE) {
 		len -= head_len;
 		mask = (~((~0U) << head_len)) << head_ofs;
 		*p++ |= mask;
 	}
 
-	for(; len >= BITMAP_BITSIZE; len -= BITMAP_BITSIZE) {
+	for (; len >= BITMAP_BITSIZE; len -= BITMAP_BITSIZE) {
 		*p++ = ~0U;
 	}
 
-	if(len > 0) {
+	if (len > 0) {
 		/* tail */
 		mask = (~0U) >> (BITMAP_BITSIZE - len);
 		*p |= mask;
@@ -2134,7 +2147,7 @@ EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len)
  */
 EXPORT int bitmap_get(struct bitmap *bitmap, unsigned ofs)
 {
-	if(ofs < bitmap->bitmap_allocbits) {
+	if (ofs < bitmap->bitmap_allocbits) {
 		return (bitmap->bitmap[ofs / BITMAP_BITSIZE] >> (ofs % BITMAP_BITSIZE)) & 1;
 	} else {
 		return 0; /* outside of the range, the bits are cleared */
@@ -2154,10 +2167,10 @@ EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs)
 	len = bitmap->bitmap_allocbits / BITMAP_BITSIZE;
 	TODO("check the head"); /* I don't remember what these TODO's are for */
 
-	for(i = ofs / BITMAP_BITSIZE; i < len; i++) {
-		if(bitmap->bitmap[i] != 0) {
+	for (i = ofs / BITMAP_BITSIZE; i < len; i++) {
+		if (bitmap->bitmap[i] != 0) {
 			/* found a set bit - scan the word to find the position */
-			for(bofs = 0; ((bitmap->bitmap[i] >> bofs) & 1) == 0; bofs++) ;
+			for (bofs = 0; ((bitmap->bitmap[i] >> bofs) & 1) == 0; bofs++) ;
 
 			return i * BITMAP_BITSIZE + bofs;
 		}
@@ -2180,10 +2193,10 @@ EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs)
 	len = bitmap->bitmap_allocbits / BITMAP_BITSIZE;
 	TODO("check the head"); /* I don't remember what these TODO's are for */
 
-	for(i = ofs / BITMAP_BITSIZE; i < len; i++) {
-		if(bitmap->bitmap[i] != ~0U) {
+	for (i = ofs / BITMAP_BITSIZE; i < len; i++) {
+		if (bitmap->bitmap[i] != ~0U) {
 			/* found a set bit - scan the word to find the position */
-			for(bofs = 0; ((bitmap->bitmap[i] >> bofs) & 1) == 1; bofs++) ;
+			for (bofs = 0; ((bitmap->bitmap[i] >> bofs) & 1) == 1; bofs++) ;
 
 			return i * BITMAP_BITSIZE + bofs;
 		}
@@ -2205,7 +2218,7 @@ EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len)
 	unsigned *p, word_count, i;
 
 	/* resize if too small */
-	if((len * CHAR_BIT) > bitmap->bitmap_allocbits) {
+	if ((len * CHAR_BIT) > bitmap->bitmap_allocbits) {
 		bitmap_resize(bitmap, len * CHAR_BIT);
 	}
 
@@ -2213,14 +2226,14 @@ EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len)
 	word_count = len / sizeof * p; /* number of words in d */
 
 	/* first do the words */
-	while(word_count > 0) {
+	while (word_count > 0) {
 		i = sizeof * p - 1;
 		*p = 0;
 
 		do {
 			*p |= *d << (i * CHAR_BIT);
 			d++;
-		} while(--i);
+		} while (--i);
 
 		p++;
 		word_count--;
@@ -2230,7 +2243,7 @@ EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len)
 	/* finish the remaining */
 	i = sizeof * p - 1;
 
-	while(len > 0) {
+	while (len > 0) {
 		*p &= 0xff << (i * CHAR_BIT);
 		*p |= *d << (i * CHAR_BIT);
 		i--;
@@ -2261,7 +2274,7 @@ EXPORT void bitmap_test(void)
 	bitmap_resize(&bitmap, 1024);
 
 	/* fill in with a test pattern */
-	for(i = 0; i < 5; i++) {
+	for (i = 0; i < 5; i++) {
 		bitmap.bitmap[i] = 0x12345678;
 	}
 
@@ -2269,7 +2282,7 @@ EXPORT void bitmap_test(void)
 	/* display the test pattern */
 	printf("bitmap_set():\n");
 
-	for(i = 0; i < 5; i++) {
+	for (i = 0; i < 5; i++) {
 		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
@@ -2277,7 +2290,7 @@ EXPORT void bitmap_test(void)
 	/* display the test pattern */
 	printf("bitmap_set():\n");
 
-	for(i = 0; i < 5; i++) {
+	for (i = 0; i < 5; i++) {
 		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
@@ -2285,7 +2298,7 @@ EXPORT void bitmap_test(void)
 	/* display the test pattern */
 	printf("bitmap_clear():\n");
 
-	for(i = 0; i < 5; i++) {
+	for (i = 0; i < 5; i++) {
 		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
@@ -2293,7 +2306,7 @@ EXPORT void bitmap_test(void)
 	/* display the test pattern */
 	printf("bitmap_clear():\n");
 
-	for(i = 0; i < 5; i++) {
+	for (i = 0; i < 5; i++) {
 		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
@@ -2301,7 +2314,7 @@ EXPORT void bitmap_test(void)
 	/* display the test pattern */
 	printf("bitmap_set():\n");
 
-	for(i = 0; i < 5; i++) {
+	for (i = 0; i < 5; i++) {
 		printf("0x%08x %s\n", bitmap.bitmap[i], util_convertnumber(bitmap.bitmap[i], 2, 32));
 	}
 
@@ -2346,9 +2359,9 @@ static int acs_testflag(struct acs_info *ai, unsigned flag)
 	unsigned i;
 	flag = tolower((char)flag);
 
-	if(flag >= 'a' && flag <= 'z') {
+	if (flag >= 'a' && flag <= 'z') {
 		i = flag - 'a';
-	} else if(flag >= '0' && flag <= '9') {
+	} else if (flag >= '0' && flag <= '9') {
 		i = flag - '0' + 26;
 	} else {
 		ERROR_FMT("unknown flag '%c'\n", flag);
@@ -2368,21 +2381,21 @@ static int acs_check(struct acs_info *ai, const char *acsstring)
 	unsigned long level;
 retry:
 
-	while(*s) switch(*s++) {
+	while (*s) switch(*s++) {
 		case 's':
 			level = strtoul(s, (char**)&endptr, 10);
 
-			if(endptr == acsstring) {
+			if (endptr == acsstring) {
 				goto parse_failure;
 			}
 
-			if(ai->level < level) goto did_not_pass;
+			if (ai->level < level) goto did_not_pass;
 
 			s = endptr;
 			break;
 
 		case 'f':
-			if(!acs_testflag(ai, (unsigned)*s)) goto did_not_pass;
+			if (!acs_testflag(ai, (unsigned)*s)) goto did_not_pass;
 
 			s++;
 			break;
@@ -2397,7 +2410,7 @@ retry:
 	return 1; /* everything matched */
 did_not_pass:
 
-	while(*s) if(*s++ == '|') goto retry; /* look for an | */
+	while (*s) if (*s++ == '|') goto retry; /* look for an | */
 
 	return 0;
 parse_failure:
@@ -2559,9 +2572,9 @@ struct attr_entry *attr_find(struct attr_list *al, const char *name)
 {
 	struct attr_entry *curr;
 
-	for(curr = LIST_TOP(*al); curr; curr = LIST_NEXT(curr, list)) {
+	for (curr = LIST_TOP(*al); curr; curr = LIST_NEXT(curr, list)) {
 		/* case sensitive. */
-		if(!strcmp(curr->name, name)) {
+		if (!strcmp(curr->name, name)) {
 			return curr;
 		}
 	}
@@ -2582,9 +2595,9 @@ int attr_add(struct attr_list *al, const char *name, const char *value)
 	/* track prev to use later as a tail. */
 	prev = NULL;
 
-	for(curr = LIST_TOP(*al); curr; curr = LIST_NEXT(curr, list)) {
+	for (curr = LIST_TOP(*al); curr; curr = LIST_NEXT(curr, list)) {
 		/* case sensitive. */
-		if(!strcmp(curr->name, name)) {
+		if (!strcmp(curr->name, name)) {
 			ERROR_FMT("WARNING:attribute '%s' already exists.\n", curr->name);
 			return 0; /**< duplicate found, refuse to add. */
 		}
@@ -2595,14 +2608,14 @@ int attr_add(struct attr_list *al, const char *name, const char *value)
 	/* create the new entry. */
 	item = calloc(1, sizeof * item);
 
-	if(!item) {
+	if (!item) {
 		PERROR("calloc()");
 		return 0; /**< out of memory. */
 	}
 
 	item->name = strdup(name);
 
-	if(!item->name) {
+	if (!item->name) {
 		PERROR("strdup()");
 		free(item);
 		return 0; /**< out of memory. */
@@ -2610,7 +2623,7 @@ int attr_add(struct attr_list *al, const char *name, const char *value)
 
 	item->value = strdup(value);
 
-	if(!item->value) {
+	if (!item->value) {
 		PERROR("strdup()");
 		free(item->name);
 		free(item);
@@ -2618,7 +2631,7 @@ int attr_add(struct attr_list *al, const char *name, const char *value)
 	}
 
 	/* if head of list use LIST_INSERT_HEAD, else insert after curr. */
-	if(prev) {
+	if (prev) {
 		assert(curr == NULL);
 		LIST_INSERT_AFTER(prev, item, list);
 	} else {
@@ -2637,7 +2650,7 @@ void attr_list_free(struct attr_list *al)
 
 	assert(al != NULL);
 
-	while((curr = LIST_TOP(*al))) {
+	while ((curr = LIST_TOP(*al))) {
 		LIST_REMOVE(curr, list);
 		free(curr->name);
 		curr->name = NULL;
@@ -2698,7 +2711,7 @@ EXPORT int user_exists(const char *username);
  */
 static void user_ll_free(struct user *u)
 {
-	if(!u) return;
+	if (!u) return;
 
 	attr_list_free(&u->extra_values);
 	LIST_INIT(&u->extra_values);
@@ -2714,7 +2727,7 @@ static void user_ll_free(struct user *u)
 /** free a user structure. */
 static void user_free(struct user *u)
 {
-	if(!u) return;
+	if (!u) return;
 
 	user_ll_free(u);
 }
@@ -2727,7 +2740,7 @@ static struct user *user_defaults(void)
 	struct user *u;
 	u = calloc(1, sizeof * u);
 
-	if(!u) {
+	if (!u) {
 		PERROR("malloc()");
 		return NULL;
 	}
@@ -2752,15 +2765,15 @@ static int user_ll_add(struct user *u)
 	assert(u != NULL);
 	assert(u->username != NULL);
 
-	if(!u) return 0; /**< failure. */
+	if (!u) return 0; /**< failure. */
 
-	if(user_exists(u->username)) {
+	if (user_exists(u->username)) {
 		return 0; /**< failure. */
 	}
 
 	ent = calloc(1, sizeof * ent);
 
-	if(!ent)
+	if (!ent)
 		return 0; /**< failure. */
 
 	ent->u = u;
@@ -2777,54 +2790,54 @@ static struct user *user_load_byname(const char *username)
 
 	h = fdb.read_begin("users", username);
 
-	if(!h) {
+	if (!h) {
 		ERROR_FMT("Could not find user \"%s\"\n", username);
 		return 0; /* failure. */
 	}
 
 	u = user_defaults(); /* allocate a default struct */
 
-	if(!u) {
+	if (!u) {
 		ERROR_MSG("Could not allocate user structure");
 		fdb.read_end(h);
 		return 0; /* failure */
 	}
 
-	while(fdb.read_next(h, &name, &value)) {
-		if(!strcasecmp("id", name))
+	while (fdb.read_next(h, &name, &value)) {
+		if (!strcasecmp("id", name))
 			parse_uint(name, value, &u->id);
-		else if(!strcasecmp("username", name))
+		else if (!strcasecmp("username", name))
 			parse_str(name, value, &u->username);
-		else if(!strcasecmp("pwcrypt", name))
+		else if (!strcasecmp("pwcrypt", name))
 			parse_str(name, value, &u->password_crypt);
-		else if(!strcasecmp("email", name))
+		else if (!strcasecmp("email", name))
 			parse_str(name, value, &u->email);
-		else if(!strcasecmp("acs.level", name))
+		else if (!strcasecmp("acs.level", name))
 			sscanf(value, "%hhu", &u->acs.level); /* TODO: add error checking. */
-		else if(!strcasecmp("acs.flags", name))
+		else if (!strcasecmp("acs.flags", name))
 			parse_uint(name, value, &u->acs.flags);
 		else
 			parse_attr(name, value, &u->extra_values);
 	}
 
-	if(!fdb.read_end(h)) {
+	if (!fdb.read_end(h)) {
 		ERROR_FMT("Error loading user \"%s\"\n", username);
 		goto failure;
 	}
 
-	if(u->id <= 0) {
+	if (u->id <= 0) {
 		ERROR_FMT("User id for user '%s' was not set or set to zero.\n", username);
 		goto failure;
 	}
 
-	if(!u->username || strcasecmp(username, u->username)) {
+	if (!u->username || strcasecmp(username, u->username)) {
 		ERROR_FMT("User name field for user '%s' was not set or does not math.\n", username);
 		goto failure;
 	}
 
 	/** @todo check all fields of u to verify they are correct. */
 
-	if(!freelist_thwack(&user_id_freelist, u->id, 1)) {
+	if (!freelist_thwack(&user_id_freelist, u->id, 1)) {
 		ERROR_FMT("Could not use user id %d (bad id or id already used?)\n", u->id);
 		goto failure;
 	}
@@ -2849,7 +2862,7 @@ static int user_write(const struct user *u)
 
 	h = fdb.write_begin("users", u->username);
 
-	if(!h) {
+	if (!h) {
 		ERROR_FMT("Could not write user \"%s\"\n", u->username);
 		return 0;
 	}
@@ -2861,11 +2874,11 @@ static int user_write(const struct user *u)
 	fdb.write_format(h, "acs.level", "%u", u->acs.level);
 	fdb.write_format(h, "acs.flags", "0x%08x", u->acs.flags);
 
-	for(curr = LIST_TOP(u->extra_values); curr; curr = LIST_NEXT(curr, list)) {
+	for (curr = LIST_TOP(u->extra_values); curr; curr = LIST_NEXT(curr, list)) {
 		fdb.write_pair(h, curr->name, curr->value);
 	}
 
-	if(!fdb.write_end(h)) {
+	if (!fdb.write_end(h)) {
 		ERROR_FMT("Could not write user \"%s\"\n", u->username);
 		return 0; /* failure. */
 	}
@@ -2882,16 +2895,16 @@ EXPORT int user_illegal(const char *username)
 {
 	const char *s;
 
-	if(!username || !*username)
+	if (!username || !*username)
 		return 1; // illegal username
 
 	s = username;
 
-	if(!isalpha(*s))
+	if (!isalpha(*s))
 		return 1; // illegal username
 
-	while(*++s) {
-		if(!isalnum(*s) && *s != '_')
+	while (*++s) {
+		if (!isalnum(*s) && *s != '_')
 			return 1; // illegal username
 	}
 
@@ -2903,15 +2916,15 @@ EXPORT int user_exists(const char *username)
 {
 	struct userdb_entry *curr;
 
-	if(user_illegal(username))
+	if (user_illegal(username))
 		return 0; /**< illegal users never exist */
 
-	for(curr = LIST_TOP(user_list); curr; curr = LIST_NEXT(curr, list)) {
+	for (curr = LIST_TOP(user_list); curr; curr = LIST_NEXT(curr, list)) {
 		const struct user *u = curr->u;
 		assert(u != NULL);
 		assert(u->username != NULL);
 
-		if(!strcasecmp(u->username, username)) {
+		if (!strcasecmp(u->username, username)) {
 			return 1; /**< user exists. */
 		}
 	}
@@ -2926,7 +2939,7 @@ EXPORT struct user *user_lookup(const char *username)
 {
 	struct userdb_entry *curr;
 
-	for(curr = LIST_TOP(user_list); curr; curr = LIST_NEXT(curr, list)) {
+	for (curr = LIST_TOP(user_list); curr; curr = LIST_NEXT(curr, list)) {
 		struct user *u = curr->u;
 
 		assert(u != NULL);
@@ -2934,14 +2947,14 @@ EXPORT struct user *user_lookup(const char *username)
 
 		/*
 		 * load from disk if not loaded:
-		 * if(!strcasecmp(curr->cached_username, username)) {
+		 * if (!strcasecmp(curr->cached_username, username)) {
 		 *   u=user_load_byname(username);
 		 *   user_ll_add(u);
 		 *   return u;
 		 * }
 		 */
 
-		if(!strcasecmp(u->username, username)) {
+		if (!strcasecmp(u->username, username)) {
 			return u; /**< user exists. */
 		}
 	}
@@ -2956,35 +2969,35 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 	long id;
 	char password_crypt[SHA1PASSWD_MAX];
 
-	if(!username || !*username) {
+	if (!username || !*username) {
 		ERROR_MSG("Username was NULL or empty");
 		return NULL; /* failure */
 	}
 
-	if(user_illegal(username))
+	if (user_illegal(username))
 		return NULL; /**< illegal users never exist */
 
-	if(user_exists(username)) {
+	if (user_exists(username)) {
 		ERROR_FMT("Username '%s' already exists.\n", username);
 		return NULL; /* failure */
 	}
 
 	/* encrypt password */
-	if(!sha1crypt_makepass(password_crypt, sizeof password_crypt, password)) {
+	if (!sha1crypt_makepass(password_crypt, sizeof password_crypt, password)) {
 		ERROR_MSG("Could not hash password");
 		return NULL; /* failure */
 	}
 
 	u = user_defaults(); /* allocate a default struct */
 
-	if(!u) {
+	if (!u) {
 		DEBUG_MSG("Could not allocate user structure");
 		return NULL; /* failure */
 	}
 
 	id = freelist_alloc(&user_id_freelist, 1);
 
-	if(id < 0) {
+	if (id < 0) {
 		ERROR_FMT("Could not allocate user id for username(%s)\n", username);
 		user_free(u);
 		return NULL; /* failure */
@@ -2997,7 +3010,7 @@ EXPORT struct user *user_create(const char *username, const char *password, cons
 	u->password_crypt = strdup(password_crypt);
 	u->email = strdup(email);
 
-	if(!user_write(u)) {
+	if (!user_write(u)) {
 		ERROR_FMT("Could not save account username(%s)\n", u->username);
 		user_free(u);
 		return NULL; /* failure */
@@ -3021,20 +3034,20 @@ EXPORT int user_init(void)
 
 	it = fdb.iterator_begin("users");
 
-	if(!it) {
+	if (!it) {
 		return 0;
 	}
 
 	/* scan for account files */
 
-	while((id = fdb.iterator_next(it))) {
+	while ((id = fdb.iterator_next(it))) {
 		struct user *u;
 
 		DEBUG("Found user record '%s'\n", id);
 		/* Load user file */
 		u = user_load_byname(id);
 
-		if(!u) {
+		if (!u) {
 			ERROR_FMT("Could not load user from file '%s'\n", id);
 			goto failure;
 		}
@@ -3062,7 +3075,7 @@ EXPORT void user_shutdown(void)
  */
 EXPORT void user_put(struct user **user)
 {
-	if(user && *user) {
+	if (user && *user) {
 		REFCOUNT_PUT(*user, user_free(*user); *user = NULL);
 	}
 }
@@ -3072,7 +3085,7 @@ EXPORT void user_put(struct user **user)
  */
 EXPORT void user_get(struct user *user)
 {
-	if(user) {
+	if (user) {
 		REFCOUNT_GET(user);
 		DEBUG("user refcount=%d\n", user->REFCOUNT_NAME);
 	}
@@ -3124,9 +3137,9 @@ static int buffer_ll_expandnl(struct buffer *b, size_t len)
 
 	assert(b != NULL);
 
-	for(p = b->data + b->used, rem = len; (e = memchr(p, '\n', rem)); rem -= e - p, p = e + 2) {
+	for (p = b->data + b->used, rem = len; (e = memchr(p, '\n', rem)); rem -= e - p, p = e + 2) {
 		/* check b->max for overflow */
-		if(p - b->data >= (ptrdiff_t)b->max) {
+		if (p - b->data >= (ptrdiff_t)b->max) {
 			DEBUG_MSG("Overflow detected");
 			return -1;
 		}
@@ -3146,7 +3159,7 @@ static int buffer_ll_expandnl(struct buffer *b, size_t len)
  */
 EXPORT int buffer_write_noexpand(struct buffer *b, const void *data, size_t len)
 {
-	if(b->used + len > b->max) {
+	if (b->used + len > b->max) {
 		DEBUG_MSG("Overflow detected. refusing to send any data.\n");
 		return -1;
 	}
@@ -3167,14 +3180,14 @@ EXPORT int buffer_write(struct buffer *b, const char *str, size_t len)
 	int ret;
 	assert(b != NULL);
 
-	if(b->used >= b->max) {
+	if (b->used >= b->max) {
 		DEBUG("Buffer %p is full\n", (void*)b);
 		return -1; /* buffer is full */
 	}
 
 	/* copy the data into the buffer, while expanding newlines */
-	for(i = 0, j = b->used; i < len && j < b->max; i++) {
-		if(str[i] == '\n') {
+	for (i = 0, j = b->used; i < len && j < b->max; i++) {
+		if (str[i] == '\n') {
 			b->data[j++] = '\r';
 		}
 
@@ -3186,7 +3199,7 @@ EXPORT int buffer_write(struct buffer *b, const char *str, size_t len)
 	assert(ret >= 0);
 	assert(b->used <= b->max);
 
-	if(i < len) {
+	if (i < len) {
 		DEBUG("Truncation detected in buffer %p\n", (void*)b);
 		return -1;
 	}
@@ -3211,10 +3224,10 @@ EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap)
 	int res;
 	assert(b != NULL);
 
-	if(!b)
+	if (!b)
 		return -1; /* failure */
 
-	if(b->used >= b->max) {
+	if (b->used >= b->max) {
 		DEBUG("Buffer %p is full\n", (void*)b);
 		return -1; /* buffer is full */
 	}
@@ -3222,12 +3235,12 @@ EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap)
 	/* we allocated an extra byte past max for null terminators */
 	res = vsnprintf(&b->data[b->used], b->max - b->used + 1, fmt, ap);
 
-	if(res < 0) { /* some libcs return -1 on truncation */
+	if (res < 0) { /* some libcs return -1 on truncation */
 		res = b->max - b->used + 2; /* trigger the truncation code below */
 	}
 
 	/* snprintf does not include the null terminator in its count */
-	if((unsigned)res > b->max - b->used) {
+	if ((unsigned)res > b->max - b->used) {
 		/* truncation occured */
 		TODO("grow the buffer and try again?");
 		DEBUG("Truncation detected in buffer %p\n", (void*)b);
@@ -3236,7 +3249,7 @@ EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap)
 
 	res = buffer_ll_expandnl(b, (unsigned)res);
 
-	if(res == -1) {
+	if (res == -1) {
 		TODO("test this code");
 		ERROR_FMT("Overflow in buffer %p\n", (void*)b);
 		return -1;
@@ -3266,7 +3279,7 @@ EXPORT const char *buffer_data(struct buffer *b, size_t *len)
 	assert(b != NULL);
 	assert(len != NULL);
 
-	if(!b) {
+	if (!b) {
 		*len = 0;
 		return NULL;
 	}
@@ -3286,7 +3299,7 @@ EXPORT char *buffer_load(struct buffer *b, size_t *len)
 	assert(b != NULL);
 	assert(len != NULL);
 
-	if(!b) {
+	if (!b) {
 		*len = 0;
 		return NULL;
 	}
@@ -3304,7 +3317,7 @@ EXPORT unsigned buffer_consume(struct buffer *b, size_t len)
 	DEBUG("len=%zu used=%zu rem=%zu\n", len, b->used, b->max - b->used);
 	assert(len <= b->used);
 
-	if(len > b->used) {
+	if (len > b->used) {
 		ERROR_FMT("WARNING:attempted ovewflow of output buffer %p\n", (void*)b);
 		len = b->used;
 	}
@@ -3325,7 +3338,7 @@ EXPORT void buffer_emit(struct buffer *b, size_t len)
 	assert(b->used + len <= b->max);
 	b->used += len;
 
-	if(b->used > b->max) {
+	if (b->used > b->max) {
 		ERROR_FMT("WARNING:attempted ovewflow of input buffer %p\n", (void*)b);
 		b->used = b->max;
 	}
@@ -3343,7 +3356,7 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 	assert(len != NULL);
 
 	/* just look for newlines if we aren't processing IACs */
-	if(!iac_process) {
+	if (!iac_process) {
 		return memchr(d, '\n', *len);
 	}
 
@@ -3351,15 +3364,15 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 
 	assert((int)*len >= 0);
 
-	for(tmplen = *len; tmplen;) {
+	for (tmplen = *len; tmplen;) {
 		TRACE("%d: len=%d tmplen=%d\n", __LINE__, *len, tmplen);
 		assert((int)tmplen > 0);
 
-		if(*d == IAC) {
+		if (*d == IAC) {
 			assert(iac_process != NULL);
 			res = iac_process(d, *len, p);
 
-			if(!res) {
+			if (!res) {
 				/* incomplete IAC sequence, wait for more data */
 				DEBUG_MSG("Incomplete IAC sequence, wait for more data\n");
 				return NULL;
@@ -3377,7 +3390,7 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 			continue;
 		}
 
-		if(*d == '\n') {
+		if (*d == '\n') {
 			return d;
 		}
 
@@ -3399,12 +3412,12 @@ EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t
 	assert(consumed_len != NULL);
 	d = buffer_findnl(b->data, &b->used, iac_process, p);
 
-	if(!d) {
+	if (!d) {
 		/* no newline found */
 		return NULL;
 	}
 
-	if(d > b->data && d[-1] == '\r') {
+	if (d > b->data && d[-1] == '\r') {
 		d[-1] = 0; /* rub out CR */
 	}
 
@@ -3433,7 +3446,7 @@ typedef int SOCKET;
 
 /** check e, if true then print an error message containing the last socket
  * error. */
-#define SOCKETIO_FAILON(e, reason, fail_label) do { if(e) { fprintf(stderr, "ERROR:%s:%s\n", reason, socketio_strerror()); goto fail_label; } } while(0)
+#define SOCKETIO_FAILON(e, reason, fail_label) do { if (e) { fprintf(stderr, "ERROR:%s:%s\n", reason, socketio_strerror()); goto fail_label; } } while (0)
 
 /** generic socket handle. */
 struct socketio_handle {
@@ -3521,7 +3534,7 @@ EXPORT const char *socketio_strerror(void)
 	int res;
 	res = WSAGetLastError();
 
-	if(res == 0)
+	if (res == 0)
 		return "winsock successful";
 
 	snprintf(buf, sizeof buf, "winsock error %d", res);
@@ -3563,12 +3576,12 @@ static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds)
 	unsigned i;
 	fprintf(stderr, "socketio_socket_count=%d\n", socketio_socket_count);
 
-	for(i = 0; i < readfds->fd_count && i < writefds->fd_count; i++) {
-		if(i < readfds->fd_count) {
+	for (i = 0; i < readfds->fd_count && i < writefds->fd_count; i++) {
+		if (i < readfds->fd_count) {
 			fprintf(stderr, "%s():READ:fd=%u  ", __func__, readfds->fd_array[i]);
 		}
 
-		if(i < writefds->fd_count) {
+		if (i < writefds->fd_count) {
 			fprintf(stderr, "%s():WRITE:fd=%u", __func__, writefds->fd_array[i]);
 		}
 
@@ -3579,10 +3592,10 @@ static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds)
 	SOCKET i;
 	fprintf(stderr, "socketio_fdmax=%d\n", socketio_fdmax);
 
-	for(i = 0; i <= socketio_fdmax; i++) {
+	for (i = 0; i <= socketio_fdmax; i++) {
 		unsigned r = FD_ISSET(i, readfds), w = FD_ISSET(i, writefds);
 
-		if(r || w) {
+		if (r || w) {
 			fprintf(stderr, "%s():fd=%d (%c%c)\n", __func__, i, r ? 'r' : '-', w ? 'w' : '-');
 		}
 	}
@@ -3600,7 +3613,7 @@ EXPORT int socketio_init(void)
 
 	err = WSAStartup(MAKEWORD(2, 2), &wsaData);
 
-	if(err != 0) {
+	if (err != 0) {
 		fprintf(stderr, "WSAStartup() failed (err=%d)\n", err);
 		return 0;
 	}
@@ -3651,7 +3664,7 @@ EXPORT int socketio_close(SOCKET *fd)
 	res = close(*fd);
 #endif
 
-	if(res == -1) {
+	if (res == -1) {
 		ERROR_FMT("close(fd=%d):%s\n", *fd, socketio_strerror());
 	}
 
@@ -3672,19 +3685,19 @@ EXPORT int socketio_check_count(SOCKET fd)
 	assert(fd != INVALID_SOCKET);
 #if defined(USE_WIN32_SOCKETS)
 
-	if(socketio_socket_count >= socketio_fdset_sz) {
+	if (socketio_socket_count >= socketio_fdset_sz) {
 		DEBUG("too many open sockets (%d) for fd_set (fd_setsize=%d)\n", socketio_socket_count, socketio_fdset_sz);
 		return 0; /* failure */
 	}
 
 #else
 
-	if((unsigned)fd >= socketio_fdset_sz) {
+	if ((unsigned)fd >= socketio_fdset_sz) {
 		DEBUG("too many open sockets (%d) for fd_set (fd_setsize=%d)\n", fd, socketio_fdset_sz);
 		return 0; /* failure */
 	}
 
-	if(fd > socketio_fdmax) {
+	if (fd > socketio_fdmax) {
 		DEBUG("Updating fdmax from %d to %d\n", socketio_fdmax, fd);
 		socketio_fdmax = fd;
 	}
@@ -3720,7 +3733,7 @@ EXPORT int socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, s
 	size_t tmplen;
 
 	/* leave room in name for ":servbuf" and at least 16 characters */
-	if(name_len >= (16 + sizeof servbuf)) {
+	if (name_len >= (16 + sizeof servbuf)) {
 		name_len -= sizeof servbuf;
 	}
 
@@ -3729,7 +3742,7 @@ EXPORT int socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, s
 
 	tmplen = strlen(name);
 
-	if(name_len > tmplen) {
+	if (name_len > tmplen) {
 		snprintf(name + tmplen, name_len - tmplen, "/%s", servbuf);
 	}
 
@@ -3752,12 +3765,12 @@ EXPORT int socketio_getpeername(SOCKET fd, char *name, size_t name_len)
 	sslen = sizeof ss;
 	res = getpeername(fd, (struct sockaddr*)&ss, &sslen);
 
-	if(res != 0) {
+	if (res != 0) {
 		ERROR_FMT("%s\n", socketio_strerror());
 		return 0;
 	}
 
-	if(!socketio_sockname((struct sockaddr*)&ss, sslen, name, name_len)) {
+	if (!socketio_sockname((struct sockaddr*)&ss, sslen, name, name_len)) {
 		ERROR_FMT("Failed on fd %d\n", fd);
 		return 0;
 	}
@@ -3787,20 +3800,20 @@ static void socketio_ll_handle_free(struct socketio_handle *sh)
 {
 	assert(sh != NULL);
 
-	if(!sh)
+	if (!sh)
 		return;
 
 	DEBUG("freeing socket handle '%s'\n", sh->name);
 
-	if(sh->extra) {
-		if(sh->extra_free) {
+	if (sh->extra) {
+		if (sh->extra_free) {
 			sh->extra_free(sh, sh->extra);
 		} else {
 			DEBUG_MSG("WARNING:extra data for socket handle is being leaked");
 		}
 	}
 
-	if(sh->fd != INVALID_SOCKET) {
+	if (sh->fd != INVALID_SOCKET) {
 		socketio_close(&sh->fd);
 	}
 
@@ -3848,7 +3861,7 @@ static void socketio_toomany(SOCKET fd)
 
 	eventlog_toomany(); /* report that we are refusing connections */
 
-	if(socketio_nonblock(fd)) {
+	if (socketio_nonblock(fd)) {
 		send(fd, buf, (sizeof buf) - 1, 0);
 		socketio_send(fd, buf, (sizeof buf) - 1);
 	}
@@ -3873,7 +3886,7 @@ static void socketio_fdset_copy(fd_set *dst, const fd_set *src)
 	size_t fd_bytes;
 	assert(socketio_fdmax != INVALID_SOCKET);
 
-	if(socketio_fdmax != INVALID_SOCKET) {
+	if (socketio_fdmax != INVALID_SOCKET) {
 		fd_bytes = ROUNDUP(socketio_fdmax + 1, NFDBITS) / 8; /* copy only the necessary bits */
 	} else {
 		fd_bytes = ROUNDUP(socketio_fdset_sz, NFDBITS) / 8; /* fdmax looked weird, copy the whole thing */
@@ -3894,7 +3907,7 @@ static struct socketio_handle *socketio_ll_newhandle(SOCKET fd, const char *name
 
 	assert(fd != INVALID_SOCKET);
 
-	if(!socketio_check_count(fd)) {
+	if (!socketio_check_count(fd)) {
 		ERROR_MSG("too many open sockets. closing new connection!");
 		socketio_toomany(fd); /* send a message to the socket */
 		return NULL; /* failure */
@@ -3925,7 +3938,7 @@ EXPORT int socketio_dispatch(long msec)
 	int nr;	/* number of sockets to process */
 	fd_set out_readfds, out_writefds;
 
-	if(msec < 0) {
+	if (msec < 0) {
 		/* wait forever */
 		to = NULL;
 	} else {
@@ -3935,16 +3948,16 @@ EXPORT int socketio_dispatch(long msec)
 		to = &timeout;
 	}
 
-	if(!LIST_TOP(socketio_handle_list)) {
+	if (!LIST_TOP(socketio_handle_list)) {
 		ERROR_MSG("No more sockets to watch");
 		return 0;
 	}
 
 	/* loop through all sockets to check for deletion */
-	for(curr = LIST_TOP(socketio_handle_list); socketio_delete_count && curr; curr = next) {
+	for (curr = LIST_TOP(socketio_handle_list); socketio_delete_count && curr; curr = next) {
 		next = LIST_NEXT(curr, list);
 
-		if(curr->delete_flag) {
+		if (curr->delete_flag) {
 			/* this entry must be deleted */
 			DEBUG("Deleting %s\n", curr->name);
 
@@ -3956,7 +3969,7 @@ EXPORT int socketio_dispatch(long msec)
 	}
 
 	/* clean up if there was a mistake in the count */
-	if(socketio_delete_count != 0) {
+	if (socketio_delete_count != 0) {
 		ERROR_MSG("WARNING:socketio_delete_count is higher than number of marked sockets");
 		socketio_delete_count = 0;
 	}
@@ -3968,13 +3981,13 @@ EXPORT int socketio_dispatch(long msec)
 	socketio_dump_fdset(&out_readfds, &out_writefds);
 #endif
 
-	if(socketio_fdmax == INVALID_SOCKET) {
+	if (socketio_fdmax == INVALID_SOCKET) {
 		DEBUG_MSG("WARNING:currently not waiting on any sockets");
 	}
 
 	nr = select(socketio_fdmax + 1, &out_readfds, &out_writefds, 0, to);
 
-	if(nr == SOCKET_ERROR) {
+	if (nr == SOCKET_ERROR) {
 		SOCKETIO_FAILON(socketio_eintr(), "select()", failure);
 		return 1; /* EINTR occured */
 	}
@@ -3984,23 +3997,23 @@ EXPORT int socketio_dispatch(long msec)
 	TODO("if fds_bits is available then base the loop on the fd_set and look up entries on the client list.");
 
 	/* check all sockets */
-	for(curr = LIST_TOP(socketio_handle_list); nr > 0 && curr; curr = next) {
+	for (curr = LIST_TOP(socketio_handle_list); nr > 0 && curr; curr = next) {
 		SOCKET fd = curr->fd;
 
 		TRACE("Checking socket %s\n", curr->name);
 
 		assert(fd != INVALID_SOCKET); /* verify consistency of datastructure */
 
-		if(FD_ISSET(fd, &out_writefds)) {
+		if (FD_ISSET(fd, &out_writefds)) {
 			/* always disable an activated entry */
 			assert(fd != INVALID_SOCKET);
 			assert((unsigned)fd < socketio_fdset_sz);
 			FD_CLR(fd, socketio_writefds);
 			DEBUG("Write-ready %s\n", curr->name);
 
-			if(curr->delete_flag) {
+			if (curr->delete_flag) {
 				/* ignore soon-to-be closed socket */
-			} if(curr->write_event) {
+			} if (curr->write_event) {
 
 				/* perform the write handler */
 				curr->write_event(curr, fd, curr->extra);
@@ -4009,16 +4022,16 @@ EXPORT int socketio_dispatch(long msec)
 			nr--;
 		}
 
-		if(FD_ISSET(fd, &out_readfds)) {
+		if (FD_ISSET(fd, &out_readfds)) {
 			/* always disable an activated entry */
 			assert(fd != INVALID_SOCKET);
 			assert((unsigned)fd < socketio_fdset_sz);
 			FD_CLR(fd, socketio_readfds);
 			DEBUG("Read-ready %s\n", curr->name);
 
-			if(curr->delete_flag) {
+			if (curr->delete_flag) {
 				/* ignore soon-to-be closed socket */
-			} else if(curr->read_event) {
+			} else if (curr->read_event) {
 				/* perform the read handler */
 				curr->read_event(curr, fd, curr->extra);
 			}
@@ -4029,7 +4042,7 @@ EXPORT int socketio_dispatch(long msec)
 		next = LIST_NEXT(curr, list);
 	}
 
-	if(nr > 0) {
+	if (nr > 0) {
 		ERROR_FMT("there were %d unhandled socket events\n", nr);
 		goto failure;
 	}
@@ -4068,7 +4081,7 @@ EXPORT void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p)
 	socketio_socket_count++; /* track number of open sockets for filling fd_set */
 #endif
 
-	if(!socketio_sockname((struct sockaddr*)&ss, sslen, buf, sizeof buf)) {
+	if (!socketio_sockname((struct sockaddr*)&ss, sslen, buf, sizeof buf)) {
 		strcpy(buf, "<UNKNOWN>");
 	}
 
@@ -4076,7 +4089,7 @@ EXPORT void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p)
 
 	newclient = socketio_ll_newhandle(fd, buf, 1, NULL, NULL);
 
-	if(!newclient) {
+	if (!newclient) {
 		ERROR_FMT("could not allocate client, closing connection '%s'\n", buf);
 		socketio_close(&fd);
 		return; /* failure */
@@ -4097,7 +4110,7 @@ static void server_free(struct socketio_handle *sh, void *p)
 {
 	struct server *servdata = p;
 
-	if(!sh->delete_flag) {
+	if (!sh->delete_flag) {
 		ERROR_MSG("WARNING: delete_flag was not set before freeing");
 	}
 
@@ -4124,7 +4137,7 @@ static struct socketio_handle *socketio_listen_bind(struct addrinfo *ai, void (*
 	const int yes = 1;
 	assert(ai != NULL);
 
-	if(!ai || !ai->ai_addr) {
+	if (!ai || !ai->ai_addr) {
 		ERROR_MSG("empty socket address");
 		return 0;
 	}
@@ -4136,12 +4149,12 @@ static struct socketio_handle *socketio_listen_bind(struct addrinfo *ai, void (*
 	socketio_socket_count++; /* track number of open sockets for filling fd_set */
 #endif
 
-	if(!socketio_check_count(fd)) {
+	if (!socketio_check_count(fd)) {
 		ERROR_MSG("too many open sockets. refusing new server!");
 		goto failure;
 	}
 
-	if(ai->ai_family == AF_INET || ai->ai_family == AF_INET6) {
+	if (ai->ai_family == AF_INET || ai->ai_family == AF_INET6) {
 		SOCKETIO_FAILON(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&yes, sizeof yes) != 0, "setting SO_REUSEADDR", failure);
 		li.l_onoff = 0; /* disable linger, except for exit() */
 		li.l_linger = 10; /* 10 seconds */
@@ -4150,21 +4163,21 @@ static struct socketio_handle *socketio_listen_bind(struct addrinfo *ai, void (*
 
 	SOCKETIO_FAILON(bind(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen) != 0, "binding to port", failure);
 
-	if(!socketio_nonblock(fd)) {
+	if (!socketio_nonblock(fd)) {
 		goto failure;
 	}
 
 	res = listen(fd, SOCKETIO_LISTEN_QUEUE);
 	SOCKETIO_FAILON(res != 0, "forming listening socket", failure);
 
-	if(!socketio_sockname(ai->ai_addr, (socklen_t)ai->ai_addrlen, buf, sizeof buf)) {
+	if (!socketio_sockname(ai->ai_addr, (socklen_t)ai->ai_addrlen, buf, sizeof buf)) {
 		strcpy(buf, "<UNKNOWN>");
 	}
 
 	/* add server to a list */
 	newserv = socketio_ll_newhandle(fd, buf, 0, NULL, server_read_event);
 
-	if(!newserv) {
+	if (!newserv) {
 		ERROR_FMT("could not allocate server, closing socket '%s'\n", buf);
 		socketio_close(&fd);
 		return 0; /* failure */
@@ -4213,21 +4226,21 @@ EXPORT struct socketio_handle *socketio_listen(int family, int socktype, const c
 
 	res = getaddrinfo(host, port, &ai_hints, &ai_res);
 
-	if(res != 0) {
+	if (res != 0) {
 		ERROR_FMT("hostname parsing error:%s\n", gai_strerror(res));
 		return 0;
 	}
 
 	/* looks for the first AF_INET or AF_INET6 entry */
-	for(curr = ai_res; curr; curr = curr->ai_next) {
+	for (curr = ai_res; curr; curr = curr->ai_next) {
 		TRACE("getaddrinfo():family=%d type=%d\n", curr->ai_family, curr->ai_socktype);
 
-		if(curr->ai_family == AF_INET6 || curr->ai_family == AF_INET) {
+		if (curr->ai_family == AF_INET6 || curr->ai_family == AF_INET) {
 			break;
 		}
 	}
 
-	if(!curr) {
+	if (!curr) {
 		freeaddrinfo(ai_res);
 		ERROR_FMT("Could not find interface for %s:%s\n", host ? host : "*", port);
 		return 0; /* failure */
@@ -4237,7 +4250,7 @@ EXPORT struct socketio_handle *socketio_listen(int family, int socktype, const c
 
 	ret = socketio_listen_bind(curr, newclient);
 
-	if(!ret) {
+	if (!ret) {
 		freeaddrinfo(ai_res);
 		ERROR_FMT("Could bind socket for %s:%s\n", host ? host : "*", port);
 		return 0; /* failure */
@@ -4299,6 +4312,7 @@ EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str)
 	res = buffer_puts(&cl->output, str);
 	socketio_writeready(cl->sh->fd);
 	cl->prompt_flag = 0;
+
 	return res;
 }
 
@@ -4314,6 +4328,7 @@ EXPORT int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_lis
 	res = buffer_vprintf(&cl->output, fmt, ap);
 	socketio_writeready(cl->sh->fd);
 	cl->prompt_flag = 0;
+
 	return res;
 }
 
@@ -4338,7 +4353,7 @@ EXPORT int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...)
 /** releases current state (frees it). */
 static void telnetclient_clear_statedata(struct telnetclient *cl)
 {
-	if(cl->state_free) {
+	if (cl->state_free) {
 		cl->state_free(cl);
 		cl->state_free = NULL;
 	}
@@ -4352,19 +4367,21 @@ static int telnetclient_channel_add(struct telnetclient *cl, struct channel *ch)
 
 	assert(cl != NULL);
 
-	if(!ch) return 1; /* adding NULL is ignored. */
+	if (!ch) return 1; /* adding NULL is ignored. */
 
-	if(!channel.join(ch, &cl->channel_member)) return 0; /* could not join channel. */
+	if (!channel.join(ch, &cl->channel_member)) return 0; /* could not join channel. */
 
 	newlist = realloc(cl->channel, sizeof * cl->channel * (cl->nr_channel + 1));
 
-	if(!newlist) {
+	if (!newlist) {
 		PERROR("realloc()");
+
 		return 0; /* could not allocate. */
 	}
 
 	cl->channel = newlist;
 	cl->channel[cl->nr_channel++] = ch;
+
 	return 1; /* success */
 }
 
@@ -4374,11 +4391,11 @@ static int telnetclient_channel_remove(struct telnetclient *cl, struct channel *
 
 	assert(cl != NULL);
 
-	if(!ch) return 1; /* removng NULL is ignored. */
+	if (!ch) return 1; /* removng NULL is ignored. */
 
-	for(i = 0; i < cl->nr_channel; i++) {
-		if(cl->channel[i] == ch) {
-			DEBUG("channel.part(%p, %p)\n", cl->channel[i], &cl->channel_member);
+	for (i = 0; i < cl->nr_channel; i++) {
+		if (cl->channel[i] == ch) {
+			DEBUG("channel.part(%p, %p)\n", (void*)cl->channel[i], (void*)&cl->channel_member);
 
 			channel.part(cl->channel[i], &cl->channel_member);
 
@@ -4386,7 +4403,7 @@ static int telnetclient_channel_remove(struct telnetclient *cl, struct channel *
 			assert(cl->nr_channel > 0); /* can't enter this condition when no channels. */
 			cl->channel[i] = cl->channel[--cl->nr_channel];
 
-			if(!cl->nr_channel) {
+			if (!cl->nr_channel) {
 				/* if not in any channels then free the array. */
 				free(cl->channel);
 				cl->channel = NULL;
@@ -4406,7 +4423,7 @@ static void telnetclient_free(struct socketio_handle *sh, void *p)
 
 	assert(client != NULL);
 
-	if(!client)
+	if (!client)
 		return;
 
 	TODO("Determine if connection was logged in first");
@@ -4414,13 +4431,13 @@ static void telnetclient_free(struct socketio_handle *sh, void *p)
 
 	DEBUG("freeing client '%s'\n", sh->name);
 
-	if(sh->fd != INVALID_SOCKET) {
+	if (sh->fd != INVALID_SOCKET) {
 		TODO("I forget the purpose of this code");
 		/* only call this if the client wasn't closed earlier */
 		socketio_readready(sh->fd);
 	}
 
-	if(!sh->delete_flag) {
+	if (!sh->delete_flag) {
 		ERROR_MSG("WARNING: delete_flag was not set before freeing");
 	}
 
@@ -4430,7 +4447,7 @@ static void telnetclient_free(struct socketio_handle *sh, void *p)
 	client->channel_member.p = NULL;
 	DEBUG("client->nr_channel=%d\n", client->nr_channel);
 
-	while(client->nr_channel) {
+	while (client->nr_channel) {
 		telnetclient_channel_remove(client, client->channel[0]);
 	}
 
@@ -4461,7 +4478,7 @@ static void telnetclient_channel_send(struct channel_member *cm, struct channel 
 	assert(cm != NULL);
 	assert(msg != NULL);
 
-	if(!cm) return;
+	if (!cm) return;
 
 	cl = cm->p;
 
@@ -4530,7 +4547,7 @@ static int telnetclient_telnet_init(struct telnetclient *cl)
 		IAC, SB, TELOPT_TTYPE, TELQUAL_SEND, IAC, SE, /* ask the terminal type */
 	};
 
-	if(buffer_write_noexpand(&cl->output, support, sizeof support) < 0) {
+	if (buffer_write_noexpand(&cl->output, support, sizeof support) < 0) {
 		DEBUG_MSG("write failure");
 		telnetclient_close(cl);
 		return 0; /* failure */
@@ -4547,7 +4564,7 @@ static int telnetclient_echomode(struct telnetclient *cl, int mode)
 	const char *s;
 	size_t len;
 
-	if(mode) {
+	if (mode) {
 		s = echo_on;
 		len = sizeof echo_on;
 	} else {
@@ -4555,7 +4572,7 @@ static int telnetclient_echomode(struct telnetclient *cl, int mode)
 		len = sizeof echo_off;
 	}
 
-	if(buffer_write_noexpand(&cl->output, s, len) < 0) {
+	if (buffer_write_noexpand(&cl->output, s, len) < 0) {
 		DEBUG_MSG("write failure");
 		cl->sh->delete_flag = 1;
 		return 0; /* failure */
@@ -4576,7 +4593,7 @@ static int telnetclient_linemode(struct telnetclient *cl, int mode)
 	const char *s;
 	size_t len;
 
-	if(mode) {
+	if (mode) {
 		s = enable;
 		len = sizeof enable;
 	} else {
@@ -4584,7 +4601,7 @@ static int telnetclient_linemode(struct telnetclient *cl, int mode)
 		len = sizeof disable;
 	}
 
-	if(buffer_write_noexpand(&cl->output, s, len) < 0) {
+	if (buffer_write_noexpand(&cl->output, s, len) < 0) {
 		DEBUG_MSG("write failure");
 		cl->sh->delete_flag = 1;
 		return 0; /* failure */
@@ -4610,7 +4627,7 @@ EXPORT void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void
 	data = buffer_data(&cl->output, &len);
 	res = socketio_send(fd, data, len);
 
-	if(res < 0) {
+	if (res < 0) {
 		sh->delete_flag = 1;
 		return; /* client write failure */
 	}
@@ -4618,7 +4635,7 @@ EXPORT void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void
 	TRACE("len=%zu res=%zu\n", len, res);
 	len = buffer_consume(&cl->output, (unsigned)res);
 
-	if(len > 0) {
+	if (len > 0) {
 		/* there is still data in our buffer */
 		socketio_writeready(fd);
 	}
@@ -4633,14 +4650,14 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 	assert(iac[0] == IAC);
 	assert(iac[1] == SB);
 
-	if(!iac) return;
+	if (!iac) return;
 
-	if(!cl) return;
+	if (!cl) return;
 
 	switch(iac[2]) {
 	case TELOPT_TTYPE:
-		if(iac[3] == TELQUAL_IS) {
-			if(len < 9) {
+		if (iac[3] == TELQUAL_IS) {
+			if (len < 9) {
 				ERROR_MSG("WARNING: short IAC SB TTYPE IS .. IAC SE");
 				return;
 			}
@@ -4655,7 +4672,7 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 		break;
 
 	case TELOPT_NAWS: {
-		if(len < 9) {
+		if (len < 9) {
 			ERROR_MSG("WARNING: short IAC SB NAWS .. IAC SE");
 			return;
 		}
@@ -4683,7 +4700,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p)
 	assert(iac != NULL);
 	assert(iac[0] == IAC);
 
-	if(iac[0] != IAC) {
+	if (iac[0] != IAC) {
 		ERROR_MSG("called on non-telnet data\n");
 		return 0;
 	}
@@ -4693,7 +4710,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p)
 		return 1; /* consume the first IAC and leave the second behind */
 
 	case WILL:
-		if(len >= 3) {
+		if (len >= 3) {
 			DEBUG("IAC WILL %hhu\n", iac[2]);
 			return 3; /* 3-byte operations*/
 		} else {
@@ -4701,7 +4718,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p)
 		}
 
 	case WONT:
-		if(len >= 3) {
+		if (len >= 3) {
 			DEBUG("IAC WONT %hhu\n", iac[2]);
 			return 3; /* 3-byte operations*/
 		} else {
@@ -4709,7 +4726,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p)
 		}
 
 	case DO:
-		if(len >= 3) {
+		if (len >= 3) {
 			DEBUG("IAC DO %hhu\n", iac[2]);
 			return 3; /* 3-byte operations*/
 		} else {
@@ -4717,7 +4734,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p)
 		}
 
 	case DONT:
-		if(len >= 3) {
+		if (len >= 3) {
 			DEBUG("IAC DONT %hhu\n", iac[2]);
 			return 3; /* 3-byte operations*/
 		} else {
@@ -4729,23 +4746,23 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p)
 		TRACE("IAC SB %hhu found\n", iac[2]);
 		endptr = iac + 2;
 
-		while((endptr = memchr(endptr, IAC, len - (endptr - iac)))) {
+		while ((endptr = memchr(endptr, IAC, len - (endptr - iac)))) {
 			assert(endptr[0] == IAC);
 			TRACE("found IAC %hhu\n", endptr[1]);
 			endptr++;
 
-			if((endptr - iac) >= (ptrdiff_t)len) {
+			if ((endptr - iac) >= (ptrdiff_t)len) {
 				DEBUG_MSG("Unterminated IAC SB sequence");
 				return 0; /* unterminated */
 			}
 
-			if(endptr[0] == SE) {
+			if (endptr[0] == SE) {
 				endptr++;
 				// DEBUG("IAC SB %hhu ... IAC SE\n", iac[2]);
 				HEXDUMP(iac, endptr - iac, "%s():IAC SB %hhu: ", __func__, iac[2]);
 				telnetclient_iac_process_sb(iac, (size_t)(endptr - iac), cl);
 				return endptr - iac;
-			} else if(endptr[0] == IAC) {
+			} else if (endptr[0] == IAC) {
 				TRACE_MSG("Found IAC IAC in IAC SB block");
 				endptr++;
 			}
@@ -4758,7 +4775,7 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p)
 
 	/* fall through */
 	default:
-		if(len >= 3)
+		if (len >= 3)
 			return 2; /* treat anything we don't know about as a 2-byte operation */
 		else
 			return 0; /* not enough data */
@@ -4779,14 +4796,14 @@ static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl
 
 	data = buffer_load(&cl->input, &len);
 
-	if(len == 0) {
+	if (len == 0) {
 		ERROR_FMT("WARNING:input buffer full, closing connection %s\n", sh->name);
 		goto failure;
 	}
 
 	res = socketio_recv(sh->fd, data, len);
 
-	if(res <= 0) {
+	if (res <= 0) {
 		/* close or error */
 		goto failure;
 	}
@@ -4795,10 +4812,12 @@ static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl
 	buffer_emit(&cl->input, (unsigned)res);
 
 	DEBUG("Client %d(%s):received %d bytes (used=%zu)\n", sh->fd, sh->name, res, cl->input.used);
+
 	return 1;
 failure:
 	/* close the socket and free the client */
 	telnetclient_close(cl);
+
 	return 0;
 }
 
@@ -4810,24 +4829,25 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 	struct telnetclient *cl = extra;
 
 	/* pull data from socket into buffer */
-	if(!telnetclient_recv(sh, cl)) {
+	if (!telnetclient_recv(sh, cl)) {
 		return; /* failure */
 	}
 
 	/* getline triggers a special IAC parser that stops at a line */
-	while((line = buffer_getline(&cl->input, &consumed, telnetclient_iac_process, cl))) {
+	while ((line = buffer_getline(&cl->input, &consumed, telnetclient_iac_process, cl))) {
 		DEBUG("client line: '%s'\n", line);
 
-		if(cl->line_input) {
+		if (cl->line_input) {
 			cl->line_input(cl, line);
 		}
 
 		buffer_consume(&cl->input, consumed);
 
-		if(sh->read_event != telnetclient_rdev_lineinput) break;
+		if (sh->read_event != telnetclient_rdev_lineinput) break;
 	}
 
 	socketio_readready(fd); /* only call this if the client wasn't closed earlier */
+
 	return;
 }
 
@@ -4854,7 +4874,7 @@ static void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_in
 static int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt)
 {
 
-	if(!cl) return 0;
+	if (!cl) return 0;
 
 	return cl->sh->read_event == telnetclient_rdev_lineinput && cl->line_input == line_input && cl->prompt_string == prompt;
 }
@@ -4883,14 +4903,14 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh)
 
 	cl = telnetclient_newclient(sh);
 
-	if(!cl) {
+	if (!cl) {
 		return; /* failure */
 	}
 
 	sh->write_event = telnetclient_write_event;
 	sh->read_event = NULL;
 
-	if(!telnetclient_telnet_init(cl) || !telnetclient_linemode(cl, 1) || !telnetclient_echomode(cl, 1)) {
+	if (!telnetclient_telnet_init(cl) || !telnetclient_linemode(cl, 1) || !telnetclient_echomode(cl, 1)) {
 		return; /* failure, the client would have been deleted */
 	}
 
@@ -4902,7 +4922,7 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh)
 /** mark a telnetclient to be closed and freed. */
 EXPORT void telnetclient_close(struct telnetclient *cl)
 {
-	if(cl && cl->sh && !cl->sh->delete_flag) {
+	if (cl && cl->sh && !cl->sh->delete_flag) {
 		cl->sh->delete_flag = 1; /* cause deletetion later */
 		socketio_delete_count++;
 	}
@@ -4911,7 +4931,7 @@ EXPORT void telnetclient_close(struct telnetclient *cl)
 /** display the currently configured prompt string again. */
 EXPORT void telnetclient_prompt_refresh(struct telnetclient *cl)
 {
-	if(cl && cl->prompt_string && !cl->prompt_flag) {
+	if (cl && cl->prompt_string && !cl->prompt_flag) {
 		telnetclient_setprompt(cl, cl->prompt_string);
 	}
 }
@@ -4921,10 +4941,10 @@ EXPORT void telnetclient_prompt_refresh_all(void)
 {
 	struct socketio_handle *curr, *next;
 
-	for(curr = LIST_TOP(socketio_handle_list); curr; curr = next) {
+	for (curr = LIST_TOP(socketio_handle_list); curr; curr = next) {
 		next = LIST_NEXT(curr, list);
 
-		if(curr->type == 1 && curr->extra) {
+		if (curr->type == 1 && curr->extra) {
 			telnetclient_prompt_refresh(curr->extra);
 		}
 	}
@@ -4970,7 +4990,7 @@ EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*f
 	newitem->extra2 = extra2;
 	newitem->extra3 = extra3;
 
-	if(mi->tail) {
+	if (mi->tail) {
 		LIST_INSERT_AFTER(mi->tail, newitem, item);
 	} else {
 		LIST_INSERT_HEAD(&mi->items, newitem, item);
@@ -4989,7 +5009,7 @@ static void menu_titledraw(struct telnetclient *cl, const char *title, size_t le
 #else
 	char buf[256];
 
-	if(len > sizeof buf - 1)
+	if (len > sizeof buf - 1)
 		len = sizeof buf - 1;
 
 #endif
@@ -4997,17 +5017,17 @@ static void menu_titledraw(struct telnetclient *cl, const char *title, size_t le
 	buf[len] = '\n';
 	buf[len + 1] = 0;
 
-	if(cl)
+	if (cl)
 		telnetclient_puts(cl, buf);
 
 	DEBUG("%s>>%s", cl ? cl->sh->name : "", buf);
 
-	if(cl)
+	if (cl)
 		telnetclient_printf(cl, "%s\n", title);
 
 	DEBUG("%s>>%s\n", cl ? cl->sh->name : "", title);
 
-	if(cl)
+	if (cl)
 		telnetclient_puts(cl, buf);
 
 	DEBUG("%s>>%s", cl ? cl->sh->name : "", buf);
@@ -5021,14 +5041,14 @@ EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi)
 	assert(mi != NULL);
 	menu_titledraw(cl, mi->title, mi->title_width);
 
-	for(curr = LIST_TOP(mi->items); curr; curr = LIST_NEXT(curr, item)) {
-		if(curr->key) {
-			if(cl)
+	for (curr = LIST_TOP(mi->items); curr; curr = LIST_NEXT(curr, item)) {
+		if (curr->key) {
+			if (cl)
 				telnetclient_printf(cl, "%c. %s\n", curr->key, curr->name);
 
 			DEBUG("%s>>%c. %s\n", cl ? cl->sh->name : "", curr->key, curr->name);
 		} else {
-			if(cl)
+			if (cl)
 				telnetclient_printf(cl, "%s\n", curr->name);
 
 			DEBUG("%s>>%s\n", cl ? cl->sh->name : "", curr->name);
@@ -5041,11 +5061,11 @@ EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const
 {
 	const struct menuitem *curr;
 
-	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+	while (*line && isspace(*line)) line++; /* ignore leading spaces */
 
-	for(curr = LIST_TOP(mi->items); curr; curr = LIST_NEXT(curr, item)) {
-		if(tolower(*line) == tolower(curr->key)) {
-			if(curr->action_func) {
+	for (curr = LIST_TOP(mi->items); curr; curr = LIST_NEXT(curr, item)) {
+		if (tolower(*line) == tolower(curr->key)) {
+			if (curr->action_func) {
 				curr->action_func(cl, curr->extra2, curr->extra3);
 			} else {
 				telnetclient_puts(cl, mud_config.msg_unsupported);
@@ -5076,25 +5096,27 @@ static void menu_start(void *p, long unused2 UNUSED, void *extra3)
  ******************************************************************************/
 
 /** action callback to do the "pose" command. */
-static int command_do_pose(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg)
+static int command_do_pose(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in current room");
 	telnetclient_printf(cl, "%s %s\n", telnetclient_username(cl), arg);
+
 	return 1; /* success */
 }
 
 /** action callback to do the "yell" command. */
-static int command_do_yell(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg)
+static int command_do_yell(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in yelling distance");
 	telnetclient_printf(cl, "%s yells \"%s\"\n", telnetclient_username(cl), arg);
+
 	return 1; /* success */
 }
 
 /** action callback to do the "say" command. */
-static int command_do_say(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg)
+static int command_do_say(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	struct channel *ch;
 	struct channel_member *exclude_list[1];
@@ -5103,25 +5125,28 @@ static int command_do_say(struct telnetclient *cl, struct user *u, const char *c
 	ch = channel.public(0);
 	exclude_list[0] = &cl->channel_member; /* don't send message to self. */
 	channel.broadcast(ch, exclude_list, 1, "%s says \"%s\"\n", telnetclient_username(cl), arg);
+
 	return 1; /* success */
 }
 
 /** action callback to do the "emote" command. */
-static int command_do_emote(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg)
+static int command_do_emote(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in current room");
 	telnetclient_printf(cl, "%s %s\n", telnetclient_username(cl), arg);
+
 	return 1; /* success */
 }
 
 /** action callback to do the "chsay" command. */
-static int command_do_chsay(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg)
+static int command_do_chsay(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	TODO("pass the channel name in a way that makes sense");
 	TODO("Get user name");
 	TODO("Broadcast to everyone in a channel");
 	telnetclient_printf(cl, "%s says \"%s\"\n", telnetclient_username(cl), arg);
+
 	return 1; /* success */
 }
 
@@ -5133,11 +5158,12 @@ static int command_do_quit(struct telnetclient *cl, struct user *u UNUSED, const
 	 * does not end up being true for a future read?
 	 */
 	telnetclient_close(cl);
+
 	return 1; /* success */
 }
 
 /** action callback to do the "roomget" command. */
-static int command_do_roomget(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg)
+static int command_do_roomget(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	struct room *r;
 	char roomnum_str[64];
@@ -5152,14 +5178,14 @@ static int command_do_roomget(struct telnetclient *cl, struct user *u, const cha
 
 	r = room.get(roomnum);
 
-	if(!r) {
+	if (!r) {
 		telnetclient_printf(cl, "room \"%s\" not found.\n", roomnum_str);
 		return 0;
 	}
 
 	attrvalue = room.attr_get(r, attrname);
 
-	if(attrvalue) {
+	if (attrvalue) {
 		telnetclient_printf(cl, "room \"%s\" \"%s\" = \"%s\"\n", roomnum_str, attrname, attrvalue);
 	} else {
 		telnetclient_printf(cl, "room \"%s\" attribute \"%s\" not found.\n", roomnum_str, attrname);
@@ -5171,7 +5197,7 @@ static int command_do_roomget(struct telnetclient *cl, struct user *u, const cha
 }
 
 /** action callback to do the "char" command. */
-static int command_do_character(struct telnetclient *cl, struct user *u, const char *cmd UNUSED, const char *arg)
+static int command_do_character(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	struct character *ch;
 	char act[64];
@@ -5182,16 +5208,16 @@ static int command_do_character(struct telnetclient *cl, struct user *u, const c
 
 	arg = util_getword(arg, act, sizeof act);
 
-	if(!strcasecmp(act, "new")) {
+	if (!strcasecmp(act, "new")) {
 		ch = character.new();
 		telnetclient_printf(cl, "Created character %s.\n", character.attr_get(ch, "id"));
 		character.put(ch);
-	} else if(!strcasecmp(act, "get")) {
+	} else if (!strcasecmp(act, "get")) {
 		arg = util_getword(arg, tmp, sizeof tmp);
 		ch_id = strtoul(tmp, 0, 10); /* TODO: handle errors. */
 		ch = character.get(ch_id);
 
-		if(ch) {
+		if (ch) {
 			/* get attribute name. */
 			arg = util_getword(arg, tmp, sizeof tmp);
 			telnetclient_printf(cl, "Character %u \"%s\" = \"%s\"\n", ch_id, tmp, character.attr_get(ch, tmp));
@@ -5199,19 +5225,19 @@ static int command_do_character(struct telnetclient *cl, struct user *u, const c
 		} else {
 			telnetclient_printf(cl, "Unknown character \"%s\"\n", tmp);
 		}
-	} else if(!strcasecmp(act, "set")) {
+	} else if (!strcasecmp(act, "set")) {
 		arg = util_getword(arg, tmp, sizeof tmp);
 		ch_id = strtoul(tmp, 0, 10); /* TODO: handle errors. */
 		ch = character.get(ch_id);
 
-		if(ch) {
+		if (ch) {
 			/* get attribute name. */
 			arg = util_getword(arg, tmp, sizeof tmp);
 
 			/* find start of value. */
-			while(*arg && isspace(*arg)) arg++;
+			while (*arg && isspace(*arg)) arg++;
 
-			if(!character.attr_set(ch, tmp, arg)) {
+			if (!character.attr_set(ch, tmp, arg)) {
 				telnetclient_printf(cl, "Could not set \"%s\" on character %u.\n", tmp, ch_id);
 			}
 
@@ -5230,6 +5256,7 @@ static int command_do_character(struct telnetclient *cl, struct user *u, const c
 static int command_not_implemented(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
 	telnetclient_puts(cl, "Not implemented\n");
+
 	return 1; /* success */
 }
 
@@ -5281,13 +5308,14 @@ static int command_run(struct telnetclient *cl, struct user *u, const char *cmd,
 	unsigned i;
 
 	/* search for a long command. */
-	for(i = 0; i < NR(command_table); i++) {
-		if(!strcasecmp(cmd, command_table[i].name)) {
+	for (i = 0; i < NR(command_table); i++) {
+		if (!strcasecmp(cmd, command_table[i].name)) {
 			return command_table[i].cb(cl, u, cmd, arg);
 		}
 	}
 
 	telnetclient_puts(cl, mud_config.msg_invalidcommand);
+
 	return 0; /* failure */
 }
 
@@ -5303,23 +5331,23 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 	assert(cl != NULL); /** @todo support cl as NULL for silent/offline commands */
 	assert(line != NULL);
 
-	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+	while (*line && isspace(*line)) line++; /* ignore leading spaces */
 
 	TODO("Can we eliminate trailing spaces?");
 
 	TODO("can we define these 1 character commands as aliases?");
 
-	if(ispunct(line[0])) {
-		for(i = 0; i < NR(command_short_table); i++) {
+	if (ispunct(line[0])) {
+		for (i = 0; i < NR(command_short_table); i++) {
 			const char *shname = command_short_table[i].shname;
 			int shname_len = strlen(shname);
 
-			if(!strncmp(line, shname, shname_len)) {
+			if (!strncmp(line, shname, shname_len)) {
 				/* find start of arguments, after the short command. */
 				arg = line + shname_len;
 
 				/* ignore leading spaces */
-				while(*arg && isspace(*arg)) arg++;
+				while (*arg && isspace(*arg)) arg++;
 
 				/* use the name as the cmd. */
 				return command_run(cl, u, command_short_table[i].name, arg);
@@ -5331,11 +5359,11 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 	e = line + strcspn(line, " \t");
 	arg = *e ? e + 1 + strspn(e + 1, " \t") : e; /* point to where the args start */
 
-	while(*arg && isspace(*arg)) arg++; /* ignore leading spaces */
+	while (*arg && isspace(*arg)) arg++; /* ignore leading spaces */
 
 	assert(e >= line);
 
-	if((unsigned)(e - line) > sizeof cmd - 1) { /* first word is too long */
+	if ((unsigned)(e - line) > sizeof cmd - 1) { /* first word is too long */
 		DEBUG("Command length %td is too long, truncating\n", e - line);
 		e = line + sizeof cmd - 1;
 	}
@@ -5366,7 +5394,7 @@ static void command_lineinput(struct telnetclient *cl, const char *line)
 	command_execute(cl, NULL, line); /** @todo pass current user and character */
 
 	/* check if we should update the prompt */
-	if(telnetclient_isstate(cl, command_lineinput, mud_config.command_prompt)) {
+	if (telnetclient_isstate(cl, command_lineinput, mud_config.command_prompt)) {
 		telnetclient_setprompt(cl, mud_config.command_prompt);
 	}
 }
@@ -5403,9 +5431,9 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line)
 
 	u = user_lookup(cl->state.login.username);
 
-	if(u) {
+	if (u) {
 		/* verify the password */
-		if(sha1crypt_checkpass(u->password_crypt, line)) {
+		if (sha1crypt_checkpass(u->password_crypt, line)) {
 			telnetclient_setuser(cl, u);
 			eventlog_signon(cl->state.login.username, cl->sh->name);
 			telnetclient_printf(cl, "Hello, %s.\n\n", u->username);
@@ -5440,9 +5468,9 @@ static void login_username_lineinput(struct telnetclient *cl, const char *line)
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
 	cl->state_free = 0; /* this state does not require anything special to free */
 
-	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+	while (*line && isspace(*line)) line++; /* ignore leading spaces */
 
-	if(!*line) {
+	if (!*line) {
 		telnetclient_puts(cl, mud_config.msg_invalidusername);
 		telnetclient_start_menuinput(cl, &gamemenu_login);
 		return;
@@ -5506,7 +5534,7 @@ EXPORT void form_free(struct form *f)
 	free(f->form_title);
 	f->form_title = NULL;
 
-	while((curr = LIST_TOP(f->items))) {
+	while ((curr = LIST_TOP(f->items))) {
 		LIST_REMOVE(curr, item);
 		free(curr->name);
 		free(curr->prompt);
@@ -5533,7 +5561,7 @@ EXPORT void form_additem(struct form *f, unsigned flags, const char *name, const
 	newitem->form_check = form_check;
 	newitem->value_index = f->item_count++;
 
-	if(f->tail) {
+	if (f->tail) {
 		LIST_INSERT_AFTER(f->tail, newitem, item);
 	} else {
 		LIST_INSERT_HEAD(&f->items, newitem, item);
@@ -5550,14 +5578,15 @@ static struct formitem *form_getitem(struct form *f, const char *name)
 	assert(f != NULL);
 	assert(name != NULL);
 
-	for(curr = LIST_TOP(f->items); curr; curr = LIST_NEXT(curr, item)) {
-		if(!strcasecmp(curr->name, name)) {
+	for (curr = LIST_TOP(f->items); curr; curr = LIST_NEXT(curr, item)) {
+		if (!strcasecmp(curr->name, name)) {
 			/* found first matching entry */
 			return curr;
 		}
 	}
 
 	ERROR_FMT("Unknown form variable '%s'\n", name);
+
 	return NULL; /* not found */
 }
 
@@ -5571,14 +5600,15 @@ static const char *form_getvalue(const struct form *f, unsigned nr_value, char *
 	assert(f != NULL);
 	assert(name != NULL);
 
-	for(curr = LIST_TOP(f->items); curr; curr = LIST_NEXT(curr, item)) {
-		if(!strcasecmp(curr->name, name) && curr->value_index < nr_value) {
+	for (curr = LIST_TOP(f->items); curr; curr = LIST_NEXT(curr, item)) {
+		if (!strcasecmp(curr->name, name) && curr->value_index < nr_value) {
 			/* found matching entry that was in range */
 			return value[curr->value_index];
 		}
 	}
 
 	ERROR_FMT("Unknown form variable '%s'\n", name);
+
 	return NULL; /* not found */
 }
 
@@ -5590,19 +5620,19 @@ static void form_menu_show(struct telnetclient *cl, const struct form *f, struct
 
 	menu_titledraw(cl, f->form_title, strlen(f->form_title));
 
-	for(i = 0, curr = LIST_TOP(f->items); curr && (!fs || i < fs->nr_value); curr = LIST_NEXT(curr, item), i++) {
+	for (i = 0, curr = LIST_TOP(f->items); curr && (!fs || i < fs->nr_value); curr = LIST_NEXT(curr, item), i++) {
 		const char *user_value;
 
 		/* skip over invisible items without altering the count/index */
-		while(curr && (curr->flags & FORM_FLAG_INVISIBLE) == FORM_FLAG_INVISIBLE)
+		while (curr && (curr->flags & FORM_FLAG_INVISIBLE) == FORM_FLAG_INVISIBLE)
 			curr = LIST_NEXT(curr, item);
 
-		if(!curr)
+		if (!curr)
 			break;
 
 		user_value = fs ? fs->value[curr->value_index] ? fs->value[curr->value_index] : "" : 0;
 
-		if((curr->flags & FORM_FLAG_HIDDEN) == FORM_FLAG_HIDDEN) {
+		if ((curr->flags & FORM_FLAG_HIDDEN) == FORM_FLAG_HIDDEN) {
 			user_value = "<hidden>";
 		}
 
@@ -5622,18 +5652,18 @@ static void form_lineinput(struct telnetclient *cl, const char *line)
 	assert(f != NULL);
 	assert(fs->curritem != NULL);
 
-	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+	while (*line && isspace(*line)) line++; /* ignore leading spaces */
 
-	if(*line) {
+	if (*line) {
 		/* check the input */
-		if(fs->curritem->form_check && !fs->curritem->form_check(cl, line)) {
+		if (fs->curritem->form_check && !fs->curritem->form_check(cl, line)) {
 			DEBUG("%s:Invalid form input\n", cl->sh->name);
 			telnetclient_puts(cl, mud_config.msg_tryagain);
 			telnetclient_setprompt(cl, fs->curritem->prompt);
 			return;
 		}
 
-		if(*value) {
+		if (*value) {
 			free(*value);
 			*value = NULL;
 		}
@@ -5641,7 +5671,7 @@ static void form_lineinput(struct telnetclient *cl, const char *line)
 		*value = strdup(line);
 		fs->curritem = LIST_NEXT(fs->curritem, item);
 
-		if(fs->curritem && (!fs->done || ((fs->curritem->flags & FORM_FLAG_INVISIBLE) == FORM_FLAG_INVISIBLE))) {
+		if (fs->curritem && (!fs->done || ((fs->curritem->flags & FORM_FLAG_INVISIBLE) == FORM_FLAG_INVISIBLE))) {
 			/* go to next item if not done or if next item is invisible */
 			telnetclient_puts(cl, fs->curritem->description);
 			telnetclient_setprompt(cl, fs->curritem->prompt);
@@ -5664,12 +5694,12 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line)
 	assert(cl != NULL);
 	assert(line != NULL);
 
-	while(*line && isspace(*line)) line++; /* ignore leading spaces */
+	while (*line && isspace(*line)) line++; /* ignore leading spaces */
 
-	if(tolower(*line) == 'a') { /* accept */
+	if (tolower(*line) == 'a') { /* accept */
 		TODO("callback to close out the form");
 
-		if(f->form_close) {
+		if (f->form_close) {
 			/* this call will switch states on success */
 			f->form_close(cl, fs);
 		} else {
@@ -5684,12 +5714,12 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line)
 		long i;
 		i = strtol(line, &endptr, 10);
 
-		if(endptr != line && i > 0) {
-			for(fs->curritem = LIST_TOP(f->items); fs->curritem; fs->curritem = LIST_NEXT(fs->curritem, item)) {
+		if (endptr != line && i > 0) {
+			for (fs->curritem = LIST_TOP(f->items); fs->curritem; fs->curritem = LIST_NEXT(fs->curritem, item)) {
 				/* skip invisible entries in selection */
-				if((fs->curritem->flags & FORM_FLAG_INVISIBLE) == FORM_FLAG_INVISIBLE) continue;
+				if ((fs->curritem->flags & FORM_FLAG_INVISIBLE) == FORM_FLAG_INVISIBLE) continue;
 
-				if(--i == 0) {
+				if (--i == 0) {
 					telnetclient_start_lineinput(cl, form_lineinput, fs->curritem->prompt);
 					return; /* success */
 				}
@@ -5701,7 +5731,6 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line)
 	telnetclient_puts(cl, mud_config.msg_invalidselection);
 	form_menu_show(cl, f, fs);
 	telnetclient_setprompt(cl, mud_config.form_prompt);
-	return;
 }
 
 /** undocumented - please add documentation. */
@@ -5711,9 +5740,9 @@ static void form_state_free(struct telnetclient *cl)
 	unsigned i;
 	DEBUG("%s:freeing state\n", cl->sh->name);
 
-	if(fs->value) {
-		for(i = 0; i < fs->nr_value; i++) {
-			if(fs->value[i]) {
+	if (fs->value) {
+		for (i = 0; i < fs->nr_value; i++) {
+			if (fs->value[i]) {
 				size_t len; /* carefully erase the data from the heap, it may be private */
 				len = strlen(fs->value[i]);
 				memset(fs->value[i], 0, len);
@@ -5751,33 +5780,35 @@ static int form_createaccount_username_check(struct telnetclient *cl, const char
 
 	len = strlen(str);
 
-	if(len < 3) {
+	if (len < 3) {
 		telnetclient_puts(cl, mud_config.msg_usermin3);
 		DEBUG_MSG("failure: username too short.");
 		goto failure;
 	}
 
-	for(s = str, res = isalpha(*s); *s; s++) {
+	for (s = str, res = isalpha(*s); *s; s++) {
 		res = res && isalnum(*s);
 
-		if(!res) {
+		if (!res) {
 			telnetclient_puts(cl, mud_config.msg_useralphanumeric);
 			DEBUG_MSG("failure: bad characters");
 			goto failure;
 		}
 	}
 
-	if(user_exists(str)) {
+	if (user_exists(str)) {
 		telnetclient_puts(cl, mud_config.msg_userexists);
 		DEBUG_MSG("failure: user exists.");
 		goto failure;
 	}
 
 	DEBUG_MSG("success.");
+
 	return 1;
 failure:
 	telnetclient_puts(cl, mud_config.msg_tryagain);
 	telnetclient_setprompt(cl, cl->state.form.curritem->prompt);
+
 	return 0;
 }
 
@@ -5788,7 +5819,7 @@ static int form_createaccount_password_check(struct telnetclient *cl, const char
 	assert(cl != NULL);
 	assert(cl->state.form.form != NULL);
 
-	if(str && strlen(str) > 3) {
+	if (str && strlen(str) > 3) {
 		DEBUG_MSG("success.");
 		return 1;
 	}
@@ -5796,6 +5827,7 @@ static int form_createaccount_password_check(struct telnetclient *cl, const char
 	/* failure */
 	telnetclient_puts(cl, mud_config.msg_tryagain);
 	telnetclient_setprompt(cl, cl->state.form.curritem->prompt);
+
 	return 0;
 }
 
@@ -5812,7 +5844,7 @@ static int form_createaccount_password2_check(struct telnetclient *cl, const cha
 
 	password1 = form_getvalue(fs->form, fs->nr_value, fs->value, "PASSWORD");
 
-	if(password1 && !strcmp(password1, str)) {
+	if (password1 && !strcmp(password1, str)) {
 		DEBUG_MSG("success.");
 		return 1;
 	}
@@ -5820,6 +5852,7 @@ static int form_createaccount_password2_check(struct telnetclient *cl, const cha
 	telnetclient_puts(cl, mud_config.msg_tryagain);
 	fs->curritem = form_getitem((struct form*)fs->form, "PASSWORD"); /* rewind to password entry */
 	telnetclient_setprompt(cl, fs->curritem->prompt);
+
 	return 0;
 }
 
@@ -5836,14 +5869,14 @@ static void form_createaccount_close(struct telnetclient *cl, struct form_state 
 
 	DEBUG("%s:create account: '%s'\n", cl->sh->name, username);
 
-	if(user_exists(username)) {
+	if (user_exists(username)) {
 		telnetclient_puts(cl, mud_config.msg_userexists);
 		return;
 	}
 
 	u = user_create(username, password, email);
 
-	if(!u) {
+	if (!u) {
 		telnetclient_printf(cl, "Could not create user named '%s'\n", username);
 		return;
 	}
@@ -5865,14 +5898,14 @@ static void form_start(void *p, long unused2 UNUSED, void *form)
 
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
 
-	if(!mud_config.newuser_allowed) {
+	if (!mud_config.newuser_allowed) {
 		/* currently not accepting applications */
 		telnetclient_puts(cl, mud_config.msgfile_newuser_deny);
 		telnetclient_start_menuinput(cl, &gamemenu_login);
 		return;
 	}
 
-	if(f->message)
+	if (f->message)
 		telnetclient_puts(cl, f->message);
 
 	cl->state_free = form_state_free;
@@ -5911,7 +5944,7 @@ EXPORT struct form *form_load(const char *buf, void (*form_close)(struct telnetc
 
 	p = util_strfile_readline(&h, &len);
 
-	if(!p) {
+	if (!p) {
 		ERROR_MSG("Could not parse form.");
 		goto failure;
 	}
@@ -5927,19 +5960,19 @@ EXPORT struct form *form_load(const char *buf, void (*form_close)(struct telnetc
 	title = NULL;
 
 	/* count number of entries */
-	while(1) {
+	while (1) {
 
 		/* look for the name */
 		do {
 			p = util_strfile_readline(&h, &len);
 
-			if(!p)
+			if (!p)
 				goto done;
 
-			while(isspace(*p)) p++ ; /* skip leading blanks and blank lines */
+			while (isspace(*p)) p++ ; /* skip leading blanks and blank lines */
 
-			for(e = 0; e < len && !isspace(p[e]); e++) ;
-		} while(!e);
+			for (e = 0; e < len && !isspace(p[e]); e++) ;
+		} while (!e);
 
 		/* found a word */
 		name = malloc(e + 1);
@@ -5949,7 +5982,7 @@ EXPORT struct form *form_load(const char *buf, void (*form_close)(struct telnetc
 		/* look for the prompt */
 		p = util_strfile_readline(&h, &len);
 
-		if(!p) break;
+		if (!p) break;
 
 		prompt = malloc(len + 1);
 		memcpy(prompt, p, len);
@@ -5958,7 +5991,7 @@ EXPORT struct form *form_load(const char *buf, void (*form_close)(struct telnetc
 		/* find end of description */
 		tmp = strstr(h.buf, "\n~");
 
-		if(!tmp)
+		if (!tmp)
 			tmp = strlen(h.buf) + h.buf;
 		else
 			tmp++;
@@ -5994,7 +6027,7 @@ failure:
 	free(prompt);
 	free(description);
 
-	if(f) {
+	if (f) {
 		form_free(f);
 	}
 
@@ -6009,10 +6042,11 @@ EXPORT struct form *form_load_from_file(const char *filename, void (*form_close)
 
 	buf = util_textfile_load(filename);
 
-	if(!buf) return 0;
+	if (!buf) return 0;
 
 	ret = form_load(buf, form_close);
 	free(buf);
+
 	return ret;
 }
 
@@ -6023,14 +6057,14 @@ EXPORT int form_module_init(void)
 
 	form_newuser_app = form_load_from_file(mud_config.form_newuser_filename, form_createaccount_close);
 
-	if(!form_newuser_app) {
+	if (!form_newuser_app) {
 		ERROR_FMT("could not load %s\n", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	}
 
 	fi = form_getitem(form_newuser_app, "USERNAME");
 
-	if(!fi) {
+	if (!fi) {
 		ERROR_FMT("%s does not have a USERNAME field.\n", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	}
@@ -6039,7 +6073,7 @@ EXPORT int form_module_init(void)
 
 	fi = form_getitem(form_newuser_app, "PASSWORD");
 
-	if(!fi) {
+	if (!fi) {
 		ERROR_FMT("%s does not have a PASSWORD field.\n", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	}
@@ -6049,7 +6083,7 @@ EXPORT int form_module_init(void)
 
 	fi = form_getitem(form_newuser_app, "PASSWORD2");
 
-	if(!fi) {
+	if (!fi) {
 		VERBOSE("warning: %s does not have a PASSWORD2 field.\n", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	} else {
@@ -6088,6 +6122,7 @@ EXPORT int game_init(void)
 	// menu_additem(&gamemenu_main, 'C', "Create Character", form_start, 0, &character_form);
 	menu_additem(&gamemenu_main, 'B', "Back to login menu", menu_start, 0, &gamemenu_login);
 	menu_additem(&gamemenu_main, 'Q', "Disconnect", signoff, 0, NULL);
+
 	return 1;
 }
 
@@ -6104,93 +6139,93 @@ static int http_parse(const char *request, size_t len)
 	end = request + len - 1;
 
 	/* method */
-	if(s > end)
+	if (s > end)
 		return 0;
 
-	if(!isalpha(*s))
+	if (!isalpha(*s))
 		return -1; /* improperly formed */
 
-	for(; isalpha(*s); s++) {
-		if(s > end)
+	for (; isalpha(*s); s++) {
+		if (s > end)
 			return 0;
 	}
 
 	DEBUG_MSG("HTTP Request: METHOD - TODO");
 
 	/* a single space */
-	if(s > end)
+	if (s > end)
 		return 0;
 
-	if(*s != ' ')
+	if (*s != ' ')
 		return -1; /* improperly formed */
 
 	s++;
 
 	/* URI */
-	if(s > end)
+	if (s > end)
 		return 0;
 
 	/* accept any non-whitespace into the URI */
-	if(isspace(*s))
+	if (isspace(*s))
 		return -1; /* improperly formed */
 
-	for(; !isspace(*s); s++) {
-		if(s > end)
+	for (; !isspace(*s); s++) {
+		if (s > end)
 			return 0;
 	}
 
 	DEBUG_MSG("HTTP Request: URI - TODO");
 
 	/* a single space */
-	if(s > end)
+	if (s > end)
 		return 0;
 
-	if(*s != ' ')
+	if (*s != ' ')
 		return -1; /* improperly formed */
 
 	s++;
 
 	/* http version */
-	if(s > end)
+	if (s > end)
 		return 0;
 
 	/** @todo check for exactly: HTTP/1.1 */
-	if(isspace(*s))
+	if (isspace(*s))
 		return -1; /* improperly formed */
 
-	for(; !isspace(*s); s++) {
-		if(s > end)
+	for (; !isspace(*s); s++) {
+		if (s > end)
 			return 0;
 	}
 
 	/* CRLF */
-	if(s > end)
+	if (s > end)
 		return 0;
 
-	if(*s != '\r')
+	if (*s != '\r')
 		return -1; /* improperly formed */
 
 	s++;
 
-	if(s > end)
+	if (s > end)
 		return 0;
 
-	if(*s != '\n')
+	if (*s != '\n')
 		return -1; /* improperly formed */
 
 	s++;
 	DEBUG_MSG("HTTP Request - end of method line");
 
 	/* message headers ... */
-	while(s <= end) {
+	while (s <= end) {
 		/* terminated by line beginning with CRLF */
-		if(*s == '\r') {
+		if (*s == '\r') {
 			s++;
 
-			if(s > end)
+			if (s > end)
 				return 0;
 
-			if(*s != '\n')
+			if (*s != '\n')
 				return -1; /* improperly formed */
 
 			DEBUG_MSG("HTTP request Success!");
@@ -6198,21 +6233,21 @@ static int http_parse(const char *request, size_t len)
 		}
 
 		/* header field */
-		if(s > end)
+		if (s > end)
 			return 0;
 
 		/** @todo don't silently ignore the headers. */
-		for(; *s != '\r'; s++) {
-			if(s > end)
+		for (; *s != '\r'; s++) {
+			if (s > end)
 				return 0; /* short */
 		}
 
 		s++;
 
-		if(s > end)
+		if (s > end)
 			return 0; /* short */
 
-		if(*s == '\n') {
+		if (*s == '\n') {
 			s++;
 			/** @todo do something with this header field */
 			DEBUG_MSG("HTTP Header field: TODO");
@@ -6269,7 +6304,7 @@ static struct socketio_handle *webserver_listen_handle;
  */
 static void webserver_close(struct webserver *ws)
 {
-	if(ws && ws->sh && !ws->sh->delete_flag) {
+	if (ws && ws->sh && !ws->sh->delete_flag) {
 		ws->sh->delete_flag = 1; /* cause deletetion later */
 		socketio_delete_count++; /* tracks if clean-up phase should be done. */
 	}
@@ -6292,15 +6327,15 @@ static void webserver_read_event(struct socketio_handle *sh, SOCKET fd, void *ex
 
 	res = socketio_recv(fd, data, len);
 
-	if(res <= 0) {
+	if (res <= 0) {
 		/* close or error */
 		webserver_close(ws);
 		return;
 	}
 
 	/** @todo implement something to parse the input. use an HTTP parser state machine. */
-	if(ws->state == 0) { /* 0 = parsing request */
-		if(ws->read_pos + res > sizeof(ws->request)) {
+	if (ws->state == 0) { /* 0 = parsing request */
+		if (ws->read_pos + res > sizeof(ws->request)) {
 			webserver_close(ws);
 			return;
 		}
@@ -6310,11 +6345,11 @@ static void webserver_read_event(struct socketio_handle *sh, SOCKET fd, void *ex
 
 		int http_result = http_parse(ws->request, ws->read_pos);
 
-		if(http_result < 0) {
+		if (http_result < 0) {
 			ERROR_MSG("WARNING: bad HTTP request header");
 			webserver_close(ws);
 			return;
-		} else if(http_result > 0) {
+		} else if (http_result > 0) {
 			/* pretend we have read in a useful request and also pretened we have
 			 * pushed some data into a buffer to deliever.
 			 */
@@ -6328,7 +6363,7 @@ static void webserver_read_event(struct socketio_handle *sh, SOCKET fd, void *ex
 		}
 	}
 
-	if(!ws->state) {
+	if (!ws->state) {
 		/* keep sucking down data. */
 		socketio_readready(fd);
 	}
@@ -6358,7 +6393,7 @@ static void webserver_write_event(struct socketio_handle *sh, SOCKET fd, void *e
 
 	res = socketio_send(fd, data + ws->write_pos, data_len - ws->write_pos);
 
-	if(res < 0) {
+	if (res < 0) {
 		sh->delete_flag = 1;
 		return; /* client write failure */
 	}
@@ -6371,9 +6406,9 @@ static void webserver_write_event(struct socketio_handle *sh, SOCKET fd, void *e
 	 * as write-ready, else close the completed connection.
 	 */
 
-	if(ws->write_pos < data_len) {
+	if (ws->write_pos < data_len) {
 		socketio_writeready(sh->fd);
-	} else if(ws->write_pos == data_len) {
+	} else if (ws->write_pos == data_len) {
 		/*
 		ws->write_pos = 0;
 		ws->state = 0;
@@ -6389,12 +6424,12 @@ static void webserver_free(struct socketio_handle *sh, void *p)
 {
 	struct webserver *ws = p;
 
-	if(sh->fd != INVALID_SOCKET) {
+	if (sh->fd != INVALID_SOCKET) {
 		/* force a future invocation when the remote socket closes. */
 		socketio_readready(sh->fd);
 	}
 
-	if(!sh->delete_flag) {
+	if (!sh->delete_flag) {
 		ERROR_MSG("WARNING: delete_flag was not set before freeing");
 	}
 
@@ -6446,7 +6481,7 @@ EXPORT int webserver_init(int family, unsigned port)
 	snprintf(port_str, sizeof port_str, "%u", port);
 	webserver_listen_handle = socketio_listen(family, SOCK_STREAM, NULL, port_str, webserver_new_event);
 
-	if(!webserver_listen_handle) {
+	if (!webserver_listen_handle) {
 		return 0; /* */
 	}
 
@@ -6458,7 +6493,7 @@ EXPORT int webserver_init(int family, unsigned port)
  */
 EXPORT void webserver_shutdown(void)
 {
-	if(webserver_listen_handle) {
+	if (webserver_listen_handle) {
 		webserver_listen_handle->delete_flag = 1;
 		socketio_delete_count++; /* tracks if clean-up phase should be done. */
 		webserver_listen_handle = NULL;
@@ -6478,11 +6513,11 @@ static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const
 	char **target;
 	size_t len;
 
-	if(!strcasecmp(id, "prompt.menu")) {
+	if (!strcasecmp(id, "prompt.menu")) {
 		target = &mud_config.menu_prompt;
-	} else if(!strcasecmp(id, "prompt.form")) {
+	} else if (!strcasecmp(id, "prompt.form")) {
 		target = &mud_config.form_prompt;
-	} else if(!strcasecmp(id, "prompt.command")) {
+	} else if (!strcasecmp(id, "prompt.command")) {
 		target = &mud_config.command_prompt;
 	} else {
 		ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
@@ -6493,6 +6528,7 @@ static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const
 	len = strlen(value) + 2; /* leave room for a space */
 	*target = malloc(len);
 	snprintf(*target, len, "%s ", value);
+
 	return 0; /* success - terminate the callback chain */
 }
 
@@ -6517,8 +6553,8 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 		{ "msg.usercreatesuccess", &mud_config.msg_usercreatesuccess },
 	};
 
-	for(i = 0; i < NR(info); i++) {
-		if(!strcasecmp(id, info[i].id)) {
+	for (i = 0; i < NR(info); i++) {
+		if (!strcasecmp(id, info[i].id)) {
 			free(*info[i].target);
 			len = strlen(value) + 2; /* leave room for a newline */
 			*info[i].target = malloc(len);
@@ -6528,6 +6564,7 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 	}
 
 	ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
+
 	return 1; /* failure - continue looking for matches */
 }
 
@@ -6546,13 +6583,13 @@ static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, cons
 		{ "msgfile.newuser_deny", &mud_config.msgfile_newuser_deny },
 	};
 
-	for(i = 0; i < NR(info); i++) {
-		if(!strcasecmp(id, info[i].id)) {
+	for (i = 0; i < NR(info); i++) {
+		if (!strcasecmp(id, info[i].id)) {
 			free(*info[i].target);
 			*info[i].target = util_textfile_load(value);
 
 			/* if we could not load the file, install a fake message */
-			if(!*info[i].target) {
+			if (!*info[i].target) {
 				char buf[128];
 				snprintf(buf, sizeof buf, "<<fileNotFound:%s>>\n", value);
 				*info[i].target = strdup(buf);
@@ -6563,6 +6600,7 @@ static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, cons
 	}
 
 	ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
+
 	return 1; /* failure - continue looking for matches */
 }
 
@@ -6575,6 +6613,7 @@ static int do_config_string(struct config *cfg UNUSED, void *extra, const char *
 
 	free(*target);
 	*target = strdup(value);
+
 	return 0; /* success - terminate the callback chain */
 }
 
@@ -6583,7 +6622,7 @@ static int do_config_string(struct config *cfg UNUSED, void *extra, const char *
  */
 static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
 {
-	if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
+	if (!socketio_listen(fl_default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
 		ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
 		return 1; /* failure - continue looking for matches */
 	}
@@ -6598,16 +6637,16 @@ static int do_config_uint(struct config *cfg UNUSED, void *extra, const char *id
 	unsigned *uint_p = extra;
 	assert(extra != NULL);
 
-	if(!extra) return -1; /* error */
+	if (!extra) return -1; /* error */
 
-	if(!*value) {
+	if (!*value) {
 		DEBUG_MSG("Empty string");
 		return -1; /* error - empty string */
 	}
 
 	*uint_p = strtoul(value, &endptr, 0);
 
-	if(*endptr != 0) {
+	if (*endptr != 0) {
 		DEBUG_MSG("Not a number");
 		return -1; /* error - empty string */
 	}
@@ -6682,11 +6721,21 @@ EXPORT void mud_config_shutdown(void)
 	};
 	unsigned i;
 
-	for(i = 0; i < NR(targets); i++) {
+	for (i = 0; i < NR(targets); i++) {
 		free(*targets[i]);
 		*targets[i] = NULL;
 	}
 }
+
+#if !defined(NDEBUG) && !defined(NTEST)
+/** test routine to dump a config option. */
+static int mud_config_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
+{
+	printf("MUD-CONFIG: %s=%s\n", id, value);
+
+	return 1;
+}
+#endif
 
 /**
  * setup config loging callback functions then reads in a configuration file.
@@ -6695,6 +6744,7 @@ EXPORT void mud_config_shutdown(void)
 EXPORT int mud_config_process(void)
 {
 	struct config cfg;
+
 	config_setup(&cfg);
 	config_watch(&cfg, "server.port", do_config_port, 0);
 	config_watch(&cfg, "server.plugins", do_config_string, &mud_config.plugins);
@@ -6710,15 +6760,16 @@ EXPORT int mud_config_process(void)
 	config_watch(&cfg, "webserver.port", do_config_uint, &mud_config.webserver_port);
 	config_watch(&cfg, "form.newuser.filename", do_config_string, &mud_config.form_newuser_filename);
 #if !defined(NDEBUG) && !defined(NTEST)
-	config_watch(&cfg, "*", config_test_show, 0);
+	config_watch(&cfg, "*", mud_config_show, 0);
 #endif
 
-	if(!config_load(mud_config.config_filename, &cfg)) {
+	if (!config_load(mud_config.config_filename, &cfg)) {
 		config_free(&cfg);
 		return 0; /* failure */
 	}
 
 	config_free(&cfg);
+
 	return 1; /* success */
 }
 
@@ -6743,10 +6794,10 @@ static struct plugin *plugin_find(const char *name)
 	struct plugin *curr;
 	assert(name != NULL);
 
-	for(curr = LIST_TOP(plugin_list); curr; curr = LIST_NEXT(curr, list)) {
+	for (curr = LIST_TOP(plugin_list); curr; curr = LIST_NEXT(curr, list)) {
 		assert(curr->name != NULL);
 
-		if(!strcasecmp(name, curr->name)) {
+		if (!strcasecmp(name, curr->name)) {
 			return curr;
 		}
 	}
@@ -6767,7 +6818,7 @@ EXPORT int plugin_load(const char *name)
 	/* look to see if it is loaded. */
 	pi = plugin_find(name);
 
-	if(pi) {
+	if (pi) {
 		ERROR_FMT("plugin already loaded: %s\n", name);
 		return 0; /* can't decide if this is an error or not. */
 	}
@@ -6776,7 +6827,7 @@ EXPORT int plugin_load(const char *name)
 	snprintf(path, sizeof path, "./%s", name);
 
 	/* load it. */
-	if(!dll_open(&h, path)) {
+	if (!dll_open(&h, path)) {
 		ERROR_FMT("could not open plugin: %s\n", name);
 		return 0;
 	}
@@ -6784,14 +6835,14 @@ EXPORT int plugin_load(const char *name)
 	/* initialize the plugin. */
 	plugin_class = dll_symbol(h, "plugin_class");
 
-	if(!plugin_class || plugin_class->api_version != PLUGIN_API || !plugin_class->initialize) {
+	if (!plugin_class || plugin_class->api_version != PLUGIN_API || !plugin_class->initialize) {
 		dll_close(h);
 		ERROR_FMT("could not get class from plugin: %s\n", name);
 		return 0;
 	}
 
 	/* found the class guts - initialize the plugin once and only once. */
-	if(!plugin_class->initialize()) {
+	if (!plugin_class->initialize()) {
 		dll_close(h);
 		ERROR_FMT("could not initialize plugin: %s\n", name);
 		return 0;
@@ -6805,6 +6856,7 @@ EXPORT int plugin_load(const char *name)
 	LIST_INSERT_HEAD(&plugin_list, pi, list);
 
 	VERBOSE("Loaded plugin: %s\n", name);
+
 	return 1;
 }
 
@@ -6816,22 +6868,22 @@ EXPORT int plugin_load_list(const char *list)
 {
 	char name[PLUGIN_NAME_MAX]; /**< hold a substring. */
 
-	while(*list) {
+	while (*list) {
 		const char *e;
 
 		/* find start of next word. */
-		while(*list && isspace(*list)) list++;
+		while (*list && isspace(*list)) list++;
 
-		for(e = list; *e && !isspace(*e); e++) ;
+		for (e = list; *e && !isspace(*e); e++) ;
 
 		/* copy word out of string list. */
 		snprintf(name, sizeof name, "%.*s", (int)(e - list), list);
 		/* move to next position. */
 		list = e;
 
-		if(*list) list++;
+		if (*list) list++;
 
-		if(!plugin_load(name)) {
+		if (!plugin_load(name)) {
 			return 0; /**< failure. */
 		}
 	}
@@ -6882,7 +6934,7 @@ static void usage(void)
  */
 static void need_parameter(int ch, const char *next_arg)
 {
-	if(!next_arg) {
+	if (!next_arg) {
 		ERROR_FMT("option -%c takes a parameter\n", ch);
 		usage();
 	}
@@ -6915,7 +6967,7 @@ static int process_flag(int ch, const char *next_arg)
 	case 'p':
 		need_parameter(ch, next_arg);
 
-		if(!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, telnetclient_new_event)) {
+		if (!socketio_listen(fl_default_family, SOCK_STREAM, NULL, next_arg, telnetclient_new_event)) {
 			usage();
 		}
 
@@ -6946,10 +6998,10 @@ static void process_args(int argc, char **argv)
 {
 	int i, j;
 
-	for(i = 1; i < argc; i++) {
-		if(argv[i][0] == '-') {
-			for(j = 1; argv[i][j]; j++) {
-				if(process_flag(argv[i][j], (i + 1) < argc ? argv[i + 1] : NULL)) {
+	for (i = 1; i < argc; i++) {
+		if (argv[i][0] == '-') {
+			for (j = 1; argv[i][j]; j++) {
+				if (process_flag(argv[i][j], (i + 1) < argc ? argv[i + 1] : NULL)) {
 					/* a flag used the next_arg */
 					i++;
 					break;
@@ -6984,12 +7036,12 @@ int main(int argc, char **argv)
 
 	srand((unsigned)time(NULL));
 
-	if(MKDIR("data") == -1 && errno != EEXIST) {
+	if (MKDIR("data") == -1 && errno != EEXIST) {
 		PERROR("data/");
 		return EXIT_FAILURE;
 	}
 
-	if(!socketio_init()) {
+	if (!socketio_init()) {
 		return EXIT_FAILURE;
 	}
 
@@ -7003,47 +7055,47 @@ int main(int argc, char **argv)
 	process_args(argc, argv);
 
 	/* process configuration file and load into mud_config global */
-	if(!mud_config_process()) {
+	if (!mud_config_process()) {
 		ERROR_MSG("could not load configuration");
 		return EXIT_FAILURE;
 	}
 
-	if(!plugin_load_list(mud_config.plugins)) {
+	if (!plugin_load_list(mud_config.plugins)) {
 		ERROR_MSG("could not load one or more plugins");
 		return EXIT_FAILURE;
 	}
 
 	/* check for missing plugins because they won't have their function
 	 * pointers initialized. */
-	if(!room_owner) {
+	if (!room_owner) {
 		b_log(B_LOG_CRIT, "room", "No room system loaded!");
 		return EXIT_FAILURE;
 	}
 
-	if(!character_owner) {
+	if (!character_owner) {
 		b_log(B_LOG_CRIT, "character", "No character system loaded!");
 		return EXIT_FAILURE;
 	}
 
-	if(!channel_owner) {
+	if (!channel_owner) {
 		b_log(B_LOG_CRIT, "channel", "No channel system loaded!");
 		return EXIT_FAILURE;
 	}
 
-	if(!eventlog_init()) {
+	if (!eventlog_init()) {
 		return EXIT_FAILURE;
 	}
 
 	atexit(eventlog_shutdown);
 
-	if(!user_init()) {
+	if (!user_init()) {
 		ERROR_MSG("could not initialize users");
 		return EXIT_FAILURE;
 	}
 
 	atexit(user_shutdown);
 
-	if(!form_module_init()) {
+	if (!form_module_init()) {
 		ERROR_MSG("could not initialize forms");
 		return EXIT_FAILURE;
 	}
@@ -7051,8 +7103,8 @@ int main(int argc, char **argv)
 	atexit(form_module_shutdown);
 
 	/* start the webserver if webserver.port is defined. */
-	if(mud_config.webserver_port) {
-		if(!webserver_init(fl_default_family, mud_config.webserver_port)) {
+	if (mud_config.webserver_port) {
+		if (!webserver_init(fl_default_family, mud_config.webserver_port)) {
 			ERROR_MSG("could not initialize webserver");
 			return EXIT_FAILURE;
 		}
@@ -7060,7 +7112,7 @@ int main(int argc, char **argv)
 		atexit(webserver_shutdown);
 	}
 
-	if(!game_init()) {
+	if (!game_init()) {
 		ERROR_MSG("could not start game");
 		return EXIT_FAILURE;
 	}
@@ -7069,10 +7121,10 @@ int main(int argc, char **argv)
 
 	TODO("use the next event for the timer");
 
-	while(keep_going_fl) {
+	while (keep_going_fl) {
 		telnetclient_prompt_refresh_all();
 
-		if(!socketio_dispatch(-1))
+		if (!socketio_dispatch(-1))
 			break;
 
 		fprintf(stderr, "Tick\n");
@@ -7080,6 +7132,7 @@ int main(int argc, char **argv)
 
 	eventlog_server_shutdown();
 	fprintf(stderr, "Server shutting down.\n");
+
 	return 0;
 }
 

@@ -4,7 +4,7 @@
  * Linked list macros.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2009 Dec 27
+ * @date 2019 Dec 25
  *
  * Written in 2009 by Jon Mayo <jon.mayo@gmail.com>
  *
@@ -19,6 +19,15 @@
 #define LIST_H_
 
 /*=* Linked list macros *=*/
+
+/* internal macro to hide GCC warnings:
+ * warning: the comparison will always evaluate as ‘true’ for the address of ‘foo’ will never be NULL [-Waddress]
+ */
+#define LIST_assert(e) \
+	_Pragma("GCC diagnostic push"); \
+	_Pragma("GCC diagnostic ignored \"-Waddress\""); \
+	assert(e); \
+	_Pragma("GCC diagnostic pop");
 
 /** undocumented - please add documentation. */
 #define LIST_ENTRY(type) struct { type *_next, **_prev; }
@@ -51,7 +60,7 @@
 
 /** undocumented - please add documentation. */
 #define LIST_INSERT_AFTER(where, elm, name) do { \
-		assert(where != NULL && elm != NULL); \
+		LIST_assert(where != NULL && elm != NULL); \
 		(elm)->name._prev=&(where)->name._next; \
 		if(((elm)->name._next=(where)->name._next)!=NULL) \
 			(where)->name._next->name._prev=&(elm)->name._next; \
@@ -60,7 +69,7 @@
 
 /** undocumented - please add documentation. */
 #define LIST_INSERT_HEAD(head, elm, name) do { \
-		assert(head != NULL && elm != NULL); \
+		LIST_assert(head != NULL && elm != NULL); \
 		(elm)->name._prev=&(head)->_head; \
 		if(((elm)->name._next=(head)->_head)!=NULL) \
 			(head)->_head->name._prev=&(elm)->name._next; \
@@ -69,7 +78,7 @@
 
 /** undocumented - please add documentation. */
 #define LIST_REMOVE(elm, name) do { \
-		assert(elm != NULL); \
+		LIST_assert(elm != NULL); \
 		if((elm)->name._next!=NULL) \
 			(elm)->name._next->name._prev=(elm)->name._prev; \
 		if((elm)->name._prev) \
@@ -78,7 +87,7 @@
 
 /** undocumented - please add documentation. */
 #define LIST_TAIL_ADD(tailptr, elm, name) do { \
-		assert(tailptr != NULL && elm != NULL); \
+		LIST_assert(tailptr != NULL && elm != NULL); \
 		(elm)->name._prev=(tailptr); \
 		*(tailptr)=(elm); \
 		(tailptr)=&(elm)->name._next; \

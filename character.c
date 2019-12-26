@@ -4,7 +4,7 @@
  * Plugin that provides a Character service.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Nov 21
+ * @date 2019 Dec 25
  *
  * Copyright (c) 2009-2019, Jon Mayo
  *
@@ -107,13 +107,13 @@ static void character_ll_free(struct character *ch)
 
 	assert(ch != NULL);
 
-	if(!ch) return;
+	if (!ch) return;
 
 	LIST_REMOVE(ch, character_cache);
 	LIST_ENTRY_INIT(ch, character_cache);
 
-	for(i = 0; i < NR(attrinfo); i++) {
-		if(attrinfo[i].type == VALUE_TYPE_STRING) {
+	for (i = 0; i < NR(attrinfo); i++) {
+		if (attrinfo[i].type == VALUE_TYPE_STRING) {
 			char **strp = (char**)((char*)ch + attrinfo[i].ofs);
 			free(*strp);
 			*strp = NULL;
@@ -133,7 +133,7 @@ static struct character *character_ll_alloc(void)
 	struct character *ret;
 	ret = calloc(1, sizeof * ret);
 
-	if(!ret) {
+	if (!ret) {
 		b_log(B_LOG_CRIT, "character", "out of memory");
 	}
 
@@ -150,10 +150,10 @@ static int character_attr_set(struct character *ch, const char *name, const char
 
 	assert(ch != NULL);
 
-	if(!ch) return 0;
+	if (!ch) return 0;
 
-	for(i = 0; i < NR(attrinfo); i++) {
-		if(!strcasecmp(name, attrinfo[i].name)) {
+	for (i = 0; i < NR(attrinfo); i++) {
+		if (!strcasecmp(name, attrinfo[i].name)) {
 			ch->dirty_fl = 1;
 			return value_set(value, attrinfo[i].type, (char*)ch + attrinfo[i].ofs);
 		}
@@ -161,7 +161,7 @@ static int character_attr_set(struct character *ch, const char *name, const char
 
 	res = parse_attr(name, value, &ch->extra_values);
 
-	if(res) {
+	if (res) {
 		ch->dirty_fl = 1;
 	}
 
@@ -178,15 +178,16 @@ static const char *character_attr_get(struct character *ch, const char *name)
 
 	assert(ch != NULL);
 
-	if(!ch) return NULL;
+	if (!ch) return NULL;
 
-	for(i = 0; i < NR(attrinfo); i++) {
-		if(!strcasecmp(name, attrinfo[i].name)) {
+	for (i = 0; i < NR(attrinfo); i++) {
+		if (!strcasecmp(name, attrinfo[i].name)) {
 			return value_get(attrinfo[i].type, (char*)ch + attrinfo[i].ofs);
 		}
 	}
 
 	at = attr_find(&ch->extra_values, name);
+
 	return at ? at->value : NULL;
 }
 
@@ -201,24 +202,24 @@ static struct character *character_load(unsigned character_id)
 
 	assert(character_id > 0);
 
-	if(character_id <= 0) return NULL;
+	if (character_id <= 0) return NULL;
 
 	h = fdb.read_begin_uint(DOMAIN_CHARACTER, character_id);
 
-	if(!h) {
+	if (!h) {
 		b_log(B_LOG_ERROR, "character", "could not load character \"%u\"", character_id);
 		return NULL;
 	}
 
 	ch = character_ll_alloc();
 
-	if(!ch) {
+	if (!ch) {
 		fdb.read_end(h);
 		return NULL;
 	}
 
-	while(fdb.read_next(h, &name, &value)) {
-		if(!character_attr_set(ch, name, value)) {
+	while (fdb.read_next(h, &name, &value)) {
+		if (!character_attr_set(ch, name, value)) {
 			b_log(B_LOG_ERROR, "character", "could not load character \"%u\"", character_id);
 			character_ll_free(ch);
 			fdb.read_end(h);
@@ -228,7 +229,7 @@ static struct character *character_load(unsigned character_id)
 
 	fdb.read_end(h);
 
-	if(character_id != ch->id) {
+	if (character_id != ch->id) {
 		b_log(B_LOG_ERROR, "character", "could not load character \"%u\" (bad, missing or mismatched id)", character_id);
 		character_ll_free(ch);
 		return NULL;
@@ -248,16 +249,16 @@ static int character_save(struct character *ch)
 
 	assert(ch != NULL);
 
-	if(!ch->dirty_fl) return 1; /* already saved - don't do it again. */
+	if (!ch->dirty_fl) return 1; /* already saved - don't do it again. */
 
 	h = fdb.write_begin_uint(DOMAIN_CHARACTER, ch->id);
 
-	if(!h) {
+	if (!h) {
 		b_log(B_LOG_ERROR, "character", "could not save character \"%u\"", ch->id);
 		return 0; /* failure */
 	}
 
-	for(i = 0; i < NR(attrinfo); i++) {
+	for (i = 0; i < NR(attrinfo); i++) {
 		void *base = ((char*)ch + attrinfo[i].ofs);
 
 		switch(attrinfo[i].type) {
@@ -266,24 +267,25 @@ static int character_save(struct character *ch)
 			break;
 
 		case VALUE_TYPE_STRING:
-			if(*(char**)base)
+			if (*(char**)base)
 				fdb.write_pair(h, attrinfo[i].name, *(char**)base);
 
 			break;
 		}
 	}
 
-	for(curr = LIST_TOP(ch->extra_values); curr; curr = LIST_NEXT(curr, list)) {
+	for (curr = LIST_TOP(ch->extra_values); curr; curr = LIST_NEXT(curr, list)) {
 		fdb.write_pair(h, curr->name, curr->value);
 	}
 
-	if(!fdb.write_end(h)) {
+	if (!fdb.write_end(h)) {
 		b_log(B_LOG_ERROR, "character", "could not save character \"%u\"", ch->id);
 		return 0; /* failure */
 	}
 
 	ch->dirty_fl = 0;
 	b_log(B_LOG_INFO, "character", "saved character \"%u\"", ch->id);
+
 	return 1;
 }
 
@@ -296,22 +298,22 @@ static struct character *character_get(unsigned character_id)
 	struct character *curr;
 
 	/* look for character in the cache. */
-	for(curr = LIST_TOP(character_cache); curr; curr = LIST_NEXT(curr, character_cache)) {
-		if(curr->id == character_id) break;
+	for (curr = LIST_TOP(character_cache); curr; curr = LIST_NEXT(curr, character_cache)) {
+		if (curr->id == character_id) break;
 	}
 
-	if(!curr) {
+	if (!curr) {
 		/* not in the cache? load the character. */
 		curr = character_load(character_id);
 	}
 
-	if(curr) {
+	if (curr) {
 		/* place entry at the top of the cache. */
 		LIST_INSERT_HEAD(&character_cache, curr, character_cache);
 		curr->refcount++;
 	}
 
-	if(!curr) {
+	if (!curr) {
 		b_log(B_LOG_WARN, "character", "could not access character \"%u\"", character_id);
 	}
 
@@ -328,7 +330,7 @@ static void character_put(struct character *ch)
 	ch->refcount--;
 
 	/* TODO: hold onto the character longer to support caching. */
-	if(ch->refcount <= 0) {
+	if (ch->refcount <= 0) {
 		character_save(ch);
 		character_ll_free(ch);
 	}
@@ -341,12 +343,12 @@ static struct character *character_new(void)
 
 	ret = character_ll_alloc();
 
-	if(!ret) return NULL;
+	if (!ret) return NULL;
 
 	/* allocate next entry from a pool. */
 	id = freelist_alloc(&character_id_freelist, 1);
 
-	if(id < 0) {
+	if (id < 0) {
 		b_log(B_LOG_CRIT, "character", "could not allocate new character id.");
 		character_ll_free(ret);
 		return NULL;
@@ -361,6 +363,7 @@ static struct character *character_new(void)
 	/* place entry at the top of the cache. */
 	LIST_INSERT_HEAD(&character_cache, ret, character_cache);
 	ret->refcount++;
+
 	return ret;
 }
 
@@ -374,19 +377,19 @@ static int character_preflight(void)
 
 	it = fdb.iterator_begin(DOMAIN_CHARACTER);
 
-	if(!it) {
+	if (!it) {
 		b_log(B_LOG_CRIT, "character", "could not load characters!");
 		return 0; /* could not load. */
 	}
 
-	while((id = fdb.iterator_next(it))) {
+	while ((id = fdb.iterator_next(it))) {
 		struct character *ch;
 		unsigned character_id;
 		char *endptr;
 		b_log(B_LOG_DEBUG, "character", "Found character: \"%s\"", id);
 		character_id = strtoul(id, &endptr, 10);
 
-		if(*endptr) {
+		if (*endptr) {
 			b_log(B_LOG_CRIT, "character", "character id \"%s\" is invalid!", id);
 			fdb.iterator_end(it);
 			return 0; /* could not load */
@@ -394,21 +397,21 @@ static int character_preflight(void)
 
 		ch = character_load(character_id);
 
-		if(!ch) {
+		if (!ch) {
 			b_log(B_LOG_CRIT, "character", "could not load character id \"%u\"", character_id);
 			fdb.iterator_end(it);
 			return 0; /* could not load */
 		}
 
 		/* compare ch->id with character_id */
-		if(ch->id != character_id) {
+		if (ch->id != character_id) {
 			b_log(B_LOG_CRIT, "character", "bad or non-matching character id \"%u\"", character_id);
 			character_ll_free(ch);
 			fdb.iterator_end(it);
 		}
 
 		/* allocate id from the pool */
-		if(!freelist_thwack(&character_id_freelist, ch->id, 1)) {
+		if (!freelist_thwack(&character_id_freelist, ch->id, 1)) {
 			b_log(B_LOG_CRIT, "character", "bad or duplicate character id \"%u\"", character_id);
 			character_ll_free(ch);
 			fdb.iterator_end(it);
@@ -419,6 +422,7 @@ static int character_preflight(void)
 	}
 
 	fdb.iterator_end(it);
+
 	return 1; /* success */
 }
 /**
@@ -433,12 +437,13 @@ static int initialize(void)
 	fdb.domain_init(DOMAIN_CHARACTER);
 
 	/* load all characters to check and to configure pool space. */
-	if(!character_preflight()) {
+	if (!character_preflight()) {
 		b_log(B_LOG_CRIT, "character", "could not load characters!");
 		return 0;
 	}
 
 	service_attach_character(&plugin_class.base_class, &plugin_class.character_interface);
+
 	return 1;
 }
 
@@ -450,6 +455,7 @@ static int shutdown(void)
 	b_log(B_LOG_INFO, "character", "Character plugin shutting down...");
 	service_detach_character(&plugin_class.base_class);
 	b_log(B_LOG_INFO, "character", "Character plugin ended.");
+
 	return 1;
 }
 

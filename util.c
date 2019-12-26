@@ -4,7 +4,7 @@
  * Utility routines - fnmatch, load text files, string utilities
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Nov 21
+ * @date 2019 Dec 25
  *
  * Copyright (c) 2009-2019, Jon Mayo
  *
@@ -51,18 +51,18 @@ int util_fnmatch(const char *pattern, const char *string, int flags)
 {
 	char c;
 
-	while((c = *pattern++)) switch(c) {
+	while ((c = *pattern++)) switch(c) {
 		case '?':
-			if(*string++ == 0) return UTIL_FNM_NOMATCH;
+			if (*string++ == 0) return UTIL_FNM_NOMATCH;
 
 			break;
 
 		case '*':
-			if(!*pattern) return 0; /* success */
+			if (!*pattern) return 0; /* success */
 
-			for(; *string; string++) {
+			for (; *string; string++) {
 				/* trace out any paths that match the first character */
-				if(((flags & UTIL_FNM_CASEFOLD) ?  tolower(*string) == tolower(*pattern) : *string == *pattern) && util_fnmatch(pattern, string, flags) == 0) {
+				if (((flags & UTIL_FNM_CASEFOLD) ?  tolower(*string) == tolower(*pattern) : *string == *pattern) && util_fnmatch(pattern, string, flags) == 0) {
 					return 0; /* recursive check matched */
 				}
 			}
@@ -77,10 +77,10 @@ int util_fnmatch(const char *pattern, const char *string, int flags)
 
 		/* fall through */
 		default:
-			if((flags & UTIL_FNM_CASEFOLD) ? tolower(*string++) != tolower(c) : *string++ != c) return UTIL_FNM_NOMATCH;
+			if ((flags & UTIL_FNM_CASEFOLD) ? tolower(*string++) != tolower(c) : *string++ != c) return UTIL_FNM_NOMATCH;
 		}
 
-	if(*string) return UTIL_FNM_NOMATCH;
+	if (*string) return UTIL_FNM_NOMATCH;
 
 	return 0; /* success */
 }
@@ -99,41 +99,44 @@ char *util_textfile_load(const char *filename)
 
 	f = fopen(filename, "r");
 
-	if(!f) {
+	if (!f) {
 		PERROR(filename);
 		goto failure0;
 	}
 
-	if(fseek(f, 0l, SEEK_END) != 0) {
+	if (fseek(f, 0l, SEEK_END) != 0) {
 		PERROR(filename);
 		goto failure1;
 	}
 
 	len = ftell(f);
 
-	if(len == EOF) {
+	if (len == EOF) {
 		PERROR(filename);
 		goto failure1;
 	}
 
 	assert(len >= 0); /* len must not be negative */
 
-	if(fseek(f, 0l, SEEK_SET) != 0) {
+	if (fseek(f, 0l, SEEK_SET) != 0) {
 		PERROR(filename);
 		goto failure1;
 	}
 
 	ret = malloc((unsigned)len + 1);
 
-	if(!ret) {
+	if (!ret) {
 		PERROR(filename);
 		goto failure1;
 	}
 
 	res = fread(ret, 1, (unsigned)len, f);
 
-	if(ferror(f)) {
+	if (ferror(f)) {
 		PERROR(filename);
+		goto failure2;
+	} else if (res != (size_t)len) {
+		ERROR_MSG("short read");
 		goto failure2;
 	}
 
@@ -161,14 +164,14 @@ const char *util_getword(const char *s, char *out, size_t outlen)
 	const char *b, *e;
 
 	/* get word */
-	for(b = s; isspace(*b); b++) ;
+	for (b = s; isspace(*b); b++) ;
 
-	for(e = b; *e && !isspace(*e); e++) ;
+	for (e = b; *e && !isspace(*e); e++) ;
 
 	snprintf(out, outlen, "%.*s", (int)(e - b), b);
 	b = e;
 
-	if(*b) b++;
+	if (*b) b++;
 
 	return b;
 }
@@ -203,12 +206,12 @@ const char *util_strfile_readline(struct util_strfile *h, size_t *len)
 	assert(h->buf != NULL);
 	ret = h->buf;
 
-	while(*h->buf && *h->buf != '\n') h->buf++;
+	while (*h->buf && *h->buf != '\n') h->buf++;
 
-	if(len)
+	if (len)
 		*len = h->buf - ret;
 
-	if(*h->buf)
+	if (*h->buf)
 		h->buf++;
 
 	return h->buf == ret ? NULL : ret; /* return EOF if the offset couldn't move forward */
@@ -222,7 +225,7 @@ void trim_nl(char *line)
 {
 	line = strrchr(line, '\n');
 
-	if(line) *line = 0;
+	if (line) *line = 0;
 }
 
 /**
@@ -234,9 +237,9 @@ char *trim_whitespace(char *line)
 {
 	char *tmp;
 
-	while(isspace(*line)) line++;
+	while (isspace(*line)) line++;
 
-	for(tmp = line + strlen(line) - 1; line < tmp && isspace(*tmp); tmp--) *tmp = 0;
+	for (tmp = line + strlen(line) - 1; line < tmp && isspace(*tmp); tmp--) *tmp = 0;
 
 	return line;
 }

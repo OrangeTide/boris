@@ -4,7 +4,7 @@
  * Config loader
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Nov 21
+ * @date 2019 Dec 25
  *
  * Copyright (c) 2009-2019 Jon Mayo
  *
@@ -53,4 +53,8 @@ void config_setup(struct config *cfg);
 void config_free(struct config *cfg);
 void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value ), void *extra);
 int config_load(const char *filename, struct config *cfg);
+
+#if !defined(NDEBUG) && !defined(NTEST)
+void config_test(void);
+#endif
 #endif

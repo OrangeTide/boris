@@ -4,7 +4,7 @@
  * Plugin that provides basic logging to stderr.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Nov 21
+ * @date 2019 Dec 25
  *
  * Copyright (c) 2009-2019, Jon Mayo
  *
@@ -64,11 +64,10 @@ static void do_log(int priority, const char *domain, const char *fmt, ...)
 
 	/* write priority */
 	i = snprintf(buf, sizeof buf - 1, "%s:",
-	             priority >= 0 && priority <= 7 ? prio_names[priority] : "UNKNOWN"
-	            );
+	             priority >= 0 && priority <= 7 ? prio_names[priority] : "UNKNOWN");
 
 	/* write domain - if it is set. */
-	if(domain)
+	if (domain)
 		i += snprintf(buf + i, sizeof buf - i - 1, "%s:", domain);
 
 	/* apply format string. */
@@ -77,7 +76,7 @@ static void do_log(int priority, const char *domain, const char *fmt, ...)
 	va_end(ap);
 
 	/* add newline if one not found. */
-	if(i && buf[i - 1] != '\n') strcpy(buf + i, "\n");
+	if (i && buf[i - 1] != '\n') strcpy(buf + i, "\n");
 
 	fputs(buf, stderr);
 }
@@ -87,12 +86,14 @@ static int initialize(void)
 	fprintf(stderr, "loaded %s\n", plugin_class.base_class.class_name);
 	service_attach_log(do_log);
 	b_log(B_LOG_INFO, "logging", "Logging system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+
 	return 1;
 }
 
 static int shutdown(void)
 {
 	service_detach_log(do_log);
+
 	return 1;
 }
 
@@ -101,9 +102,11 @@ static int shutdown(void)
  */
 static void set_level(int level)
 {
-	if(level > 7) level = 7;
+	if (level > 7)
+		level = 7;
 
-	if(level < 0) level = 0;
+	if (level < 0)
+		level = 0;
 
 	log_level = level;
 }
