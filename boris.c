@@ -204,6 +204,8 @@
 #include "sha1crypt.h"
 #include "util.h"
 #include "config.h"
+#include "worldclock.h"
+#include "comutil.h"
 
 /******************************************************************************
  * Macros
@@ -369,8 +371,6 @@
 /******************************************************************************
  * Types and data structures
  ******************************************************************************/
-
-struct telnetclient;
 
 struct socketio_handle;
 
@@ -4304,7 +4304,7 @@ EXPORT const char *telnetclient_username(struct telnetclient *cl)
 }
 
 /** write a null terminated string to a telnetclient buffer. */
-EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str)
+int telnetclient_puts(struct telnetclient *cl, const char *str)
 {
 	int res;
 	assert(cl != NULL);
@@ -4317,7 +4317,7 @@ EXPORT int telnetclient_puts(struct telnetclient *cl, const char *str)
 }
 
 /** vprintf for a telnetclient output buffer. */
-EXPORT int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap)
+int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap)
 {
 	int res;
 
@@ -4333,7 +4333,7 @@ EXPORT int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_lis
 }
 
 /** printf for a telnetclient output buffer. */
-EXPORT int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...)
+int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...)
 {
 	va_list ap;
 	int res;
@@ -5252,6 +5252,14 @@ static int command_do_character(struct telnetclient *cl, struct user *u UNUSED, 
 	return 1; /* success */
 }
 
+/** action callback to do the "quit" command. */
+static int command_do_time(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
+{
+	show_gametime(cl);
+
+	return 1; /* success */
+}
+
 /** action callback to remote that a command is not implemented. */
 static int command_not_implemented(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
@@ -5275,6 +5283,7 @@ static const struct command_table {
 	{ "chsay", command_do_chsay },
 	{ "sayto", command_not_implemented },
 	{ "tell", command_not_implemented },
+	{ "time", command_do_time },
 	{ "whisper", command_not_implemented },
 	{ "to", command_not_implemented },
 	{ "help", command_not_implemented },
@@ -5404,6 +5413,9 @@ static void command_start_lineinput(struct telnetclient *cl)
 {
 	telnetclient_printf(cl, "Terminal type: %s\n", cl->terminal.name);
 	telnetclient_printf(cl, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
+
+	show_gametime(cl);
+
 	telnetclient_start_lineinput(cl, command_lineinput, mud_config.command_prompt);
 }
 
@@ -6109,14 +6121,17 @@ EXPORT void form_module_shutdown(void)
 /** undocumented - please add documentation. */
 EXPORT int game_init(void)
 {
+	if (worldclock_init())
+		return 0;
 
-	/* The login menu */
+	/*** The login menu ***/
 	menu_create(&gamemenu_login, "Login Menu");
 
 	menu_additem(&gamemenu_login, 'L', "Login", login_username_start, 0, NULL);
 	menu_additem(&gamemenu_login, 'N', "New User", form_createaccount_start, 0, NULL);
 	menu_additem(&gamemenu_login, 'Q', "Disconnect", signoff, 0, NULL);
 
+	/*** The Main Menu ***/
 	menu_create(&gamemenu_main, "Main Menu");
 	menu_additem(&gamemenu_main, 'E', "Enter the game", command_start, 0, NULL);
 	// menu_additem(&gamemenu_main, 'C', "Create Character", form_start, 0, &character_form);
