@@ -33,6 +33,8 @@
 #ifndef BORIS_PLUGIN_H_
 #define BORIS_PLUGIN_H_
 
+#include <stddef.h>
+
 /**
  * API version - when plugin api changes significantly then increase this.
  */

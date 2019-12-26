@@ -38,10 +38,13 @@
 struct channel;
 struct channel_member;
 struct freelist_entry;
+struct telnetclient;
 
 /******************************************************************************
  * Includes
  ******************************************************************************/
+#include <stdarg.h>
+
 #include "plugin.h"
 #include "list.h"
 
@@ -172,5 +175,9 @@ int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count);
 #ifndef NTEST
 void freelist_test(void);
 #endif
+
+int telnetclient_puts(struct telnetclient *cl, const char *str);
+int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap);
+int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...);
 
 #endif
