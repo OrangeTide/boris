@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
-TAREXT=bz2
+TAREXT=xz
 DS="$(date +%Y%m%d)"
 VER="$(awk '/@version/ { print $3 }' *.c)"
 if [ -z "$VER" ]; then
