@@ -32,21 +32,192 @@
  */
 #ifndef BORIS_H_
 #define BORIS_H_
+
+/* major, minor and patch level for version. */
+#define BORIS_VERSION_MAJ 0
+#define BORIS_VERSION_MIN 6
+#define BORIS_VERSION_PAT 0
+
 /******************************************************************************
  * Forward declarations
  ******************************************************************************/
 struct channel;
 struct channel_member;
 struct freelist_entry;
+struct menuinfo;
 struct telnetclient;
+struct user;
 
 /******************************************************************************
  * Includes
  ******************************************************************************/
 #include <stdarg.h>
 
+#include "mudconfig.h"
 #include "plugin.h"
 #include "list.h"
+#include "terminal.h"
+
+/******************************************************************************
+ * Macros
+ ******************************************************************************/
+#if !defined(__STDC_VERSION__) || !(__STDC_VERSION__ >= 199901L)
+#warning Requires C99
+#endif
+
+/*=* General purpose macros *=*/
+
+/** make four ASCII characters into a 32-bit integer. */
+#define FOURCC(a,b,c,d)	( \
+	((uint_least32_t)(d)<<24) \
+	|((uint_least32_t)(c)<<16) \
+	|((uint_least32_t)(b)<<8) \
+	|(a))
+
+/** _make_name2 is used by VAR and _make_name. */
+#define _make_name2(x,y) x##y
+
+/** _make_name is used by var. */
+#define _make_name(x,y) _make_name2(x,y)
+
+/** _make_string2 is used by _make_string */
+#define _make_string2(x) #x
+
+/** _make_string is used to turn an value into a string. */
+#define _make_string(x) _make_string2(x)
+
+/** VAR() is used for making temp variables in macros. */
+#define VAR(x) _make_name(x,__LINE__)
+
+#if defined(BORIS_VERSION_PAT) && (BORIS_VERSION_PAT > 0)
+/** BORIS_VERSION_STR contains the version as a string. */
+#  define BORIS_VERSION_STR \
+	_make_string(BORIS_VERSION_MAJ) "." \
+	_make_string(BORIS_VERSION_MIN) "p" \
+	_make_string(BORIS_VERSION_PAT)
+#else
+#  define BORIS_VERSION_STR \
+	_make_string(BORIS_VERSION_MAJ) "." \
+	_make_string(BORIS_VERSION_MIN)
+#endif
+
+/* controls how external functions are exported */
+#ifndef NDEBUG
+/** tag a function as being an exported symbol. */
+#define EXPORT
+#else
+/** fake out the export and keep the functions internal. */
+#define EXPORT static
+#endif
+
+/*=* Byte-order functions *=*/
+
+/** WRite Big-Endian 32-bit value. */
+#define WR_BE32(dest, offset, value) do { \
+		unsigned VAR(tmp)=value; \
+		(dest)[offset]=(VAR(tmp)/16777216L)%256; \
+		(dest)[(offset)+1]=(VAR(tmp)/65536L)%256; \
+		(dest)[(offset)+2]=(VAR(tmp)/256)%256; \
+		(dest)[(offset)+3]=VAR(tmp)%256; \
+	} while (0)
+
+/** WRite Big-Endian 16-bit value. */
+#define WR_BE16(dest, offset, value) do { \
+		unsigned VAR(tmp)=value; \
+		(dest)[offset]=(VAR(tmp)/256)%256; \
+		(dest)[(offset)+1]=VAR(tmp)%256; \
+	} while (0)
+
+/** WRite Big-Endian 64-bit value. */
+#define WR_BE64(dest, offset, value) do { \
+		unsigned long long VAR(tmp)=value; \
+		(dest)[offset]=((VAR(tmp))>>56)&255; \
+		(dest)[(offset)+1]=((VAR(tmp))>>48)&255; \
+		(dest)[(offset)+2]=((VAR(tmp))>>40)&255; \
+		(dest)[(offset)+3]=((VAR(tmp))>>32)&255; \
+		(dest)[(offset)+4]=((VAR(tmp))>>24)&255; \
+		(dest)[(offset)+5]=((VAR(tmp))>>16)&255; \
+		(dest)[(offset)+6]=((VAR(tmp))>>8)&255; \
+		(dest)[(offset)+7]=(VAR(tmp))&255; \
+	} while (0)
+
+/** ReaD Big-Endian 16-bit value. */
+#define RD_BE16(src, offset) ((((src)[offset]&255u)<<8)|((src)[(offset)+1]&255u))
+
+/** ReaD Big-Endian 32-bit value. */
+#define RD_BE32(src, offset) (\
+	(((src)[offset]&255ul)<<24) \
+	|(((src)[(offset)+1]&255ul)<<16) \
+	|(((src)[(offset)+2]&255ul)<<8) \
+	|((src)[(offset)+3]&255ul))
+
+/** ReaD Big-Endian 64-bit value. */
+#define RD_BE64(src, offset) (\
+		(((src)[offset]&255ull)<<56) \
+		|(((src)[(offset)+1]&255ull)<<48) \
+		|(((src)[(offset)+2]&255ull)<<40) \
+		|(((src)[(offset)+3]&255ull)<<32) \
+		|(((src)[(offset)+4]&255ull)<<24) \
+		|(((src)[(offset)+5]&255ull)<<16) \
+		|(((src)[(offset)+6]&255ull)<<8) \
+		|((src)[(offset)+7]&255ull))
+
+/*=* Bitfield operations *=*/
+
+/** return in type sized elements to create a bitfield of 'bits' bits. */
+#define BITFIELD(bits, type) (((bits)+(CHAR_BIT*sizeof(type))-1)/(CHAR_BIT*sizeof(type)))
+
+/** set bit position 'bit' in bitfield x. */
+#define BITSET(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]|=1<<((bit)&((CHAR_BIT*sizeof *(x))-1))
+
+/** clear bit position 'bit' in bitfield x */
+#define BITCLR(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]&=~(1<<((bit)&((CHAR_BIT*sizeof *(x))-1)))
+
+/** toggle bit position 'bit' in bitfield x. */
+#define BITINV(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]^=1<<((bit)&((CHAR_BIT*sizeof *(x))-1))
+
+/** return a large non-zero number if the bit is set, zero if clear. */
+#define BITTEST(x, bit) ((x)[(bit)/((CHAR_BIT*sizeof *(x)))]&(1<<((bit)&((CHAR_BIT*sizeof *(x))-1))))
+
+/** checks that bit is in range for bitfield x. */
+#define BITRANGE(x, bit) ((bit)<(sizeof(x)*CHAR_BIT))
+
+/*=* reference counting macros *=*/
+
+/** data type used for reference counting. */
+#define REFCOUNT_TYPE int
+
+/** member name used for the refcounting field in a struct. */
+#define REFCOUNT_NAME _referencecount
+
+/** initialize the reference count in a struct (passed as obj). */
+#define REFCOUNT_INIT(obj) ((obj)->REFCOUNT_NAME=0)
+
+/**
+ * decrement the reference count on struct obj, and eval free_action if it is
+ * zero or less.
+ */
+#define REFCOUNT_PUT(obj, free_action) do { \
+		assert((obj)->REFCOUNT_NAME>0); \
+		if (--(obj)->REFCOUNT_NAME<=0) { \
+			free_action; \
+		} \
+	} while (0)
+
+/** increment the reference count on struct obj. */
+#define REFCOUNT_GET(obj) do { (obj)->REFCOUNT_NAME++; } while (0)
+
+/*=* Compiler macros *=*/
+#ifdef __GNUC__
+/** using GCC, enable special GCC options. */
+#define GCC_ONLY(x) x
+#else
+/** this version defined if not using GCC. */
+#define GCC_ONLY(x)
+#endif
+
+/** macro to mark function parameters as unused, used to supress warnings. */
+#define UNUSED GCC_ONLY(__attribute__((unused)))
 
 /******************************************************************************
  * Defines and macros
@@ -140,6 +311,14 @@ struct channel_member {
 };
 
 /******************************************************************************
+ * Global variables
+ ******************************************************************************/
+
+extern struct plugin_room_interface room;
+extern struct plugin_character_interface character;
+extern struct plugin_channel_interface channel;
+
+/******************************************************************************
  * Protos
  ******************************************************************************/
 
@@ -176,8 +355,20 @@ int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count);
 void freelist_test(void);
 #endif
 
+const char *telnetclient_username(struct telnetclient *cl);
 int telnetclient_puts(struct telnetclient *cl, const char *str);
 int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap);
 int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...);
+void telnetclient_setprompt(struct telnetclient *cl, const char *prompt);
+void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt);
+int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt);
+void telnetclient_close(struct telnetclient *cl);
+struct channel_member *telnetclient_channel_member(struct telnetclient *cl);
+struct socketio_handle *telnetclient_socket_handle(struct telnetclient *cl);
+const char *telnetclient_socket_name(struct telnetclient *cl);
+const struct terminal *telnetclient_get_terminal(struct telnetclient *cl);
+
+void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
+void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 
 #endif

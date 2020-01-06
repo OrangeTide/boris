@@ -5,9 +5,9 @@
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
  * @version 0.6
- * @date 2019 Dec 25
+ * @date 2020 Jan 05
  *
- * Copyright (c) 2008-2019, Jon Mayo
+ * Copyright (c) 2008-2020, Jon Mayo
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,10 +32,6 @@
  * policies, either expressed or implied, of the Boris MUD project.
  */
 
-/* major, minor and patch level for version. */
-#define BORIS_VERSION_MAJ 0
-#define BORIS_VERSION_MIN 6
-#define BORIS_VERSION_PAT 0
 /** @mainpage
  *
  * Design Documentation
@@ -197,7 +193,9 @@
 #endif
 
 #include "boris.h"
+#include "command.h"
 #include "debug.h"
+#include "eventlog.h"
 #include "list.h"
 #include "plugin.h"
 #include "sha1.h"
@@ -205,168 +203,6 @@
 #include "util.h"
 #include "config.h"
 #include "worldclock.h"
-#include "comutil.h"
-
-/******************************************************************************
- * Macros
- ******************************************************************************/
-#if !defined(__STDC_VERSION__) || !(__STDC_VERSION__ >= 199901L)
-#warning Requires C99
-#endif
-
-/*=* General purpose macros *=*/
-
-/** make four ASCII characters into a 32-bit integer. */
-#define FOURCC(a,b,c,d)	( \
-	((uint_least32_t)(d)<<24) \
-	|((uint_least32_t)(c)<<16) \
-	|((uint_least32_t)(b)<<8) \
-	|(a))
-
-/** _make_name2 is used by VAR and _make_name. */
-#define _make_name2(x,y) x##y
-
-/** _make_name is used by var. */
-#define _make_name(x,y) _make_name2(x,y)
-
-/** _make_string2 is used by _make_string */
-#define _make_string2(x) #x
-
-/** _make_string is used to turn an value into a string. */
-#define _make_string(x) _make_string2(x)
-
-/** VAR() is used for making temp variables in macros. */
-#define VAR(x) _make_name(x,__LINE__)
-
-#if defined(BORIS_VERSION_PAT) && (BORIS_VERSION_PAT > 0)
-/** BORIS_VERSION_STR contains the version as a string. */
-#  define BORIS_VERSION_STR \
-	_make_string(BORIS_VERSION_MAJ) "." \
-	_make_string(BORIS_VERSION_MIN) "p" \
-	_make_string(BORIS_VERSION_PAT)
-#else
-#  define BORIS_VERSION_STR \
-	_make_string(BORIS_VERSION_MAJ) "." \
-	_make_string(BORIS_VERSION_MIN)
-#endif
-
-/* controls how external functions are exported */
-#ifndef NDEBUG
-/** tag a function as being an exported symbol. */
-#define EXPORT
-#else
-/** fake out the export and keep the functions internal. */
-#define EXPORT static
-#endif
-
-/*=* Byte-order functions *=*/
-
-/** WRite Big-Endian 32-bit value. */
-#define WR_BE32(dest, offset, value) do { \
-		unsigned VAR(tmp)=value; \
-		(dest)[offset]=(VAR(tmp)/16777216L)%256; \
-		(dest)[(offset)+1]=(VAR(tmp)/65536L)%256; \
-		(dest)[(offset)+2]=(VAR(tmp)/256)%256; \
-		(dest)[(offset)+3]=VAR(tmp)%256; \
-	} while (0)
-
-/** WRite Big-Endian 16-bit value. */
-#define WR_BE16(dest, offset, value) do { \
-		unsigned VAR(tmp)=value; \
-		(dest)[offset]=(VAR(tmp)/256)%256; \
-		(dest)[(offset)+1]=VAR(tmp)%256; \
-	} while (0)
-
-/** WRite Big-Endian 64-bit value. */
-#define WR_BE64(dest, offset, value) do { \
-		unsigned long long VAR(tmp)=value; \
-		(dest)[offset]=((VAR(tmp))>>56)&255; \
-		(dest)[(offset)+1]=((VAR(tmp))>>48)&255; \
-		(dest)[(offset)+2]=((VAR(tmp))>>40)&255; \
-		(dest)[(offset)+3]=((VAR(tmp))>>32)&255; \
-		(dest)[(offset)+4]=((VAR(tmp))>>24)&255; \
-		(dest)[(offset)+5]=((VAR(tmp))>>16)&255; \
-		(dest)[(offset)+6]=((VAR(tmp))>>8)&255; \
-		(dest)[(offset)+7]=(VAR(tmp))&255; \
-	} while (0)
-
-/** ReaD Big-Endian 16-bit value. */
-#define RD_BE16(src, offset) ((((src)[offset]&255u)<<8)|((src)[(offset)+1]&255u))
-
-/** ReaD Big-Endian 32-bit value. */
-#define RD_BE32(src, offset) (\
-	(((src)[offset]&255ul)<<24) \
-	|(((src)[(offset)+1]&255ul)<<16) \
-	|(((src)[(offset)+2]&255ul)<<8) \
-	|((src)[(offset)+3]&255ul))
-
-/** ReaD Big-Endian 64-bit value. */
-#define RD_BE64(src, offset) (\
-		(((src)[offset]&255ull)<<56) \
-		|(((src)[(offset)+1]&255ull)<<48) \
-		|(((src)[(offset)+2]&255ull)<<40) \
-		|(((src)[(offset)+3]&255ull)<<32) \
-		|(((src)[(offset)+4]&255ull)<<24) \
-		|(((src)[(offset)+5]&255ull)<<16) \
-		|(((src)[(offset)+6]&255ull)<<8) \
-		|((src)[(offset)+7]&255ull))
-
-/*=* Bitfield operations *=*/
-
-/** return in type sized elements to create a bitfield of 'bits' bits. */
-#define BITFIELD(bits, type) (((bits)+(CHAR_BIT*sizeof(type))-1)/(CHAR_BIT*sizeof(type)))
-
-/** set bit position 'bit' in bitfield x. */
-#define BITSET(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]|=1<<((bit)&((CHAR_BIT*sizeof *(x))-1))
-
-/** clear bit position 'bit' in bitfield x */
-#define BITCLR(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]&=~(1<<((bit)&((CHAR_BIT*sizeof *(x))-1)))
-
-/** toggle bit position 'bit' in bitfield x. */
-#define BITINV(x, bit) (x)[(bit)/((CHAR_BIT*sizeof *(x)))]^=1<<((bit)&((CHAR_BIT*sizeof *(x))-1))
-
-/** return a large non-zero number if the bit is set, zero if clear. */
-#define BITTEST(x, bit) ((x)[(bit)/((CHAR_BIT*sizeof *(x)))]&(1<<((bit)&((CHAR_BIT*sizeof *(x))-1))))
-
-/** checks that bit is in range for bitfield x. */
-#define BITRANGE(x, bit) ((bit)<(sizeof(x)*CHAR_BIT))
-
-/*=* reference counting macros *=*/
-
-/** data type used for reference counting. */
-#define REFCOUNT_TYPE int
-
-/** member name used for the refcounting field in a struct. */
-#define REFCOUNT_NAME _referencecount
-
-/** initialize the reference count in a struct (passed as obj). */
-#define REFCOUNT_INIT(obj) ((obj)->REFCOUNT_NAME=0)
-
-/**
- * decrement the reference count on struct obj, and eval free_action if it is
- * zero or less.
- */
-#define REFCOUNT_PUT(obj, free_action) do { \
-		assert((obj)->REFCOUNT_NAME>0); \
-		if (--(obj)->REFCOUNT_NAME<=0) { \
-			free_action; \
-		} \
-	} while (0)
-
-/** increment the reference count on struct obj. */
-#define REFCOUNT_GET(obj) do { (obj)->REFCOUNT_NAME++; } while (0)
-
-/*=* Compiler macros *=*/
-#ifdef __GNUC__
-/** using GCC, enable special GCC options. */
-#define GCC_ONLY(x) x
-#else
-/** this version defined if not using GCC. */
-#define GCC_ONLY(x)
-#endif
-
-/** macro to mark function parameters as unused, used to supress warnings. */
-#define UNUSED GCC_ONLY(__attribute__((unused)))
 
 /******************************************************************************
  * Types and data structures
@@ -423,43 +259,14 @@ struct form {
 static struct menuinfo gamemenu_login, gamemenu_main;
 
 /** global configuration of the mud. */
-static struct mud_config {
-	char *config_filename;
-	char *menu_prompt;
-	char *form_prompt;
-	char *command_prompt;
-	char *msg_errormain;
-	char *msg_invalidselection;
-	char *msg_invalidusername;
-	char *msgfile_noaccount;
-	char *msgfile_badpassword;
-	char *msg_tryagain;
-	char *msg_unsupported;
-	char *msg_useralphanumeric;
-	char *msg_usercreatesuccess;
-	char *msg_userexists;
-	char *msg_usermin3;
-	char *msg_invalidcommand;
-	char *msgfile_welcome;
-	unsigned newuser_level;
-	unsigned newuser_flags;
-	unsigned newuser_allowed; /* true if we're allowing newuser applications */
-	char *eventlog_filename;
-	char *eventlog_timeformat;
-	char *msgfile_newuser_create;
-	char *msgfile_newuser_deny;
-	char *default_channels;
-	unsigned webserver_port;
-	char *form_newuser_filename;
-	char *plugins;
-} mud_config;
+struct mud_config mud_config;
 
 /******************************************************************************
  * Prototypes
  ******************************************************************************/
-EXPORT void telnetclient_close(struct telnetclient *cl);
-EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
-EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
+void telnetclient_close(struct telnetclient *cl);
+void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
+void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 static void form_menu_lineinput(struct telnetclient *cl, const char *line);
 
 /******************************************************************************
@@ -1817,177 +1624,6 @@ EXPORT void freelist_test(void)
 }
 #endif
 
-/******************************************************************************
- * eventlog - writes logging information based on events
- ******************************************************************************/
-/*-* eventlog:globals *-*/
-
-/** output file used for eventlogging. */
-static FILE *eventlog_file;
-
-/*-* eventlog:internal functions *-*/
-
-/*-* eventlog:external functions *-*/
-
-/**
- * initialize the eventlog component.
- */
-EXPORT int eventlog_init(void)
-{
-	eventlog_file = fopen(mud_config.eventlog_filename, "a");
-
-	if (!eventlog_file) {
-		PERROR(mud_config.eventlog_filename);
-		return 0; /* failure */
-	}
-
-	setvbuf(eventlog_file, NULL, _IOLBF, 0);
-
-	return 1; /* success */
-}
-
-/** clean up eventlog module and close the logging file. */
-EXPORT void eventlog_shutdown(void)
-{
-	if (eventlog_file) {
-		fclose(eventlog_file);
-		eventlog_file = 0;
-	}
-}
-
-/** log a message to the eventlog. */
-EXPORT void eventlog(const char *type, const char *fmt, ...)
-{
-	va_list ap;
-	char buf[512];
-	int n;
-	time_t t;
-	char timestamp[64];
-
-	va_start(ap, fmt);
-	n = vsnprintf(buf, sizeof buf, fmt, ap);
-	va_end(ap);
-
-	if (n < 0) {
-		ERROR_MSG("vsnprintf() failure");
-		return; /* failure */
-	}
-
-	if (n >= (int)sizeof buf) { /* output was truncated */
-		n = strlen(buf);
-	}
-
-	/* make certain the last character is a newline */
-	if (n > 0 && buf[n - 1] != '\n') {
-		if (n == sizeof buf) n--;
-
-		buf[n] = '\n';
-		buf[n + 1] = 0;
-		DEBUG_MSG("Adding newline to message");
-	}
-
-	time(&t);
-	strftime(timestamp, sizeof timestamp, mud_config.eventlog_timeformat, gmtime(&t));
-
-	if (fprintf(eventlog_file ? eventlog_file : stderr, "%s:%s:%s", timestamp, type, buf) < 0) {
-		/* there was a write error */
-		PERROR(eventlog_file ? mud_config.eventlog_filename : "stderr");
-	}
-}
-
-/**
- * report that a connection has occured.
- */
-EXPORT void eventlog_connect(const char *peer_str)
-{
-	eventlog("CONNECT", "remote=%s\n", peer_str);
-}
-
-/** report the startup of the server. */
-EXPORT void eventlog_server_startup(void)
-{
-	eventlog("STARTUP", "\n");
-}
-
-/** report the shutdown of the server. */
-EXPORT void eventlog_server_shutdown(void)
-{
-	eventlog("SHUTDOWN", "\n");
-}
-
-/** report a failed login attempt. */
-EXPORT void eventlog_login_failattempt(const char *username, const char *peer_str)
-{
-	eventlog("LOGINFAIL", "remote=%s name='%s'\n", peer_str, username);
-}
-
-/** report a successful login(sign-on) to eventlog. */
-EXPORT void eventlog_signon(const char *username, const char *peer_str)
-{
-	eventlog("SIGNON", "remote=%s name='%s'\n", peer_str, username);
-}
-
-/** report a signoff to the eventlog. */
-EXPORT void eventlog_signoff(const char *username, const char *peer_str)
-{
-	eventlog("SIGNOFF", "remote=%s name='%s'\n", peer_str, username);
-}
-
-/** report that a connection was rejected because there are already too many
- * connections. */
-EXPORT void eventlog_toomany(void)
-{
-	/** @todo we could get the peername from the fd and log that? */
-	eventlog("TOOMANY", "\n");
-}
-
-/**
- * log commands that a user enters.
- */
-EXPORT void eventlog_commandinput(const char *remote, const char *username, const char *line)
-{
-	eventlog("COMMAND", "remote=\"%s\" user=\"%s\" command=\"%s\"\n", remote, username, line);
-}
-
-/** report that a new public channel was created. */
-EXPORT void eventlog_channel_new(const char *channel_name)
-{
-	eventlog("CHANNEL-NEW", "channel=\"%s\"\n", channel_name);
-}
-
-/** report that a public channel was removed. */
-EXPORT void eventlog_channel_remove(const char *channel_name)
-{
-	eventlog("CHANNEL-REMOVE", "channel=\"%s\"\n", channel_name);
-}
-
-/** report a user joining a public channel. */
-EXPORT void eventlog_channel_join(const char *remote, const char *channel_name, const char *username)
-{
-	if (!remote) {
-		eventlog("CHANNEL-JOIN", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
-	} else  {
-		eventlog("CHANNEL-JOIN", "remote=\"%s\" channel=\"%s\" user=\"%s\"\n", remote, channel_name, username);
-	}
-}
-
-/** report a user leaving a public channel. */
-EXPORT void eventlog_channel_part(const char *remote, const char *channel_name, const char *username)
-{
-	if (!remote) {
-		eventlog("CHANNEL-PART", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
-	} else  {
-		eventlog("CHANNEL-PART", "remote=\"%s\" channel=\"%s\" user=\"%s\"\n", remote, channel_name, username);
-	}
-}
-
-/**
- * logs an HTTP GET action.
- */
-EXPORT void eventlog_webserver_get(const char *remote, const char *uri)
-{
-	eventlog("WEBSITE-GET", "remote=\"%s\" uri=\"%s\"\n", remote ? remote : "", uri ? uri : "");
-}
 /******************************************************************************
  * Bitmap API
  ******************************************************************************/
@@ -4268,11 +3904,7 @@ EXPORT struct socketio_handle *socketio_listen(int family, int socktype, const c
 struct telnetclient {
 	struct socketio_handle *sh;
 	struct buffer output, input;
-	/** terminal information: width, height, terminale type. */
-	struct terminal {
-		int width, height;
-		char name[32];
-	} terminal;
+	struct terminal terminal;
 	int prompt_flag; /* true if prompt has been sent */
 	const char *prompt_string;
 	void (*line_input)(struct telnetclient *cl, const char *line);
@@ -4298,7 +3930,7 @@ struct telnetclient {
 /**
  * @return the username
  */
-EXPORT const char *telnetclient_username(struct telnetclient *cl)
+const char *telnetclient_username(struct telnetclient *cl)
 {
 	return cl && cl->user && cl->user->username ? cl->user->username : "<UNKNOWN>";
 }
@@ -4852,7 +4484,7 @@ EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, v
 }
 
 /** configures the prompt string for telnetclient_rdev_lineinput. */
-static void telnetclient_setprompt(struct telnetclient *cl, const char *prompt)
+void telnetclient_setprompt(struct telnetclient *cl, const char *prompt)
 {
 	cl->prompt_string = prompt ? prompt : "? ";
 	telnetclient_puts(cl, cl->prompt_string);
@@ -4860,7 +4492,7 @@ static void telnetclient_setprompt(struct telnetclient *cl, const char *prompt)
 }
 
 /** start line input mode on a telnetclient. */
-static void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt)
+void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt)
 {
 	assert(cl != NULL);
 	telnetclient_setprompt(cl, prompt);
@@ -4871,7 +4503,7 @@ static void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_in
 /**
  * @return true if client is still in this state
  */
-static int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt)
+int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt)
 {
 
 	if (!cl) return 0;
@@ -4920,7 +4552,7 @@ EXPORT void telnetclient_new_event(struct socketio_handle *sh)
 }
 
 /** mark a telnetclient to be closed and freed. */
-EXPORT void telnetclient_close(struct telnetclient *cl)
+void telnetclient_close(struct telnetclient *cl)
 {
 	if (cl && cl->sh && !cl->sh->delete_flag) {
 		cl->sh->delete_flag = 1; /* cause deletetion later */
@@ -4929,7 +4561,7 @@ EXPORT void telnetclient_close(struct telnetclient *cl)
 }
 
 /** display the currently configured prompt string again. */
-EXPORT void telnetclient_prompt_refresh(struct telnetclient *cl)
+void telnetclient_prompt_refresh(struct telnetclient *cl)
 {
 	if (cl && cl->prompt_string && !cl->prompt_flag) {
 		telnetclient_setprompt(cl, cl->prompt_string);
@@ -4937,7 +4569,7 @@ EXPORT void telnetclient_prompt_refresh(struct telnetclient *cl)
 }
 
 /** update the prompts on all open sockets if they are type 1(client). */
-EXPORT void telnetclient_prompt_refresh_all(void)
+void telnetclient_prompt_refresh_all(void)
 {
 	struct socketio_handle *curr, *next;
 
@@ -4948,6 +4580,26 @@ EXPORT void telnetclient_prompt_refresh_all(void)
 			telnetclient_prompt_refresh(curr->extra);
 		}
 	}
+}
+
+struct channel_member *telnetclient_channel_member(struct telnetclient *cl)
+{
+	return &cl->channel_member;
+}
+
+struct socketio_handle *telnetclient_socket_handle(struct telnetclient *cl)
+{
+	return cl->sh;
+}
+
+const char *telnetclient_socket_name(struct telnetclient *cl)
+{
+	return cl->sh ? cl->sh->name : NULL;
+}
+
+const struct terminal *telnetclient_get_terminal(struct telnetclient *cl)
+{
+	return cl ? &cl->terminal : NULL;
 }
 
 /******************************************************************************
@@ -5034,7 +4686,7 @@ static void menu_titledraw(struct telnetclient *cl, const char *title, size_t le
 }
 
 /** send the selection menu to a telnetclient. */
-EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi)
+void menu_show(struct telnetclient *cl, const struct menuinfo *mi)
 {
 	const struct menuitem *curr;
 
@@ -5057,7 +4709,7 @@ EXPORT void menu_show(struct telnetclient *cl, const struct menuinfo *mi)
 }
 
 /** process input into the menu system. */
-EXPORT void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line)
+void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line)
 {
 	const struct menuitem *curr;
 
@@ -5089,340 +4741,6 @@ static void menu_start(void *p, long unused2 UNUSED, void *extra3)
 	struct telnetclient *cl = p;
 	struct menuinfo *mi = extra3;
 	telnetclient_start_menuinput(cl, mi);
-}
-
-/******************************************************************************
- * command - handles the command processing
- ******************************************************************************/
-
-/** action callback to do the "pose" command. */
-static int command_do_pose(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
-{
-	TODO("Get user name");
-	TODO("Broadcast to everyone in current room");
-	telnetclient_printf(cl, "%s %s\n", telnetclient_username(cl), arg);
-
-	return 1; /* success */
-}
-
-/** action callback to do the "yell" command. */
-static int command_do_yell(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
-{
-	TODO("Get user name");
-	TODO("Broadcast to everyone in yelling distance");
-	telnetclient_printf(cl, "%s yells \"%s\"\n", telnetclient_username(cl), arg);
-
-	return 1; /* success */
-}
-
-/** action callback to do the "say" command. */
-static int command_do_say(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
-{
-	struct channel *ch;
-	struct channel_member *exclude_list[1];
-	TODO("Get user name");
-	telnetclient_printf(cl, "You say \"%s\"\n", arg);
-	ch = channel.public(0);
-	exclude_list[0] = &cl->channel_member; /* don't send message to self. */
-	channel.broadcast(ch, exclude_list, 1, "%s says \"%s\"\n", telnetclient_username(cl), arg);
-
-	return 1; /* success */
-}
-
-/** action callback to do the "emote" command. */
-static int command_do_emote(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
-{
-	TODO("Get user name");
-	TODO("Broadcast to everyone in current room");
-	telnetclient_printf(cl, "%s %s\n", telnetclient_username(cl), arg);
-
-	return 1; /* success */
-}
-
-/** action callback to do the "chsay" command. */
-static int command_do_chsay(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
-{
-	TODO("pass the channel name in a way that makes sense");
-	TODO("Get user name");
-	TODO("Broadcast to everyone in a channel");
-	telnetclient_printf(cl, "%s says \"%s\"\n", telnetclient_username(cl), arg);
-
-	return 1; /* success */
-}
-
-/** action callback to do the "quit" command. */
-static int command_do_quit(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
-{
-	/** @todo
-	 * the close code needs to change the state so telnetclient_isstate
-	 * does not end up being true for a future read?
-	 */
-	telnetclient_close(cl);
-
-	return 1; /* success */
-}
-
-/** action callback to do the "roomget" command. */
-static int command_do_roomget(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
-{
-	struct room *r;
-	char roomnum_str[64];
-	unsigned roomnum;
-	char attrname[64];
-	const char *attrvalue;
-
-	arg = util_getword(arg, roomnum_str, sizeof roomnum_str);
-	roomnum = strtoul(roomnum_str, 0, 10); /* TODO: handle errors. */
-
-	arg = util_getword(arg, attrname, sizeof attrname);
-
-	r = room.get(roomnum);
-
-	if (!r) {
-		telnetclient_printf(cl, "room \"%s\" not found.\n", roomnum_str);
-		return 0;
-	}
-
-	attrvalue = room.attr_get(r, attrname);
-
-	if (attrvalue) {
-		telnetclient_printf(cl, "room \"%s\" \"%s\" = \"%s\"\n", roomnum_str, attrname, attrvalue);
-	} else {
-		telnetclient_printf(cl, "room \"%s\" attribute \"%s\" not found.\n", roomnum_str, attrname);
-	}
-
-	room.put(r);
-
-	return 1; /* success */
-}
-
-/** action callback to do the "char" command. */
-static int command_do_character(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
-{
-	struct character *ch;
-	char act[64];
-	char tmp[64];
-	unsigned ch_id;
-
-	assert(arg != NULL);
-
-	arg = util_getword(arg, act, sizeof act);
-
-	if (!strcasecmp(act, "new")) {
-		ch = character.new();
-		telnetclient_printf(cl, "Created character %s.\n", character.attr_get(ch, "id"));
-		character.put(ch);
-	} else if (!strcasecmp(act, "get")) {
-		arg = util_getword(arg, tmp, sizeof tmp);
-		ch_id = strtoul(tmp, 0, 10); /* TODO: handle errors. */
-		ch = character.get(ch_id);
-
-		if (ch) {
-			/* get attribute name. */
-			arg = util_getword(arg, tmp, sizeof tmp);
-			telnetclient_printf(cl, "Character %u \"%s\" = \"%s\"\n", ch_id, tmp, character.attr_get(ch, tmp));
-			character.put(ch);
-		} else {
-			telnetclient_printf(cl, "Unknown character \"%s\"\n", tmp);
-		}
-	} else if (!strcasecmp(act, "set")) {
-		arg = util_getword(arg, tmp, sizeof tmp);
-		ch_id = strtoul(tmp, 0, 10); /* TODO: handle errors. */
-		ch = character.get(ch_id);
-
-		if (ch) {
-			/* get attribute name. */
-			arg = util_getword(arg, tmp, sizeof tmp);
-
-			/* find start of value. */
-			while (*arg && isspace(*arg)) arg++;
-
-			if (!character.attr_set(ch, tmp, arg)) {
-				telnetclient_printf(cl, "Could not set \"%s\" on character %u.\n", tmp, ch_id);
-			}
-
-			character.put(ch);
-		} else {
-			telnetclient_printf(cl, "Unknown character \"%s\"\n", tmp);
-		}
-	} else {
-		telnetclient_printf(cl, "unknown action \"%s\"\n", act);
-	}
-
-	return 1; /* success */
-}
-
-/** action callback to do the "quit" command. */
-static int command_do_time(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
-{
-	show_gametime(cl);
-
-	return 1; /* success */
-}
-
-/** action callback to remote that a command is not implemented. */
-static int command_not_implemented(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
-{
-	telnetclient_puts(cl, "Not implemented\n");
-
-	return 1; /* success */
-}
-
-/** table of every command string and its callback function. */
-static const struct command_table {
-	char *name; /**< full command name. */
-	int (*cb)(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg);
-} command_table[] = {
-	{ "who", command_not_implemented },
-	{ "quit", command_do_quit },
-	{ "page", command_not_implemented },
-	{ "say", command_do_say },
-	{ "yell", command_do_yell },
-	{ "emote", command_do_emote },
-	{ "pose", command_do_pose },
-	{ "chsay", command_do_chsay },
-	{ "sayto", command_not_implemented },
-	{ "tell", command_not_implemented },
-	{ "time", command_do_time },
-	{ "whisper", command_not_implemented },
-	{ "to", command_not_implemented },
-	{ "help", command_not_implemented },
-	{ "spoof", command_not_implemented },
-	{ "roomget", command_do_roomget },
-	{ "char", command_do_character },
-};
-
-/**
- * table of short commands, they must start with a punctuation. ispunct()
- * but they can be more than one character long, the table is first match.
- */
-static const struct command_short_table {
-	char *shname; /**< short commands. */
-	char *name; /**< full command name. */
-} command_short_table[] = {
-	{ ":", "pose" },
-	{ "'", "say" },
-	{ "\"\"", "yell" },
-	{ "\"", "say" },
-	{ ",", "emote" },
-	{ ".", "chsay" },
-	{ ";", "spoof" },
-};
-
-/**
- * use cmd to run a command from the command_table array.
- */
-static int command_run(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg)
-{
-	unsigned i;
-
-	/* search for a long command. */
-	for (i = 0; i < NR(command_table); i++) {
-		if (!strcasecmp(cmd, command_table[i].name)) {
-			return command_table[i].cb(cl, u, cmd, arg);
-		}
-	}
-
-	telnetclient_puts(cl, mud_config.msg_invalidcommand);
-
-	return 0; /* failure */
-}
-
-/**
- * executes a command for user u.
- */
-static int command_execute(struct telnetclient *cl, struct user *u, const char *line)
-{
-	char cmd[64];
-	const char *e, *arg;
-	unsigned i;
-
-	assert(cl != NULL); /** @todo support cl as NULL for silent/offline commands */
-	assert(line != NULL);
-
-	while (*line && isspace(*line)) line++; /* ignore leading spaces */
-
-	TODO("Can we eliminate trailing spaces?");
-
-	TODO("can we define these 1 character commands as aliases?");
-
-	if (ispunct(line[0])) {
-		for (i = 0; i < NR(command_short_table); i++) {
-			const char *shname = command_short_table[i].shname;
-			int shname_len = strlen(shname);
-
-			if (!strncmp(line, shname, shname_len)) {
-				/* find start of arguments, after the short command. */
-				arg = line + shname_len;
-
-				/* ignore leading spaces */
-				while (*arg && isspace(*arg)) arg++;
-
-				/* use the name as the cmd. */
-				return command_run(cl, u, command_short_table[i].name, arg);
-			}
-		}
-	}
-
-	/* copy the first word into cmd[] */
-	e = line + strcspn(line, " \t");
-	arg = *e ? e + 1 + strspn(e + 1, " \t") : e; /* point to where the args start */
-
-	while (*arg && isspace(*arg)) arg++; /* ignore leading spaces */
-
-	assert(e >= line);
-
-	if ((unsigned)(e - line) > sizeof cmd - 1) { /* first word is too long */
-		DEBUG("Command length %td is too long, truncating\n", e - line);
-		e = line + sizeof cmd - 1;
-	}
-
-	memcpy(cmd, line, (unsigned)(e - line));
-	cmd[e - line] = 0;
-
-	TODO("check for \"playername,\" syntax for directed speech");
-
-	TODO("check user aliases");
-
-	DEBUG("cmd=\"%s\"\n", cmd);
-
-	return command_run(cl, u, cmd, arg);
-}
-
-/** callback to process line input. */
-static void command_lineinput(struct telnetclient *cl, const char *line)
-{
-	assert(cl != NULL);
-	assert(cl->sh != NULL);
-	DEBUG("%s:entered command '%s'\n", telnetclient_username(cl), line);
-
-	/* log command input */
-	eventlog_commandinput(cl->sh->name, telnetclient_username(cl), line);
-
-	/* do something with the command */
-	command_execute(cl, NULL, line); /** @todo pass current user and character */
-
-	/* check if we should update the prompt */
-	if (telnetclient_isstate(cl, command_lineinput, mud_config.command_prompt)) {
-		telnetclient_setprompt(cl, mud_config.command_prompt);
-	}
-}
-
-/** start line input mode and send it to command_lineinput. */
-static void command_start_lineinput(struct telnetclient *cl)
-{
-	telnetclient_printf(cl, "Terminal type: %s\n", cl->terminal.name);
-	telnetclient_printf(cl, "display size is: %ux%u\n", cl->terminal.width, cl->terminal.height);
-
-	show_gametime(cl);
-
-	telnetclient_start_lineinput(cl, command_lineinput, mud_config.command_prompt);
-}
-
-/** wrapper callback for a menuitem to start command mode. */
-EXPORT void command_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
-{
-	command_start_lineinput(p);
 }
 
 /******************************************************************************
