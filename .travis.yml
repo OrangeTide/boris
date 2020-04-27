@@ -1,0 +1,9 @@
+language: c
+dist: xenial
+addons:
+  apt:
+    packages:
+      - libuv1-dev
+script:
+  - make all
+  - make clean-all
