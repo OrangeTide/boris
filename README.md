@@ -2,6 +2,8 @@
 
 A MUD code base in the style of the last millennium, written in the new millennium.
 
+[![Build Status](https://travis-ci.com/OrangeTide/boris.svg?branch=master)](https://travis-ci.com/OrangeTide/boris)
+
 ## Table of Contents
 
 - [Introduction](#introduction)
