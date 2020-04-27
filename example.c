@@ -41,7 +41,7 @@ static int initialize(void)
 	return 1;
 }
 
-static int shutdown(void)
+static int ex_shutdown(void)
 {
 	b_log(B_LOG_INFO, "example", "Example plugin shutting down...");
 	b_log(B_LOG_INFO, "example", "Example plugin ended.");
@@ -54,5 +54,5 @@ static int shutdown(void)
  ******************************************************************************/
 
 const struct plugin_example_class plugin_class = {
-	.base_class = { PLUGIN_API, "example", initialize, shutdown },
+	.base_class = { PLUGIN_API, "example", initialize, ex_shutdown },
 };

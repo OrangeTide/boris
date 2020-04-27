@@ -30,5 +30,6 @@ extern struct mud_config {
 	unsigned webserver_port;
 	char *form_newuser_filename;
 	char *plugins;
+	int default_family; /* IPv4 or IPv6 */
 } mud_config;
 #endif
