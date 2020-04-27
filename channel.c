@@ -259,7 +259,7 @@ static int initialize(void)
 /**
  * Shutdown the plugin.
  */
-static int shutdown(void)
+static int ch_shutdown(void)
 {
 	b_log(B_LOG_INFO, "channel", "channel plugin shutting down...");
 	service_detach_channel(&plugin_class.base_class);
@@ -335,7 +335,7 @@ static int channel_broadcast(struct channel *ch, struct channel_member **exclude
  * Class for the plugin
  */
 const struct plugin_channel_class plugin_class = {
-	.base_class = { PLUGIN_API, "channel", initialize, shutdown },
+	.base_class = { PLUGIN_API, "channel", initialize, ch_shutdown },
 	.channel_interface = {
 		channel_join, channel_part,
 		channel_public,

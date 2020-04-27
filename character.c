@@ -450,7 +450,7 @@ static int initialize(void)
 /**
  *
  */
-static int shutdown(void)
+static int chr_shutdown(void)
 {
 	b_log(B_LOG_INFO, "character", "Character plugin shutting down...");
 	service_detach_character(&plugin_class.base_class);
@@ -468,7 +468,7 @@ static int shutdown(void)
  *
  */
 const struct plugin_character_class plugin_class = {
-	.base_class = { PLUGIN_API, "character", initialize, shutdown },
+	.base_class = { PLUGIN_API, "character", initialize, chr_shutdown },
 	.character_interface = {
 		character_get, character_put, character_new,
 		character_attr_set, character_attr_get,

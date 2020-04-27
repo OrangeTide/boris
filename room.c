@@ -401,7 +401,7 @@ static int initialize(void)
 	return 1;
 }
 
-static int shutdown(void)
+static int room_shutdown(void)
 {
 	struct room *curr;
 	b_log(B_LOG_INFO, "room", "Room system shutting down..");
@@ -431,6 +431,6 @@ static int shutdown(void)
  ******************************************************************************/
 
 const struct plugin_room_class plugin_class = {
-	.base_class = { PLUGIN_API, "room", initialize, shutdown },
+	.base_class = { PLUGIN_API, "room", initialize, room_shutdown },
 	.room_interface = { room_get, room_put, room_attr_set, room_attr_get, room_save }
 };

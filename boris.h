@@ -47,11 +47,14 @@ struct freelist_entry;
 struct menuinfo;
 struct telnetclient;
 struct user;
+struct form;
+struct form_state;
 
 /******************************************************************************
  * Includes
  ******************************************************************************/
 #include <stdarg.h>
+#include <sys/socket.h>
 
 #include "mudconfig.h"
 #include "plugin.h"
@@ -220,6 +223,31 @@ struct user;
 #define UNUSED GCC_ONLY(__attribute__((unused)))
 
 /******************************************************************************
+ * Socket I/O
+ ******************************************************************************/
+
+#ifndef USE_WIN32_SOCKETS
+/** define SOCKET on POSIX systems because Winsock2 uses this typedef too,
+ * but it is good to remember that ws2's sockets are unsigned int handles
+ * while POSIX/BSD systems use a signed int, with -1 as flag value for an
+ * unused or freed socket.
+ */
+typedef int SOCKET;
+
+/** value used to inidicate an uninitialized socket handle. */
+#define INVALID_SOCKET (-1)
+
+/** value returned by most of the socket functions to indicate error. */
+#define SOCKET_ERROR (-1)
+#endif
+
+/** check e, if true then print an error message containing the last socket
+ * error. */
+#define SOCKETIO_FAILON(e, reason, fail_label) do { if (e) { fprintf(stderr, "ERROR:%s:%s\n", reason, socketio_strerror()); goto fail_label; } } while (0)
+
+struct socketio_handle;
+
+/******************************************************************************
  * Defines and macros
  ******************************************************************************/
 
@@ -325,6 +353,13 @@ extern struct plugin_channel_interface channel;
 extern void (*b_log)(int priority, const char *domain, const char *fmt, ...);
 extern struct plugin_fdb_interface fdb;
 
+const struct plugin_basic_class *get_room_owner(void);
+const struct plugin_basic_class *get_character_owner(void);
+const struct plugin_basic_class *get_channel_owner(void);
+
+int plugin_load(const char *name);
+int plugin_load_list(const char *list);
+
 int service_detach_log(void (*log)(int priority, const char *domain, const char *fmt, ...));
 void service_attach_log(void (*log)(int priority, const char *domain, const char *fmt, ...));
 void service_detach_fdb(const struct plugin_basic_class *cls);
@@ -355,6 +390,7 @@ int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count);
 void freelist_test(void);
 #endif
 
+void telnetclient_new_event(struct socketio_handle *sh);
 const char *telnetclient_username(struct telnetclient *cl);
 int telnetclient_puts(struct telnetclient *cl, const char *str);
 int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap);
@@ -367,8 +403,48 @@ struct channel_member *telnetclient_channel_member(struct telnetclient *cl);
 struct socketio_handle *telnetclient_socket_handle(struct telnetclient *cl);
 const char *telnetclient_socket_name(struct telnetclient *cl);
 const struct terminal *telnetclient_get_terminal(struct telnetclient *cl);
+void telnetclient_prompt_refresh(struct telnetclient *cl);
+void telnetclient_prompt_refresh_all(void);
 
 void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
 void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 
+int form_module_init(void);
+void form_module_shutdown(void);
+struct form *form_load(const char *buf, void (*form_close)(struct telnetclient *cl, struct form_state *fs));
+struct form *form_load_from_file(const char *filename, void (*form_close)(struct telnetclient *cl, struct form_state *fs));
+void form_state_init(struct form_state *fs, const struct form *f);
+void form_additem(struct form *f, unsigned flags, const char *name, const char *prompt, const char *description, int (*form_check)(struct telnetclient *cl, const char *str));
+void form_init(struct form *f, const char *title, void (*form_close)(struct telnetclient *cl, struct form_state *fs));
+void form_setmessage(struct form *f, const char *message);
+void form_free(struct form *f);
+
+void mud_config_init(void);
+void mud_config_shutdown(void);
+int mud_config_process(void);
+
+int game_init(void);
+
+int user_init(void);
+void user_shutdown(void);
+void user_put(struct user **user);
+void user_get(struct user *user);
+
+int socketio_init(void);
+void socketio_shutdown(void);
+int socketio_check_count(SOCKET fd);
+void socketio_readready(SOCKET fd);
+void socketio_writeready(SOCKET fd);
+int socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, size_t name_len);
+int socketio_getpeername(SOCKET fd, char *name, size_t name_len);
+int socketio_send(SOCKET fd, const void *data, size_t len);
+int socketio_recv(SOCKET fd, void *data, size_t len);
+int socketio_dispatch(long msec);
+const char *socketio_strerror(void);
+int socketio_wouldblock(void);
+int socketio_eintr(void);
+struct socketio_handle *socketio_listen(int family, int socktype, const char *host, const char *port, void (*newclient)(struct socketio_handle *sh));
+
+int webserver_init(int family, unsigned port);
+void webserver_shutdown(void);
 #endif

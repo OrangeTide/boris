@@ -90,7 +90,7 @@ static int initialize(void)
 	return 1;
 }
 
-static int shutdown(void)
+static int l_shutdown(void)
 {
 	service_detach_log(do_log);
 
@@ -115,6 +115,6 @@ static void set_level(int level)
  * the only external symbol.
  */
 const struct plugin_basiclog_class plugin_class = {
-	.base_class = { PLUGIN_API, "logging", initialize, shutdown },
+	.base_class = { PLUGIN_API, "logging", initialize, l_shutdown },
 	.log_interface = { do_log, set_level }
 };

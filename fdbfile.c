@@ -792,7 +792,7 @@ static int initialize(void)
 	return 1;
 }
 
-static int shutdown(void)
+static int db_shutdown(void)
 {
 	service_detach_fdb(&plugin_class.base_class);
 
@@ -800,7 +800,7 @@ static int shutdown(void)
 }
 
 const struct plugin_fdb_class plugin_class = {
-	.base_class = { PLUGIN_API, "fdb", initialize, shutdown },
+	.base_class = { PLUGIN_API, "fdb", initialize, db_shutdown },
 	.fdb_interface = {
 		fdb_domain_init,
 		fdb_write_begin,
