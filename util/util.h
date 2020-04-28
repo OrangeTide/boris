@@ -32,6 +32,7 @@
  */
 #ifndef UTIL_H_
 #define UTIL_H_
+#include <stddef.h>
 
 /** util_fnmatch returns this value when a match was not found. */
 #define UTIL_FNM_NOMATCH 1
