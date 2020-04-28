@@ -29,7 +29,6 @@ extern struct mud_config {
 	char *default_channels;
 	unsigned webserver_port;
 	char *form_newuser_filename;
-	char *plugins;
 	int default_family; /* IPv4 or IPv6 */
 } mud_config;
 #endif

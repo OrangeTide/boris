@@ -34,6 +34,7 @@
 #include "boris.h"
 #include "list.h"
 #include "fdb.h"
+#include "logging.h"
 
 #include <assert.h>
 #include <stdarg.h>

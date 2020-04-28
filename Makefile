@@ -24,11 +24,10 @@ CPPFLAGS+=-DNTEST
 # project configurations
 MODULES:=\
 	boris \
-	logging \
 # do not remove this comment.
 
 # hack around makedep rules not seeing our CPPFLAGS_modules
-CPPFLAGS+=-Iinclude/ -Ichannel -Icharacter/ -Icrypt/ -Ifdb/ -Iroom/ -Itask/ -Iutil/ -Iworldclock/
+CPPFLAGS+=-Iinclude/ -Ichannel -Icharacter/ -Icrypt/ -Ifdb/ -Iroom/ -Itask/ -Iutil/ -Iworldclock/ -Ilog/
 
 # boris
 EXEC_boris:=boris
@@ -45,6 +44,7 @@ SRCS_boris:=\
 	crypt/sha1crypt.c \
 	fdb/fdbfile.c \
 	log/eventlog.c \
+	log/logging.c \
 	room/room.c \
 	server/common.c \
 	task/command.c \
@@ -53,11 +53,6 @@ SRCS_boris:=\
 	worldclock/worldclock.c \
 # do not remove this comment.
 OBJS_boris:=$(SRCS_boris:.c=.o)
-
-# logging.so plugin
-EXEC_logging:=logging.$(SOEXT)
-SRCS_logging:=logging.c
-OBJS_logging:=$(SRCS_logging:.c=.o)
 
 ##############################################################################
 # Dec 24 2009

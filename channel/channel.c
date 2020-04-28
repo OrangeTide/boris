@@ -32,6 +32,7 @@
  */
 #include "channel.h"
 #include "boris.h"
+#include "logging.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -68,11 +69,6 @@ struct channel_public {
 LIST_HEAD(struct channel_public_list, struct channel_public);
 
 /******************************************************************************
- * Prototypes
- ******************************************************************************/
-extern const struct plugin_channel_class plugin_class;
-
-/******************************************************************************
  * Globals
  ******************************************************************************/
 
@@ -94,18 +90,18 @@ static struct channel_member **channel_find_member(struct channel *ch, struct ch
 {
 	unsigned i;
 
-	DEBUG("looking for channel member %p(p=%p)", cm, cm ? cm->p : NULL);
+	DEBUG("looking for channel member %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
 
 	if (!ch) return NULL;
 
 	for (i = 0; i < ch->nr_member; i++) {
-		DEBUG("looking at %p...", ch->member[i]);
+		DEBUG("looking at %p...", (void*)ch->member[i]);
 
 		if (ch->member[i] == cm) return &ch->member[i];
 
 	}
 
-	DEBUG("not found %p(p=%p)", cm, cm ? cm->p : NULL);
+	DEBUG("not found %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
 	return NULL;
 }
 
@@ -151,7 +147,7 @@ static int channel_delete_member(struct channel *ch, struct channel_member *cm)
 
 	if (!d) return 0; /* not a member */
 
-	DEBUG("found channel member %p at %p", cm, d);
+	DEBUG("found channel member %p at %p", (void*)cm, (void*)d);
 
 	assert(ch->nr_member > 0);
 
@@ -238,11 +234,11 @@ struct channel *channel_public(const char *name)
 }
 
 /**
- * Initialize the plugin.
+ * Initialize the sub-system.
  */
 int channel_initialize(void)
 {
-	b_log(B_LOG_INFO, "channel", "channel plugin loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	b_log(B_LOG_INFO, "channel", "channel sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	channel_public_add("Wiz");
 	channel_public_add("OOC");
 	channel_public_add(NULL); /* system channel. */
@@ -250,12 +246,12 @@ int channel_initialize(void)
 }
 
 /**
- * Shutdown the plugin.
+ * Shutdown the sub-system.
  */
 void channel_shutdown(void)
 {
-	b_log(B_LOG_INFO, "channel", "channel plugin shutting down...");
-	b_log(B_LOG_INFO, "channel", "channel plugin ended.");
+	b_log(B_LOG_INFO, "channel", "channel sub-system shutting down...");
+	b_log(B_LOG_INFO, "channel", "channel sub-system ended.");
 }
 
 /**
@@ -308,7 +304,7 @@ int channel_broadcast(struct channel *ch, struct channel_member **exclude_list, 
 
 	for (i = 0; i < ch->nr_member; i++) {
 		struct channel_member *cm = ch->member[i];
-		DEBUG("cm=%p p=%p\n", cm, cm ? cm->p : NULL);
+		DEBUG("cm=%p p=%p\n", (void*)cm, cm ? cm->p : NULL);
 
 		if (cm && cm->send && !is_on_list(cm, exclude_list, exclude_list_len)) {
 			cm->send(cm, ch, buf);
