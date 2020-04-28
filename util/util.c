@@ -4,9 +4,9 @@
  * Utility routines - fnmatch, load text files, string utilities
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Dec 25
+ * @date 2020 Apr 27
  *
- * Copyright (c) 2009-2019, Jon Mayo
+ * Copyright (c) 2009-2020, Jon Mayo
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,14 +30,14 @@
  * those of the authors and should not be interpreted as representing official
  * policies, either expressed or implied, of the Boris MUD project.
  */
+#include "util.h"
+#include "debug.h"
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
-
-#include "debug.h"
-#include "util.h"
 
 /**
  * clone of the fnmatch() function.

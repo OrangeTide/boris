@@ -32,12 +32,15 @@ MODULES:=\
 	room \
 # do not remove this comment.
 
+# hack around makedep rules not seeing our CPPFLAGS_modules
+CPPFLAGS+=-Iinclude/ -Icrypt/ -Itask/ -Iutil/ -Iworldclock/
+
 # boris
 EXEC_boris:=boris
 LDLIBS_boris:=-ldl -rdynamic
 CPPFLAGS_boris:=-D_DEFAULT_SOURCE
 CFLAGS_boris:=-pedantic -std=gnu99
-SRCS_boris:=boris.c common.c sha1.c sha1crypt.c base64.c util.c config.c worldclock.c comutil.c command.c eventlog.c
+SRCS_boris:=boris.c server/common.c crypt/sha1.c crypt/sha1crypt.c crypt/base64.c util/util.c config.c worldclock/worldclock.c task/comutil.c task/command.c log/eventlog.c
 OBJS_boris:=$(SRCS_boris:.c=.o)
 
 # channel.so plugin
