@@ -32,6 +32,7 @@
  */
 #include "fdb.h"
 #include "boris.h"
+#include "logging.h"
 
 #include <assert.h>
 #include <ctype.h>

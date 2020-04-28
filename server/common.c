@@ -43,8 +43,6 @@
  * - bitmap - manages large bitmaps
  * - buffer - manages an i/o buffer
  * - config - represent a configuration parser. uses config_watcher as entries.
- * - dll - low-level api to open modules (.dll or .so). uses @ref dll_open and @ref dll_close
- * - plugin - open plug-ins using dll.
  * - form - uses formitem.
  * - form_state
  * - freelist - allocate ranges of numbers from a pool. uses freelist_entry and freelist_extent.
@@ -52,8 +50,6 @@
  * - menuinfo - draws menus to a telnetclient
  * - refcount - macros to provide reference counting. uses @ref REFCOUNT_PUT and @ref REFCOUNT_GET
  * - server - accepts new connections
- * - sha1 - SHA1 hashing.
- * - sha1crypt - SHA1 passwd hashing.
  * - shvar - process $() macros. implemented by @ref shvar_eval.
  * - socketio_handle - manages network sockets
  * - telnetclient - processes data from a socket for Telnet protocol
@@ -180,11 +176,11 @@
 
 #include "boris.h"
 #include "command.h"
+#include "channel.h"
 #include "debug.h"
 #include "eventlog.h"
 #include "fdb.h"
 #include "list.h"
-#include "plugin.h"
 #include "sha1.h"
 #include "sha1crypt.h"
 #include "util.h"
@@ -255,49 +251,6 @@ void telnetclient_close(struct telnetclient *cl);
 void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
 void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
 static void form_menu_lineinput(struct telnetclient *cl, const char *line);
-
-/******************************************************************************
- * dummy services - functions that are used as a default for services.
- ******************************************************************************/
-
-/**
- * a default log function to use if none is defined.
- */
-static void b_log_dummy(int priority UNUSED, const char *domain UNUSED, const char *fmt, ...)
-{
-	va_list ap;
-	va_start(ap, fmt);
-	fprintf(stderr, fmt, ap);
-	va_end(ap);
-	fputc('\n', stderr); /* assume there is no trainling newline. */
-}
-
-/******************************************************************************
- * Services
- ******************************************************************************/
-
-void (*b_log)(int priority, const char *domain, const char *fmt, ...) = b_log_dummy;
-
-/**
- * detach the function pointer providing the log service.
- */
-int service_detach_log(void (*log)(int priority, const char *domain, const char *fmt, ...))
-{
-	if (log == b_log) {
-		b_log = b_log_dummy;
-		return 1;
-	}
-
-	return 0; /* was not attached. */
-}
-
-/**
- * attach a function pointer to provide log service.
- */
-void service_attach_log(void (*log)(int priority, const char *domain, const char *fmt, ...))
-{
-	b_log = log ? log : b_log_dummy;
-}
 
 /******************************************************************************
  * name-value parser routines.
@@ -438,177 +391,6 @@ const char *value_get(enum value_type type, void *p)
 
 	return NULL;
 }
-
-/******************************************************************************
- * DLL / Plug-in routines.
- ******************************************************************************/
-
-#ifdef WIN32
-#include <windows.h>
-/**
- * handle for an open DLL used by dll_open() and dll_close().
- */
-typedef HMODULE dll_handle_t;
-typedef FARPROC dll_func_t;
-typedef void *dll_symbol_t;
-#define SOEXT ".dll"
-#else
-#include <dlfcn.h>
-/**
- * handle for an open DLL used by dll_open() and dll_close().
- */
-typedef struct {
-	void *h;
-} dll_handle_t;
-typedef int (*dll_func_t)();
-typedef void *dll_symbol_t;
-#ifdef __APPLE__
-#define SOEXT ".dylib"
-#else
-#define SOEXT ".so"
-#endif
-#endif
-
-/**
- * internal function for reporting errors on last operation with a DLL.
- * @see dll_open dll_close
- */
-static void dll_show_error(const char *reason)
-{
-#ifdef WIN32
-	LPTSTR lpMsgBuf;
-	FormatMessage(
-		FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
-		| FORMAT_MESSAGE_IGNORE_INSERTS, NULL, GetLastError(),
-		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPTSTR)&lpMsgBuf, 0, NULL);
-
-	if (reason) {
-		fprintf(stderr, "%s:%s\n", reason, lpMsgBuf);
-	} else {
-		fprintf(stderr, "%s\n", lpMsgBuf);
-	}
-
-	LocalFree(lpMsgBuf);
-#else
-	const char *msg;
-	msg = dlerror();
-
-	if (msg) {
-		if (reason) {
-			fprintf(stderr, "%s:%s\n", reason, msg);
-		} else {
-			fprintf(stderr, "%s\n", msg);
-		}
-	}
-
-#endif
-}
-
-/**
- * opens a file and updates the handle at h.
- * file extension is optional, and it is best not to specify it.
- * @param h pointer to the handle to be updated. set to NULL on failure.
- * @param filename name of the DLL file to open. should not contain an
- *                 extension, that will be added.
- * @return non-zero on success, 0 on failure.
- * @see dll_close
- */
-EXPORT int dll_open(dll_handle_t *h, const char *filename)
-{
-	char path[PATH_MAX];
-#ifdef WIN32
-	unsigned i;
-
-	/* convert / to \ in the filename, as required by LoadLibrary(). */
-	for (i = 0; filename[i] && i < sizeof path - 1; i++) {
-		path[i] = filename[i] == '/' ? '\\' : filename[i];
-	}
-
-	path[i] = 0; /* null terminate */
-
-	if (!strstr(filename, SOEXT)) {
-		strcat(path, SOEXT);
-	}
-
-	/* TODO: convert filename to windows text encoding */
-	*h = LoadLibrary(filename);
-
-	if (!*h) {
-#else
-	strcpy(path, filename);
-
-	if (!strstr(filename, SOEXT)) {
-		strcat(path, SOEXT);
-	}
-
-	TRACE("dlopen(%s)\n", path);
-	h->h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-
-	if (!h->h) {
-#endif
-		dll_show_error(path);
-		return 0;
-	}
-
-	return 1;
-}
-
-/**
- * closes an open DLL file handle. ignores NULL handles.
- * @param h handle to close
- * @see dll_open
- */
-EXPORT void dll_close(dll_handle_t h)
-{
-#ifdef WIN32
-
-	if (h.h) {
-		if (!FreeLibrary(h)) {
-			dll_show_error("FreeLibrary()");
-		}
-	}
-
-#else
-
-	if (h.h) {
-		if (dlclose(h.h)) {
-			dll_show_error("dlclose()");
-		}
-	}
-
-#endif
-}
-
-/**
- * get a function's address from a DLL.
- * name must by a symbol name for a function.
- * @param h handle
- * @param name a symbol name, must be a function.
- * @return NULL on error. address of exported symbol on success.
- */
-EXPORT dll_symbol_t dll_symbol(dll_handle_t h, const char *name)
-{
-	dll_symbol_t ret;
-#ifdef WIN32
-	ret = GetProcAddress(h, name);
-#else
-	ret = dlsym(h.h, name);
-#endif
-
-	if (!ret) {
-		dll_show_error(name);
-	}
-
-	return ret;
-}
-
-/* not used at this time. */
-#if 0
-EXPORT dll_func_t dll_func(dll_handle_t h, const char *name)
-{
-	return (int(*)())dll_symbol(h, name);
-}
-#endif
 
 /******************************************************************************
  * Debug and test routines
@@ -5799,7 +5581,6 @@ void mud_config_init(void)
 	mud_config.default_channels = strdup("@system,@wiz,OOC,auction,chat,newbie");
 	mud_config.webserver_port = 0; /* default is to disable. */
 	mud_config.form_newuser_filename = strdup("data/forms/newuser.form");
-	mud_config.plugins = NULL;
 	mud_config.default_family = 0;
 }
 
@@ -5831,7 +5612,6 @@ void mud_config_shutdown(void)
 		&mud_config.msgfile_newuser_deny,
 		&mud_config.default_channels,
 		&mud_config.form_newuser_filename,
-		&mud_config.plugins,
 	};
 	unsigned i;
 
@@ -5861,7 +5641,6 @@ int mud_config_process(void)
 
 	config_setup(&cfg);
 	config_watch(&cfg, "server.port", do_config_port, 0);
-	config_watch(&cfg, "server.plugins", do_config_string, &mud_config.plugins);
 	config_watch(&cfg, "prompt.*", do_config_prompt, 0);
 	config_watch(&cfg, "msg.*", do_config_msg, 0);
 	config_watch(&cfg, "msgfile.*", do_config_msgfile, 0);
@@ -5885,124 +5664,6 @@ int mud_config_process(void)
 	config_free(&cfg);
 
 	return 1; /* success */
-}
-
-/******************************************************************************
- * Plugins
- ******************************************************************************/
-
-#define PLUGIN_NAME_MAX 64
-
-struct plugin {
-	LIST_ENTRY(struct plugin) list;
-	dll_handle_t h;
-	char *name;
-	const struct plugin_basic_class *plugin_class;
-};
-
-LIST_HEAD(struct plugin_list, struct plugin); /**< list of loaded plugin. */
-static struct plugin_list plugin_list;
-
-static struct plugin *plugin_find(const char *name)
-{
-	struct plugin *curr;
-	assert(name != NULL);
-
-	for (curr = LIST_TOP(plugin_list); curr; curr = LIST_NEXT(curr, list)) {
-		assert(curr->name != NULL);
-
-		if (!strcasecmp(name, curr->name)) {
-			return curr;
-		}
-	}
-
-	return NULL; /* not found. */
-}
-
-/**
- * @param name base name, with path or extension.
- */
-int plugin_load(const char *name)
-{
-	struct plugin *pi;
-	dll_handle_t h;
-	const struct plugin_basic_class *plugin_class;
-	char path[PATH_MAX];
-
-	/* look to see if it is loaded. */
-	pi = plugin_find(name);
-
-	if (pi) {
-		ERROR_FMT("plugin already loaded: %s\n", name);
-		return 0; /* can't decide if this is an error or not. */
-	}
-
-	/* force dlopen to look in current directory. */
-	snprintf(path, sizeof path, "./%s", name);
-
-	/* load it. */
-	if (!dll_open(&h, path)) {
-		ERROR_FMT("could not open plugin: %s\n", name);
-		return 0;
-	}
-
-	/* initialize the plugin. */
-	plugin_class = dll_symbol(h, "plugin_class");
-
-	if (!plugin_class || plugin_class->api_version != PLUGIN_API || !plugin_class->initialize) {
-		dll_close(h);
-		ERROR_FMT("could not get class from plugin: %s\n", name);
-		return 0;
-	}
-
-	/* found the class guts - initialize the plugin once and only once. */
-	if (!plugin_class->initialize()) {
-		dll_close(h);
-		ERROR_FMT("could not initialize plugin: %s\n", name);
-		return 0;
-	}
-
-	/* add plugin to a list now that it has been initialized. */
-	pi = calloc(1, sizeof * pi);
-	pi->h = h;
-	pi->name = strdup(name);
-	pi->plugin_class = plugin_class;
-	LIST_INSERT_HEAD(&plugin_list, pi, list);
-
-	VERBOSE("Loaded plugin: %s\n", name);
-
-	return 1;
-}
-
-/**
- * go through a space seperated list and load all the plugins.
- * @param list string containing a list of plugins to load.
- */
-int plugin_load_list(const char *list)
-{
-	char name[PLUGIN_NAME_MAX]; /**< hold a substring. */
-
-	while (*list) {
-		const char *e;
-
-		/* find start of next word. */
-		while (*list && isspace(*list)) list++;
-
-		for (e = list; *e && !isspace(*e); e++) ;
-
-		/* copy word out of string list. */
-		snprintf(name, sizeof name, "%.*s", (int)(e - list), list);
-		/* move to next position. */
-		list = e;
-
-		if (*list) list++;
-
-		if (!plugin_load(name)) {
-			return 0; /**< failure. */
-		}
-	}
-
-	return 1; /**< success. */
 }
 
 /******************************************************************************

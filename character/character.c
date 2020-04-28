@@ -33,6 +33,7 @@
 #include "character.h"
 #include "boris.h"
 #include "fdb.h"
+#include "logging.h"
 
 #include <assert.h>
 #include <stddef.h>
@@ -420,7 +421,7 @@ static int character_preflight(void)
  */
 int character_initialize(void)
 {
-	b_log(B_LOG_INFO, "character", "Character plugin loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	b_log(B_LOG_INFO, "character", "Character sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	freelist_init(&character_id_freelist);
 	freelist_pool(&character_id_freelist, 1, ID_MAX);
 
@@ -443,6 +444,6 @@ int character_initialize(void)
  */
 void character_shutdown(void)
 {
-	b_log(B_LOG_INFO, "character", "Character plugin shutting down...");
-	b_log(B_LOG_INFO, "character", "Character plugin ended.");
+	b_log(B_LOG_INFO, "character", "Character sub-system shutting down...");
+	b_log(B_LOG_INFO, "character", "Character sub-system ended.");
 }

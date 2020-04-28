@@ -27,7 +27,6 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 
 ## Features
 
-- plugin based design. easily extend, test, and customize your own server.
 - file-based database. Like NoSQL, but inferior in every way.
 
 ## Building
@@ -44,7 +43,7 @@ cd boris
 make
 ```
 
-Build output is an executable (`boris`) and several plugins (`channel.so character.so example.so fdbfile.so logging.so room.so`).
+Build output is an executable (`boris`).
 
 ## Usage
 

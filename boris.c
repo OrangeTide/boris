@@ -1,11 +1,11 @@
 /**
  * @file common.c
  *
- * A plugin oriented MUD.
+ * 20th Century MUD.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @version 0.6
- * @date 2020 Apr 26
+ * @version 0.7
+ * @date 2020 Apr 27
  *
  * Copyright (c) 2008-2020, Jon Mayo
  *
@@ -39,6 +39,7 @@
 #include "eventlog.h"
 #include "fdb.h"
 #include "room.h"
+#include "logging.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -236,6 +237,13 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	if (logging_initialize()) {
+		ERROR_MSG("could not initialize logging");
+		return EXIT_FAILURE;
+	}
+
+	atexit(logging_shutdown);
+
 	if (fdb_initialize()) {
 		ERROR_MSG("could not load database");
 		return EXIT_FAILURE;
@@ -263,11 +271,6 @@ int main(int argc, char **argv)
 	}
 
 	atexit(character_shutdown);
-
-	if (!plugin_load_list(mud_config.plugins)) {
-		ERROR_MSG("could not load one or more plugins");
-		return EXIT_FAILURE;
-	}
 
 	if (!eventlog_init()) {
 		return EXIT_FAILURE;

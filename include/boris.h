@@ -1,12 +1,12 @@
 /**
  * @file boris.h
  *
- * A plugin oriented MUD.
+ * 20th Century MUD.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Dec 25
+ * @date 2020 Apr 27
  *
- * Copyright (c) 2009-2019 Jon Mayo
+ * Copyright (c) 2009-2020 Jon Mayo
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,7 +35,7 @@
 
 /* major, minor and patch level for version. */
 #define BORIS_VERSION_MAJ 0
-#define BORIS_VERSION_MIN 6
+#define BORIS_VERSION_MIN 7
 #define BORIS_VERSION_PAT 0
 
 /******************************************************************************
@@ -57,7 +57,6 @@ struct form_state;
 #include <sys/socket.h>
 
 #include "mudconfig.h"
-#include "plugin.h"
 #include "list.h"
 #include "terminal.h"
 
@@ -260,15 +259,6 @@ struct socketio_handle;
 /** round down on a boundry. */
 #define ROUNDDOWN(a,n) ((a)-((a)%(n)))
 
-#define B_LOG_ASSERT 0 /**< unexpected condition forcing shutdown. */
-#define B_LOG_CRIT 1 /**< critial message - system needs to shutdown. */
-#define B_LOG_ERROR 2 /**< error occured - maybe fatal. */
-#define B_LOG_WARN 3 /**< warning - something unexpected. */
-#define B_LOG_INFO 4 /**< interesting information */
-#define B_LOG_TODO 5 /**< messages for incomplete implementation. */
-#define B_LOG_DEBUG 6 /**< debug messages. */
-#define B_LOG_TRACE 7 /**< trace logging */
-
 /* names of various domains */
 #define DOMAIN_USER "users"
 #define DOMAIN_ROOM "rooms"
@@ -345,11 +335,6 @@ struct channel_member {
 /******************************************************************************
  * Protos
  ******************************************************************************/
-
-extern void (*b_log)(int priority, const char *domain, const char *fmt, ...);
-
-int plugin_load(const char *name);
-int plugin_load_list(const char *list);
 
 int service_detach_log(void (*log)(int priority, const char *domain, const char *fmt, ...));
 void service_attach_log(void (*log)(int priority, const char *domain, const char *fmt, ...));
