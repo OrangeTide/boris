@@ -42,8 +42,6 @@
  * - bitfield - manages small staticly sized bitmaps. uses @ref BITFIELD
  * - bitmap - manages large bitmaps
  * - buffer - manages an i/o buffer
- * - channel_group
- * - channel_member
  * - config - represent a configuration parser. uses config_watcher as entries.
  * - dll - low-level api to open modules (.dll or .so). uses @ref dll_open and @ref dll_close
  * - plugin - open plug-ins using dll.
@@ -280,31 +278,6 @@ static void b_log_dummy(int priority UNUSED, const char *domain UNUSED, const ch
 
 void (*b_log)(int priority, const char *domain, const char *fmt, ...) = b_log_dummy;
 
-struct plugin_room_interface room;
-static const struct plugin_basic_class *room_owner;
-
-const struct plugin_basic_class *get_room_owner(void)
-{
-	return room_owner;
-}
-
-struct plugin_character_interface character;
-static const struct plugin_basic_class *character_owner;
-
-const struct plugin_basic_class *get_character_owner(void)
-{
-	return character_owner;
-}
-
-struct plugin_channel_interface channel;
-static const struct plugin_basic_class *channel_owner;
-
-const struct plugin_basic_class *get_channel_owner(void)
-{
-	return channel_owner;
-}
-
-
 /**
  * detach the function pointer providing the log service.
  */
@@ -324,57 +297,6 @@ int service_detach_log(void (*log)(int priority, const char *domain, const char 
 void service_attach_log(void (*log)(int priority, const char *domain, const char *fmt, ...))
 {
 	b_log = log ? log : b_log_dummy;
-}
-
-void service_detach_room(const struct plugin_basic_class *cls)
-{
-	if (!cls || room_owner == cls) {
-		room_owner = NULL;
-		memset(&room, 0, sizeof room);
-	}
-}
-
-void service_attach_room(const struct plugin_basic_class *cls, const struct plugin_room_interface *interface)
-{
-	room_owner = cls;
-
-	if (interface) {
-		room = *interface;
-	}
-}
-
-void service_detach_character(const struct plugin_basic_class *cls)
-{
-	if (!cls || character_owner == cls) {
-		character_owner = NULL;
-		memset(&character, 0, sizeof character);
-	}
-}
-
-void service_attach_character(const struct plugin_basic_class *cls, const struct plugin_character_interface *interface)
-{
-	character_owner = cls;
-
-	if (interface) {
-		character = *interface;
-	}
-}
-
-void service_detach_channel(const struct plugin_basic_class *cls)
-{
-	if (!cls || channel_owner == cls) {
-		channel_owner = NULL;
-		memset(&channel, 0, sizeof channel);
-	}
-}
-
-void service_attach_channel(const struct plugin_basic_class *cls, const struct plugin_channel_interface *interface)
-{
-	channel_owner = cls;
-
-	if (interface) {
-		channel = *interface;
-	}
 }
 
 /******************************************************************************
@@ -3862,7 +3784,7 @@ static int telnetclient_channel_add(struct telnetclient *cl, struct channel *ch)
 
 	if (!ch) return 1; /* adding NULL is ignored. */
 
-	if (!channel.join(ch, &cl->channel_member)) return 0; /* could not join channel. */
+	if (!channel_join(ch, &cl->channel_member)) return 0; /* could not join channel. */
 
 	newlist = realloc(cl->channel, sizeof * cl->channel * (cl->nr_channel + 1));
 
@@ -3888,9 +3810,9 @@ static int telnetclient_channel_remove(struct telnetclient *cl, struct channel *
 
 	for (i = 0; i < cl->nr_channel; i++) {
 		if (cl->channel[i] == ch) {
-			DEBUG("channel.part(%p, %p)\n", (void*)cl->channel[i], (void*)&cl->channel_member);
+			DEBUG("channel_part(%p, %p)\n", (void*)cl->channel[i], (void*)&cl->channel_member);
 
-			channel.part(cl->channel[i], &cl->channel_member);
+			channel_part(cl->channel[i], &cl->channel_member);
 
 			cl->channel[i] = NULL;
 			assert(cl->nr_channel > 0); /* can't enter this condition when no channels. */
@@ -4008,7 +3930,7 @@ static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh)
 	sh->extra = cl;
 	sh->extra_free = telnetclient_free;
 
-	telnetclient_channel_add(cl, channel.public(0));
+	telnetclient_channel_add(cl, channel_public(0));
 
 	return cl;
 failed:

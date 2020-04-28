@@ -5,7 +5,7 @@ struct fdb_read_handle;
 struct fdb_iterator;
 
 int fdb_initialize(void);
-int fdb_shutdown(void);
+void fdb_shutdown(void);
 int fdb_domain_init(const char *domain);
 struct fdb_write_handle *fdb_write_begin(const char *domain, const char *id);
 struct fdb_write_handle *fdb_write_begin_uint(const char *domain, unsigned id);

@@ -33,8 +33,12 @@
  */
 
 #include "boris.h"
+#include "channel.h"
+#include "character.h"
 #include "debug.h"
 #include "eventlog.h"
+#include "fdb.h"
+#include "room.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -232,25 +236,36 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	if (fdb_initialize()) {
+		ERROR_MSG("could not load database");
+		return EXIT_FAILURE;
+	}
+
+	atexit(fdb_shutdown);
+
+	if (channel_initialize()) {
+		ERROR_MSG("could not load channels");
+		return EXIT_FAILURE;
+	}
+
+	atexit(channel_shutdown);
+
+	if (room_initialize()) {
+		ERROR_MSG("could not load room sub-system");
+		return EXIT_FAILURE;
+	}
+
+	atexit(room_shutdown);
+
+	if (character_initialize()) {
+		ERROR_MSG("could not load character sub-system");
+		return EXIT_FAILURE;
+	}
+
+	atexit(character_shutdown);
+
 	if (!plugin_load_list(mud_config.plugins)) {
 		ERROR_MSG("could not load one or more plugins");
-		return EXIT_FAILURE;
-	}
-
-	/* check for missing plugins because they won't have their function
-	 * pointers initialized. */
-	if (!get_room_owner()) {
-		b_log(B_LOG_CRIT, "room", "No room system loaded!");
-		return EXIT_FAILURE;
-	}
-
-	if (!get_character_owner()) {
-		b_log(B_LOG_CRIT, "character", "No character system loaded!");
-		return EXIT_FAILURE;
-	}
-
-	if (!get_channel_owner()) {
-		b_log(B_LOG_CRIT, "channel", "No channel system loaded!");
 		return EXIT_FAILURE;
 	}
 

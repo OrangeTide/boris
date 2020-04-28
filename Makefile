@@ -24,50 +24,40 @@ CPPFLAGS+=-DNTEST
 # project configurations
 MODULES:=\
 	boris \
-	channel \
-	character \
-	example \
 	logging \
-	room \
 # do not remove this comment.
 
 # hack around makedep rules not seeing our CPPFLAGS_modules
-CPPFLAGS+=-Iinclude/ -Icrypt/ -Ifdb/ -Itask/ -Iutil/ -Iworldclock/
+CPPFLAGS+=-Iinclude/ -Ichannel -Icharacter/ -Icrypt/ -Ifdb/ -Iroom/ -Itask/ -Iutil/ -Iworldclock/
 
 # boris
 EXEC_boris:=boris
 LDLIBS_boris:=-ldl -rdynamic
 CPPFLAGS_boris:=-D_DEFAULT_SOURCE
 CFLAGS_boris:=-pedantic -std=gnu99
-SRCS_boris:=boris.c server/common.c crypt/sha1.c crypt/sha1crypt.c \
-	crypt/base64.c util/util.c config.c worldclock/worldclock.c \
-	task/comutil.c task/command.c log/eventlog.c fdb/fdbfile.c
+SRCS_boris:=\
+	boris.c \
+	config.c \
+	channel/channel.c \
+	character/character.c \
+	crypt/base64.c \
+	crypt/sha1.c \
+	crypt/sha1crypt.c \
+	fdb/fdbfile.c \
+	log/eventlog.c \
+	room/room.c \
+	server/common.c \
+	task/command.c \
+	task/comutil.c \
+	util/util.c \
+	worldclock/worldclock.c \
+# do not remove this comment.
 OBJS_boris:=$(SRCS_boris:.c=.o)
-
-# channel.so plugin
-EXEC_channel:=channel.$(SOEXT)
-SRCS_channel:=channel.c
-OBJS_channel:=$(SRCS_channel:.c=.o)
-
-# character.so plugin
-EXEC_character:=character.$(SOEXT)
-SRCS_character:=character.c
-OBJS_character:=$(SRCS_character:.c=.o)
-
-# example.so plugin that does nothing
-EXEC_example:=example.$(SOEXT)
-SRCS_example:=example.c
-OBJS_example:=$(SRCS_example:.c=.o)
 
 # logging.so plugin
 EXEC_logging:=logging.$(SOEXT)
 SRCS_logging:=logging.c
 OBJS_logging:=$(SRCS_logging:.c=.o)
-
-# room.so plugin
-EXEC_room:=room.$(SOEXT)
-SRCS_room:=room.c
-OBJS_room:=$(SRCS_room:.c=.o)
 
 ##############################################################################
 # Dec 24 2009
