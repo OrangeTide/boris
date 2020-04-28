@@ -204,7 +204,7 @@ static struct character *character_load(unsigned character_id)
 
 	if (character_id <= 0) return NULL;
 
-	h = fdb.read_begin_uint(DOMAIN_CHARACTER, character_id);
+	h = fdb_read_begin_uint(DOMAIN_CHARACTER, character_id);
 
 	if (!h) {
 		b_log(B_LOG_ERROR, "character", "could not load character \"%u\"", character_id);
@@ -214,20 +214,20 @@ static struct character *character_load(unsigned character_id)
 	ch = character_ll_alloc();
 
 	if (!ch) {
-		fdb.read_end(h);
+		fdb_read_end(h);
 		return NULL;
 	}
 
-	while (fdb.read_next(h, &name, &value)) {
+	while (fdb_read_next(h, &name, &value)) {
 		if (!character_attr_set(ch, name, value)) {
 			b_log(B_LOG_ERROR, "character", "could not load character \"%u\"", character_id);
 			character_ll_free(ch);
-			fdb.read_end(h);
+			fdb_read_end(h);
 			return NULL;
 		}
 	}
 
-	fdb.read_end(h);
+	fdb_read_end(h);
 
 	if (character_id != ch->id) {
 		b_log(B_LOG_ERROR, "character", "could not load character \"%u\" (bad, missing or mismatched id)", character_id);
@@ -251,7 +251,7 @@ static int character_save(struct character *ch)
 
 	if (!ch->dirty_fl) return 1; /* already saved - don't do it again. */
 
-	h = fdb.write_begin_uint(DOMAIN_CHARACTER, ch->id);
+	h = fdb_write_begin_uint(DOMAIN_CHARACTER, ch->id);
 
 	if (!h) {
 		b_log(B_LOG_ERROR, "character", "could not save character \"%u\"", ch->id);
@@ -263,22 +263,22 @@ static int character_save(struct character *ch)
 
 		switch(attrinfo[i].type) {
 		case VALUE_TYPE_UINT:
-			fdb.write_format(h, attrinfo[i].name, "%u", *(unsigned*)base);
+			fdb_write_format(h, attrinfo[i].name, "%u", *(unsigned*)base);
 			break;
 
 		case VALUE_TYPE_STRING:
 			if (*(char**)base)
-				fdb.write_pair(h, attrinfo[i].name, *(char**)base);
+				fdb_write_pair(h, attrinfo[i].name, *(char**)base);
 
 			break;
 		}
 	}
 
 	for (curr = LIST_TOP(ch->extra_values); curr; curr = LIST_NEXT(curr, list)) {
-		fdb.write_pair(h, curr->name, curr->value);
+		fdb_write_pair(h, curr->name, curr->value);
 	}
 
-	if (!fdb.write_end(h)) {
+	if (!fdb_write_end(h)) {
 		b_log(B_LOG_ERROR, "character", "could not save character \"%u\"", ch->id);
 		return 0; /* failure */
 	}
@@ -375,14 +375,14 @@ static int character_preflight(void)
 	struct fdb_iterator *it;
 	const char *id;
 
-	it = fdb.iterator_begin(DOMAIN_CHARACTER);
+	it = fdb_iterator_begin(DOMAIN_CHARACTER);
 
 	if (!it) {
 		b_log(B_LOG_CRIT, "character", "could not load characters!");
 		return 0; /* could not load. */
 	}
 
-	while ((id = fdb.iterator_next(it))) {
+	while ((id = fdb_iterator_next(it))) {
 		struct character *ch;
 		unsigned character_id;
 		char *endptr;
@@ -391,7 +391,7 @@ static int character_preflight(void)
 
 		if (*endptr) {
 			b_log(B_LOG_CRIT, "character", "character id \"%s\" is invalid!", id);
-			fdb.iterator_end(it);
+			fdb_iterator_end(it);
 			return 0; /* could not load */
 		}
 
@@ -399,7 +399,7 @@ static int character_preflight(void)
 
 		if (!ch) {
 			b_log(B_LOG_CRIT, "character", "could not load character id \"%u\"", character_id);
-			fdb.iterator_end(it);
+			fdb_iterator_end(it);
 			return 0; /* could not load */
 		}
 
@@ -407,21 +407,21 @@ static int character_preflight(void)
 		if (ch->id != character_id) {
 			b_log(B_LOG_CRIT, "character", "bad or non-matching character id \"%u\"", character_id);
 			character_ll_free(ch);
-			fdb.iterator_end(it);
+			fdb_iterator_end(it);
 		}
 
 		/* allocate id from the pool */
 		if (!freelist_thwack(&character_id_freelist, ch->id, 1)) {
 			b_log(B_LOG_CRIT, "character", "bad or duplicate character id \"%u\"", character_id);
 			character_ll_free(ch);
-			fdb.iterator_end(it);
+			fdb_iterator_end(it);
 			return 0; /* could not load */
 		}
 
 		character_ll_free(ch);
 	}
 
-	fdb.iterator_end(it);
+	fdb_iterator_end(it);
 
 	return 1; /* success */
 }
@@ -434,7 +434,7 @@ static int initialize(void)
 	freelist_init(&character_id_freelist);
 	freelist_pool(&character_id_freelist, 1, ID_MAX);
 
-	fdb.domain_init(DOMAIN_CHARACTER);
+	fdb_domain_init(DOMAIN_CHARACTER);
 
 	/* load all characters to check and to configure pool space. */
 	if (!character_preflight()) {

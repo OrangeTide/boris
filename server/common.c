@@ -47,7 +47,6 @@
  * - config - represent a configuration parser. uses config_watcher as entries.
  * - dll - low-level api to open modules (.dll or .so). uses @ref dll_open and @ref dll_close
  * - plugin - open plug-ins using dll.
- * - fdb - file database. holds data in regular files.
  * - form - uses formitem.
  * - form_state
  * - freelist - allocate ranges of numbers from a pool. uses freelist_entry and freelist_extent.
@@ -185,6 +184,7 @@
 #include "command.h"
 #include "debug.h"
 #include "eventlog.h"
+#include "fdb.h"
 #include "list.h"
 #include "plugin.h"
 #include "sha1.h"
@@ -274,93 +274,11 @@ static void b_log_dummy(int priority UNUSED, const char *domain UNUSED, const ch
 	fputc('\n', stderr); /* assume there is no trainling newline. */
 }
 
-/* dummy functions that return failure for everything. */
-static int dummy_fdb_domain_init(const char *domain UNUSED)
-{
-	return 0;
-}
-
-static struct fdb_write_handle *dummy_fdb_write_begin(const char *domain UNUSED, const char *id UNUSED)
-{
-	return NULL;
-}
-
-static struct fdb_write_handle *dummy_fdb_write_begin_uint(const char *domain UNUSED, unsigned id UNUSED)
-{
-	return NULL;
-}
-
-static int dummy_fdb_write_pair(struct fdb_write_handle *h UNUSED, const char *name UNUSED, const char *value_str UNUSED)
-{
-	return 0;
-}
-
-static int dummy_fdb_write_format(struct fdb_write_handle *h UNUSED, const char *name UNUSED, const char *value_fmt UNUSED, ...)
-{
-	return 0;
-}
-
-static int dummy_fdb_write_end(struct fdb_write_handle *h UNUSED)
-{
-	return 0;
-}
-
-static void dummy_fdb_write_abort(struct fdb_write_handle *h UNUSED) { }
-
-static struct fdb_read_handle *dummy_fdb_read_begin(const char *domain UNUSED, const char *id UNUSED)
-{
-	return NULL;
-}
-
-static struct fdb_read_handle *dummy_fdb_read_begin_uint(const char *domain UNUSED, unsigned id UNUSED)
-{
-	return NULL;
-}
-
-static int dummy_fdb_read_next(struct fdb_read_handle *h UNUSED, const char **name UNUSED, const char **value UNUSED)
-{
-	return 0;
-}
-
-static int dummy_fdb_read_end(struct fdb_read_handle *h UNUSED)
-{
-	return 0;
-}
-
-static struct fdb_iterator *dummy_fdb_iterator_begin(const char *domain UNUSED)
-{
-	return NULL;
-}
-
-static const char *dummy_fdb_iterator_next(struct fdb_iterator *it UNUSED)
-{
-	return NULL;
-}
-
-static void dummy_fdb_iterator_end(struct fdb_iterator *it UNUSED) { }
-
 /******************************************************************************
  * Services
  ******************************************************************************/
 
 void (*b_log)(int priority, const char *domain, const char *fmt, ...) = b_log_dummy;
-struct plugin_fdb_interface fdb = {
-	dummy_fdb_domain_init,
-	dummy_fdb_write_begin,
-	dummy_fdb_write_begin_uint,
-	dummy_fdb_write_pair,
-	dummy_fdb_write_format,
-	dummy_fdb_write_end,
-	dummy_fdb_write_abort,
-	dummy_fdb_read_begin,
-	dummy_fdb_read_begin_uint,
-	dummy_fdb_read_next,
-	dummy_fdb_read_end,
-	dummy_fdb_iterator_begin,
-	dummy_fdb_iterator_next,
-	dummy_fdb_iterator_end,
-};
-static const struct plugin_basic_class *fdb_owner;
 
 struct plugin_room_interface room;
 static const struct plugin_basic_class *room_owner;
@@ -406,47 +324,6 @@ int service_detach_log(void (*log)(int priority, const char *domain, const char 
 void service_attach_log(void (*log)(int priority, const char *domain, const char *fmt, ...))
 {
 	b_log = log ? log : b_log_dummy;
-}
-
-/**
- * deattach an interface from fdb, but only if class is the current owner.
- * if class is NULL or current owner, sets fdb to use dummy functions.
- */
-void service_detach_fdb(const struct plugin_basic_class *cls)
-{
-	const struct plugin_fdb_interface dummy = {
-		dummy_fdb_domain_init,
-		dummy_fdb_write_begin,
-		dummy_fdb_write_begin_uint,
-		dummy_fdb_write_pair,
-		dummy_fdb_write_format,
-		dummy_fdb_write_end,
-		dummy_fdb_write_abort,
-		dummy_fdb_read_begin,
-		dummy_fdb_read_begin_uint,
-		dummy_fdb_read_next,
-		dummy_fdb_read_end,
-		dummy_fdb_iterator_begin,
-		dummy_fdb_iterator_next,
-		dummy_fdb_iterator_end,
-	};
-
-	if (!cls || fdb_owner == cls) {
-		fdb_owner = NULL;
-		fdb = dummy;
-	}
-}
-
-/**
- * attach an interface to fdb.
- */
-void service_attach_fdb(const struct plugin_basic_class *cls, const struct plugin_fdb_interface *interface)
-{
-	fdb_owner = cls;
-
-	if (interface) {
-		fdb = *interface;
-	}
 }
 
 void service_detach_room(const struct plugin_basic_class *cls)
@@ -2428,7 +2305,7 @@ static struct user *user_load_byname(const char *username)
 	struct fdb_read_handle *h;
 	const char *name, *value;
 
-	h = fdb.read_begin("users", username);
+	h = fdb_read_begin("users", username);
 
 	if (!h) {
 		ERROR_FMT("Could not find user \"%s\"\n", username);
@@ -2439,11 +2316,11 @@ static struct user *user_load_byname(const char *username)
 
 	if (!u) {
 		ERROR_MSG("Could not allocate user structure");
-		fdb.read_end(h);
+		fdb_read_end(h);
 		return 0; /* failure */
 	}
 
-	while (fdb.read_next(h, &name, &value)) {
+	while (fdb_read_next(h, &name, &value)) {
 		if (!strcasecmp("id", name))
 			parse_uint(name, value, &u->id);
 		else if (!strcasecmp("username", name))
@@ -2460,7 +2337,7 @@ static struct user *user_load_byname(const char *username)
 			parse_attr(name, value, &u->extra_values);
 	}
 
-	if (!fdb.read_end(h)) {
+	if (!fdb_read_end(h)) {
 		ERROR_FMT("Error loading user \"%s\"\n", username);
 		goto failure;
 	}
@@ -2500,25 +2377,25 @@ static int user_write(const struct user *u)
 	assert(u != NULL);
 	assert(u->username != NULL);
 
-	h = fdb.write_begin("users", u->username);
+	h = fdb_write_begin("users", u->username);
 
 	if (!h) {
 		ERROR_FMT("Could not write user \"%s\"\n", u->username);
 		return 0;
 	}
 
-	fdb.write_format(h, "id", "%u", u->id);
-	fdb.write_pair(h, "username", u->username);
-	fdb.write_pair(h, "pwcrypt", u->password_crypt);
-	fdb.write_pair(h, "email", u->email);
-	fdb.write_format(h, "acs.level", "%u", u->acs.level);
-	fdb.write_format(h, "acs.flags", "0x%08x", u->acs.flags);
+	fdb_write_format(h, "id", "%u", u->id);
+	fdb_write_pair(h, "username", u->username);
+	fdb_write_pair(h, "pwcrypt", u->password_crypt);
+	fdb_write_pair(h, "email", u->email);
+	fdb_write_format(h, "acs.level", "%u", u->acs.level);
+	fdb_write_format(h, "acs.flags", "0x%08x", u->acs.flags);
 
 	for (curr = LIST_TOP(u->extra_values); curr; curr = LIST_NEXT(curr, list)) {
-		fdb.write_pair(h, curr->name, curr->value);
+		fdb_write_pair(h, curr->name, curr->value);
 	}
 
-	if (!fdb.write_end(h)) {
+	if (!fdb_write_end(h)) {
 		ERROR_FMT("Could not write user \"%s\"\n", u->username);
 		return 0; /* failure. */
 	}
@@ -2670,9 +2547,9 @@ int user_init(void)
 	freelist_init(&user_id_freelist);
 	freelist_pool(&user_id_freelist, 1, 32768);
 
-	fdb.domain_init("users");
+	fdb_domain_init("users");
 
-	it = fdb.iterator_begin("users");
+	it = fdb_iterator_begin("users");
 
 	if (!it) {
 		return 0;
@@ -2680,7 +2557,7 @@ int user_init(void)
 
 	/* scan for account files */
 
-	while ((id = fdb.iterator_next(it))) {
+	while ((id = fdb_iterator_next(it))) {
 		struct user *u;
 
 		DEBUG("Found user record '%s'\n", id);
@@ -2696,10 +2573,10 @@ int user_init(void)
 		user_ll_add(u);
 	}
 
-	fdb.iterator_end(it);
+	fdb_iterator_end(it);
 	return 1; /* success */
 failure:
-	fdb.iterator_end(it);
+	fdb_iterator_end(it);
 	return 0; /* failure */
 }
 

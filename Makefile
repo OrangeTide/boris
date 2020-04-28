@@ -27,20 +27,21 @@ MODULES:=\
 	channel \
 	character \
 	example \
-	fdbfile \
 	logging \
 	room \
 # do not remove this comment.
 
 # hack around makedep rules not seeing our CPPFLAGS_modules
-CPPFLAGS+=-Iinclude/ -Icrypt/ -Itask/ -Iutil/ -Iworldclock/
+CPPFLAGS+=-Iinclude/ -Icrypt/ -Ifdb/ -Itask/ -Iutil/ -Iworldclock/
 
 # boris
 EXEC_boris:=boris
 LDLIBS_boris:=-ldl -rdynamic
 CPPFLAGS_boris:=-D_DEFAULT_SOURCE
 CFLAGS_boris:=-pedantic -std=gnu99
-SRCS_boris:=boris.c server/common.c crypt/sha1.c crypt/sha1crypt.c crypt/base64.c util/util.c config.c worldclock/worldclock.c task/comutil.c task/command.c log/eventlog.c
+SRCS_boris:=boris.c server/common.c crypt/sha1.c crypt/sha1crypt.c \
+	crypt/base64.c util/util.c config.c worldclock/worldclock.c \
+	task/comutil.c task/command.c log/eventlog.c fdb/fdbfile.c
 OBJS_boris:=$(SRCS_boris:.c=.o)
 
 # channel.so plugin
@@ -57,11 +58,6 @@ OBJS_character:=$(SRCS_character:.c=.o)
 EXEC_example:=example.$(SOEXT)
 SRCS_example:=example.c
 OBJS_example:=$(SRCS_example:.c=.o)
-
-# fdbfile.so plugin
-EXEC_fdbfile:=fdbfile.$(SOEXT)
-SRCS_fdbfile:=fdbfile.c
-OBJS_fdbfile:=$(SRCS_fdbfile:.c=.o)
 
 # logging.so plugin
 EXEC_logging:=logging.$(SOEXT)
