@@ -195,7 +195,7 @@ static struct room *room_load(unsigned room_id)
 
 	snprintf(numbuf, sizeof numbuf, "%u", room_id);
 
-	h = fdb.read_begin("rooms", numbuf);
+	h = fdb_read_begin("rooms", numbuf);
 
 	if (!h) {
 		b_log(B_LOG_ERROR, "room", "could not load room \"%s\"", numbuf);
@@ -207,20 +207,20 @@ static struct room *room_load(unsigned room_id)
 	if (!r) {
 		/* TODO: do perror? */
 		b_log(B_LOG_ERROR, "calloc", "not allocate room \"%s\"", numbuf);
-		fdb.read_end(h);
+		fdb_read_end(h);
 		return NULL;
 	}
 
-	while (fdb.read_next(h, &name, &value)) {
+	while (fdb_read_next(h, &name, &value)) {
 		if (!room_attr_set(r, name, value)) {
 			b_log(B_LOG_ERROR, "room", "could not load room \"%s\"", numbuf);
 			room_ll_free(r);
-			fdb.read_end(h);
+			fdb_read_end(h);
 			return NULL;
 		}
 	}
 
-	fdb.read_end(h);
+	fdb_read_end(h);
 
 	/* r->id wasn't set, this is a problem. */
 	if (!r->id) {
@@ -261,38 +261,38 @@ static int room_save(struct room *r)
 
 	snprintf(numbuf, sizeof numbuf, "%u", r->id);
 
-	h = fdb.write_begin("rooms", numbuf);
+	h = fdb_write_begin("rooms", numbuf);
 
 	if (!h) {
 		b_log(B_LOG_ERROR, "room", "could not save room \"%s\"", numbuf);
 		return 0; /* failure */
 	}
 
-	fdb.write_format(h, "id", "%u", r->id);
+	fdb_write_format(h, "id", "%u", r->id);
 
 	if (r->name.short_str)
-		fdb.write_pair(h, "name.short", r->name.short_str);
+		fdb_write_pair(h, "name.short", r->name.short_str);
 
 	if (r->name.long_str)
-		fdb.write_pair(h, "name.long", r->name.long_str);
+		fdb_write_pair(h, "name.long", r->name.long_str);
 
 	if (r->desc.short_str)
-		fdb.write_pair(h, "desc.short", r->desc.short_str);
+		fdb_write_pair(h, "desc.short", r->desc.short_str);
 
 	if (r->desc.long_str)
-		fdb.write_pair(h, "desc.long", r->desc.long_str);
+		fdb_write_pair(h, "desc.long", r->desc.long_str);
 
 	if (r->owner)
-		fdb.write_pair(h, "owner", r->owner);
+		fdb_write_pair(h, "owner", r->owner);
 
 	if (r->creator)
-		fdb.write_pair(h, "creator", r->creator);
+		fdb_write_pair(h, "creator", r->creator);
 
 	for (curr = LIST_TOP(r->extra_values); curr; curr = LIST_NEXT(curr, list)) {
-		fdb.write_pair(h, curr->name, curr->value);
+		fdb_write_pair(h, curr->name, curr->value);
 	}
 
-	if (!fdb.write_end(h)) {
+	if (!fdb_write_end(h)) {
 		b_log(B_LOG_ERROR, "room", "could not save room \"%s\"", numbuf);
 		return 0; /* failure */
 	}
@@ -361,9 +361,9 @@ static int initialize(void)
 	b_log(B_LOG_INFO, "room", "Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	LIST_INIT(&room_cache);
 
-	fdb.domain_init("rooms");
+	fdb_domain_init("rooms");
 
-	it = fdb.iterator_begin("rooms");
+	it = fdb_iterator_begin("rooms");
 
 	if (!it) {
 		b_log(B_LOG_CRIT, "room", "could not load rooms!");
@@ -371,7 +371,7 @@ static int initialize(void)
 	}
 
 	/* preflight all of the rooms. */
-	while ((id = fdb.iterator_next(it))) {
+	while ((id = fdb_iterator_next(it))) {
 		struct room *r;
 		unsigned room_id;
 		char *endptr;
@@ -380,7 +380,7 @@ static int initialize(void)
 
 		if (*endptr) {
 			b_log(B_LOG_CRIT, "room", "room id \"%s\" is invalid!", id);
-			fdb.iterator_end(it);
+			fdb_iterator_end(it);
 			return 0; /* could not load */
 		}
 
@@ -388,14 +388,14 @@ static int initialize(void)
 
 		if (!r) {
 			b_log(B_LOG_CRIT, "room", "could not load rooms!");
-			fdb.iterator_end(it);
+			fdb_iterator_end(it);
 			return 0; /* could not load */
 		}
 
 		room_ll_free(r);
 	}
 
-	fdb.iterator_end(it);
+	fdb_iterator_end(it);
 
 	service_attach_room(&plugin_class.base_class, &plugin_class.room_interface);
 	return 1;

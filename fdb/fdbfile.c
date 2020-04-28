@@ -4,9 +4,9 @@
  * fdb - database using text files as the backend.
  *
  * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Dec 25
+ * @date 2020 Apr 27
  *
- * Copyright (c) 2009-2019, Jon Mayo
+ * Copyright (c) 2009-2020, Jon Mayo
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +30,9 @@
  * those of the authors and should not be interpreted as representing official
  * policies, either expressed or implied, of the Boris MUD project.
  */
+#include "fdb.h"
+#include "boris.h"
+
 #include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -42,23 +45,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "boris.h"
-#include "plugin.h"
-
 #define MKDIR(d) mkdir(d, 0777)
 #define PERROR(m) perror(m)
 #define VERBOSE printf
 
 #define FDB_VALUE_MAX 4096
-
-/**
- * class definition.
- */
-struct plugin_fdb_class {
-	struct plugin_basic_class base_class;
-	struct plugin_fdb_interface fdb_interface;
-};
-extern const struct plugin_fdb_class plugin_class;
 
 /**
  * handle used for writing.
@@ -273,11 +264,13 @@ static int fdb_parse_line(char *line, const char **name, const char **value)
 	return 1; /* failure. */
 }
 
+/*** External Functions ***/
+
 /**
  * initializes a domain.
  * (creates a directory to hold files)
  */
-static int fdb_domain_init(const char *domain)
+int fdb_domain_init(const char *domain)
 {
 	char *pathname;
 	pathname = fdb_basepath(domain);
@@ -295,7 +288,7 @@ static int fdb_domain_init(const char *domain)
 /**
  * open the file and start writing to it.
  */
-static struct fdb_write_handle *fdb_write_begin(const char *domain, const char *id)
+struct fdb_write_handle *fdb_write_begin(const char *domain, const char *id)
 {
 	struct fdb_write_handle *ret;
 	FILE *f;
@@ -323,7 +316,7 @@ static struct fdb_write_handle *fdb_write_begin(const char *domain, const char *
 /**
  * same as fdb_write_begin() but takes a uint.
  */
-static struct fdb_write_handle *fdb_write_begin_uint(const char *domain, unsigned id)
+struct fdb_write_handle *fdb_write_begin_uint(const char *domain, unsigned id)
 {
 	char numbuf[22]; /* big enough for a signed 64-bit decimal */
 	snprintf(numbuf, sizeof numbuf, "%u", id);
@@ -334,7 +327,7 @@ static struct fdb_write_handle *fdb_write_begin_uint(const char *domain, unsigne
  * write a string to an open record.
  * you can only use a name once per transaction (begin/end)
  */
-static int fdb_write_pair(struct fdb_write_handle *h, const char *name, const char *value_str)
+int fdb_write_pair(struct fdb_write_handle *h, const char *name, const char *value_str)
 {
 	int res;
 	size_t escaped_len, i;
@@ -394,7 +387,7 @@ static int fdb_write_pair(struct fdb_write_handle *h, const char *name, const ch
  * you can only use a name once per transaction (begin/end)
  * @todo make this interface not limit the value.
  */
-static int fdb_write_format(struct fdb_write_handle *h, const char *name, const char *value_fmt, ...)
+int fdb_write_format(struct fdb_write_handle *h, const char *name, const char *value_fmt, ...)
 {
 	char buf[FDB_VALUE_MAX]; /**< holds the largest possible value. */
 	va_list ap;
@@ -412,7 +405,7 @@ static int fdb_write_format(struct fdb_write_handle *h, const char *name, const 
 /**
  * move the temp file over the real file then close it.
  */
-static int fdb_write_end(struct fdb_write_handle *h)
+int fdb_write_end(struct fdb_write_handle *h)
 {
 	char *filename;
 
@@ -466,7 +459,7 @@ static int fdb_write_end(struct fdb_write_handle *h)
  * terminate the creation of this record.
  * it is still necessary to call fdb_write_end()
  */
-static void fdb_write_abort(struct fdb_write_handle *h)
+void fdb_write_abort(struct fdb_write_handle *h)
 {
 	h->error_fl = 1;
 }
@@ -474,7 +467,7 @@ static void fdb_write_abort(struct fdb_write_handle *h)
 /**
  * start reading.
  */
-static struct fdb_read_handle *fdb_read_begin(const char *domain, const char *id)
+struct fdb_read_handle *fdb_read_begin(const char *domain, const char *id)
 {
 	struct fdb_read_handle *ret;
 	FILE *f;
@@ -500,7 +493,7 @@ static struct fdb_read_handle *fdb_read_begin(const char *domain, const char *id
 	return ret;
 }
 
-static struct fdb_read_handle *fdb_read_begin_uint(const char *domain, unsigned id)
+struct fdb_read_handle *fdb_read_begin_uint(const char *domain, unsigned id)
 {
 	char numbuf[22]; /* big enough for a signed 64-bit decimal */
 
@@ -512,7 +505,7 @@ static struct fdb_read_handle *fdb_read_begin_uint(const char *domain, unsigned 
 /**
  * read a line of data from the file.
  */
-static int fdb_read_next(struct fdb_read_handle *h, const char **name, const char **value)
+int fdb_read_next(struct fdb_read_handle *h, const char **name, const char **value)
 {
 	size_t ofs, newofs;
 
@@ -567,7 +560,7 @@ static int fdb_read_next(struct fdb_read_handle *h, const char **name, const cha
 /**
  * end reading process, close the file and free the handle.
  */
-static int fdb_read_end(struct fdb_read_handle *h)
+int fdb_read_end(struct fdb_read_handle *h)
 {
 	int ret;
 
@@ -589,7 +582,7 @@ static int fdb_read_end(struct fdb_read_handle *h)
 /**
  * get an iterator that lists all records in domain.
  */
-static struct fdb_iterator *fdb_iterator_begin(const char *domain)
+struct fdb_iterator *fdb_iterator_begin(const char *domain)
 {
 	char *pathname;
 	DIR *d;
@@ -627,7 +620,7 @@ static struct fdb_iterator *fdb_iterator_begin(const char *domain)
  * get id of record.
  * return NULL if no more ids.
  */
-static const char *fdb_iterator_next(struct fdb_iterator *it)
+const char *fdb_iterator_next(struct fdb_iterator *it)
 {
 	struct dirent *de;
 	struct stat st;
@@ -679,7 +672,7 @@ next:
 /**
  * finish the iterator.
  */
-static void fdb_iterator_end(struct fdb_iterator *it)
+void fdb_iterator_end(struct fdb_iterator *it)
 {
 	assert(it != NULL);
 	closedir(it->d);
@@ -690,6 +683,19 @@ static void fdb_iterator_end(struct fdb_iterator *it)
 	free(it->domain);
 	it->domain = NULL;
 	free(it);
+}
+
+int fdb_initialize(void)
+{
+	fprintf(stderr, "loaded %s\n", "fdb");
+	b_log(B_LOG_INFO, "logging", "FDB-file system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+
+	return 0;
+}
+
+int fdb_shutdown(void)
+{
+	return 0;
 }
 
 /* compile with STAND_ALONE_TEST for unit test. */
@@ -761,6 +767,8 @@ static int fdb_test3(void)
  */
 int main()
 {
+	fdb_initialize();
+
 	VERBOSE("*** TEST 1 ***\n");
 
 	if (!fdb_test1())
@@ -776,46 +784,13 @@ int main()
 	if (!fdb_test3())
 		goto failure;
 
+	fdb_shutdown();
 	return 0;
 failure:
 	fprintf(stderr, "It didn't work.\n");
 
+	fdb_shutdown();
 	return 1;
 }
 #else
-static int initialize(void)
-{
-	fprintf(stderr, "loaded %s\n", plugin_class.base_class.class_name);
-	service_attach_fdb(&plugin_class.base_class, &plugin_class.fdb_interface);
-	b_log(B_LOG_INFO, "logging", "FDB-file system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
-
-	return 1;
-}
-
-static int db_shutdown(void)
-{
-	service_detach_fdb(&plugin_class.base_class);
-
-	return 1;
-}
-
-const struct plugin_fdb_class plugin_class = {
-	.base_class = { PLUGIN_API, "fdb", initialize, db_shutdown },
-	.fdb_interface = {
-		fdb_domain_init,
-		fdb_write_begin,
-		fdb_write_begin_uint,
-		fdb_write_pair,
-		fdb_write_format,
-		fdb_write_end,
-		fdb_write_abort,
-		fdb_read_begin,
-		fdb_read_begin_uint,
-		fdb_read_next,
-		fdb_read_end,
-		fdb_iterator_begin,
-		fdb_iterator_next,
-		fdb_iterator_end,
-	},
-};
 #endif
