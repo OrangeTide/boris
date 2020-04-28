@@ -33,6 +33,9 @@
 
 #include "command.h"
 #include "boris.h"
+#include "channel.h"
+#include "character.h"
+#include "room.h"
 #include "comutil.h"
 #include "debug.h"
 #include "util.h"
@@ -74,9 +77,9 @@ int command_do_say(struct telnetclient *cl, struct user *u UNUSED, const char *c
 	struct channel_member *exclude_list[1];
 	TODO("Get user name");
 	telnetclient_printf(cl, "You say \"%s\"\n", arg);
-	ch = channel.public(0);
+	ch = channel_public(0);
 	exclude_list[0] = telnetclient_channel_member(cl); /* don't send message to self. */
-	channel.broadcast(ch, exclude_list, 1, "%s says \"%s\"\n", telnetclient_username(cl), arg);
+	channel_broadcast(ch, exclude_list, 1, "%s says \"%s\"\n", telnetclient_username(cl), arg);
 
 	return 1; /* success */
 }
@@ -128,14 +131,14 @@ int command_do_roomget(struct telnetclient *cl, struct user *u UNUSED, const cha
 
 	arg = util_getword(arg, attrname, sizeof attrname);
 
-	r = room.get(roomnum);
+	r = room_get(roomnum);
 
 	if (!r) {
 		telnetclient_printf(cl, "room \"%s\" not found.\n", roomnum_str);
 		return 0;
 	}
 
-	attrvalue = room.attr_get(r, attrname);
+	attrvalue = room_attr_get(r, attrname);
 
 	if (attrvalue) {
 		telnetclient_printf(cl, "room \"%s\" \"%s\" = \"%s\"\n", roomnum_str, attrname, attrvalue);
@@ -143,7 +146,7 @@ int command_do_roomget(struct telnetclient *cl, struct user *u UNUSED, const cha
 		telnetclient_printf(cl, "room \"%s\" attribute \"%s\" not found.\n", roomnum_str, attrname);
 	}
 
-	room.put(r);
+	room_put(r);
 
 	return 1; /* success */
 }
@@ -161,26 +164,26 @@ int command_do_character(struct telnetclient *cl, struct user *u UNUSED, const c
 	arg = util_getword(arg, act, sizeof act);
 
 	if (!strcasecmp(act, "new")) {
-		ch = character.new();
-		telnetclient_printf(cl, "Created character %s.\n", character.attr_get(ch, "id"));
-		character.put(ch);
+		ch = character_new();
+		telnetclient_printf(cl, "Created character %s.\n", character_attr_get(ch, "id"));
+		character_put(ch);
 	} else if (!strcasecmp(act, "get")) {
 		arg = util_getword(arg, tmp, sizeof tmp);
 		ch_id = strtoul(tmp, 0, 10); /* TODO: handle errors. */
-		ch = character.get(ch_id);
+		ch = character_get(ch_id);
 
 		if (ch) {
 			/* get attribute name. */
 			arg = util_getword(arg, tmp, sizeof tmp);
-			telnetclient_printf(cl, "Character %u \"%s\" = \"%s\"\n", ch_id, tmp, character.attr_get(ch, tmp));
-			character.put(ch);
+			telnetclient_printf(cl, "Character %u \"%s\" = \"%s\"\n", ch_id, tmp, character_attr_get(ch, tmp));
+			character_put(ch);
 		} else {
 			telnetclient_printf(cl, "Unknown character \"%s\"\n", tmp);
 		}
 	} else if (!strcasecmp(act, "set")) {
 		arg = util_getword(arg, tmp, sizeof tmp);
 		ch_id = strtoul(tmp, 0, 10); /* TODO: handle errors. */
-		ch = character.get(ch_id);
+		ch = character_get(ch_id);
 
 		if (ch) {
 			/* get attribute name. */
@@ -189,11 +192,11 @@ int command_do_character(struct telnetclient *cl, struct user *u UNUSED, const c
 			/* find start of value. */
 			while (*arg && isspace(*arg)) arg++;
 
-			if (!character.attr_set(ch, tmp, arg)) {
+			if (!character_attr_set(ch, tmp, arg)) {
 				telnetclient_printf(cl, "Could not set \"%s\" on character %u.\n", tmp, ch_id);
 			}
 
-			character.put(ch);
+			character_put(ch);
 		} else {
 			telnetclient_printf(cl, "Unknown character \"%s\"\n", tmp);
 		}

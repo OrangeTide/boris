@@ -30,24 +30,19 @@
  * those of the authors and should not be interpreted as representing official
  * policies, either expressed or implied, of the Boris MUD project.
  */
+#include "character.h"
+#include "boris.h"
+#include "fdb.h"
+
 #include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "boris.h"
 
 /******************************************************************************
  * Types
  ******************************************************************************/
-
-/**
- *
- */
-struct plugin_character_class {
-	struct plugin_basic_class base_class;
-	struct plugin_character_interface character_interface;
-};
 
 struct character {
 	LIST_ENTRY(struct character) character_cache; /**< currently loaded characters. */
@@ -63,11 +58,6 @@ struct character {
 };
 
 LIST_HEAD(struct character_cache, struct character);
-/******************************************************************************
- * Prototypes
- ******************************************************************************/
-extern const struct plugin_character_class plugin_class;
-
 /******************************************************************************
  * Globals
  ******************************************************************************/
@@ -143,7 +133,7 @@ static struct character *character_ll_alloc(void)
 /**
  *
  */
-static int character_attr_set(struct character *ch, const char *name, const char *value)
+int character_attr_set(struct character *ch, const char *name, const char *value)
 {
 	unsigned i;
 	int res;
@@ -171,7 +161,7 @@ static int character_attr_set(struct character *ch, const char *name, const char
 /**
  *
  */
-static const char *character_attr_get(struct character *ch, const char *name)
+const char *character_attr_get(struct character *ch, const char *name)
 {
 	unsigned i;
 	struct attr_entry *at;
@@ -241,7 +231,7 @@ static struct character *character_load(unsigned character_id)
 /**
  * save a character record, but only if the dirty_fl is set.
  */
-static int character_save(struct character *ch)
+int character_save(struct character *ch)
 {
 	struct attr_entry *curr;
 	struct fdb_write_handle *h;
@@ -293,7 +283,7 @@ static int character_save(struct character *ch)
  * load character into active list, if not already loaded, then increase
  * reference count of character.
  */
-static struct character *character_get(unsigned character_id)
+struct character *character_get(unsigned character_id)
 {
 	struct character *curr;
 
@@ -323,7 +313,7 @@ static struct character *character_get(unsigned character_id)
 /**
  * reduce reference count of character.
  */
-static void character_put(struct character *ch)
+void character_put(struct character *ch)
 {
 	assert(ch != NULL);
 
@@ -336,7 +326,7 @@ static void character_put(struct character *ch)
 	}
 }
 
-static struct character *character_new(void)
+struct character *character_new(void)
 {
 	struct character *ret;
 	long id;
@@ -428,50 +418,31 @@ static int character_preflight(void)
 /**
  *
  */
-static int initialize(void)
+int character_initialize(void)
 {
 	b_log(B_LOG_INFO, "character", "Character plugin loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	freelist_init(&character_id_freelist);
 	freelist_pool(&character_id_freelist, 1, ID_MAX);
 
-	fdb_domain_init(DOMAIN_CHARACTER);
+	if (!fdb_domain_init(DOMAIN_CHARACTER)) {
+		b_log(B_LOG_CRIT, "character", "could not access database!");
+		return -1;
+	}
 
 	/* load all characters to check and to configure pool space. */
 	if (!character_preflight()) {
 		b_log(B_LOG_CRIT, "character", "could not load characters!");
-		return 0;
+		return -1;
 	}
 
-	service_attach_character(&plugin_class.base_class, &plugin_class.character_interface);
-
-	return 1;
+	return 0;
 }
 
 /**
  *
  */
-static int chr_shutdown(void)
+void character_shutdown(void)
 {
 	b_log(B_LOG_INFO, "character", "Character plugin shutting down...");
-	service_detach_character(&plugin_class.base_class);
 	b_log(B_LOG_INFO, "character", "Character plugin ended.");
-
-	return 1;
 }
-
-
-/******************************************************************************
- * Class
- ******************************************************************************/
-
-/**
- *
- */
-const struct plugin_character_class plugin_class = {
-	.base_class = { PLUGIN_API, "character", initialize, chr_shutdown },
-	.character_interface = {
-		character_get, character_put, character_new,
-		character_attr_set, character_attr_get,
-		character_save
-	},
-};

@@ -30,13 +30,15 @@
  * those of the authors and should not be interpreted as representing official
  * policies, either expressed or implied, of the Boris MUD project.
  */
+#include "channel.h"
+#include "boris.h"
+
 #include <assert.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "boris.h"
 
 /******************************************************************************
  * Defines
@@ -50,14 +52,6 @@
 /******************************************************************************
  * Types
  ******************************************************************************/
-
-/**
- *
- */
-struct plugin_channel_class {
-	struct plugin_basic_class base_class;
-	struct plugin_channel_interface channel_interface;
-};
 
 struct channel {
 	/* array of members */
@@ -231,7 +225,7 @@ static int channel_public_add(const char *name)
 /**
  * get a channel by numeric id.
  */
-static struct channel *channel_public(const char *name)
+struct channel *channel_public(const char *name)
 {
 	struct channel_public *cp;
 	cp = channel_public_find(name);
@@ -246,31 +240,28 @@ static struct channel *channel_public(const char *name)
 /**
  * Initialize the plugin.
  */
-static int initialize(void)
+int channel_initialize(void)
 {
 	b_log(B_LOG_INFO, "channel", "channel plugin loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	channel_public_add("Wiz");
 	channel_public_add("OOC");
 	channel_public_add(NULL); /* system channel. */
-	service_attach_channel(&plugin_class.base_class, &plugin_class.channel_interface);
-	return 1;
+	return 0;
 }
 
 /**
  * Shutdown the plugin.
  */
-static int ch_shutdown(void)
+void channel_shutdown(void)
 {
 	b_log(B_LOG_INFO, "channel", "channel plugin shutting down...");
-	service_detach_channel(&plugin_class.base_class);
 	b_log(B_LOG_INFO, "channel", "channel plugin ended.");
-	return 1;
 }
 
 /**
  * join a channel.
  */
-static int channel_join(struct channel *ch, struct channel_member *cm)
+int channel_join(struct channel *ch, struct channel_member *cm)
 {
 	b_log(B_LOG_TRACE, "channel", "someone(%p) joined\n", cm ? cm->p : NULL);
 	return channel_add_member(ch, cm);
@@ -279,7 +270,7 @@ static int channel_join(struct channel *ch, struct channel_member *cm)
 /**
  * leave a channel.
  */
-static void channel_part(struct channel *ch, struct channel_member *cm)
+void channel_part(struct channel *ch, struct channel_member *cm)
 {
 	b_log(B_LOG_TRACE, "channel", "someone(%p) parted\n", cm ? cm->p : NULL);
 
@@ -305,7 +296,7 @@ static int is_on_list(const struct channel_member *cm, struct channel_member **e
 /**
  * send a message to everyone except those on exclude_list.
  */
-static int channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...)
+int channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...)
 {
 	va_list ap;
 	unsigned i;
@@ -326,19 +317,3 @@ static int channel_broadcast(struct channel *ch, struct channel_member **exclude
 
 	return 0; /* failure */
 }
-
-/******************************************************************************
- * Class
- ******************************************************************************/
-
-/**
- * Class for the plugin
- */
-const struct plugin_channel_class plugin_class = {
-	.base_class = { PLUGIN_API, "channel", initialize, ch_shutdown },
-	.channel_interface = {
-		channel_join, channel_part,
-		channel_public,
-		channel_broadcast,
-	},
-};

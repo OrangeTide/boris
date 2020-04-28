@@ -693,9 +693,8 @@ int fdb_initialize(void)
 	return 0;
 }
 
-int fdb_shutdown(void)
+void fdb_shutdown(void)
 {
-	return 0;
 }
 
 /* compile with STAND_ALONE_TEST for unit test. */

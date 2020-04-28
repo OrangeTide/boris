@@ -342,34 +342,17 @@ struct channel_member {
  * Global variables
  ******************************************************************************/
 
-extern struct plugin_room_interface room;
-extern struct plugin_character_interface character;
-extern struct plugin_channel_interface channel;
-
 /******************************************************************************
  * Protos
  ******************************************************************************/
 
 extern void (*b_log)(int priority, const char *domain, const char *fmt, ...);
-extern struct plugin_fdb_interface fdb;
-
-const struct plugin_basic_class *get_room_owner(void);
-const struct plugin_basic_class *get_character_owner(void);
-const struct plugin_basic_class *get_channel_owner(void);
 
 int plugin_load(const char *name);
 int plugin_load_list(const char *list);
 
 int service_detach_log(void (*log)(int priority, const char *domain, const char *fmt, ...));
 void service_attach_log(void (*log)(int priority, const char *domain, const char *fmt, ...));
-void service_detach_fdb(const struct plugin_basic_class *cls);
-void service_attach_fdb(const struct plugin_basic_class *cls, const struct plugin_fdb_interface *interface);
-void service_detach_room(const struct plugin_basic_class *cls);
-void service_attach_room(const struct plugin_basic_class *cls, const struct plugin_room_interface *interface);
-void service_detach_character(const struct plugin_basic_class *cls);
-void service_attach_character(const struct plugin_basic_class *cls, const struct plugin_character_interface *interface);
-void service_detach_channel(const struct plugin_basic_class *cls);
-void service_attach_channel(const struct plugin_basic_class *cls, const struct plugin_channel_interface *interface);
 
 struct attr_entry *attr_find(struct attr_list *al, const char *name);
 int attr_add(struct attr_list *al, const char *name, const char *value);

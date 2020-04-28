@@ -30,16 +30,18 @@
  * those of the authors and should not be interpreted as representing official
  * policies, either expressed or implied, of the Boris MUD project.
  */
+#include "room.h"
+#include "boris.h"
+#include "list.h"
+#include "fdb.h"
+
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "boris.h"
-#include "list.h"
-#include "plugin.h"
-
+#define SUBSYSTEM_NAME "room"
 #define LOGBASIC_LENGTH_MAX 1024
 
 /******************************************************************************
@@ -61,17 +63,7 @@ struct room {
 	struct attr_list extra_values; /**< load in other values here. */
 };
 
-struct plugin_room_class {
-	struct plugin_basic_class base_class;
-	struct plugin_room_interface room_interface;
-};
-
 LIST_HEAD(struct room_cache, struct room);
-
-/******************************************************************************
- * Prototypes
- ******************************************************************************/
-extern const struct plugin_room_class plugin_class;
 
 /******************************************************************************
  * Globals
@@ -117,7 +109,7 @@ static void room_ll_free(struct room *r)
 /**
  * set an attribute on a room.
  */
-static int room_attr_set(struct room *r, const char *name, const char *value)
+int room_attr_set(struct room *r, const char *name, const char *value)
 {
 	int res;
 
@@ -151,7 +143,7 @@ static int room_attr_set(struct room *r, const char *name, const char *value)
 	return res;
 }
 
-static const char *room_attr_get(struct room *r, const char *name)
+const char *room_attr_get(struct room *r, const char *name)
 {
 	static char numbuf[22]; /* big enough for a signed 64-bit decimal */
 
@@ -195,10 +187,10 @@ static struct room *room_load(unsigned room_id)
 
 	snprintf(numbuf, sizeof numbuf, "%u", room_id);
 
-	h = fdb_read_begin("rooms", numbuf);
+	h = fdb_read_begin(DOMAIN_ROOM, numbuf);
 
 	if (!h) {
-		b_log(B_LOG_ERROR, "room", "could not load room \"%s\"", numbuf);
+		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not load room \"%s\"", numbuf);
 		return NULL;
 	}
 
@@ -213,7 +205,7 @@ static struct room *room_load(unsigned room_id)
 
 	while (fdb_read_next(h, &name, &value)) {
 		if (!room_attr_set(r, name, value)) {
-			b_log(B_LOG_ERROR, "room", "could not load room \"%s\"", numbuf);
+			b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not load room \"%s\"", numbuf);
 			room_ll_free(r);
 			fdb_read_end(h);
 			return NULL;
@@ -224,14 +216,14 @@ static struct room *room_load(unsigned room_id)
 
 	/* r->id wasn't set, this is a problem. */
 	if (!r->id) {
-		b_log(B_LOG_ERROR, "room", "id not set for room \"%u\"", room_id);
+		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "id not set for room \"%u\"", room_id);
 		room_ll_free(r);
 		return NULL;
 	}
 
 	/* r->id doesn't match the file the room is stored under. */
 	if (r->id != room_id) {
-		b_log(B_LOG_ERROR, "room", "id was set to \"%u\" but should be \"%u\"", r->id, room_id);
+		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "id was set to \"%u\" but should be \"%u\"", r->id, room_id);
 		room_ll_free(r);
 		return NULL;
 	}
@@ -242,7 +234,7 @@ static struct room *room_load(unsigned room_id)
 /**
  * write a room structure to disk, if it is not dirty (dirty_fl).
  */
-static int room_save(struct room *r)
+int room_save(struct room *r)
 {
 	struct attr_entry *curr;
 	struct fdb_write_handle *h;
@@ -255,16 +247,16 @@ static int room_save(struct room *r)
 
 	/* refuse to save room 0. */
 	if (!r->id) {
-		b_log(B_LOG_ERROR, "room", "attempted to save room \"%u\", but it is reserved", r->id);
+		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "attempted to save room \"%u\", but it is reserved", r->id);
 		return 0;
 	}
 
 	snprintf(numbuf, sizeof numbuf, "%u", r->id);
 
-	h = fdb_write_begin("rooms", numbuf);
+	h = fdb_write_begin(DOMAIN_ROOM, numbuf);
 
 	if (!h) {
-		b_log(B_LOG_ERROR, "room", "could not save room \"%s\"", numbuf);
+		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not save room \"%s\"", numbuf);
 		return 0; /* failure */
 	}
 
@@ -293,12 +285,12 @@ static int room_save(struct room *r)
 	}
 
 	if (!fdb_write_end(h)) {
-		b_log(B_LOG_ERROR, "room", "could not save room \"%s\"", numbuf);
+		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not save room \"%s\"", numbuf);
 		return 0; /* failure */
 	}
 
 	r->dirty_fl = 0;
-	b_log(B_LOG_INFO, "room", "saved room \"%s\"", numbuf);
+	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "saved room \"%s\"", numbuf);
 	return 1;
 }
 
@@ -306,7 +298,7 @@ static int room_save(struct room *r)
  * load room into cache, if not already loaded, then increase reference count
  * of room.
  */
-static struct room *room_get(unsigned room_id)
+struct room *room_get(unsigned room_id)
 {
 	struct room *curr;
 
@@ -331,7 +323,7 @@ static struct room *room_get(unsigned room_id)
 	}
 
 	if (!curr) {
-		b_log(B_LOG_WARN, "room", "could not access room \"%u\"", room_id);
+		b_log(B_LOG_WARN, SUBSYSTEM_NAME, "could not access room \"%u\"", room_id);
 	}
 
 	return curr;
@@ -340,7 +332,7 @@ static struct room *room_get(unsigned room_id)
 /**
  * reduce reference count of room.
  */
-static void room_put(struct room *r)
+void room_put(struct room *r)
 {
 	assert(r != NULL);
 
@@ -353,21 +345,24 @@ static void room_put(struct room *r)
 	}
 }
 
-static int initialize(void)
+int room_initialize(void)
 {
 	struct fdb_iterator *it;
 	const char *id;
 
-	b_log(B_LOG_INFO, "room", "Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	LIST_INIT(&room_cache);
 
-	fdb_domain_init("rooms");
+	if (!fdb_domain_init(DOMAIN_ROOM)) {
+		b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "could not load rooms!");
+		return -1; /* could not load. */
+	}
 
-	it = fdb_iterator_begin("rooms");
+	it = fdb_iterator_begin(DOMAIN_ROOM);
 
 	if (!it) {
-		b_log(B_LOG_CRIT, "room", "could not load rooms!");
-		return 0; /* could not load. */
+		b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "could not load rooms!");
+		return -1; /* could not load. */
 	}
 
 	/* preflight all of the rooms. */
@@ -375,21 +370,21 @@ static int initialize(void)
 		struct room *r;
 		unsigned room_id;
 		char *endptr;
-		b_log(B_LOG_DEBUG, "room", "Found room: \"%s\"", id);
+		b_log(B_LOG_DEBUG, SUBSYSTEM_NAME, "Found room: \"%s\"", id);
 		room_id = strtoul(id, &endptr, 10);
 
 		if (*endptr) {
-			b_log(B_LOG_CRIT, "room", "room id \"%s\" is invalid!", id);
+			b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "room id \"%s\" is invalid!", id);
 			fdb_iterator_end(it);
-			return 0; /* could not load */
+			return -1; /* could not load */
 		}
 
 		r = room_load(room_id);
 
 		if (!r) {
-			b_log(B_LOG_CRIT, "room", "could not load rooms!");
+			b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "could not load rooms!");
 			fdb_iterator_end(it);
-			return 0; /* could not load */
+			return -1; /* could not load */
 		}
 
 		room_ll_free(r);
@@ -397,40 +392,35 @@ static int initialize(void)
 
 	fdb_iterator_end(it);
 
-	service_attach_room(&plugin_class.base_class, &plugin_class.room_interface);
-	return 1;
+	return 0; /* success */
 }
 
-static int room_shutdown(void)
+void room_shutdown(void)
 {
 	struct room *curr;
-	b_log(B_LOG_INFO, "room", "Room system shutting down..");
+	struct room_cache blocked_cache;
 
-	/* check to make sure no rooms are still in use. */
-	for (curr = LIST_TOP(room_cache); curr; curr = LIST_NEXT(curr, room_cache)) {
-		if (curr->refcount > 0) {
-			b_log(B_LOG_ERROR, "room", "cannot shut down, room \"%u\" still in use.", curr->id);
-			return 0; /* refuse to unload */
-		}
-	}
+	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "Room system shutting down..");
 
 	/* save all dirty objects and free all data. */
+	LIST_INIT(&blocked_cache); /* keep a temporary list of unfreed rooms */
 	while ((curr = LIST_TOP(room_cache))) {
 		LIST_REMOVE(curr, room_cache);
 		room_save(curr);
-		room_ll_free(curr);
+
+		/* check to make sure no rooms are still in use. */
+		if (curr->refcount > 0) {
+			b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "cannot shut down, room \"%u\" still in use.", curr->id);
+			LIST_INSERT_HEAD(&blocked_cache, curr, room_cache);
+		} else {
+			room_ll_free(curr);
+		}
 	}
 
-	service_detach_room(&plugin_class.base_class);
-	b_log(B_LOG_INFO, "room", "Room system ended.");
-	return 1;
+	if (LIST_TOP(blocked_cache)) {
+		/* we could not free these rooms, sorry! */
+		room_cache = blocked_cache;
+	}
+
+	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "Room system ended.");
 }
-
-/******************************************************************************
- * Class
- ******************************************************************************/
-
-const struct plugin_room_class plugin_class = {
-	.base_class = { PLUGIN_API, "room", initialize, room_shutdown },
-	.room_interface = { room_get, room_put, room_attr_set, room_attr_get, room_save }
-};
