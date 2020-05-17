@@ -232,11 +232,8 @@
 #endif
 
 #include "boris.h"
-#include "debug.h"
 #include "list.h"
 #include "plugin.h"
-#include "sha1.h"
-#include "sha1crypt.h"
 
 /******************************************************************************
  * Macros
@@ -361,6 +358,76 @@
 
 /** checks that bit is in range for bitfield x. */
 #define BITRANGE(x, bit) ((bit)<(sizeof(x)*CHAR_BIT))
+
+/*=* DEBUG MACROS *=*/
+/* VERBOSE(), DEBUG() and TRACE() macros.
+ * DEBUG() does nothing if NDEBUG is defined
+ * TRACE() does nothing if NTRACE is defined */
+
+/** log a message to the console. */
+#define VERBOSE(...) fprintf(stderr, __VA_ARGS__)
+
+#ifdef NDEBUG
+#  define DEBUG(...) /* DEBUG disabled */
+#  define DEBUG_MSG(msg) /* DEBUG_MSG disabled */
+#  define HEXDUMP(data, len, ...) /* HEXDUMP disabled */
+#else
+
+/** DEBUG() prints a formatted message to stderr if NDEBUG is not defined. */
+#  define DEBUG(msg, ...) fprintf(stderr, "DEBUG:%s():%d:" msg, __func__, __LINE__, ## __VA_ARGS__);
+
+/** DEBUG_MSG prints a string and newline to stderr if NDEBUG is not defined. */
+#  define DEBUG_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
+
+/** HEXDUMP() outputs a message and block of hexdump data to stderr if NDEBUG is not defined. */
+#  define HEXDUMP(data, len, ...) do { fprintf(stderr, __VA_ARGS__); util_hexdump(stderr, data, len); } while(0)
+#endif
+
+#ifdef NTRACE
+#  define TRACE(...) /* TRACE disabled */
+#  define HEXDUMP_TRACE(data, len, ...) /* HEXDUMP_TRACE disabled */
+#else
+/** TRACE() prints a message to stderr if NTRACE is not defined. */
+#  define TRACE(f, ...) fprintf(stderr, "TRACE:%s():%u:" f, __func__, __LINE__, __VA_ARGS__)
+/** HEXDUMP_TRACE() does a hexdump to stderr if NTRACE is not defined. */
+#  define HEXDUMP_TRACE(data, len, ...) HEXDUMP(data, len, __VA_ARGS__)
+#endif
+
+
+/** TRACE_MSG() prints a message and newline to stderr if NTRACE is not defined. */
+#define TRACE_MSG(m) TRACE("%s\n", m);
+
+/** ERROR_FMT() prints a formatted message to stderr. */
+#define ERROR_FMT(msg, ...) fprintf(stderr, "ERROR:%s():%d:" msg, __func__, __LINE__, __VA_ARGS__);
+
+/** ERROR_MSG prints a string and newline to stderr. */
+#define ERROR_MSG(msg) fprintf(stderr, "ERROR:%s():%d:" msg "\n", __func__, __LINE__);
+
+/** TODO prints a string and newline to stderr. */
+#define TODO(msg) fprintf(stderr, "TODO:%s():%d:" msg "\n", __func__, __LINE__);
+
+/** trace logs entry to a function if NTRACE is not defined. */
+#define TRACE_ENTER() TRACE("%u:ENTER\n", __LINE__);
+
+/** trace logs exit of a function if NTRACE is not defined. */
+#define TRACE_EXIT() TRACE("%u:EXIT\n", __LINE__);
+
+/** tests an expression, if failed prints an error message based on errno and jumps to a label. */
+#define FAILON(e, reason, label) do { if(e) { fprintf(stderr, "FAILED:%s:%s\n", reason, strerror(errno)); goto label; } } while(0)
+
+/** logs a message based on errno */
+#define PERROR(msg) fprintf(stderr, "ERROR:%s():%d:%s:%s\n", __func__, __LINE__, msg, strerror(errno));
+
+/** DIE - print the function and line number then abort. */
+#define DIE() do { ERROR_MSG("abort!"); abort(); } while(0)
+
+#ifndef NDEBUG
+#include <string.h>
+/** initialize with junk - used to find unitialized values. */
+#  define JUNKINIT(ptr, len) memset((ptr), 0xBB, (len));
+#else
+#  define JUNKINIT(ptr, len) /* do nothing */
+#endif
 
 /*=* reference counting macros *=*/
 
@@ -2677,6 +2744,544 @@ void acs_test(void) {
 /** undocumented - please add documentation. */
 #define	MODE_MASK 31
 
+/******************************************************************************
+ * base64 : encode base64
+ ******************************************************************************/
+
+static const uint8_t base64enc_tab[64]= "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static uint8_t *base64dec_tab; /* initialized by base64_decode. */
+
+/**
+ * base64_encodes as ./0123456789a-zA-Z.
+ *
+ */
+EXPORT int base64_encode(size_t in_len, const unsigned char *in, size_t out_len, char *out) {
+	unsigned ii, io;
+	uint_least32_t v;
+	unsigned rem;
+
+	for(io=0,ii=0,v=0,rem=0;ii<in_len;ii++) {
+		unsigned char ch;
+		ch=in[ii];
+		v=(v<<8)|ch;
+		rem+=8;
+		while(rem>=6) {
+			rem-=6;
+			if(io>=out_len) return -1; /* truncation is failure */
+			out[io++]=base64enc_tab[(v>>rem)&63];
+		}
+	}
+	if(rem) {
+		v<<=(6-rem);
+		if(io>=out_len) return -1; /* truncation is failure */
+		out[io++]=base64enc_tab[v&63];
+	}
+	while(io&3) {
+		if(io>=out_len) return -1; /* truncation is failure */
+		out[io++]='=';
+	}
+	if(io>=out_len) return -1; /* no room for null terminator */
+	out[io]=0;
+	return io;
+}
+
+/* decode a base64 string in one shot */
+EXPORT int base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *out) {
+	unsigned ii, io;
+	uint_least32_t v;
+	unsigned rem;
+
+	/* initialize base64dec_tab if not initialized. */
+	if(!base64dec_tab) {
+		unsigned i;
+		base64dec_tab=malloc(256);
+		if(!base64dec_tab) {
+			PERROR("malloc()");
+			return 0;
+		}
+		memset(base64dec_tab, 255, 256); /**< use 255 indicates a bad value. */
+
+		for(i=0;i<NR(base64enc_tab);i++) {
+			base64dec_tab[base64enc_tab[i]]=i;
+		}
+	}
+
+	for(io=0,ii=0,v=0,rem=0;ii<in_len;ii++) {
+		unsigned char ch;
+		if(isspace(in[ii])) continue;
+		if(in[ii]=='=') break; /* stop at = */
+		ch=base64dec_tab[(unsigned)in[ii]];
+		if(ch==255) break; /* stop at a parse error */
+		v=(v<<6)|ch;
+		rem+=6;
+		if(rem>=8) {
+			rem-=8;
+			if(io>=out_len) return -1; /* truncation is failure */
+			out[io++]=(v>>rem)&255;
+		}
+	}
+	if(rem>=8) {
+		rem-=8;
+		if(io>=out_len) return -1; /* truncation is failure */
+		out[io++]=(v>>rem)&255;
+	}
+	return io;
+}
+
+
+/******************************************************************************
+ * SHA1
+ ******************************************************************************/
+/* SHA-1 hashing routines.
+ * see RFC3174 for the SHA-1 algorithm.
+ *
+ * Jon Mayo - PUBLIC DOMAIN - July 17, 2009
+ *
+ */
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdint.h>
+
+/**
+ * size of a SHA-1 digest in bytes. SHA-1 is 160-bit.
+ */
+#define SHA1_DIGEST_LENGTH 20
+
+/**
+ * number of 32-bit values in a 512-bit block.
+ */
+#define SHA1_LBLOCK 16
+
+/**
+ * SHA-1 Constants.
+ */
+#define SHA1_K0 0x5a827999
+#define SHA1_K1 0x6ed9eba1
+#define SHA1_K2 0x8f1bbcdc
+#define SHA1_K3 0xca62c1d6
+
+/**
+ * rotate a value in an f-bit field left by b bits.
+ * truncate to 32-bits.
+ */
+#define ROL(f, v, b) ((((v)<<(b))|((v)>>((f)-(b))))&(0xfffffffful>>(32-(f))))
+/* here is a version that doens't truncate, useful for f-bit sized environments.
+ * #define ROL(f, v, b) (((v)<<(b))|((v)>>((f)-(b))))
+ */
+#define ROL32(v, b) ROL(32, v, b)
+
+/**
+ * data structure holding the state of the hash processing.
+ */
+struct sha1_ctx {
+	uint_least32_t
+		h[5], /**< five hash state values for 160-bits. */
+		data[SHA1_LBLOCK]; /**< load data into chunks here. */
+	uint_least64_t cnt; /**< total so far in bits. */
+	unsigned data_len; /**< number of bytes used in data. (not the number of words/elements) */
+};
+
+/**
+ * initialize the hash context.
+ */
+EXPORT int sha1_init(struct sha1_ctx *ctx) {
+	if(!ctx) return 0; /* failure */
+
+	/* initialize h state. */
+	ctx->h[0]=0x67452301lu;
+	ctx->h[1]=0xefcdab89lu;
+	ctx->h[2]=0x98badcfelu;
+	ctx->h[3]=0x10325476lu;
+	ctx->h[4]=0xc3d2e1f0lu;
+
+	ctx->cnt=0;
+	ctx->data_len=0;
+	memset(ctx->data, 0, sizeof ctx->data);
+
+	return 1; /* success */
+}
+
+/**
+ * do this transformation for each chunk, chunk assumed to be loaded into ctx->data[].
+ */
+static void sha1_transform_chunk(struct sha1_ctx *ctx) {
+	unsigned i;
+	uint_least32_t
+		v[5], /**< called a, b, c, d, e in the documentation. */
+		f, k, tmp, w[16];
+
+	assert(ctx != NULL);
+
+	/* load a, b, c, d, e with the current hash state. */
+	for(i=0;i<5;i++) {
+		v[i]=ctx->h[i];
+	}
+
+	for(i=0;i<80;i++) {
+		unsigned t=i&15;
+
+		if(i<16) {
+			/* load 16 words of data into w[]. */
+			w[i]=ctx->data[i];
+		} else {
+			/* 16 to 79 - perform this calculation. */
+			w[t]^=w[(t+13)&15]^w[(t+8)&15]^w[(t+2)&15];
+			w[t]=ROL32(w[t], 1); /* left rotate 1. */
+		}
+
+		if(i<20) {
+			f=(v[1]&v[2])|(~v[1]&v[3]);
+			k=SHA1_K0;
+		} else if(i<40) {
+			f=v[1]^v[2]^v[3];
+			k=SHA1_K1;
+		} else if(i<60) {
+			f=(v[1]&v[2])|(v[1]&v[3])|(v[2]&v[3]);
+			k=SHA1_K2;
+		} else {
+			f=v[1]^v[2]^v[3];
+			k=SHA1_K3;
+		}
+
+		tmp=ROL32(v[0], 5); /* left rotate 5. */
+		tmp+=f+v[4]+k+w[t];
+		v[4]=v[3];
+		v[3]=v[2];
+		v[2]=ROL32(v[1], 30); /* left rotate 30. */
+		v[1]=v[0];
+		v[0]=tmp;
+
+	}
+
+	/* add a, b, c, d, e to the hash state. */
+	for(i=0;i<5;i++) {
+		ctx->h[i]+=v[i];
+	}
+
+	memset(v, 0, sizeof v); /* erase the variables to avoid leaving useful data behind. */
+}
+
+/**
+ * hash more data to the stream.
+ */
+EXPORT int sha1_update(struct sha1_ctx *ctx, const void *data, size_t len) {
+	if(!ctx||(!data&&!len)) return 0; /* failure */
+
+	while(len>0) {
+		/* load a chunk into ctx->data[]. return on short chunk.
+		 * load data in endian neutral way.
+		 */
+
+		while(ctx->data_len<4*SHA1_LBLOCK) {
+			if(len<=0) return 1; /* continue this later. */
+
+			/* fill out the buffer in big-endian order. */
+			switch((ctx->cnt/8)%4) {
+				case 0:
+					ctx->data[ctx->data_len++/4]=((uint_least32_t)*(const unsigned char*)data)<<24;
+					break;
+				case 1:
+					ctx->data[ctx->data_len++/4]|=((uint_least32_t)*(const unsigned char*)data)<<16;
+					break;
+				case 2:
+					ctx->data[ctx->data_len++/4]|=((uint_least32_t)*(const unsigned char*)data)<<8;
+					break;
+				case 3:
+					ctx->data[ctx->data_len++/4]|=*(const unsigned char*)data;
+					break;
+			}
+
+			ctx->cnt+=8; /* 8 bits were added. */
+			data=(const unsigned char*)data+1; /* next byte. */
+			len--; /* we've used up a byte. */
+		}
+
+		assert(ctx->data_len==4*SHA1_LBLOCK); /* the loop condition above ensures this. */
+
+		sha1_transform_chunk(ctx);
+
+		ctx->data_len=0;
+	}
+
+	return 1; /* success */
+}
+
+/**
+ * pad SHA-1 with 1s followed by 0s and a 64-bit value of the number of bits.
+ */
+static void sha1_append_length(struct sha1_ctx *ctx) {
+	unsigned char lendata[8];
+
+	assert(ctx != NULL);
+
+	/* write out the total number of bits procesed by the hash into a buffer. */
+	lendata[0]=ctx->cnt>>56;
+	lendata[1]=ctx->cnt>>48;
+	lendata[2]=ctx->cnt>>40;
+	lendata[3]=ctx->cnt>>32;
+	lendata[4]=ctx->cnt>>24;
+	lendata[5]=ctx->cnt>>16;
+	lendata[6]=ctx->cnt>>8;
+	lendata[7]=ctx->cnt;
+
+	/* insert 1 bit followed by 0s. */
+	sha1_update(ctx, "\x80", 1); /* binary 10000000. */
+	while(ctx->cnt%512 != 448) {
+		sha1_update(ctx, "", 1); /* insert 0. */
+	}
+
+	/* write out the big-endian value holding the number of bits processed. */
+	sha1_update(ctx, lendata, sizeof lendata);
+
+	assert(ctx->cnt%512 == 0); /* above should have triggered a sha1_transform_chunk(). */
+}
+
+/**
+ * finish up the hash, and pad in the special SHA-1 way with the length.
+ */
+EXPORT int sha1_final(unsigned char *md, struct sha1_ctx *ctx) {
+	assert(ctx != NULL);
+	assert(md != NULL);
+
+	sha1_append_length(ctx);
+
+	assert(ctx->cnt%512 == 0);
+
+	/* combine h0, h1, h2, h3, h4 into digest. */
+	if(md) {
+		unsigned i;
+		for(i=0;i<5;i++) {
+			/* big-endian */
+			md[i*4]=ctx->h[i]>>24;
+			md[i*4+1]=ctx->h[i]>>16;
+			md[i*4+2]=ctx->h[i]>>8;
+			md[i*4+3]=ctx->h[i];
+		}
+	}
+
+	sha1_init(ctx); /* rub out the old data. */
+
+	return 1; /* success */
+}
+
+/**
+ * quick calculation of SHA1 on buffer data.
+ * @param data pointer.
+ * @param len length of data at pointer data.
+ * @param md if NULL use a static array.
+ * @return return md, of md is NULL then return static array.
+ */
+EXPORT unsigned char *sha1(const void *data, size_t len, unsigned char *md) {
+	struct sha1_ctx ctx;
+	static unsigned char tmp[SHA1_DIGEST_LENGTH];
+	sha1_init(&ctx);
+	sha1_update(&ctx, data, len);
+	if(!md) md=tmp;
+	sha1_final(md, &ctx);
+	return md;
+}
+
+#ifndef NTEST
+static void sha1_print_digest(const unsigned char *md) {
+	unsigned i;
+	for(i=0;i<SHA1_DIGEST_LENGTH;i++) {
+		printf("%02X", md[i]);
+		if(i<SHA1_DIGEST_LENGTH-1) printf(":");
+	}
+	printf("\n");
+}
+
+static int sha1_test(void) {
+	const char test1[]="The quick brown fox jumps over the lazy dog";
+	const unsigned char test1_digest[SHA1_DIGEST_LENGTH] = {
+		0x2f, 0xd4, 0xe1, 0xc6, 0x7a, 0x2d, 0x28, 0xfc, 0xed, 0x84, 0x9e, 0xe1, 0xbb, 0x76, 0xe7, 0x39, 0x1b, 0x93, 0xeb, 0x12,
+	};
+	unsigned char digest[SHA1_DIGEST_LENGTH];
+
+	memset(digest, 0, sizeof digest);
+
+	if(!sha1(test1, strlen(test1), digest)) {
+		printf("failed.\n");
+		return 0;
+	}
+
+	printf("calculated : ");
+	sha1_print_digest(digest);
+
+	printf("known      : ");
+	sha1_print_digest(test1_digest);
+
+	printf("test1: %s\n", memcmp(digest, test1_digest, SHA1_DIGEST_LENGTH) ? "FAILED" : "PASSED");
+
+	return 1;
+}
+#endif
+/******************************************************************************
+ * SHA1PASSWD - passwd hashing using SHA-1 algorithm
+ ******************************************************************************/
+
+/** Number of bits used by SHA-1 */
+#define SHA1CRYPT_BITS 128
+
+/** default length of salt to use for salted hash. */
+#define SHA1CRYPT_GENSALT_LEN 6
+
+/** maximum salt size we support. */
+#define SHA1CRYPT_GENSALT_MAX 16
+
+/** prefix for salted SHA1 password hash. */
+#define SHA1PASSWD_MAGIC "{SSHA}"
+
+/** length of SHA1PASSWD_MAGIC. */
+#define SHA1PASSWD_MAGIC_LEN 6
+
+/** maximum length of crypted password including null termination. */
+#define SHA1PASSWD_MAX (SHA1PASSWD_MAGIC_LEN+((SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_MAX+3)/4*4)*4/3+1)
+
+
+
+/**
+ * generate a salt for the hash.
+ */
+static void sha1crypt_gensalt(size_t salt_len, void *salt) {
+    size_t i;
+    for(i=0;i<salt_len;i++) {
+        /* TODO: use better random salt */
+        ((unsigned char*)salt)[i]=(rand()%96)+' ';
+    }
+}
+
+static int sha1crypt_create_password(char *buf, size_t max, const char *plaintext, size_t salt_len, const unsigned char *salt) {
+	struct sha1_ctx ctx;
+	/** hold both the digest and the salt. */
+	unsigned char digest[SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_MAX];
+	/** round up to a multiple of 4, then multiply by 4/3. */
+	char tmp[((SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_MAX+3)/4*4)*4/3+1];
+
+	if(salt_len>SHA1CRYPT_GENSALT_MAX) {
+		ERROR_MSG("Salt is too large.");
+		return 0; /**< salt too large. */
+	}
+
+	/* calculate SHA1 of salt+plaintext. */
+	sha1_init(&ctx);
+	sha1_update(&ctx, salt, salt_len);
+	sha1_update(&ctx, plaintext, strlen(plaintext));
+	sha1_final(digest, &ctx);
+
+	/* append salt onto end of digest. */
+	memcpy(digest+SHA1_DIGEST_LENGTH, salt, salt_len);
+
+	/* encode digest+salt into buf. */
+	if(base64_encode(SHA1_DIGEST_LENGTH+salt_len, digest, sizeof tmp, tmp)<0) {
+		ERROR_MSG("Buffer cannot hold password.");
+		return 0; /**< no room. */
+	}
+
+	/** @todo return an error if snprintf truncated. */
+	snprintf(buf, max, "%s%s", SHA1PASSWD_MAGIC, tmp);
+
+	TRACE("Password hash: \"%s\"\n", buf);
+	HEXDUMP_TRACE(salt, salt_len, "Password salt(len=%d): ", salt_len);
+
+	return 1; /**< success. */
+}
+
+/**
+ * @param buf output buffer.
+ */
+EXPORT int sha1crypt_makepass(char *buf, size_t max, const char *plaintext) {
+    unsigned char salt[SHA1CRYPT_GENSALT_LEN];
+
+	assert(max > 0);
+
+	/* create a random salt of reasonable length. */
+    sha1crypt_gensalt(sizeof salt, salt);
+
+	return sha1crypt_create_password(buf, max, plaintext, sizeof salt, salt);
+}
+
+EXPORT int sha1crypt_checkpass(const char *crypttext, const char *plaintext) {
+	char tmp[SHA1PASSWD_MAX]; /* big enough to hold a re-encoded password. */
+	unsigned char digest[SHA1_DIGEST_LENGTH+SHA1CRYPT_GENSALT_MAX];
+    unsigned char *salt;
+	int res;
+	size_t crypttext_len;
+
+	crypttext_len=strlen(crypttext);
+
+	/* check for password magic at beginning. */
+	if(crypttext_len<=SHA1PASSWD_MAGIC_LEN || strncmp(crypttext, SHA1PASSWD_MAGIC, SHA1PASSWD_MAGIC_LEN)) {
+		ERROR_MSG("not a SHA1 crypt.");
+		return 0; /**< bad base64 string, too large or too small. */
+	}
+
+	/* get salt from password, and skip over magic. */
+	res=base64_decode(crypttext_len-SHA1PASSWD_MAGIC_LEN, crypttext+SHA1PASSWD_MAGIC_LEN, sizeof digest, digest);
+	if(res<0 || res<SHA1_DIGEST_LENGTH) {
+		ERROR_MSG("crypt decode error.");
+		return 0; /**< bad base64 string, too large or too small. */
+	}
+	salt=&digest[SHA1_DIGEST_LENGTH];
+
+	/* saltlength = total - digest */
+	res=sha1crypt_create_password(tmp, sizeof tmp, plaintext, res-SHA1_DIGEST_LENGTH, salt);
+	if(!res) {
+		ERROR_MSG("crypt decode error2.");
+		return 0; /**< couldn't encode? weird. this shouldn't ever happen. */
+	}
+
+	/* encoded successfully - compare them */
+	return strcmp(tmp, crypttext)==0;
+}
+
+#ifndef NTEST
+/* example:
+ * {SSHA}ZIb6984G1q5itn2VUoEb34Jxuq5LUntDZlwK */
+EXPORT void sha1crypt_test(void) {
+	char buf[SHA1PASSWD_MAX];
+	int res;
+	char salt[SHA1CRYPT_GENSALT_LEN];
+	struct {
+		char *pass, *hash;
+	} examples[] = {
+		{ "secret", "{SSHA}2gDsLm/57U00KyShbiYsgvPIsQtzYWx0" },
+		{ "abcdef", "{SSHA}AZz7VpGpy0tnrooaGm++zs9zqgZiVHhbKEc=" },
+		{ "abcdef", "{SSHA}6Nrfz6LziwIo8HsSAkjm/nCeledLUntDZlw=" },
+		{ "abcdeg", "{SSHA}8Lqg317f9lLd0M3EnwIe7BHiH3liVHhbKEc="},
+	};
+	unsigned i;
+
+	/* generate salt. */
+	sha1crypt_gensalt(sizeof salt, salt);
+	HEXDUMP(salt, sizeof salt, "%s(): testing sha1crypt_gensalt() : salt=", __func__);
+
+	/* password creation and checking. - positive testing. */
+	sha1crypt_makepass(buf, sizeof buf, "abcdef");
+	printf("buf=\"%s\"\n", buf);
+	res=sha1crypt_checkpass(buf, "abcdef");
+	DEBUG("sha1crypt_checkpass() positive:%s (res=%d)\n", !res ? "FAILED" : "PASSED", res);
+	if(!res) {
+		ERROR_MSG("sha1crypt_checkpass() must succeed on positive test.");
+		exit(1);
+	}
+
+	/* checking - negative testing. */
+	res=sha1crypt_checkpass(buf, "abcdeg");
+	DEBUG("sha1crypt_checkpass() negative:%s (res=%d)\n", res ? "FAILED" : "PASSED", res);
+	if(res) {
+		ERROR_MSG("sha1crypt_checkpass() must fail on negative test.");
+		exit(1);
+	}
+
+	/* loop through all hardcoded examples. */
+	for(i=0;i<NR(examples);i++) {
+		res=sha1crypt_checkpass(examples[i].hash, examples[i].pass);
+		DEBUG("Example %d:%s (res=%d) hash:%s\n", i+1, !res ? "FAILED" : "PASSED", res, examples[i].hash);
+	}
+}
+#endif
 /******************************************************************************
  * attribute list
  ******************************************************************************/
