@@ -12,7 +12,7 @@ clean-all :: clean
 tests ::
 
 ## a test implementation and some tests
-S.demovm := demovm.c ../stackdump.c
+S.demovm := demovm.c
 O.demovm := $(S.demovm:%.c=%.o)
 demovm : $(O.demovm) ../libstackvm.a
 all :: demovm

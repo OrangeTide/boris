@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "stackdump.h"
 #include "stackvm.h"
 
 /* logging macros */
@@ -106,7 +105,6 @@ static void sys_trap_callback(struct vm *vm)
 
 int main(int argc, char **argv)
 {
-	enable_stack_dump();
 	process_args(argc, argv);
 
 	struct vm_env *env = vm_env_new(100);

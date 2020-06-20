@@ -13,7 +13,7 @@ int vmMain(int x, int y)
 	a = trap_Callback(3, do_add, 300, 400, 500);
 	b = trap_Callback(2, do_mul, 600, 700);
 	return a + b;
-#else /* example of doing something simular in C. */
+#else /* example of doing something similar in C. */
 	a = do_callback(do_add, 300, 400, 500);
 	b = do_callback(do_mul, 600, 700, 0);
 	return a + b;

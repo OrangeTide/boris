@@ -41,4 +41,7 @@ void vm_pushf(struct vm *vm, vmsingle_t f);
 vmword_t vm_arg(struct vm *vm, int num);
 char *vm_string(struct vm *vm, vmword_t addr, size_t *len);
 void vm_abort(struct vm *vm);
+void *vm_get_extra(struct vm *vm);
+void *vm_set_extra(struct vm *vm, void *p);
+void vm_yield(struct vm *vm);
 #endif

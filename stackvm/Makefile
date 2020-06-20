@@ -16,7 +16,7 @@ clean-all :: clean
 tests ::
 
 ## the stackvm library
-S.libstackvm := stackvm.c stackdump.c
+S.libstackvm := stackvm.c
 O.libstackvm := $(S.libstackvm:%.c=%.o)
 libstackvm.a : libstackvm.a($(O.libstackvm))
 all :: libstackvm.a

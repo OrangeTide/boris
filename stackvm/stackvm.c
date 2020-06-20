@@ -18,12 +18,19 @@
 #include "hexdump.c"
 #endif
 
+int stackvm_verbose = 0;
+
 /* logging macros */
-#define info(format, ...) fprintf(stderr, "INFO:" format, ## __VA_ARGS__)
-#define warn(format, ...) fprintf(stderr, "WARN:" format, ## __VA_ARGS__)
 #define error(format, ...) fprintf(stderr, "ERROR:%s():%d:" format, __func__, __LINE__, ## __VA_ARGS__)
+#define warn(format, ...) fprintf(stderr, "WARN:" format, ## __VA_ARGS__)
+#define info(format, ...) do { if (stackvm_verbose > 0) fprintf(stderr, "INFO:" format, ## __VA_ARGS__); } while(0)
+#ifdef DEBUG_ENABLED
 #define debug(format, ...) fprintf(stderr, "DEBUG:%s():%d:" format, __func__, __LINE__, ## __VA_ARGS__)
 #define trace(format, ...) fprintf(stderr, "TRACE:%s():%d:" format, __func__, __LINE__, ## __VA_ARGS__)
+#else
+#define debug(format, ...) /* disabled debug messages */
+#define trace(format, ...) /* disabled trace messages */
+#endif
 
 #define vm_error_set(vm, flag) do { \
 		trace("set error:%#x\n", (flag)); \
@@ -54,6 +61,8 @@ struct vm_env {
 
 struct vm {
 	const struct vm_env *env;
+	void *extra;
+	int yield; /* set if we run_slice should yield after system calls */
 	/* code is a read-only area for instructions */
 	struct vm_op *code;
 	size_t code_len;
@@ -570,6 +579,8 @@ int vm_run_slice(struct vm *vm)
 
 	while (!vm->status && !_check_code_bounds(__func__, __LINE__, vm, vm->pc)) {
 		struct vm_op *op = &vm->code[vm->pc++];
+
+#ifdef DEBUG_ENABLED
 		{ /* debug only */
 			vmword_t top = ~0;
 
@@ -580,6 +591,7 @@ int vm_run_slice(struct vm *vm)
 			      vm->pc - 1, vm->pc - 1, disassemble_opcode(op),
 			      top, top, vm->psp, vm->psp);
 		}
+#endif
 
 		switch (op->op) {
 			;
@@ -611,8 +623,13 @@ int vm_run_slice(struct vm *vm)
 				// TODO: do system call if program counter is negative
 				vm->pc = 0xdeadbeef; /* system call better clean this up */
 				if (vm->env) {
+					vm->yield = 0;
 					if (vm_env_call(vm->env, a, vm))
 						vm_error_set(vm, VM_ERROR_BAD_SYSCALL);
+					if (vm->yield) {
+						e = 0; /* not finished - yielding */
+						goto out;
+					}
 				} else {
 					// TODO: catch this as an error
 					error("%s:environment not set during system call (pc=%#x call=%d)\n",
@@ -1336,4 +1353,21 @@ void vm_abort(struct vm *vm)
 	vm_error_set(vm, VM_ERROR_ABORT);
 	info("%s:ABORTED!\n", vm->vm_filename);
 	// TODO: print pc=%#x and syscall=%d
+}
+
+void *vm_get_extra(struct vm *vm)
+{
+	return vm->extra;
+}
+
+void *vm_set_extra(struct vm *vm, void *p)
+{
+	void *old = vm->extra;
+	vm->extra = p;
+	return old;
+}
+
+void vm_yield(struct vm *vm)
+{
+	vm->yield = 1;
 }
