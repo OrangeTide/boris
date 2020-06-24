@@ -2,8 +2,8 @@
 int
 main(int argc, char *argv[])
 {
-	puts("Hello World!");
-	mdelay(1500);
-	puts("Good-bye.");
+	puts("Test2 - begin"); 
+	mdelay(1000);
+	puts("Test2 - end"); 
 	return 0;
 }

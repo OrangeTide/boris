@@ -14,11 +14,11 @@
 //////////////////////////////////////////////////////////////////////////////
 
 /* logging macros */
-#define info(format, ...) fprintf(stderr, "INFO:" format, ## __VA_ARGS__)
-#define warn(format, ...) fprintf(stderr, "WARN:" format, ## __VA_ARGS__)
-#define error(format, ...) fprintf(stderr, "ERROR:%s():%d:" format, __func__, __LINE__, ## __VA_ARGS__)
-#define debug(format, ...) fprintf(stderr, "DEBUG:%s():%d:" format, __func__, __LINE__, ## __VA_ARGS__)
-#define trace(format, ...) fprintf(stderr, "TRACE:%s():%d:" format, __func__, __LINE__, ## __VA_ARGS__)
+#define info(format, ...) fprintf(stderr, "INFO:" format "\n", ## __VA_ARGS__)
+#define warn(format, ...) fprintf(stderr, "WARN:" format "\n", ## __VA_ARGS__)
+#define error(format, ...) fprintf(stderr, "ERROR:%s():%d:" format "\n", __func__, __LINE__, ## __VA_ARGS__)
+#define debug(format, ...) fprintf(stderr, "DEBUG:%s():%d:" format "\n", __func__, __LINE__, ## __VA_ARGS__)
+#define trace(format, ...) fprintf(stderr, "TRACE:%s():%d:" format "\n", __func__, __LINE__, ## __VA_ARGS__)
 
 //////////////////////////////////////////////////////////////////////////////
 extern int stackvm_verbose; // HACK
@@ -37,8 +37,10 @@ static double
 timer_now(void)
 {
 	struct timespec ts;
-	if (clock_gettime(CLOCK_MONOTONIC, &ts))
+	if (clock_gettime(CLOCK_MONOTONIC, &ts)) {
+		perror(__func__);
 		return FP_NAN;
+	}
 	return (double)ts.tv_sec + ((double)ts.tv_nsec / 1e9);
 }
 
@@ -94,15 +96,19 @@ sys_mdelay(struct vm *vm)
 	vm_push(vm, 0); // TODO: is this correct for the ABI?
 
 	struct task *task = vm_get_extra(vm);
-	unsigned long deadline = (timer_now() + msec / 1e6) * 1e6;
+	trace("extra=%p", (void*)task);
+	unsigned long deadline = (timer_now() * 1e3) + msec;
 	struct prioq_elm elm = { deadline, task };
 	prioq_enqueue(timerq, &elm);
 
-	task_schedule(task, sleeping);
-	info("%s:VM sleeping (%lu microseconds)\n", vm_filename(vm), (unsigned long)msec);
+	if (task_schedule(task, sleeping)) {
+		vm_abort(vm);
+		return;
+	}
+	info("%s:VM sleeping (%lu microseconds)", vm_filename(vm), (unsigned long)msec);
 
 	// BUG: if next line below is done, VM's don't run to completion in run_all() loop
-	// vm_yield(vm);
+	vm_yield(vm);
 }
 
 struct vm_env *
@@ -139,7 +145,7 @@ add_vm(struct vm_env *env, const char *vm_filename)
 {
 	struct vm *vm = vm_new(env);
 	if (!vm_load(vm, vm_filename)) {
-		error("%s:could not load file\n", vm_filename);
+		error("%s:could not load file", vm_filename);
 		return -1;
 	}
 
@@ -166,12 +172,12 @@ done(struct task *task)
 
 	if (vm_status(vm) == VM_STATUS_FINISHED) {
 		vmword_t result = vm_pop(vm);
-		info("%s:VM success (result=%u)\n",
+		info("%s:VM success (result=%u)",
 			vm_filename(vm), (int) result);
 	}
 
 	if (vm_status(vm) != VM_STATUS_FINISHED) {
-		info("%s:VM failure (err=%#x)\n",
+		info("%s:VM failure (err=%#x)",
 			vm_filename(vm), vm_status(vm));
 	}
 
@@ -189,28 +195,37 @@ wait_for_next(void)
 {
 	struct prioq_elm elm;
 	if (!prioq_dequeue(timerq, &elm))
-		return -1;
+		return 0; /* nothing */
+
 	// TODO: loop through all prioq entries that have timed out
 
-	unsigned long now = timer_now() * 1e6;
+	unsigned long long now = timer_now() * 1e3;
 
-	/* not expired yet ... sleeping */
-	if (now > elm.d) {
+	if (now < elm.d) {
+		/* not expired yet ... sleeping */
+		unsigned long long msec = elm.d - now;
 		struct timespec waittime = {
-			.tv_sec = (now - elm.d) / 1000,
-			.tv_nsec = ((now - elm.d) % 1000) * 1000,
+			.tv_sec = msec / 1000,
+			.tv_nsec = (msec % 1000) * 1000,
 		};
+		info("sleeping %lld msec", msec);
 		nanosleep(&waittime, NULL);
 		// TODO: fix issue of waking up due to signal, etc ...
+	} else {
+		info("expired (%lld >= %lld)", now, elm.d);
 	}
 
+	trace("ptr=%p", (void*)elm.p);
 	struct task *task = elm.p;
-	task_schedule(task, ready);
+	task_remove_channel(task); /* take off SLEEPING queue */
+	if (task_schedule(task, ready)) { /* move onto READY queue */
+		return -1;
+	}
 
 	struct vm *vm = task_extra(task);
-	info("%s:VM waking from sleep\n", vm_filename(vm));
+	info("%s:VM waking from sleep", vm_filename(vm));
 
-	return 0;
+	return 1;
 }
 
 static int
@@ -220,10 +235,13 @@ run_all(void)
 		struct task *task = task_channel_next(ready);
 		if (!task) {
 			// This design is bad - running tasks will starve out ready tasks
-			info("no tasks ready ... sleeping\n");
-			if (wait_for_next())
-				break;
-			continue;
+			info("no tasks ready ... ");
+			int e = wait_for_next();
+			if (e < 0)
+				return -1; /* error */
+			if (e)
+				continue; /* task(s) woke up */
+			break; /* out of tasks to run */
 		}
 
 		struct vm *vm = task_extra(task);
@@ -233,11 +251,12 @@ run_all(void)
 		} else if (e == 0) { // not finished
 			/* add it to the ready list if not on any list */
 			if (task_empty(task)) {
-				task_schedule(task, ready);
-				info("%s:VM scheduling (READY)\n", vm_filename(vm));
+				if (task_schedule(task, ready))
+					return -1;
+				info("%s:VM scheduling (READY)", vm_filename(vm));
 			}
 		} else { // error / unknown
-			error("%s:VM run slice error (%d)\n", vm_filename(vm), e);
+			error("%s:VM run slice error (%d)", vm_filename(vm), e);
 			done(task);
 		}
 	} while (kernel_task_count);
@@ -262,6 +281,7 @@ process_args(int argc, char **argv)
 		switch (opt) {
 		case 'h':
 			usage();
+			/* fallthrough */
 		case 'v':
 			stackvm_verbose++;
 			break;
@@ -283,7 +303,7 @@ main(int argc, char **argv)
 
 	struct vm_env *env = create_environment();
 	if (!env) {
-		error("%s:could not create environment\n", program_invocation_short_name);
+		error("%s:could not create environment", program_invocation_short_name);
 		return EXIT_FAILURE;
 	}
 
@@ -295,7 +315,9 @@ main(int argc, char **argv)
 		}
 	}
 
-	run_all();
+	if (run_all())
+		return EXIT_FAILURE;
+
 
 	return EXIT_SUCCESS;
 }

@@ -17,11 +17,19 @@ O.kernel := $(S.kernel:%.c=%.o)
 kernel : $(O.kernel) ../libstackvm.a
 all :: kernel
 clean :: ; $(RM) kernel $(O.kernel)
+tests :: test-kernel
+test-kernel : | kernel hello.qvm test2.qvm
+	./kernel hello.qvm test2.qvm
 
 ## Programs
 all :: hello.qvm
 clean :: ; $(RM) hello.qvm hello.asm
 hello.qvm : hello.asm
+
+## Programs
+all :: test2.qvm
+clean :: ; $(RM) test2.qvm test2.asm
+test2.qvm : test2.asm
 
 # TOOLSDIR := ../../stackvm-tools/
 Q3ASM := $(TOOLSDIR)q3asm

@@ -1,6 +1,6 @@
 
 #include <stdio.h>
-#define TRACEF(fmt, ...) fprintf(stderr, ">>> %s" fmt "\n", ## __VA_ARGS__)
+#define TRACEF(fmt, ...) fprintf(stderr, ">>> %s():" fmt "\n", __func__, ## __VA_ARGS__)
 
 #include "prioq.c"
 

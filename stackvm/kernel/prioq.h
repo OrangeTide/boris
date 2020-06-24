@@ -3,7 +3,7 @@
 
 struct prioq_elm
 {
-    unsigned long d; /* key - usually time */
+    unsigned long long d; /* key - usually time */
     void *p;
 };
 

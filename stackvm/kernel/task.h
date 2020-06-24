@@ -11,5 +11,6 @@ void task_free(struct task *task);
 int task_schedule(struct task *task, struct task_channel *chan);
 
 struct task_channel *task_channel_new(const char *id);
+int task_remove_channel(struct task *task);
 struct task *task_channel_next(struct task_channel *chan);
 #endif

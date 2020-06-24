@@ -9,17 +9,24 @@
 #include <string.h>
 #include <sys/queue.h>
 
+#if 1
+#include <stdio.h>
+#define TRACEF(fmt, ...) fprintf(stderr, ">>> %s():" fmt "\n", __func__, ## __VA_ARGS__)
+#else
+#define TRACEF(fmt, ...) /* ignored */
+#endif
+
 struct task {
 	TAILQ_ENTRY(task) tailq;
 	void *context;
 	void (*run)(void *context);
 	void (*free)(void *context);
-	char id[8];
+	char id[16];
 	struct task_channel *chan;
 };
 
 struct task_channel {
-	char id[8];
+	char id[16];
 	TAILQ_HEAD(task_head, task) task_head;
 };
 
@@ -88,15 +95,36 @@ task_free(struct task *task)
 int
 task_schedule(struct task *task, struct task_channel *chan)
 {
-	if (!chan)
+	TRACEF("task=%.*s chan=%.*s", sizeof(task->id), task ? task->id : "(None)", sizeof(chan->id), chan ? chan->id : "(None)");
+	if (!chan || !task)
 		return -1; // EINVAL
 	if (TAILQ_NEXT(task, tailq)) {
 		// TODO: TAILQ_REMOVE(task->chan->task_head, task, tailq);
+		TRACEF("ERROR:%s():task=%.*s oldchan=%.*s:task already scheduled!", __func__, sizeof(task->id), task->id, sizeof(task->chan->id), task->chan->id);
 		return -1; // Error: already in a channel
 	}
 
 	TAILQ_INSERT_TAIL(&chan->task_head, task, tailq);
 	task->chan = chan;
+
+	return 0;
+}
+
+int
+task_remove_channel(struct task *task)
+{
+	if (!task)
+		return -1; /* EINVAL */
+
+	struct task_channel *chan = task->chan;
+	if (!chan)
+		return 0; /* ignored */
+
+	TAILQ_REMOVE(&chan->task_head, task, tailq);
+	task->tailq.tqe_next = NULL;
+	task->tailq.tqe_prev = NULL;
+
+	task->chan = NULL; /* leaving the channel */
 
 	return 0;
 }
@@ -109,8 +137,7 @@ task_channel_next(struct task_channel *chan)
 	if (!task)
 		return NULL;
 
-	TAILQ_REMOVE(&chan->task_head, task, tailq);
-	task->chan = NULL; /* leaving the channel */
+	task_remove_channel(task);
 
 	return task;
 }
