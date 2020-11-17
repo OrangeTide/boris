@@ -1,7 +1,5 @@
 DIR = .
 SRCS = \
-	boris.c \
-	config.c \
 	channel/channel.c \
 	character/character.c \
 	crypt/base64.c \
@@ -11,7 +9,10 @@ SRCS = \
 	log/eventlog.c \
 	log/logging.c \
 	room/room.c \
+	server/boris.c \
 	server/common.c \
+	server/config.c \
+	stackvm/stackvm.c \
 	task/command.c \
 	task/comutil.c \
 	util/util.c \
