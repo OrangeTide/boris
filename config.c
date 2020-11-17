@@ -37,6 +37,7 @@
 #include "debug.h"
 #include "util.h"
 #include "config.h"
+#include "boris.h"
 
 /** initialize a config handle. */
 void config_setup(struct config *cfg)

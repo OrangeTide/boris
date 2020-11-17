@@ -270,7 +270,7 @@ static void sha1_print_digest(const unsigned char *md)
 	printf("\n");
 }
 
-static int sha1_test(void)
+int sha1_test(void)
 {
 	const char test1[] = "The quick brown fox jumps over the lazy dog";
 	const unsigned char test1_digest[SHA1_DIGEST_LENGTH] = {
