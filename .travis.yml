@@ -3,7 +3,11 @@ dist: xenial
 addons:
   apt:
     packages:
-      - libuv1-dev
+      - libtelnet-dev
+      - libevent-dev
+      - libssh-dev
+      - libmicrohttpd-dev
+      - liblmdb-dev
 script:
   - make all
   - make clean-all

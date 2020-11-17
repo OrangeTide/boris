@@ -1,7 +1,10 @@
 all ::
-clean :: ; $(RM) $(DEPFILES)
+	@echo Make version: ${MAKE_VERSION}
+	@echo "Compiler version: $(shell gcc --version | head -n1)"
+clean ::
+clean-all : clean ; $(RM) $(DEPFILES)
 tests ::
-.PHONY : all clean tests
+.PHONY : all clean clean-all tests
 ########################################################################
 # Configuration
 ########################################################################
