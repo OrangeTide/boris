@@ -51,7 +51,7 @@ DIR :=)
 endef
 # generate an executable
 define generate-exe
-$(call generate,$1)
+$(call generate,$1)\
 $(eval all :: $(addprefix $(BINDIR)/,$1))
 endef
 # generate a test
