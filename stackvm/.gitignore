@@ -1,0 +1,11 @@
+*~
+*.o
+*.a
+*.lib
+*.so
+*.dll
+*.exe
+#
+*.asm
+*.qvm
+!libc*.asm

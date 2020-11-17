@@ -1,0 +1,110 @@
+Instruction Set Architecture
+============================
+00	UNDEF		undefined
+01	IGNORE		no-op
+02	BREAK		debugger break
+03	ENTER x		adjust call frame by x
+04	LEAVE x		leave call frame
+05	CALL		( a -- )
+06	PUSH		push zero ( -- 0 )
+07	POP		drop item ( n -- )
+08	CONST x		push constant ( -- n )
+09	LOCAL x		index local frame by x ( -- n )
+0A	JUMP		( a -- )
+0B	EQ j		integer equal ( a b -- )
+0C	NE j		integer not equal ( a b -- )
+0D	LTI j		integer less ( ai bi -- )
+0E	LEI j		integer less or equal ( ai bi -- )
+0F	GTI j		integer greater than ( ai bi -- )
+10	GEI j		integer greater or equal ( ai bi -- )
+11	LTU j		unsigned less than ( au bu -- )
+12	LEU j		unsigned less equal ( au bu -- )
+13	GTU j		unsigned greater than ( au bu -- )
+14	GEU j		unsigned greater or equal ( au bu -- )
+15	EQF j		float equal ( af bf -- )
+16	NEF j		float not equal
+17	LTF j		float less than
+18	LEF j		float less or equal
+19	GTF j		float greater than
+1A	GEF j		float greater or equal
+1B	LOAD1		read byte from memory ( a -- b )
+1C	LOAD2		read short from memory ( a -- s )
+1D	LOAD4		read word from memory ( a -- i )
+1E	STORE1		store byte into memory ( a b -- )
+1F	STORE2		store short into memory ( a s -- )
+20	STORE4		store word info memory ( a i -- )
+21	ARG b		store TOS into arg position ( n -- )
+22	BLOCK_COPY x	( r2 r1 r0 -- )
+23	SEX8		sign extend 8-bit ( b -- i )
+24	SEX16		sign extend 16-bit ( s -- i )
+25	NEGI		integer negate ( i -- i )
+26	ADD		addition ( au bu -- u )
+27	SUB		subtract ( au bu -- u )
+28	DIVI		integer divide ( n d -- q )
+29	DIVU		unsigned divide ( n d -- q )
+2A	MODI		integer modulo ( n d -- m )
+2B	MODU		unsigned modulo ( n d -- m )
+2C	MULI		integer multiply ( a b -- i )
+2D	MULU		unsigned multiply ( a b -- u )
+2E	BAND		bitwise-AND ( a b -- u )
+2F	BOR		bitwise-OR ( a b -- u )
+30	BXOR		bitwise-XOR ( a b -- u )
+31	BCOM		bitwise complement ( u -- u )
+32	LSH		left shift ( n shft -- n )
+33	RSHI		arithmetic right shift ( n shift -- n )
+34	RSHU		bitwise right shift ( n shift -- n )
+35	NEGF		float negate ( f -- f )
+36	ADDF		float addition ( af bf -- f )
+37	SUBF		float subtraction ( af bf -- f )
+38	DIVF		float division ( n d -- q )
+39	MULF		float multiplication ( a b -- f )
+3A	CVIF		convert integer to float ( i -- f )
+3B	CVFI		convert float to integer ( f -- i )
+
+
+File Format
+===========
+len	field name
+---	----------
+4	magic 0x12721444 or 0x44147212
+4	instruction count
+4	CODE segment size
+4	CODE segment offset
+4	DATA segment size
+4	DATA segment offset
+4	LIT segment size
+4	BSS segment size
+
+
+Call Frame Format
+=================
+                         +---------------+ \
+top of address space --> | arg...        |  \
+                         | arg1          |   \
+                         | arg0          |    \
+                         +---------------+     \
+                         | N/A           |      >-- vm entry call
+SP at entry -----------> | saved PC (-1) |     /
+                         +---------------+    /
+                         | local...      |   /
+                         | local1        |  /
+SP after ENTER (????)--> | local0        | /
+                         +---------------+ \
+                         | arg...        |  \
+                         | arg1          |   \
+                         | arg0          |    \
+                         +---------------+     \
+                         | saved SP      |      >-- second function call
+SP at entry -----------> | saved PC      |     /
+                         +---------------+    /
+                         | local...      |   /
+                         | local1        |  /
+SP after ENTER (????)--> | local0        | /
+                         +---------------+
+
+
+System Calls
+============
+The VM permits calling external (native) functions by doing a CALL to a negative
+address. -1 is traditionally used to indicate an exit from the VM, -2 and beyond
+are free to be used for any purposes.
