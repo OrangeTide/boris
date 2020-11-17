@@ -435,32 +435,6 @@ static const char *util_convertnumber(unsigned n, unsigned base, unsigned pad)
 
 	return o;
 }
-
-/**
- * debug routine to hexdump some bytes.
- * @param f output file stream.
- * @param data pointer to the data.
- * @param len length to hexdump.
- */
-static void util_hexdump(FILE *f, const void *data, int len)
-{
-	fprintf(f, "[%d]", len);
-
-	while (len > 0) {
-		unsigned char ch = *(unsigned char*)data;
-
-		if (isprint(ch)) {
-			fprintf(f, " '%c'", ch);
-		} else {
-			fprintf(f, " 0x%02hhx", ch);
-		}
-
-		len--;
-		data = ((unsigned char*)data) + 1;
-	}
-
-	fprintf(f, "\n");
-}
 #endif
 
 /******************************************************************************

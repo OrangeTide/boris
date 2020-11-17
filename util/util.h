@@ -32,7 +32,7 @@
  */
 #ifndef UTIL_H_
 #define UTIL_H_
-#include <stddef.h>
+#include <stdio.h>
 
 /** util_fnmatch returns this value when a match was not found. */
 #define UTIL_FNM_NOMATCH 1
@@ -53,4 +53,5 @@ void util_strfile_close(struct util_strfile *h);
 const char *util_strfile_readline(struct util_strfile *h, size_t *len);
 void trim_nl(char *line);
 char *trim_whitespace(char *line);
+void util_hexdump(FILE *f, const void *data, int len);
 #endif

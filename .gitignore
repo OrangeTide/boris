@@ -9,7 +9,6 @@ junk*/
 *.dll
 *.lib
 *.exe
-
-*.makedep
+*.d
 
 data/users/
