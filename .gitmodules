@@ -1,3 +1,24 @@
 [submodule "stackvm-tools"]
 	path = stackvm-tools
 	url = git://github.com/OrangeTide/stackvm-tools.git
+	branch = master
+[submodule "stackvm"]
+	path = stackvm
+	url = git://github.com/OrangeTide/stackvm
+	branch = master
+[submodule "libbcrypt"]
+	path = libbcrypt
+	url = git://github.com/OrangeTide/libbcrypt
+	branch = master
+[submodule "lmdb"]
+	path = lmdb
+	url = git://github.com/LMDB/lmdb
+	branch = mdb.master
+[submodule "daemonize"]
+	path = daemonize
+	url = git://github.com/OrangeTide/daemonize
+	branch = master
+[submodule "http-parser"]
+	path = http-parser
+	url = https://github.com/nodejs/http-parser
+	branch = master
