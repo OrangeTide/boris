@@ -14,11 +14,13 @@
 	path = lmdb
 	url = git://github.com/LMDB/lmdb
 	branch = mdb.master
+	shallow = true
 [submodule "daemonize"]
 	path = daemonize
 	url = git://github.com/OrangeTide/daemonize
 	branch = master
-[submodule "http-parser"]
-	path = http-parser
-	url = https://github.com/nodejs/http-parser
+[submodule "civetweb"]
+	shallow = true
+	path = civetweb
+	url = https://github.com/civetweb/civetweb
 	branch = master

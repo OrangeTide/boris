@@ -3,12 +3,8 @@ dist: xenial
 addons:
   apt:
     packages:
-      - libtelnet-dev
-      - libevent-dev
-      - libssh-dev
-      - libmicrohttpd-dev
-      - liblmdb-dev
+      - libuv1-dev
 script:
   - make -v | head -n1
-  - make all
+  - make V=1 all
   - make clean-all

@@ -1,6 +1,67 @@
-#  Makefile
+# Jon's modular Makefile
+# Copyright 2020-2021 Jon Mayo <jon@rm-f.net>
+# Permission is granted to modify and/or redistribute this work.
+# THE WORKS ARE WITHOUT WARRANTY.
 ########################################################################
-## Settings
+## Documentation
+#
+# Basic Usage:
+# * For help `make help`.
+# * To configure `make configure-` or `make` without .config file present.
+# * To build `make` or `make all`.
+# * To clean intermediate files, `make clean`.
+# * To clean executable files as well, `make clean-all`.
+# * To clean everything above plus wipe configuration, `make distclean`.
+# * Executables are output to globally configured BINDIR (./bin/ is default).
+# * Intermediate files are output to BUILDDIR (./build/ is default).
+# * Set TOOLPREFIX to use an alternative toolchain path or prefix.
+#
+# Adding Your Project:
+# * Define parameters for each project in a top-level *.mk file.
+# * Mandatory values for TYPE, OUT, SRCS.
+# * OUT is the name of your executable (without .exe or .dll extension).
+# * TYPE is one of: `exe`, `dll`, `disable*'
+# * Set SRCDIR to place the source files of a project in a subdirectory.
+# * Optionally set CFLAGS, CPPFLAGS, LDFLAGS, LDLIBS, CXXFLAGS, etc.
+# * optional variables based on target platform type. (e.g. SRCS.win32)
+#
+# Adding A New Platform Configuration:
+# * .config files define new platforms
+# * LDFLAGS_LIB is a macro. $1 is LIBDIR; $2 is SONAME.
+# * ENVIRONMENT is the target platform type and can be anything that is
+#   convenient for matching. (win32, x11, posix, linux, bsd, darwin, ...)
+# (TODO: complete this section)
+#
+########################################################################
+## TODO
+#
+# * accept TYPE parameter for making static and dynamic libraries
+# * handle languages other than C (finish C++ and ASM support)
+# * make it easier to configure a different cross-compiler.
+#   * test it out with crossbuild-essential-{arm64,armel,armhf,i386}
+# * add pkg-config support as a PKGS parameter.
+# * cross-project references of depedencies and configuration parameters.
+# * output intermediate objects to a configurable directory.
+# * implement a TEST_SCRIPT parameter to run a test script for a project.
+# * add a DESCRIPTION field for describing a .config file
+# * support matching of multiple tags in the ENVIRONMENT parameter.
+#
+########################################################################
+## Default - for advance use, override these on the command-line.
+CC = $(TOOLPREFIX)gcc
+CXX = $(TOOLPREFIX)g++
+LD = $(TOOLPREFIX)ld
+AS = $(TOOLPREFIX)as
+AR = $(TOOLPREFIX)ar
+CFLAGS = -Wall -W -O3 -flto -g
+RM ?= rm -f
+MKDIR ?= mkdir -p
+RMDIR = rm -rf
+BINDIR ?= bin
+OBJBUILD ?= build
+
+########################################################################
+## Process Command-line settings
 # use V=1 to select verbose output, default is quiet output
 ifeq ($(V),1)
 QCMD=
@@ -11,86 +72,251 @@ NORM:=$(shell tput sgr0)
 QCMD=@
 QDSC=@echo $1 $(BOLD)$2$(NORM) $3
 endif
-########################################################################
-## Boris MUD project-wide settings
-EXEC = bin/mud
-SRCS = server/main.c \
-       server/server.c
-CFLAGS = -Wall -W -O3 -flto -g -pthread
-CPPFLAGS = -D_GNU_SOURCE -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L
-CPPFLAGS += -Iserver/
-OBJBUILD = build/
-PKGS = libuv
-########################################################################
-## http_parser
-SRCS += http-parser/http_parser.c
-CPPFLAGS += -Ihttp-parser/
-########################################################################
-## Session
-SRCS += session/env.c
-CPPFLAGS += -Isession/
-########################################################################
-## Logging
-SRCS += log/log.c
-CPPFLAGS += -Ilog/
-########################################################################
-## Blowfish Crypt
-SRCS += libbcrypt/bcrypt.c
-CPPFLAGS += -Ilibbcrypt/
-########################################################################
-## SQLite Amalgamation
-# SRCS += sqlite-amalgamation/sqlite3.c
-# CFLAGS += -Isqlite-smalgamation/
-########################################################################
-## LMDB
-SRCS += lmdb/libraries/liblmdb/mdb.c \
-	lmdb/libraries/liblmdb/midl.c
-CPPFLAGS += -Ilmdb/libraries/liblmdb/
-########################################################################
-## Daemonize
-SRCS += daemonize/daemonize.c
-CPPFLAGS += -Idaemonize/
-########################################################################
-## StackVM
-SRCS += stackvm/stackvm.c
-CPPFLAGS += -Istackvm/
-########################################################################
-## World Clock
-SRCS += worldclock/worldclock.c
-CPPFLAGS += -Iworldclock/
-########################################################################
-# Remember, these are evaluated when expanded ...
-OBJS = $(patsubst %.c,$(OBJBUILD)%.o,$(SRCS))
-DEPS = $(patsubst %.c,$(OBJBUILD)%.d,$(SRCS))
 
-all :: $(EXEC)
-clean ::
-	$(call QDSC,"Removing build objects ...",$(OBJS))
-	$(QCMD)$(RM) $(OBJS)
-clean ::
-	$(call QDSC,"Removing temporary dependency files ...",$(DEPS))
-	$(QCMD)$(RM) $(DEPS)
-clean-all :: clean
-	$(call QDSC,"Removing executable ...",$(EXEC))
-	$(QCMD)$(RM) $(EXEC)
-.PHONY: all clean clean-all
 ########################################################################
-# make use of .d (dependency) files generated with -MMD -MP
+## Commands used in rules
+
+define cmd.clean
+$(call QDSC,"Removing $2 ...",$1)
+$(QCMD)$(RM) $1
+endef
+
+define cmd.compile.c
+$(call QDSC,"Compiling $@ ...",$<)
+$(QCMD)$(CC) $(CFLAGS) $(COMMON_CFLAGS) $(CPPFLAGS) -c -o $@ $<
+endef
+
+define cmd.compile.cpp
+$(call QDSC,"Compiling $@ ...",$<)
+$(QCMD)$(CXX) $(CXXFLAGS) $(COMMON_CFLAGS) $(CPPFLAGS) -c -o $@ $<
+endef
+
+define cmd.link.o
+$(call QDSC,"Linking $@ ...",$^)
+$(QCMD)$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+endef
+
+########################################################################
+## Generic pattern rules
+
+(%): %
+	$(call QDSC,"Updating archive $@ ...",$^)
+	$(QCMD)$(AR) $(ARFLAGS) $@ $<
+
+$(OBJBUILD)/%/ :
+	$(call QDSC,"Creating directory ...",$@)
+	$(QCMD)mkdir -p $@
+
+########################################################################
+## Targets
+all :: | $(BINDIR)
+clean ::
+clean-all :: clean ; $(call cmd.clean,$(DEPS),autogenerated dependencies)
+distclean : clean-all
+	$(call QDSC,"Preparing a clean distribution ...",.config $(BINDIR))
+	$(QCMD)$(RM) .config
+	$(QCMD)$(RMDIR) $(BINDIR) $(OBJBUILD)
+.PHONY : all clean clean-all distclean help configure
+
+########################################################################
+## Configuration & Help
+
+# load configuration - this is where TOOLCHAIN_PREFIX is defined
+-include .config
+ifneq ($(lastword $(MAKEFILE_LIST)),.config)
+.DEFAULT_GOAL := configure
+endif
+
+CONFIG_CHOICES = $(patsubst %.config,%,$(notdir $(wildcard *.config)))
+
+# generate shell commands to display config helps on config-XXXXX
+define echo_config_choices
+$(foreach i,$1,
+@echo configure-$i
+@echo "  Configure for $i."
+)
+endef
+
+configure :
+	@echo Select one of
+	@echo -------------
+	$(call echo_config_choices,$(CONFIG_CHOICES))
+
+configure-% :
+	cp $*.config .config
+
+help :
+	@echo Build Help
+	@echo ----------
+	@echo usage: make [goals...]
+	@echo
+	@echo make all
+	@echo "  Builds everything. (default)"
+	@echo make clean
+	@echo "  Cleans all temporary objects."
+	@echo make clean-all
+	@echo "  Cleans all executables, dependency files, and objects."
+	@echo make distclean
+	@echo "  Cleans configuration and all over the above."
+	@echo make help
+	@echo "  This help."
+	@echo make configure
+	@echo "  Show configuration help."
+	$(call echo_config_choices,$(CONFIG_CHOICES))
+
+########################################################################
+## Default Pattern rules
+%.o : %.c ; $(cmd.compile.c)
+%.o : %.cpp ; $(cmd.compile.cpp)
+
+########################################################################
+## Macros
+# load all options for a target into simple variables
+define loadproject
+include $1
+TYPE ?= exe
+CFLAGS ?= $(DEFAULT_CFLAGS)
+CPPFLAGS ?= $(DEFAULT_CPPFLAGS)
+CXXFLAGS ?= $(DEFAULT_CXXFLAGS)
+LDFLAGS ?= $(DEFAULT_LDFLAGS)
+ASFLAGS ?= $(DEFAULT_ASFLAGS)
+ARFLAGS ?= $(DEFAULT_ARFLAGS)
+ifneq ($$(TYPE),disabled)
+TYPE.$1 := $$(TYPE)
+ALL_TARGETS += $1
+OUT ?= $$(basename $$(firstword $$(SRCS)))
+SRCS.$1 := $$(addprefix $$(if $$(SRCDIR),$$(SRCDIR)/),$$(SRCS) $$(SRCS.$(ENVIRONMENT)))
+EXTRA_OBJS.$1 := $$(addprefix $$(if $$(SRCDIR),$$(SRCDIR)/),$$(OBJS) $$(OBJS.$(ENVIRONMENT)))
+CFLAGS.$1 := $$(CFLAGS) $$(CFLAGS.$(ENVIRONMENT))
+CPPFLAGS.$1 := $$(CPPFLAGS) $$(CPPFLAGS.$(ENVIRONMENT)) $$(if $$(SRCDIR),-I$$(SRCDIR))
+CXXFLAGS.$1 := $$(CXXFLAGS) $$(CXXFLAGS.$(ENVIRONMENT))
+LDFLAGS.$1 := $$(LDFLAGS) $$(LDFLAGS.$(ENVIRONMENT)) $(if $(OBJBUILD),-L$(OBJBUILD)/)
+LDLIBS.$1 := $$(LDLIBS) $$(LDLIBS.$(ENVIRONMENT))
+ASFLAGS.$1 := $$(ASFLAGS) $$(ASFLAGS.$(ENVIRONMENT))
+ARFLAGS.$1 := $$(ARFLAGS) $$(ARFLAGS.$(ENVIRONMENT))
+PKGS.$1 := $$(PKGS) $$(PKGS.$(ENVIRONMENT))
+NAME.$1 := $$(if $$(NAME),$$(NAME),$$(basename $1))
+USELIBS.$1 := $$(strip $$(USELIBS) $(USELIB))
+ifeq ($$(TYPE),exe)
+OUT.$1 := $(if $(BINDIR),$(BINDIR)/)$$(OUT)$(EXT)
+else ifeq ($$(TYPE),dll)
+OUT.$1 := $(if $(BINDIR),$(BINDIR)/)$$(OUT)$(DLLEXT)
+else ifeq ($$(TYPE),lib)
+OUT.$1 := $(if $(OBJBUILD),$(OBJBUILD)/)$$(LIBPREFIX)$$(OUT)$(LIBSUFFIX)
+PROVIDES_OUT.$$(NAME.$1) := $$(OUT.$1)
+PROVIDES_LIB.$$(NAME.$1) := -l$$(OUT)
+PROVIDES_CFLAGS.$$(NAME.$1) := $$(PROVIDES_CFLAGS) $$(PROVIDES_CFLAGS.$(ENVIRONMENT))
+PROVIDES_LDFLAGS.$$(NAME.$1) := $$(PROVIDES_LDFLAGS) $$(PROVIDES_LDFLAGS.$(ENVIRONMENT))
+PROVIDES_LDLIBS.$$(NAME.$1) := $$(PROVIDES_LDLIBS) $$(PROVIDES_LDLIBS.$(ENVIRONMENT))
+PROVIDES_PKGS.$$(NAME.$1) := $$(PKGS) $$(PKGS.$(ENVIRONMENT))
+ifneq ($$(SRCDIR),)
+PROVIDES_INCLUDE.$$(NAME.$1) := -I$$(SRCDIR)
+endif
+endif
+endif
+undefine OBJS
+undefine OBJS.$(ENVIRONMENT)
+undefine SRCS
+undefine SRCS.$(ENVIRONMENT)
+undefine OUT
+undefine TYPE
+undefine CFLAGS
+undefine CFLAGS.$(ENVIRONMENT)
+undefine CPPFLAGS
+undefine CPPFLAGS.$(ENVIRONMENT)
+undefine CXXFLAGS
+undefine CXXFLAGS.$(ENVIRONMENT)
+undefine LDFLAGS
+undefine LDFLAGS.$(ENVIRONMENT)
+undefine LDLIBS
+undefine LDLIBS.$(ENVIRONMENT)
+undefine ASFLAGS
+undefine ASFLAGS.$(ENVIRONMENT)
+undefine ARFLAGS
+undefine ARFLAGS.$(ENVIRONMENT)
+undefine PKGS
+undefine SRCDIR
+undefine NAME
+undefine USELIB
+undefine USELIBS
+undefine PROVIDES_CFLAGS
+undefine PROVIDES_LDFLAGS
+undefine PROVIDES_LDLIBS
+endef
+# generate rules for a target
+define generate
+ifneq ($$(USELIBS.$1),)
+CFLAGS.$1 += $(foreach i,$(USELIBS.$1),$(PROVIDES_CFLAGS.$i))
+CPPFLAGS.$1 += $(foreach i,$(USELIBS.$1),$(PROVIDES_INCLUDE.$i))
+LDFLAGS.$1 += $(foreach i,$(USELIBS.$1),$(PROVIDES_LDFLAGS.$i))
+LDLIBS.$1 += $(foreach i,$(USELIBS.$1),$(PROVIDES_LIB.$i) $(PROVIDES_LDLIBS.$i))
+PKGS.$1 += $(foreach i,$(USELIBS.$1),$(PROVIDES_PKGS.$i))
+endif
+ifneq ($$(strip $$(PKGS.$1)),)
+CFLAGS.$1 += $$(shell pkg-config --cflags $$(PKGS.$1))
+LDFLAGS.$1 += $$(shell pkg-config --libs $$(PKGS.$1))
+endif
+OBJS.c.$1 := $$(patsubst %.c,$(if $(OBJBUILD),$(OBJBUILD)/)%.o,$$(filter %.c,$$(SRCS.$1)))
+OBJS.$1 := $$(OBJS.c.$1) $$(OBJS.cpp.$1) $$(OBJS.S.$1)
+$$(OBJS.c.$1) : $(if $(OBJBUILD),$(OBJBUILD)/)%.o : %.c | $$(sort $$(dir $$(OBJS.c.$1)))
+	$$(cmd.compile.c)
+$$(OBJS.cpp.$1) : $(if $(OBJBUILD),$(OBJBUILD)/)%.o : %.cpp | $$(sort $$(dir $$(OBJS.c.$1)))
+	$$(cmd.compile.cpp)
+$$(OBJS.s.$1) : $(if $(OBJBUILD),$(OBJBUILD)/)%.o : %.S | $$(sort $$(dir $$(OBJS.c.$1)))
+	$$(cmd.compile.S)
+all :: $$(OUT.$1)
+clean :: ; $$(call cmd.clean,$$(OBJS.$1),"objects for $$(NAME.$1)")
+clean-all :: ; $$(call cmd.clean,$$(OUT.$1),"artifacts for $$(NAME.$1)")
+ifeq ($$(TYPE.$1),exe)
+$$(OUT.$1) : $$(OBJS.$1) $$(EXTRA_OBJS.$1) | $(foreach i,$(USELIBS.$1),$(PROVIDES_OUT.$i))
+	$$(cmd.link.o)
+else ifeq ($$(TYPE.$1),dll)
+$$(error TODO: support building DLLs)
+else ifeq ($$(TYPE.$1),lib)
+$$(OUT.$1) : $$(OUT.$1)($$(OBJS.$1))
+$$(OUT.$1) : ARFLAGS = $$(strip $$(ARFLAGS.$1))
+else
+$$(error unknown TYPE=$$(TYPE.$1))
+endif
+$$(OUT.$1) $$(OBJS.$1) : CFLAGS = $$(strip $$(CFLAGS.$1))
+$$(OBJS.$1) : CPPFLAGS = $$(strip $$(CPPFLAGS.$1))
+$$(OBJS.$1) : CXXFLAGS = $$(strip $$(CXXFLAGS.$1))
+$$(OUT.$1) : LDFLAGS = $$(strip $$(LDFLAGS.$1))
+$$(OUT.$1) : LDLIBS = $$(strip $$(LDLIBS.$1))
+$$(OBJS.$1) : ASFLAGS = $$(strip $$(ASFLAGS.$1))
+endef
+#$$(OBJS.$1) : $(if $(OBJBUILD),$(OBJBUILD)/)%.o : %.c ; $(cmd.compile.c)
+#$$(OBJS.$1) : $(if $(OBJBUILD),$(OBJBUILD)/)%.o : %.cpp ; $(cmd.compile.cpp)
+########################################################################
+# save all defaults
+DEFAULT_CFLAGS := $(CFLAGS)
+DEFAULT_CPPFLAGS := $(CPPFLAGS)
+DEFAULT_CXXFLAGS := $(CXXFLAGS)
+DEFAULT_LDFLAGS := $(LDFLAGS)
+DEFAULT_ASFLAGS := $(ASFLAGS)
+DEFAULT_ARFLAGS := $(ARFLAGS)
+########################################################################
+# clean out values that can be pass on the command-line that can also be set in *.mk files
+override undefine CFLAGS
+override undefine CPPFLAGS
+override undefine CXXFLAGS
+override undefine LDFLAGS
+override undefine LDLIBS
+override undefine ASFLAGS
+override undefine ARFLAGS
+########################################################################
+# Load and process every project
+ALL_TARGETS :=
+DEPS :=
+$(foreach p,$(wildcard *.mk),$(eval $(call loadproject,$p)))
+
+# Process all generated dependency files
+DEPS = $(patsubst %.c,$(if $(OBJBUILD),$(OBJBUILD)/)%.d,$(foreach p,$(ALL_TARGETS),$(SRCS.$p)))
+
+# generate rules for every target
+$(foreach p,$(ALL_TARGETS),$(eval $(call generate,$p)))
 -include $(DEPS)
+
 ########################################################################
-## Rules
-
-# output all .o files under build/ directory
-$(OBJBUILD)%.o : %.c
-	@mkdir -p $(dir $@)
-	$(call QDSC,"Compiling","$<","...")
-	$(QCMD)$(CC) $(CFLAGS) $(CPPFLAGS) -MMD -MP -c -o $@ $< $(if $(PKGS),$(shell pkg-config --cflags $(PKGS)))
-
-# build the executable
-$(EXEC) : $(OBJS) | $(dir $(EXEC))
-	$(call QDSC,"Linking","$@",": $^")
-	$(QCMD)$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS) $(if $(PKGS),$(shell pkg-config --cflags --libs $(PKGS)))
-
-# automatically create subdirectory
-%/ :
-	mkdir -p $@
+# Utility rules
+$(BINDIR) : ; $(MKDIR) $@

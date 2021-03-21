@@ -26,6 +26,7 @@
 
 #include "daemonize.h"
 #include "server.h"
+#include "log.h"
 
 static int foreground_mode = 1;
 

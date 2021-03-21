@@ -3,6 +3,10 @@ gmon.out
 .*.swp
 junk*/
 
+/.config
+/build
+/bin
+
 *.o
 *.a
 *.so

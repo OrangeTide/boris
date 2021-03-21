@@ -1,0 +1,9 @@
+TYPE = lib
+OUT = civetweb
+SRCDIR = civetweb
+SRCS = src/civetweb.c
+CFLAGS = -Icivetweb/include/ -Icivetweb/src/ -DUSE_WEBSOCKET -DOPENSSL_API_1_1 -DNO_CGI -DNO_CACHING -DUSE_ZLIB -DUSE_IPV6 -DUSE_SERVER_STATS
+PROVIDES_CFLAGS = -Icivetweb/include/ -pthread
+PROVIDES_LDFLAGS = -pthread
+PROVIDES_LDLIBS = -lrt -ldl
+PKGS = zlib
