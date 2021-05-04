@@ -1,0 +1,20 @@
+# TODO
+
+  * remove LMDB
+  * use SQLcipher
+  * bring in `experiment-feb2021.02.14` project - make into threaded telnet server with civetweb-like API
+  * bring in `prop` project
+  * bring in and finish CQUEUE implementation
+  * add website folder to hold static assets for webserver
+  * implement authserver
+  * implement mq (message queues)
+  * implement filter (libuv-like call chains for sockets)
+  * implement IP blocking (hosts deny?)
+
+# DONE
+
+  * bring in civetweb from `webmud` project
+
+# WONT-DO
+
+  * bring back FDB until I can get SQLite or SQLcipher set up.

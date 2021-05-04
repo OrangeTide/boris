@@ -1,0 +1,1 @@
+* Use thread TLS and a #define to override puts() and printf() with socket_printf() for the currently processing connection.

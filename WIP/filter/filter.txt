@@ -1,0 +1,36 @@
+# layered filter architecture
+
+TODO ...
+
+
+typedef struct filter_descriptor {
+// TODO: ...
+// holds index into the struct filter, in order to catch the chain of filter entries
+} filter_descriptor_t;
+
+struct filter_entry {
+	void *extra;
+	int (*upstream)(const void *buf, size_t len, void *extra, filter_descriptor_t filterdesc)
+	int (*downstream)(const void *buf, size_t len, void *extra, filter_descriptor_t filterdesc);
+	void (*freeextra)(void *extra);
+	// TODO: ??? should we just make a linked list? struct filter_entry *next;
+};
+
+struct filter {
+	unsigned max_filters;
+	struct filter_entry entries[];
+};
+
+usage:
+
+pass data to first upstream chain.
+callback calls next entry on chain.
+
+filter_call_next(const void *buf, size_t len, filter_descriptor_t filterdesc);
+	increments to the next filter_entry (TODO: upstream vs. downstream direction)
+	skips entries with a NULL function, optimizing as a unity function.
+	last filter entry won't call any more filters, it's probably a write() syscall.
+
+upstream: goes up the chain.
+downstream: in reverse order.
+
