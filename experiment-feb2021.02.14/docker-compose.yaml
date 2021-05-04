@@ -1,0 +1,11 @@
+version: '2'
+services:
+    myappTODO:
+        build:
+            context: .
+            args:
+                uwsgi_uid: ${UWSGI_UID}
+                uwsgi_gid: ${UWSGI_GID}
+        restart: always
+        volumes:
+        - ${SOCKET_DIR}/:/var/run/uwsgi/:rw

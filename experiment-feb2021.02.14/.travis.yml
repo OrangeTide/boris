@@ -1,0 +1,13 @@
+language: c
+dist: xenial
+addons:
+  apt:
+    packages:
+      - build-essential
+      - git
+      - libuv1-dev
+script:
+  - make -v | head -n1
+  - make configure-linux-gcc
+  - make all
+  - make distclean

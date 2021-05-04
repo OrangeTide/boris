@@ -1,0 +1,7 @@
+.config
+*.o
+*.so
+*.a
+*.dll
+*.lib
+*.exe

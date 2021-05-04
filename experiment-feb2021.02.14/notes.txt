@@ -1,0 +1,19 @@
+
+
+## dockerfile
+
+RUN apk --update add socat
+CMD socat UNIX-LISTEN:/foo/bar.sock -
+
+## API key
+
+ * shared secret : how does each service receive it?
+   - read a file on boot
+   - read from a named pipe passed as a parameter or a fixed FD number
+
+### Auth Token
+
+ * every service has an API to generate a token from an API key
+ * further APIs request a valid token to work
+   * single server service can hold all tokens in global memory
+   * a multi-server service needs a backend to look up tokens and metadata
