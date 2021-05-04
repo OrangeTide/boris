@@ -1,0 +1,6 @@
+
+
+## dockerfile
+
+RUN apk --update add socat
+CMD socat UNIX-LISTEN:/foo/bar.sock -
