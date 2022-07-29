@@ -11,4 +11,5 @@ junk*/
 *.exe
 *.d
 
-data/users/
+/data/users/
+/build
