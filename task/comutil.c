@@ -34,7 +34,8 @@
 #include "worldclock.h"
 #include <time.h>
 
-void show_gametime(struct telnetclient *cl)
+void
+show_gametime(struct telnetclient *cl)
 {
 	char systime[64];
 	char gametime[64];
@@ -43,6 +44,7 @@ void show_gametime(struct telnetclient *cl)
 
 	t = time(0);
 	tm = localtime(&t);
+
 	if (strftime(systime, sizeof(systime), "%Y-%m-%d %H:%M:%S", tm) != 0)
 		telnetclient_printf(cl, "System local time: %s\n", systime);
 

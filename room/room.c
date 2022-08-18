@@ -80,7 +80,8 @@ static struct room_cache room_cache;
 /**
  * deallocate a room structure immediately.
  */
-static void room_ll_free(struct room *r)
+static void
+room_ll_free(struct room *r)
 {
 	assert(r != NULL);
 
@@ -110,7 +111,8 @@ static void room_ll_free(struct room *r)
 /**
  * set an attribute on a room.
  */
-int room_attr_set(struct room *r, const char *name, const char *value)
+int
+room_attr_set(struct room *r, const char *name, const char *value)
 {
 	int res;
 
@@ -144,7 +146,8 @@ int room_attr_set(struct room *r, const char *name, const char *value)
 	return res;
 }
 
-const char *room_attr_get(struct room *r, const char *name)
+const char *
+room_attr_get(struct room *r, const char *name)
 {
 	static char numbuf[22]; /* big enough for a signed 64-bit decimal */
 
@@ -174,7 +177,8 @@ const char *room_attr_get(struct room *r, const char *name)
 	return NULL; /* failure - not found. */
 }
 
-static struct room *room_load(unsigned room_id)
+static struct room *
+room_load(unsigned room_id)
 {
 	struct room *r;
 	char numbuf[22]; /* big enough for a signed 64-bit decimal */
@@ -235,7 +239,8 @@ static struct room *room_load(unsigned room_id)
 /**
  * write a room structure to disk, if it is not dirty (dirty_fl).
  */
-int room_save(struct room *r)
+int
+room_save(struct room *r)
 {
 	struct attr_entry *curr;
 	struct fdb_write_handle *h;
@@ -333,7 +338,8 @@ struct room *room_get(unsigned room_id)
 /**
  * reduce reference count of room.
  */
-void room_put(struct room *r)
+void
+room_put(struct room *r)
 {
 	assert(r != NULL);
 
@@ -346,7 +352,8 @@ void room_put(struct room *r)
 	}
 }
 
-int room_initialize(void)
+int
+room_initialize(void)
 {
 	struct fdb_iterator *it;
 	const char *id;
@@ -396,7 +403,8 @@ int room_initialize(void)
 	return 0; /* success */
 }
 
-void room_shutdown(void)
+void
+room_shutdown(void)
 {
 	struct room *curr;
 	struct room_cache blocked_cache;
@@ -405,6 +413,7 @@ void room_shutdown(void)
 
 	/* save all dirty objects and free all data. */
 	LIST_INIT(&blocked_cache); /* keep a temporary list of unfreed rooms */
+
 	while ((curr = LIST_TOP(room_cache))) {
 		LIST_REMOVE(curr, room_cache);
 		room_save(curr);

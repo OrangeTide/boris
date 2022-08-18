@@ -53,7 +53,8 @@ static FILE *eventlog_file;
 /**
  * initialize the eventlog component.
  */
-int eventlog_init(void)
+int
+eventlog_init(void)
 {
 	eventlog_file = fopen(mud_config.eventlog_filename, "a");
 
@@ -68,7 +69,8 @@ int eventlog_init(void)
 }
 
 /** clean up eventlog module and close the logging file. */
-void eventlog_shutdown(void)
+void
+eventlog_shutdown(void)
 {
 	if (eventlog_file) {
 		fclose(eventlog_file);
@@ -77,7 +79,8 @@ void eventlog_shutdown(void)
 }
 
 /** log a message to the eventlog. */
-void eventlog(const char *type, const char *fmt, ...)
+void
+eventlog(const char *type, const char *fmt, ...)
 {
 	va_list ap;
 	char buf[512];
@@ -119,44 +122,51 @@ void eventlog(const char *type, const char *fmt, ...)
 /**
  * report that a connection has occured.
  */
-void eventlog_connect(const char *peer_str)
+void
+eventlog_connect(const char *peer_str)
 {
 	eventlog("CONNECT", "remote=%s\n", peer_str);
 }
 
 /** report the startup of the server. */
-void eventlog_server_startup(void)
+void
+eventlog_server_startup(void)
 {
 	eventlog("STARTUP", "\n");
 }
 
 /** report the shutdown of the server. */
-void eventlog_server_shutdown(void)
+void
+eventlog_server_shutdown(void)
 {
 	eventlog("SHUTDOWN", "\n");
 }
 
 /** report a failed login attempt. */
-void eventlog_login_failattempt(const char *username, const char *peer_str)
+void
+eventlog_login_failattempt(const char *username, const char *peer_str)
 {
 	eventlog("LOGINFAIL", "remote=%s name='%s'\n", peer_str, username);
 }
 
 /** report a successful login(sign-on) to eventlog. */
-void eventlog_signon(const char *username, const char *peer_str)
+void
+eventlog_signon(const char *username, const char *peer_str)
 {
 	eventlog("SIGNON", "remote=%s name='%s'\n", peer_str, username);
 }
 
 /** report a signoff to the eventlog. */
-void eventlog_signoff(const char *username, const char *peer_str)
+void
+eventlog_signoff(const char *username, const char *peer_str)
 {
 	eventlog("SIGNOFF", "remote=%s name='%s'\n", peer_str, username);
 }
 
 /** report that a connection was rejected because there are already too many
  * connections. */
-void eventlog_toomany(void)
+void
+eventlog_toomany(void)
 {
 	/** @todo we could get the peername from the fd and log that? */
 	eventlog("TOOMANY", "\n");
@@ -165,25 +175,29 @@ void eventlog_toomany(void)
 /**
  * log commands that a user enters.
  */
-void eventlog_commandinput(const char *remote, const char *username, const char *line)
+void
+eventlog_commandinput(const char *remote, const char *username, const char *line)
 {
 	eventlog("COMMAND", "remote=\"%s\" user=\"%s\" command=\"%s\"\n", remote, username, line);
 }
 
 /** report that a new public channel was created. */
-void eventlog_channel_new(const char *channel_name)
+void
+eventlog_channel_new(const char *channel_name)
 {
 	eventlog("CHANNEL-NEW", "channel=\"%s\"\n", channel_name);
 }
 
 /** report that a public channel was removed. */
-void eventlog_channel_remove(const char *channel_name)
+void
+eventlog_channel_remove(const char *channel_name)
 {
 	eventlog("CHANNEL-REMOVE", "channel=\"%s\"\n", channel_name);
 }
 
 /** report a user joining a public channel. */
-void eventlog_channel_join(const char *remote, const char *channel_name, const char *username)
+void
+eventlog_channel_join(const char *remote, const char *channel_name, const char *username)
 {
 	if (!remote) {
 		eventlog("CHANNEL-JOIN", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
@@ -193,7 +207,8 @@ void eventlog_channel_join(const char *remote, const char *channel_name, const c
 }
 
 /** report a user leaving a public channel. */
-void eventlog_channel_part(const char *remote, const char *channel_name, const char *username)
+void
+eventlog_channel_part(const char *remote, const char *channel_name, const char *username)
 {
 	if (!remote) {
 		eventlog("CHANNEL-PART", "channel=\"%s\" user=\"%s\"\n", channel_name, username);
@@ -205,7 +220,8 @@ void eventlog_channel_part(const char *remote, const char *channel_name, const c
 /**
  * logs an HTTP GET action.
  */
-void eventlog_webserver_get(const char *remote, const char *uri)
+void
+eventlog_webserver_get(const char *remote, const char *uri)
 {
 	eventlog("WEBSITE-GET", "remote=\"%s\" uri=\"%s\"\n", remote ? remote : "", uri ? uri : "");
 }

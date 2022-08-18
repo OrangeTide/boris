@@ -77,7 +77,8 @@ static struct channel_public_list channel_public_list;
 /******************************************************************************
  * Functions
  ******************************************************************************/
-static void channel_init(struct channel *ch)
+static void
+channel_init(struct channel *ch)
 {
 	ch->nr_member = 0;
 	ch->member = NULL;
@@ -86,7 +87,8 @@ static void channel_init(struct channel *ch)
 /**
  * test for membership in a channel.
  */
-static struct channel_member **channel_find_member(struct channel *ch, struct channel_member *cm)
+static struct channel_member **
+channel_find_member(struct channel *ch, struct channel_member *cm)
 {
 	unsigned i;
 
@@ -108,7 +110,8 @@ static struct channel_member **channel_find_member(struct channel *ch, struct ch
 /**
  * add member to a channel.
  */
-static int channel_add_member(struct channel *ch, struct channel_member *cm)
+static int
+channel_add_member(struct channel *ch, struct channel_member *cm)
 {
 	struct channel_member **newlist;
 
@@ -134,7 +137,8 @@ static int channel_add_member(struct channel *ch, struct channel_member *cm)
 /**
  * remove a member from a channel.
  */
-static int channel_delete_member(struct channel *ch, struct channel_member *cm)
+static int
+channel_delete_member(struct channel *ch, struct channel_member *cm)
 {
 	struct channel_member **d;
 
@@ -164,7 +168,8 @@ static int channel_delete_member(struct channel *ch, struct channel_member *cm)
 	return 1; /* success */
 }
 
-static struct channel_public *channel_public_find(const char *name)
+static struct channel_public *
+channel_public_find(const char *name)
 {
 	struct channel_public *curr;
 
@@ -183,7 +188,8 @@ static struct channel_public *channel_public_find(const char *name)
 /**
  * define a new public channel.
  */
-static int channel_public_add(const char *name)
+static int
+channel_public_add(const char *name)
 {
 	struct channel_public *newch;
 
@@ -236,7 +242,8 @@ struct channel *channel_public(const char *name)
 /**
  * Initialize the sub-system.
  */
-int channel_initialize(void)
+int
+channel_initialize(void)
 {
 	b_log(B_LOG_INFO, "channel", "channel sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	channel_public_add("Wiz");
@@ -248,7 +255,8 @@ int channel_initialize(void)
 /**
  * Shutdown the sub-system.
  */
-void channel_shutdown(void)
+void
+channel_shutdown(void)
 {
 	b_log(B_LOG_INFO, "channel", "channel sub-system shutting down...");
 	b_log(B_LOG_INFO, "channel", "channel sub-system ended.");
@@ -257,7 +265,8 @@ void channel_shutdown(void)
 /**
  * join a channel.
  */
-int channel_join(struct channel *ch, struct channel_member *cm)
+int
+channel_join(struct channel *ch, struct channel_member *cm)
 {
 	b_log(B_LOG_TRACE, "channel", "someone(%p) joined\n", cm ? cm->p : NULL);
 	return channel_add_member(ch, cm);
@@ -266,7 +275,8 @@ int channel_join(struct channel *ch, struct channel_member *cm)
 /**
  * leave a channel.
  */
-void channel_part(struct channel *ch, struct channel_member *cm)
+void
+channel_part(struct channel *ch, struct channel_member *cm)
 {
 	b_log(B_LOG_TRACE, "channel", "someone(%p) parted\n", cm ? cm->p : NULL);
 
@@ -278,7 +288,8 @@ void channel_part(struct channel *ch, struct channel_member *cm)
 /**
  * exclude_list can only be NULL if exclude_list_len is 0.
  */
-static int is_on_list(const struct channel_member *cm, struct channel_member **exclude_list, unsigned exclude_list_len)
+static int
+is_on_list(const struct channel_member *cm, struct channel_member **exclude_list, unsigned exclude_list_len)
 {
 	unsigned i;
 
@@ -292,7 +303,8 @@ static int is_on_list(const struct channel_member *cm, struct channel_member **e
 /**
  * send a message to everyone except those on exclude_list.
  */
-int channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...)
+int
+channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...)
 {
 	va_list ap;
 	unsigned i;

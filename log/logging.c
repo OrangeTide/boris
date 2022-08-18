@@ -46,7 +46,8 @@ static char *prio_names[] = {
 	"INFO", "TODO", "DEBUG", "TRACE"
 };
 
-void logging_do_log(int priority, const char *domain, const char *fmt, ...)
+void
+logging_do_log(int priority, const char *domain, const char *fmt, ...)
 {
 	char buf[LOGBASIC_LENGTH_MAX];
 	int i;
@@ -74,7 +75,8 @@ void logging_do_log(int priority, const char *domain, const char *fmt, ...)
 	fputs(buf, stderr);
 }
 
-int logging_initialize(void)
+int
+logging_initialize(void)
 {
 	fprintf(stderr, "loaded %s\n", "logging");
 	b_log(B_LOG_INFO, "logging", "Logging system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
@@ -82,14 +84,16 @@ int logging_initialize(void)
 	return 0;
 }
 
-void logging_shutdown(void)
+void
+logging_shutdown(void)
 {
 }
 
 /**
  * set the currnet logging level.
  */
-void logging_set_level(int level)
+void
+logging_set_level(int level)
 {
 	if (level > 7)
 		level = 7;

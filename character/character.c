@@ -92,7 +92,8 @@ static struct freelist character_id_freelist;
 /**
  * deallocate a character structure immediately.
  */
-static void character_ll_free(struct character *ch)
+static void
+character_ll_free(struct character *ch)
 {
 	unsigned i;
 
@@ -119,7 +120,8 @@ static void character_ll_free(struct character *ch)
 /**
  * allocate an empty character.
  */
-static struct character *character_ll_alloc(void)
+static struct character *
+character_ll_alloc(void)
 {
 	struct character *ret;
 	ret = calloc(1, sizeof * ret);
@@ -134,7 +136,8 @@ static struct character *character_ll_alloc(void)
 /**
  *
  */
-int character_attr_set(struct character *ch, const char *name, const char *value)
+int
+character_attr_set(struct character *ch, const char *name, const char *value)
 {
 	unsigned i;
 	int res;
@@ -162,7 +165,8 @@ int character_attr_set(struct character *ch, const char *name, const char *value
 /**
  *
  */
-const char *character_attr_get(struct character *ch, const char *name)
+const char *
+character_attr_get(struct character *ch, const char *name)
 {
 	unsigned i;
 	struct attr_entry *at;
@@ -185,7 +189,8 @@ const char *character_attr_get(struct character *ch, const char *name)
 /**
  * load a character from fdb.
  */
-static struct character *character_load(unsigned character_id)
+static struct character *
+character_load(unsigned character_id)
 {
 	struct character *ch;
 	struct fdb_read_handle *h;
@@ -232,7 +237,8 @@ static struct character *character_load(unsigned character_id)
 /**
  * save a character record, but only if the dirty_fl is set.
  */
-int character_save(struct character *ch)
+int
+character_save(struct character *ch)
 {
 	struct attr_entry *curr;
 	struct fdb_write_handle *h;
@@ -314,7 +320,8 @@ struct character *character_get(unsigned character_id)
 /**
  * reduce reference count of character.
  */
-void character_put(struct character *ch)
+void
+character_put(struct character *ch)
 {
 	assert(ch != NULL);
 
@@ -361,7 +368,8 @@ struct character *character_new(void)
 /**
  * preflight all of the characters by loading every one of them.
  */
-static int character_preflight(void)
+static int
+character_preflight(void)
 {
 	struct fdb_iterator *it;
 	const char *id;
@@ -419,7 +427,8 @@ static int character_preflight(void)
 /**
  *
  */
-int character_initialize(void)
+int
+character_initialize(void)
 {
 	b_log(B_LOG_INFO, "character", "Character sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	freelist_init(&character_id_freelist);
@@ -442,7 +451,8 @@ int character_initialize(void)
 /**
  *
  */
-void character_shutdown(void)
+void
+character_shutdown(void)
 {
 	b_log(B_LOG_INFO, "character", "Character sub-system shutting down...");
 	b_log(B_LOG_INFO, "character", "Character sub-system ended.");

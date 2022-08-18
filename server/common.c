@@ -259,7 +259,8 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line);
 /**
  * parse a value string into a uint.
  */
-int parse_uint(const char *name, const char *value, unsigned *uint_p)
+int
+parse_uint(const char *name, const char *value, unsigned *uint_p)
 {
 	char *endptr;
 	assert(uint_p != NULL);
@@ -284,7 +285,8 @@ int parse_uint(const char *name, const char *value, unsigned *uint_p)
 /**
  * load a string into str_p, free()ing string at str_p first.
  */
-int parse_str(const char *name UNUSED, const char *value, char **str_p)
+int
+parse_str(const char *name UNUSED, const char *value, char **str_p)
 {
 	assert(str_p != NULL);
 	assert(value != NULL);
@@ -306,7 +308,8 @@ int parse_str(const char *name UNUSED, const char *value, char **str_p)
 /**
  * add to an attribute list.
  */
-int parse_attr(const char *name, const char *value, struct attr_list *al)
+int
+parse_attr(const char *name, const char *value, struct attr_list *al)
 {
 	struct attr_entry *at;
 
@@ -328,7 +331,8 @@ int parse_attr(const char *name, const char *value, struct attr_list *al)
 /**
  * set a value into p according to type.
  */
-int value_set(const char *value, enum value_type type, void *p)
+int
+value_set(const char *value, enum value_type type, void *p)
 {
 	assert(p != NULL);
 	assert(value != NULL);
@@ -376,7 +380,8 @@ int value_set(const char *value, enum value_type type, void *p)
  * string returned is temporary and can change if an object is modified or if
  * this function is called again.
  */
-const char *value_get(enum value_type type, void *p)
+const char *
+value_get(enum value_type type, void *p)
 {
 	static char numbuf[22]; /* big enough for a signed 64-bit decimal */
 
@@ -406,7 +411,8 @@ const char *value_get(enum value_type type, void *p)
  * @param base the output base (2 to 64)
  * @param pad length to use when padding with zeros. 0 means do not pad.
  */
-static const char *util_convertnumber(unsigned n, unsigned base, unsigned pad)
+static const char *
+util_convertnumber(unsigned n, unsigned base, unsigned pad)
 {
 	static char number_buffer[65];
 	static const char tab[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-";
@@ -448,7 +454,8 @@ static const char *util_convertnumber(unsigned n, unsigned base, unsigned pad)
 #define SHVAR_ESCAPE '$'
 
 /** evaluate "shell variables", basically expand ${FOO} in a string. */
-int shvar_eval(char *out, size_t len, const char *src, const char *(*match)(const char *key))
+int
+shvar_eval(char *out, size_t len, const char *src, const char *(*match)(const char *key))
 {
 	const char *old;
 	char key[SHVAR_ID_MAX];
@@ -564,7 +571,8 @@ static unsigned heap_len;
  * min heap is sorted by lowest value at root.
  * @return non-zero if a>b
  */
-static inline int heapqueue_greaterthan(struct heapqueue_elm *a, struct heapqueue_elm *b)
+static inline int
+heapqueue_greaterthan(struct heapqueue_elm *a, struct heapqueue_elm *b)
 {
 	assert(a != NULL);
 	assert(b != NULL);
@@ -576,7 +584,8 @@ static inline int heapqueue_greaterthan(struct heapqueue_elm *a, struct heapqueu
  * @param elm the value to compare against
  * @return new position of hole
  */
-static int heapqueue_ll_siftdown(unsigned i, struct heapqueue_elm *elm)
+static int
+heapqueue_ll_siftdown(unsigned i, struct heapqueue_elm *elm)
 {
 	assert(elm != NULL);
 	assert(i < heap_len || i == 0);
@@ -609,7 +618,8 @@ static int heapqueue_ll_siftdown(unsigned i, struct heapqueue_elm *elm)
  * @param elm the value to compare against
  * @return the new position of the hole
  */
-static int heapqueue_ll_siftup(unsigned i, struct heapqueue_elm *elm)
+static int
+heapqueue_ll_siftup(unsigned i, struct heapqueue_elm *elm)
 {
 	assert(elm != NULL);
 	assert(i < heap_len);
@@ -625,7 +635,8 @@ static int heapqueue_ll_siftup(unsigned i, struct heapqueue_elm *elm)
 
 /**
  * removes entry at i. */
-int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret)
+int
+heapqueue_cancel(unsigned i, struct heapqueue_elm *ret)
 {
 	/* 1. copy the value at i into ret
 	 * 2. put last node into empty position
@@ -637,14 +648,14 @@ int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret)
 	assert(heap_len < NR(heap));
 	*ret = heap[i]; /* copy the value at i into ret */
 	TRACE("canceling entry #%d: val=%d (parent=%d:>%u) (left %d:>%u) (right %d:>%u) (last %d)\n",
-		i, ret->d,
-		i > 0 ? (int)HEAPQUEUE_PARENT(i) : -1,
-		i > 0 ? heap[HEAPQUEUE_PARENT(i)].d : 0,
-		HEAPQUEUE_LEFT(i) < heap_len ? (int)HEAPQUEUE_LEFT(i) : -1,
-		HEAPQUEUE_LEFT(i) < heap_len ? heap[HEAPQUEUE_LEFT(i)].d : 0,
-		HEAPQUEUE_RIGHT(i) < heap_len ? (int)HEAPQUEUE_RIGHT(i) : -1,
-		HEAPQUEUE_RIGHT(i) < heap_len ? heap[HEAPQUEUE_RIGHT(i)].d : 0,
-		heap[heap_len - 1].d);
+	      i, ret->d,
+	      i > 0 ? (int)HEAPQUEUE_PARENT(i) : -1,
+	      i > 0 ? heap[HEAPQUEUE_PARENT(i)].d : 0,
+	      HEAPQUEUE_LEFT(i) < heap_len ? (int)HEAPQUEUE_LEFT(i) : -1,
+	      HEAPQUEUE_LEFT(i) < heap_len ? heap[HEAPQUEUE_LEFT(i)].d : 0,
+	      HEAPQUEUE_RIGHT(i) < heap_len ? (int)HEAPQUEUE_RIGHT(i) : -1,
+	      HEAPQUEUE_RIGHT(i) < heap_len ? heap[HEAPQUEUE_RIGHT(i)].d : 0,
+	      heap[heap_len - 1].d);
 
 	/* move last entry to the empty position */
 	heap_len--;
@@ -688,7 +699,8 @@ int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret)
  * -# Compare the added element with its parent; if they are in the correct order, stop.
  * -# If not, swap the element with its parent and return to the previous step.
  */
-void heapqueue_enqueue(struct heapqueue_elm *elm)
+void
+heapqueue_enqueue(struct heapqueue_elm *elm)
 {
 	unsigned i;
 	assert(elm != NULL);
@@ -703,7 +715,8 @@ void heapqueue_enqueue(struct heapqueue_elm *elm)
  * sift-down operation for dequeueing.
  * removes the root entry and copies it to ret.
  */
-int heapqueue_dequeue(struct heapqueue_elm *ret)
+int
+heapqueue_dequeue(struct heapqueue_elm *ret)
 {
 	unsigned i;
 	assert(ret != NULL);
@@ -725,7 +738,8 @@ int heapqueue_dequeue(struct heapqueue_elm *ret)
 /**
  * checks the heap to see that it is valid.
  */
-static int heapqueue_isvalid(void)
+static int
+heapqueue_isvalid(void)
 {
 	unsigned i;
 
@@ -740,7 +754,8 @@ static int heapqueue_isvalid(void)
 }
 
 /** dump the entire heapqueue data structure to stderr. */
-static void heapqueue_dump(void)
+static void
+heapqueue_dump(void)
 {
 	unsigned i;
 	fprintf(stderr, "::: Dumping heapqueue :::\n");
@@ -753,7 +768,8 @@ static void heapqueue_dump(void)
 }
 
 /** test the heapqueue system. */
-void heapqueue_test(void)
+void
+heapqueue_test(void)
 {
 	struct heapqueue_elm elm, tmp;
 	unsigned i;
@@ -836,7 +852,8 @@ struct freelist_entry {
 
 #if !defined(NTEST) || !defined(NDEBUG)
 /** print a freelist to stderr. */
-static void freelist_dump(struct freelist *fl)
+static void
+freelist_dump(struct freelist *fl)
 {
 	struct freelist_entry *curr;
 	unsigned n;
@@ -851,7 +868,8 @@ static void freelist_dump(struct freelist *fl)
 /**
  * lowlevel - detach and free an entry.
  */
-static void freelist_ll_free(struct freelist_entry *e)
+static void
+freelist_ll_free(struct freelist_entry *e)
 {
 	assert(e != NULL);
 	assert(e->global._prev != NULL);
@@ -866,7 +884,8 @@ static void freelist_ll_free(struct freelist_entry *e)
 /**
  * lowlevel - append an extra to the global list at prev
  */
-static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsigned ofs, unsigned count)
+static struct freelist_entry *
+freelist_ll_new(struct freelist_entry **prev, unsigned ofs, unsigned count)
 {
 	struct freelist_entry *new;
 	assert(prev != NULL);
@@ -889,7 +908,8 @@ static struct freelist_entry *freelist_ll_new(struct freelist_entry **prev, unsi
  * checks two extents and determine if they are immediately adjacent.
  * @returns true if a bridge is detected.
  */
-static int freelist_ll_isbridge(struct freelist_extent *prev_ext, unsigned ofs, unsigned count, struct freelist_extent *next_ext)
+static int
+freelist_ll_isbridge(struct freelist_extent *prev_ext, unsigned ofs, unsigned count, struct freelist_extent *next_ext)
 {
 	/*
 	DEBUG("testing for bridge:\n"
@@ -902,13 +922,15 @@ static int freelist_ll_isbridge(struct freelist_extent *prev_ext, unsigned ofs, 
 }
 
 /** initialize a freelist. starts off as empty. */
-void freelist_init(struct freelist *fl)
+void
+freelist_init(struct freelist *fl)
 {
 	LIST_INIT(&fl->global);
 }
 
 /** deallocate all entries on the freelist. */
-void freelist_free(struct freelist *fl)
+void
+freelist_free(struct freelist *fl)
 {
 	while (LIST_TOP(fl->global)) {
 		freelist_ll_free(LIST_TOP(fl->global));
@@ -920,7 +942,8 @@ void freelist_free(struct freelist *fl)
 /** allocate memory from the pool.
  * @return offset of the allocation. return -1 on failure.
  */
-long freelist_alloc(struct freelist *fl, unsigned count)
+long
+freelist_alloc(struct freelist *fl, unsigned count)
 {
 	struct freelist_entry *curr;
 
@@ -956,7 +979,8 @@ long freelist_alloc(struct freelist *fl, unsigned count)
  *
  * WARNING: passing bad parameters will result in strange data in the list
  */
-void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
+void
+freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 {
 	struct freelist_entry *new, *curr, *last;
 
@@ -1054,7 +1078,8 @@ void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
  * (assumes that freelist_pool assembles adjacent regions into the largest
  * possible contigious spaces)
  */
-int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count)
+int
+freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count)
 {
 	struct freelist_entry *curr;
 
@@ -1118,7 +1143,8 @@ int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count)
 
 #ifndef NTEST
 /** test the freelist. */
-void freelist_test(void)
+void
+freelist_test(void)
 {
 	struct freelist fl;
 	unsigned n;
@@ -1204,7 +1230,8 @@ struct bitmap {
 /**
  * initialize an bitmap structure to be empty.
  */
-void bitmap_init(struct bitmap *bitmap)
+void
+bitmap_init(struct bitmap *bitmap)
 {
 	assert(bitmap != NULL);
 	bitmap->bitmap = 0;
@@ -1214,7 +1241,8 @@ void bitmap_init(struct bitmap *bitmap)
 /**
  * free a bitmap structure.
  */
-void bitmap_free(struct bitmap *bitmap)
+void
+bitmap_free(struct bitmap *bitmap)
 {
 	assert(bitmap != NULL); /* catch when calling free on NULL */
 
@@ -1229,7 +1257,8 @@ void bitmap_free(struct bitmap *bitmap)
  * @param bitmap the bitmap structure.
  * @param newbits is in bits (not bytes).
  */
-int bitmap_resize(struct bitmap *bitmap, size_t newbits)
+int
+bitmap_resize(struct bitmap *bitmap, size_t newbits)
 {
 	unsigned *tmp;
 
@@ -1261,7 +1290,8 @@ int bitmap_resize(struct bitmap *bitmap, size_t newbits)
  * @param ofs first bit to clear.
  * @param len number of bits to clear.
  */
-void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len)
+void
+bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len)
 {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
@@ -1301,7 +1331,8 @@ void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len)
  * @param ofs first bit to set.
  * @param len number of bits to set.
  */
-void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len)
+void
+bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len)
 {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
@@ -1340,7 +1371,8 @@ void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len)
  * @param ofs the index of the bit.
  * @return 0 or 1 depending on value of the bit.
  */
-int bitmap_get(struct bitmap *bitmap, unsigned ofs)
+int
+bitmap_get(struct bitmap *bitmap, unsigned ofs)
 {
 	if (ofs < bitmap->bitmap_allocbits) {
 		return (bitmap->bitmap[ofs / BITMAP_BITSIZE] >> (ofs % BITMAP_BITSIZE)) & 1;
@@ -1355,7 +1387,8 @@ int bitmap_get(struct bitmap *bitmap, unsigned ofs)
  * @param ofs the index of the bit to begin scanning.
  * @return the position of the next set bit. -1 if the end of the bits was reached
  */
-int bitmap_next_set(struct bitmap *bitmap, unsigned ofs)
+int
+bitmap_next_set(struct bitmap *bitmap, unsigned ofs)
 {
 	unsigned i, len, bofs;
 	assert(bitmap != NULL);
@@ -1381,7 +1414,8 @@ int bitmap_next_set(struct bitmap *bitmap, unsigned ofs)
  * @param ofs the index of the bit to begin scanning.
  * @return the position of the next cleared bit. -1 if the end of the bits was reached
  */
-int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs)
+int
+bitmap_next_clear(struct bitmap *bitmap, unsigned ofs)
 {
 	unsigned i, len, bofs;
 	assert(bitmap != NULL);
@@ -1408,7 +1442,8 @@ int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs)
  * @param d a buffer to use for initializing the bitmap.
  * @param len length in bytes of the buffer d.
  */
-void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len)
+void
+bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len)
 {
 	unsigned *p, word_count, i;
 
@@ -1451,7 +1486,8 @@ void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len)
  * Get the length (in bytes) of the bitmap table.
  * @return the length in bytes of the entire bitmap table.
  */
-unsigned bitmap_length(struct bitmap *bitmap)
+unsigned
+bitmap_length(struct bitmap *bitmap)
 {
 	return bitmap ? ROUNDUP(bitmap->bitmap_allocbits, CHAR_BIT) / CHAR_BIT : 0;
 }
@@ -1460,7 +1496,8 @@ unsigned bitmap_length(struct bitmap *bitmap)
 /**
  * unit tests for struct bitmap data structure.
  */
-void bitmap_test(void)
+void
+bitmap_test(void)
 {
 	int i;
 	struct bitmap bitmap;
@@ -1542,14 +1579,16 @@ struct acs_info {
 };
 
 /** initializes acs_info to some values. */
-static void acs_init(struct acs_info *ai, unsigned level, unsigned flags)
+static void
+acs_init(struct acs_info *ai, unsigned level, unsigned flags)
 {
 	ai->level = level <= UCHAR_MAX ? level : UCHAR_MAX;
 	ai->flags = flags;
 }
 
 /** test if a flag is set in acs_info. */
-static int acs_testflag(struct acs_info *ai, unsigned flag)
+static int
+acs_testflag(struct acs_info *ai, unsigned flag)
 {
 	unsigned i;
 	flag = tolower((char)flag);
@@ -1569,7 +1608,8 @@ static int acs_testflag(struct acs_info *ai, unsigned flag)
 /** check a string against acs_info.
  * the string can contain levels (s) or flags(f).
  * use | to OR things toegether. */
-static int acs_check(struct acs_info *ai, const char *acsstring)
+static int
+acs_check(struct acs_info *ai, const char *acsstring)
 {
 	const char *s = acsstring;
 	const char *endptr;
@@ -1616,7 +1656,8 @@ parse_failure:
 #ifndef NTEST
 
 /** test routine for acs_info. */
-void acs_test(void)
+void
+acs_test(void)
 {
 	struct acs_info ai_test;
 
@@ -1781,7 +1822,8 @@ struct attr_entry *attr_find(struct attr_list *al, const char *name)
  * add an entry to the end, preserves the order.
  * refuse to add a duplicate entry.
  */
-int attr_add(struct attr_list *al, const char *name, const char *value)
+int
+attr_add(struct attr_list *al, const char *name, const char *value)
 {
 	struct attr_entry *curr, *prev, *item;
 
@@ -1839,7 +1881,8 @@ int attr_add(struct attr_list *al, const char *name, const char *value)
 /**
  * free every element on the list.
  */
-void attr_list_free(struct attr_list *al)
+void
+attr_list_free(struct attr_list *al)
 {
 	struct attr_entry *curr;
 
@@ -1904,7 +1947,8 @@ int user_exists(const char *username);
 /**
  * only free the structure data.
  */
-static void user_ll_free(struct user *u)
+static void
+user_ll_free(struct user *u)
 {
 	if (!u) return;
 
@@ -1920,7 +1964,8 @@ static void user_ll_free(struct user *u)
 }
 
 /** free a user structure. */
-static void user_free(struct user *u)
+static void
+user_free(struct user *u)
 {
 	if (!u) return;
 
@@ -1930,7 +1975,8 @@ static void user_free(struct user *u)
 /**
  * allocate a default struct.
  */
-static struct user *user_defaults(void)
+static struct user *
+user_defaults(void)
 {
 	struct user *u;
 	u = calloc(1, sizeof * u);
@@ -1954,7 +2000,8 @@ static struct user *user_defaults(void)
 /**
  * insert a user into user_list, but only if it is not already on the list.
  */
-static int user_ll_add(struct user *u)
+static int
+user_ll_add(struct user *u)
 {
 	struct userdb_entry *ent;
 	assert(u != NULL);
@@ -1977,7 +2024,8 @@ static int user_ll_add(struct user *u)
 }
 
 /** load a user by username. */
-static struct user *user_load_byname(const char *username)
+static struct user *
+user_load_byname(const char *username)
 {
 	struct user *u;
 	struct fdb_read_handle *h;
@@ -2047,7 +2095,8 @@ failure:
 }
 
 /** write a user file. */
-static int user_write(const struct user *u)
+static int
+user_write(const struct user *u)
 {
 	struct fdb_write_handle *h;
 	struct attr_entry *curr;
@@ -2086,7 +2135,8 @@ static int user_write(const struct user *u)
 /** test to see if a username is illegal.
  * username must start with a letter. Remaining character can only be letters,
  * numbers, and _ */
-int user_illegal(const char *username)
+int
+user_illegal(const char *username)
 {
 	const char *s;
 
@@ -2107,7 +2157,8 @@ int user_illegal(const char *username)
 }
 
 /** test to see if a user exists. */
-int user_exists(const char *username)
+int
+user_exists(const char *username)
 {
 	struct userdb_entry *curr;
 
@@ -2215,7 +2266,8 @@ struct user *user_create(const char *username, const char *password, const char 
 }
 
 /** initialize the user system. */
-int user_init(void)
+int
+user_init(void)
 {
 	struct fdb_iterator *it;
 	const char *id;
@@ -2259,7 +2311,8 @@ failure:
 }
 
 /** shutdown the user system. */
-void user_shutdown(void)
+void
+user_shutdown(void)
 {
 	/** @todo free all loaded users. */
 	freelist_free(&user_id_freelist);
@@ -2268,7 +2321,8 @@ void user_shutdown(void)
 /**
  * decrement a reference count.
  */
-void user_put(struct user **user)
+void
+user_put(struct user **user)
 {
 	if (user && *user) {
 		REFCOUNT_PUT(*user, user_free(*user); *user = NULL);
@@ -2278,7 +2332,8 @@ void user_put(struct user **user)
 /**
  * increment the reference count.
  */
-void user_get(struct user *user)
+void
+user_get(struct user *user)
 {
 	if (user) {
 		REFCOUNT_GET(user);
@@ -2302,7 +2357,8 @@ struct buffer {
  * space is left in the buffer for null terminator, so best to make the size a
  * multiple of a power of 2 minus 1.
  */
-void buffer_init(struct buffer *b, size_t max)
+void
+buffer_init(struct buffer *b, size_t max)
 {
 	assert(b != NULL);
 	b->data = malloc(max + 1); /* allocate an extra byte past max for null */
@@ -2313,7 +2369,8 @@ void buffer_init(struct buffer *b, size_t max)
 /**
  * free the buffer.
  */
-void buffer_free(struct buffer *b)
+void
+buffer_free(struct buffer *b)
 {
 	free(b->data);
 	b->data = NULL;
@@ -2325,7 +2382,8 @@ void buffer_free(struct buffer *b)
  * expand newlines into CR/LF startin at used.
  * @return length of processed string or -1 on overflow
  */
-static int buffer_ll_expandnl(struct buffer *b, size_t len)
+static int
+buffer_ll_expandnl(struct buffer *b, size_t len)
 {
 	size_t rem;
 	char *p, *e;
@@ -2352,7 +2410,8 @@ static int buffer_ll_expandnl(struct buffer *b, size_t len)
  * special write that does not expand its input.
  * unlike the other calls, truncation will not load partial data into a buffer
  */
-int buffer_write_noexpand(struct buffer *b, const void *data, size_t len)
+int
+buffer_write_noexpand(struct buffer *b, const void *data, size_t len)
 {
 	if (b->used + len > b->max) {
 		DEBUG_MSG("Overflow detected. refusing to send any data.\n");
@@ -2369,7 +2428,8 @@ int buffer_write_noexpand(struct buffer *b, const void *data, size_t len)
 /**
  * writes data and exapands newline to CR/LF.
  */
-int buffer_write(struct buffer *b, const char *str, size_t len)
+int
+buffer_write(struct buffer *b, const char *str, size_t len)
 {
 	size_t i, j;
 	int ret;
@@ -2406,7 +2466,8 @@ int buffer_write(struct buffer *b, const char *str, size_t len)
 /**
  * puts data in a client's output buffer.
  */
-static int buffer_puts(struct buffer *b, const char *str)
+static int
+buffer_puts(struct buffer *b, const char *str)
 {
 	return buffer_write(b, str, strlen(str));
 }
@@ -2414,7 +2475,8 @@ static int buffer_puts(struct buffer *b, const char *str)
 /**
  * printfs and expands newline to CR/LF.
  */
-int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap)
+int
+buffer_vprintf(struct buffer *b, const char *fmt, va_list ap)
 {
 	int res;
 	assert(b != NULL);
@@ -2458,7 +2520,8 @@ int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap)
 /**
  * printfs data in a client's output buffer.
  */
-static int buffer_printf(struct buffer *b, const char *fmt, ...)
+static int
+buffer_printf(struct buffer *b, const char *fmt, ...)
 {
 	va_list ap;
 	int res;
@@ -2469,7 +2532,8 @@ static int buffer_printf(struct buffer *b, const char *fmt, ...)
 }
 
 /** return the current data in the buffer and update len with the length. */
-const char *buffer_data(struct buffer *b, size_t *len)
+const char *
+buffer_data(struct buffer *b, size_t *len)
 {
 	assert(b != NULL);
 	assert(len != NULL);
@@ -2489,7 +2553,8 @@ const char *buffer_data(struct buffer *b, size_t *len)
  * @param b a buffer
  * @param len the amount remaining in the buffer
  */
-char *buffer_load(struct buffer *b, size_t *len)
+char *
+buffer_load(struct buffer *b, size_t *len)
 {
 	assert(b != NULL);
 	assert(len != NULL);
@@ -2506,7 +2571,8 @@ char *buffer_load(struct buffer *b, size_t *len)
 /**
  * @return the remaining data in the buffer
  */
-unsigned buffer_consume(struct buffer *b, size_t len)
+unsigned
+buffer_consume(struct buffer *b, size_t len)
 {
 	assert(b != NULL);
 	DEBUG("len=%zu used=%zu rem=%zu\n", len, b->used, b->max - b->used);
@@ -2526,7 +2592,8 @@ unsigned buffer_consume(struct buffer *b, size_t len)
 /**
  * commits data to buffer.
  */
-void buffer_emit(struct buffer *b, size_t len)
+void
+buffer_emit(struct buffer *b, size_t len)
 {
 	assert(b != NULL);
 	assert(b->used <= b->max);
@@ -2543,7 +2610,8 @@ void buffer_emit(struct buffer *b, size_t len)
  * callback returns the number of items consumed.
  * if a line is incomplete (which it will be if an IAC is incomplete, then return NULL
  */
-static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p)
+static char *
+buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p)
 {
 	size_t res, tmplen;
 
@@ -2600,7 +2668,8 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 /** read a line of data from the buffer.
  * handles CR/LF and LF terminated lines.
  */
-const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p)
+const char *
+buffer_getline(struct buffer *b, size_t *consumed_len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p)
 {
 	char *d;
 	assert(b != NULL);
@@ -2670,7 +2739,8 @@ static unsigned socketio_delete_count = 0;
 #if defined(USE_WIN32_SOCKETS) && !defined(gai_strerror)
 
 /** handles string errors from getaddrinfo related functions. */
-static const char *gai_strerror(int err)
+static const char *
+gai_strerror(int err)
 {
 	switch(err) {
 	case EAI_AGAIN:
@@ -2703,7 +2773,8 @@ static const char *gai_strerror(int err)
 #endif
 
 /** gets the last socket error as a string. */
-const char *socketio_strerror(void)
+const char *
+socketio_strerror(void)
 {
 #if defined(USE_WIN32_SOCKETS)
 	static char buf[64];
@@ -2723,7 +2794,8 @@ const char *socketio_strerror(void)
 /**
  * @return true if the last recv()/send() call would have blocked.
  */
-int socketio_wouldblock(void)
+int
+socketio_wouldblock(void)
 {
 #if defined(USE_WIN32_SOCKETS)
 	return WSAGetLastError() == WSAEWOULDBLOCK;
@@ -2735,7 +2807,8 @@ int socketio_wouldblock(void)
 /**
  * @return true for errno==EINTR.
  */
-int socketio_eintr(void)
+int
+socketio_eintr(void)
 {
 #if defined(USE_WIN32_SOCKETS)
 	return WSAGetLastError() == WSAEINTR;
@@ -2746,7 +2819,8 @@ int socketio_eintr(void)
 
 #ifndef NTRACE
 /** dump all the bits in fd_set. */
-static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds)
+static void
+socketio_dump_fdset(fd_set *readfds, fd_set *writefds)
 {
 #if defined(USE_WIN32_SOCKETS)
 	unsigned i;
@@ -2781,7 +2855,8 @@ static void socketio_dump_fdset(fd_set *readfds, fd_set *writefds)
 #endif
 
 /** initialize the socketio module. */
-int socketio_init(void)
+int
+socketio_init(void)
 {
 #if defined(USE_WIN32_SOCKETS)
 	WSADATA wsaData;
@@ -2795,8 +2870,8 @@ int socketio_init(void)
 	}
 
 	DEBUG("Winsock: VERSION %u.%u\n",
-		LOBYTE(wsaData.wVersion),
-		HIBYTE(wsaData.wVersion));
+	      LOBYTE(wsaData.wVersion),
+	      HIBYTE(wsaData.wVersion));
 #endif
 
 	socketio_fdset_sz = FD_SETSIZE;
@@ -2819,7 +2894,8 @@ int socketio_init(void)
 }
 
 /** clean up the socketio module. */
-void socketio_shutdown(void)
+void
+socketio_shutdown(void)
 {
 #if defined(USE_WIN32_SOCKETS)
 	WSACleanup();
@@ -2827,7 +2903,8 @@ void socketio_shutdown(void)
 }
 
 /** close a socket and write INVALID_SOCKET to its handle. */
-int socketio_close(SOCKET *fd)
+int
+socketio_close(SOCKET *fd)
 {
 	int res;
 	assert(fd != 0);
@@ -2855,7 +2932,8 @@ int socketio_close(SOCKET *fd)
  * You should call this whenever opening a new socket.
  * checks the maximum count and updates socketio_fdmax
  */
-int socketio_check_count(SOCKET fd)
+int
+socketio_check_count(SOCKET fd)
 {
 	assert(fd != INVALID_SOCKET);
 #if defined(USE_WIN32_SOCKETS)
@@ -2884,7 +2962,8 @@ int socketio_check_count(SOCKET fd)
 /**
  * report that an fd is ready for read events, and update the fdmax value.
  */
-void socketio_readready(SOCKET fd)
+void
+socketio_readready(SOCKET fd)
 {
 	assert(fd != INVALID_SOCKET);
 	FD_SET(fd, socketio_readfds);
@@ -2893,7 +2972,8 @@ void socketio_readready(SOCKET fd)
 /**
  * report that an fd is ready for write events, and update the fdmax value.
  */
-void socketio_writeready(SOCKET fd)
+void
+socketio_writeready(SOCKET fd)
 {
 	assert(fd != INVALID_SOCKET);
 	FD_SET(fd, socketio_writefds);
@@ -2901,7 +2981,8 @@ void socketio_writeready(SOCKET fd)
 
 /** convert a sockaddr into a string.
  * used for processing the sockaddr from accept() or getpeername(). */
-int socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, size_t name_len)
+int
+socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, size_t name_len)
 {
 	char servbuf[16];
 	int res;
@@ -2928,7 +3009,8 @@ failure:
 }
 
 /** gets the name of a socket's peer as a string. */
-int socketio_getpeername(SOCKET fd, char *name, size_t name_len)
+int
+socketio_getpeername(SOCKET fd, char *name, size_t name_len)
 {
 	struct sockaddr_storage ss;
 	socklen_t sslen;
@@ -2955,7 +3037,8 @@ int socketio_getpeername(SOCKET fd, char *name, size_t name_len)
 }
 
 /** set a socket to non-blocking I/O. */
-static int socketio_nonblock(SOCKET fd)
+static int
+socketio_nonblock(SOCKET fd)
 {
 	int res;
 #if defined(USE_WIN32_SOCKETS)
@@ -2971,7 +3054,8 @@ failure:
 }
 
 /** low-level free of socketio_handle. */
-static void socketio_ll_handle_free(struct socketio_handle *sh)
+static void
+socketio_ll_handle_free(struct socketio_handle *sh)
 {
 	assert(sh != NULL);
 
@@ -3004,7 +3088,8 @@ static void socketio_ll_handle_free(struct socketio_handle *sh)
 
 /** send raw data to a socket.
  * a short write is possible! */
-int socketio_send(SOCKET fd, const void *data, size_t len)
+int
+socketio_send(SOCKET fd, const void *data, size_t len)
 {
 	int res;
 	res = send(fd, data, len, 0);
@@ -3015,7 +3100,8 @@ failure:
 }
 
 /** read raw data from a socket up to len in size. */
-int socketio_recv(SOCKET fd, void *data, size_t len)
+int
+socketio_recv(SOCKET fd, void *data, size_t len)
 {
 	int res;
 	res = recv(fd, data, len, 0);
@@ -3030,7 +3116,8 @@ failure:
  * this is used when there are more sockets than we can deal with (like on
  * Win32).
  */
-static void socketio_toomany(SOCKET fd)
+static void
+socketio_toomany(SOCKET fd)
 {
 	const char buf[] = "Too many connections\r\n";
 
@@ -3048,7 +3135,8 @@ static void socketio_toomany(SOCKET fd)
  * copy an fd_set basiced on socketio_fdmax (for Unix systems) or
  * fd_count(Win32).
  */
-static void socketio_fdset_copy(fd_set *dst, const fd_set *src)
+static void
+socketio_fdset_copy(fd_set *dst, const fd_set *src)
 {
 	assert(dst != NULL);
 	assert(src != NULL);
@@ -3076,7 +3164,8 @@ static void socketio_fdset_copy(fd_set *dst, const fd_set *src)
 }
 
 /** allocate a new socketio_handle. */
-static struct socketio_handle *socketio_ll_newhandle(SOCKET fd, const char *name, unsigned type, void (*write_event)(struct socketio_handle *sh, SOCKET fd, void *p), void (*read_event)(struct socketio_handle *sh, SOCKET fd, void *p))
+static struct socketio_handle *
+socketio_ll_newhandle(SOCKET fd, const char *name, unsigned type, void (*write_event)(struct socketio_handle *sh, SOCKET fd, void *p), void (*read_event)(struct socketio_handle *sh, SOCKET fd, void *p))
 {
 	struct socketio_handle *ret;
 
@@ -3106,7 +3195,8 @@ failure:
 /** wait for events on all sockets for up to msec.
  * the time can expire sooner.
  */
-int socketio_dispatch(long msec)
+int
+socketio_dispatch(long msec)
 {
 	struct socketio_handle *curr, *next;
 	struct timeval timeout, *to;
@@ -3239,7 +3329,8 @@ struct server {
 };
 
 /** handler for read-ready events - calls accept(). */
-void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p)
+void
+server_read_event(struct socketio_handle *sh, SOCKET fd, void *p)
 {
 	struct sockaddr_storage ss;
 	socklen_t sslen;
@@ -3281,7 +3372,8 @@ failure:
 }
 
 /** free a server socketio_handle. */
-static void server_free(struct socketio_handle *sh, void *p)
+static void
+server_free(struct socketio_handle *sh, void *p)
 {
 	struct server *servdata = p;
 
@@ -3300,7 +3392,8 @@ static void server_free(struct socketio_handle *sh, void *p)
 }
 
 /** create a listening socket for use with a server. */
-static struct socketio_handle *socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct socketio_handle *new_sh))
+static struct socketio_handle *
+socketio_listen_bind(struct addrinfo *ai, void (*newclient)(struct socketio_handle *new_sh))
 {
 	SOCKET fd;
 	int res;
@@ -3469,13 +3562,15 @@ struct telnetclient {
 /**
  * @return the username
  */
-const char *telnetclient_username(struct telnetclient *cl)
+const char *
+telnetclient_username(struct telnetclient *cl)
 {
 	return cl && cl->user && cl->user->username ? cl->user->username : "<UNKNOWN>";
 }
 
 /** write a null terminated string to a telnetclient buffer. */
-int telnetclient_puts(struct telnetclient *cl, const char *str)
+int
+telnetclient_puts(struct telnetclient *cl, const char *str)
 {
 	int res;
 	assert(cl != NULL);
@@ -3488,7 +3583,8 @@ int telnetclient_puts(struct telnetclient *cl, const char *str)
 }
 
 /** vprintf for a telnetclient output buffer. */
-int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap)
+int
+telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap)
 {
 	int res;
 
@@ -3504,7 +3600,8 @@ int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap)
 }
 
 /** printf for a telnetclient output buffer. */
-int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...)
+int
+telnetclient_printf(struct telnetclient *cl, const char *fmt, ...)
 {
 	va_list ap;
 	int res;
@@ -3522,7 +3619,8 @@ int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...)
 }
 
 /** releases current state (frees it). */
-static void telnetclient_clear_statedata(struct telnetclient *cl)
+static void
+telnetclient_clear_statedata(struct telnetclient *cl)
 {
 	if (cl->state_free) {
 		cl->state_free(cl);
@@ -3532,7 +3630,8 @@ static void telnetclient_clear_statedata(struct telnetclient *cl)
 	memset(&cl->state, 0, sizeof cl->state);
 }
 
-static int telnetclient_channel_add(struct telnetclient *cl, struct channel *ch)
+static int
+telnetclient_channel_add(struct telnetclient *cl, struct channel *ch)
 {
 	struct channel **newlist;
 
@@ -3556,7 +3655,8 @@ static int telnetclient_channel_add(struct telnetclient *cl, struct channel *ch)
 	return 1; /* success */
 }
 
-static int telnetclient_channel_remove(struct telnetclient *cl, struct channel *ch)
+static int
+telnetclient_channel_remove(struct telnetclient *cl, struct channel *ch)
 {
 	unsigned i;
 
@@ -3588,7 +3688,8 @@ static int telnetclient_channel_remove(struct telnetclient *cl, struct channel *
 }
 
 /** free a telnetclient structure. */
-static void telnetclient_free(struct socketio_handle *sh, void *p)
+static void
+telnetclient_free(struct socketio_handle *sh, void *p)
 {
 	struct telnetclient *client = p;
 
@@ -3642,7 +3743,8 @@ static void telnetclient_free(struct socketio_handle *sh, void *p)
 	free(client);
 }
 
-static void telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const char *msg)
+static void
+telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const char *msg)
 {
 	struct telnetclient *cl;
 
@@ -3658,7 +3760,8 @@ static void telnetclient_channel_send(struct channel_member *cm, struct channel 
 }
 
 /** allocate a new telnetclient based on an existing valid socketio_handle. */
-static struct telnetclient *telnetclient_newclient(struct socketio_handle *sh)
+static struct telnetclient *
+telnetclient_newclient(struct socketio_handle *sh)
 {
 	struct telnetclient *cl;
 	cl = malloc(sizeof * cl);
@@ -3696,7 +3799,8 @@ failed:
 /**
  * replaces the current user with a different one and updates the reference counts.
  */
-static void telnetclient_setuser(struct telnetclient *cl, struct user *u)
+static void
+telnetclient_setuser(struct telnetclient *cl, struct user *u)
 {
 	struct user *old_user;
 	assert(cl != NULL);
@@ -3709,7 +3813,8 @@ static void telnetclient_setuser(struct telnetclient *cl, struct user *u)
 /**
  * posts telnet protocol necessary to begin negotiation of options.
  */
-static int telnetclient_telnet_init(struct telnetclient *cl)
+static int
+telnetclient_telnet_init(struct telnetclient *cl)
 {
 	const char support[] = {
 		IAC, DO, TELOPT_LINEMODE,
@@ -3728,7 +3833,8 @@ static int telnetclient_telnet_init(struct telnetclient *cl)
 }
 
 /** send TELNET protocol messages to control echo mode. */
-static int telnetclient_echomode(struct telnetclient *cl, int mode)
+static int
+telnetclient_echomode(struct telnetclient *cl, int mode)
 {
 	static const char echo_off[] = { IAC, WILL, TELOPT_ECHO }; /* OFF */
 	static const char echo_on[] = { IAC, WONT, TELOPT_ECHO }; /* ON */
@@ -3753,7 +3859,8 @@ static int telnetclient_echomode(struct telnetclient *cl, int mode)
 }
 
 /** send TELNET protocol messages to control line mode. */
-static int telnetclient_linemode(struct telnetclient *cl, int mode)
+static int
+telnetclient_linemode(struct telnetclient *cl, int mode)
 {
 	const char enable[] = {
 		IAC, SB, TELOPT_LINEMODE, LM_MODE, MODE_EDIT | MODE_TRAPSIG, IAC, SE
@@ -3782,7 +3889,8 @@ static int telnetclient_linemode(struct telnetclient *cl, int mode)
 }
 
 /** callback used when a socketio_handle for a telnetclient is write-ready. */
-void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void *p)
+void
+telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void *p)
 {
 	const char *data;
 	size_t len;
@@ -3815,7 +3923,8 @@ void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void *p)
 /**
  * for processing IAC SB.
  */
-static void telnetclient_iac_process_sb(const char *iac, size_t len, struct telnetclient *cl)
+static void
+telnetclient_iac_process_sb(const char *iac, size_t len, struct telnetclient *cl)
 {
 	assert(cl != NULL);
 	assert(iac[0] == IAC);
@@ -3863,7 +3972,8 @@ static void telnetclient_iac_process_sb(const char *iac, size_t len, struct teln
 /**
  * @return 0 means "incomplete" data for this function
  */
-static size_t telnetclient_iac_process(const char *iac, size_t len, void *p)
+static size_t
+telnetclient_iac_process(const char *iac, size_t len, void *p)
 {
 	struct telnetclient *cl = p;
 	const char *endptr;
@@ -3959,7 +4069,8 @@ static size_t telnetclient_iac_process(const char *iac, size_t len, void *p)
 /**
  * pull data from socket into buffer.
  */
-static int telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl)
+static int
+telnetclient_recv(struct socketio_handle *sh, struct telnetclient *cl)
 {
 	char *data;
 	size_t len;
@@ -3993,7 +4104,8 @@ failure:
 }
 
 /** read event callback when a telnetclient is doing line oriented input. */
-void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, void *extra)
+void
+telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, void *extra)
 {
 	const char *line;
 	size_t consumed;
@@ -4023,7 +4135,8 @@ void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, void *ex
 }
 
 /** configures the prompt string for telnetclient_rdev_lineinput. */
-void telnetclient_setprompt(struct telnetclient *cl, const char *prompt)
+void
+telnetclient_setprompt(struct telnetclient *cl, const char *prompt)
 {
 	cl->prompt_string = prompt ? prompt : "? ";
 	telnetclient_puts(cl, cl->prompt_string);
@@ -4031,7 +4144,8 @@ void telnetclient_setprompt(struct telnetclient *cl, const char *prompt)
 }
 
 /** start line input mode on a telnetclient. */
-void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt)
+void
+telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt)
 {
 	assert(cl != NULL);
 	telnetclient_setprompt(cl, prompt);
@@ -4042,7 +4156,8 @@ void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(st
 /**
  * @return true if client is still in this state
  */
-int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt)
+int
+telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt)
 {
 
 	if (!cl) return 0;
@@ -4051,13 +4166,15 @@ int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct teln
 }
 
 /** callback to handle a line of input. */
-static void menu_lineinput(struct telnetclient *cl, const char *line)
+static void
+menu_lineinput(struct telnetclient *cl, const char *line)
 {
 	menu_input(cl, cl->state.menu.menu, line);
 }
 
 /** start menu input mode for a telnet client. */
-static void telnetclient_start_menuinput(struct telnetclient *cl, struct menuinfo *menu)
+static void
+telnetclient_start_menuinput(struct telnetclient *cl, struct menuinfo *menu)
 {
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
 	cl->state.menu.menu = menu;
@@ -4068,7 +4185,8 @@ static void telnetclient_start_menuinput(struct telnetclient *cl, struct menuinf
 /**
  * callback given to socketio_listen to create telnetclients on accept.
  */
-void telnetclient_new_event(struct socketio_handle *sh)
+void
+telnetclient_new_event(struct socketio_handle *sh)
 {
 	struct telnetclient *cl;
 
@@ -4091,7 +4209,8 @@ void telnetclient_new_event(struct socketio_handle *sh)
 }
 
 /** mark a telnetclient to be closed and freed. */
-void telnetclient_close(struct telnetclient *cl)
+void
+telnetclient_close(struct telnetclient *cl)
 {
 	if (cl && cl->sh && !cl->sh->delete_flag) {
 		cl->sh->delete_flag = 1; /* cause deletetion later */
@@ -4100,7 +4219,8 @@ void telnetclient_close(struct telnetclient *cl)
 }
 
 /** display the currently configured prompt string again. */
-void telnetclient_prompt_refresh(struct telnetclient *cl)
+void
+telnetclient_prompt_refresh(struct telnetclient *cl)
 {
 	if (cl && cl->prompt_string && !cl->prompt_flag) {
 		telnetclient_setprompt(cl, cl->prompt_string);
@@ -4108,7 +4228,8 @@ void telnetclient_prompt_refresh(struct telnetclient *cl)
 }
 
 /** update the prompts on all open sockets if they are type 1(client). */
-void telnetclient_prompt_refresh_all(void)
+void
+telnetclient_prompt_refresh_all(void)
 {
 	struct socketio_handle *curr, *next;
 
@@ -4131,12 +4252,14 @@ struct socketio_handle *telnetclient_socket_handle(struct telnetclient *cl)
 	return cl->sh;
 }
 
-const char *telnetclient_socket_name(struct telnetclient *cl)
+const char *
+telnetclient_socket_name(struct telnetclient *cl)
 {
 	return cl->sh ? cl->sh->name : NULL;
 }
 
-const struct terminal *telnetclient_get_terminal(struct telnetclient *cl)
+const struct terminal *
+telnetclient_get_terminal(struct telnetclient *cl)
 {
 	return cl ? &cl->terminal : NULL;
 }
@@ -4156,7 +4279,8 @@ struct menuitem {
 };
 
 /** initialize a menuinfo structure. */
-void menu_create(struct menuinfo *mi, const char *title)
+void
+menu_create(struct menuinfo *mi, const char *title)
 {
 	assert(mi != NULL);
 	LIST_INIT(&mi->items);
@@ -4170,7 +4294,8 @@ failed:
 }
 
 /** add a new menuitem to a menuinfo. */
-void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*, long, void*), long extra2, void *extra3)
+void
+menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*, long, void*), long extra2, void *extra3)
 {
 	struct menuitem *newitem;
 	newitem = malloc(sizeof * newitem);
@@ -4193,7 +4318,8 @@ void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(vo
 /**
  * draw a little box around the string.
  */
-static void menu_titledraw(struct telnetclient *cl, const char *title, size_t len)
+static void
+menu_titledraw(struct telnetclient *cl, const char *title, size_t len)
 {
 #if __STDC_VERSION__ >= 199901L
 	char buf[len + 2];
@@ -4225,7 +4351,8 @@ static void menu_titledraw(struct telnetclient *cl, const char *title, size_t le
 }
 
 /** send the selection menu to a telnetclient. */
-void menu_show(struct telnetclient *cl, const struct menuinfo *mi)
+void
+menu_show(struct telnetclient *cl, const struct menuinfo *mi)
 {
 	const struct menuitem *curr;
 
@@ -4248,7 +4375,8 @@ void menu_show(struct telnetclient *cl, const struct menuinfo *mi)
 }
 
 /** process input into the menu system. */
-void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line)
+void
+menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line)
 {
 	const struct menuitem *curr;
 
@@ -4275,7 +4403,8 @@ void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *
 /**
  * used as a generic starting point for menus.
  */
-static void menu_start(void *p, long unused2 UNUSED, void *extra3)
+static void
+menu_start(void *p, long unused2 UNUSED, void *extra3)
 {
 	struct telnetclient *cl = p;
 	struct menuinfo *mi = extra3;
@@ -4287,7 +4416,8 @@ static void menu_start(void *p, long unused2 UNUSED, void *extra3)
  ******************************************************************************/
 
 /** undocumented - please add documentation. */
-static void login_password_lineinput(struct telnetclient *cl, const char *line)
+static void
+login_password_lineinput(struct telnetclient *cl, const char *line)
 {
 	struct user *u;
 
@@ -4323,14 +4453,16 @@ static void login_password_lineinput(struct telnetclient *cl, const char *line)
 }
 
 /** undocumented - please add documentation. */
-static void login_password_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
+static void
+login_password_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
 {
 	struct telnetclient *cl = p;
 	telnetclient_start_lineinput(cl, login_password_lineinput, "Password: ");
 }
 
 /** undocumented - please add documentation. */
-static void login_username_lineinput(struct telnetclient *cl, const char *line)
+static void
+login_username_lineinput(struct telnetclient *cl, const char *line)
 {
 	assert(line != NULL);
 
@@ -4352,14 +4484,16 @@ static void login_username_lineinput(struct telnetclient *cl, const char *line)
 }
 
 /** undocumented - please add documentation. */
-static void login_username_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
+static void
+login_username_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
 {
 	struct telnetclient *cl = p;
 	telnetclient_start_lineinput(cl, login_username_lineinput, "Username: ");
 }
 
 /** undocumented - please add documentation. */
-static void signoff(void *p, long unused2 UNUSED, void *unused3 UNUSED)
+static void
+signoff(void *p, long unused2 UNUSED, void *unused3 UNUSED)
 {
 	struct telnetclient *cl = p;
 	telnetclient_close(cl);
@@ -4375,7 +4509,8 @@ static void signoff(void *p, long unused2 UNUSED, void *unused3 UNUSED)
 static struct form *form_newuser_app;
 
 /** undocumented - please add documentation. */
-void form_init(struct form *f, const char *title, void (*form_close)(struct telnetclient *cl, struct form_state *fs))
+void
+form_init(struct form *f, const char *title, void (*form_close)(struct telnetclient *cl, struct form_state *fs))
 {
 	LIST_INIT(&f->items);
 	f->form_title = strdup(title);
@@ -4388,13 +4523,15 @@ void form_init(struct form *f, const char *title, void (*form_close)(struct teln
 /**
  * define a message to be displayed on start.
  */
-void form_setmessage(struct form *f, const char *message)
+void
+form_setmessage(struct form *f, const char *message)
 {
 	f->message = message;
 }
 
 /** undocumented - please add documentation. */
-void form_free(struct form *f)
+void
+form_free(struct form *f)
 {
 	struct formitem *curr;
 
@@ -4418,7 +4555,8 @@ void form_free(struct form *f)
 }
 
 /** undocumented - please add documentation. */
-void form_additem(struct form *f, unsigned flags, const char *name, const char *prompt, const char *description, int (*form_check)(struct telnetclient *cl, const char *str))
+void
+form_additem(struct form *f, unsigned flags, const char *name, const char *prompt, const char *description, int (*form_check)(struct telnetclient *cl, const char *str))
 {
 	struct formitem *newitem;
 
@@ -4440,7 +4578,8 @@ void form_additem(struct form *f, unsigned flags, const char *name, const char *
 }
 
 /** undocumented - please add documentation. */
-static struct formitem *form_getitem(struct form *f, const char *name)
+static struct formitem *
+form_getitem(struct form *f, const char *name)
 {
 	struct formitem *curr;
 
@@ -4462,7 +4601,8 @@ static struct formitem *form_getitem(struct form *f, const char *name)
 /**
  * look up the user value from a form.
  */
-static const char *form_getvalue(const struct form *f, unsigned nr_value, char **value, const char *name)
+static const char *
+form_getvalue(const struct form *f, unsigned nr_value, char **value, const char *name)
 {
 	const struct formitem *curr;
 
@@ -4482,7 +4622,8 @@ static const char *form_getvalue(const struct form *f, unsigned nr_value, char *
 }
 
 /** undocumented - please add documentation. */
-static void form_menu_show(struct telnetclient *cl, const struct form *f, struct form_state *fs)
+static void
+form_menu_show(struct telnetclient *cl, const struct form *f, struct form_state *fs)
 {
 	const struct formitem *curr;
 	unsigned i;
@@ -4512,7 +4653,8 @@ static void form_menu_show(struct telnetclient *cl, const struct form *f, struct
 }
 
 /** undocumented - please add documentation. */
-static void form_lineinput(struct telnetclient *cl, const char *line)
+static void
+form_lineinput(struct telnetclient *cl, const char *line)
 {
 	struct form_state *fs = &cl->state.form;
 	const struct form *f = fs->form;
@@ -4554,7 +4696,8 @@ static void form_lineinput(struct telnetclient *cl, const char *line)
 }
 
 /** undocumented - please add documentation. */
-static void form_menu_lineinput(struct telnetclient *cl, const char *line)
+static void
+form_menu_lineinput(struct telnetclient *cl, const char *line)
 {
 	struct form_state *fs = &cl->state.form;
 	const struct form *f = fs->form;
@@ -4603,7 +4746,8 @@ static void form_menu_lineinput(struct telnetclient *cl, const char *line)
 }
 
 /** undocumented - please add documentation. */
-static void form_state_free(struct telnetclient *cl)
+static void
+form_state_free(struct telnetclient *cl)
 {
 	struct form_state *fs = &cl->state.form;
 	unsigned i;
@@ -4628,7 +4772,8 @@ static void form_state_free(struct telnetclient *cl)
 }
 
 /** undocumented - please add documentation. */
-void form_state_init(struct form_state *fs, const struct form *f)
+void
+form_state_init(struct form_state *fs, const struct form *f)
 {
 	fs->form = f;
 	fs->nr_value = 0;
@@ -4637,7 +4782,8 @@ void form_state_init(struct form_state *fs, const struct form *f)
 }
 
 /** undocumented - please add documentation. */
-static int form_createaccount_username_check(struct telnetclient *cl, const char *str)
+static int
+form_createaccount_username_check(struct telnetclient *cl, const char *str)
 {
 	int res;
 	size_t len;
@@ -4681,7 +4827,8 @@ failure:
 	return 0;
 }
 
-static int form_createaccount_password_check(struct telnetclient *cl, const char *str)
+static int
+form_createaccount_password_check(struct telnetclient *cl, const char *str)
 {
 	TRACE_ENTER();
 
@@ -4701,7 +4848,8 @@ static int form_createaccount_password_check(struct telnetclient *cl, const char
 }
 
 /** verify that the second password entry matches the first */
-static int form_createaccount_password2_check(struct telnetclient *cl, const char *str)
+static int
+form_createaccount_password2_check(struct telnetclient *cl, const char *str)
 {
 	const char *password1;
 	struct form_state *fs = &cl->state.form;
@@ -4726,7 +4874,8 @@ static int form_createaccount_password2_check(struct telnetclient *cl, const cha
 }
 
 /** undocumented - please add documentation. */
-static void form_createaccount_close(struct telnetclient *cl, struct form_state *fs)
+static void
+form_createaccount_close(struct telnetclient *cl, struct form_state *fs)
 {
 	const char *username, *password, *email;
 	struct user *u;
@@ -4759,7 +4908,8 @@ static void form_createaccount_close(struct telnetclient *cl, struct form_state 
 }
 
 /** undocumented - please add documentation. */
-static void form_start(void *p, long unused2 UNUSED, void *form)
+static void
+form_start(void *p, long unused2 UNUSED, void *form)
 {
 	struct telnetclient *cl = p;
 	struct form *f = form;
@@ -4790,7 +4940,8 @@ static void form_start(void *p, long unused2 UNUSED, void *form)
 }
 
 /** undocumented - please add documentation. */
-static void form_createaccount_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
+static void
+form_createaccount_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
 {
 	form_start(p, 0, form_newuser_app);
 }
@@ -4920,7 +5071,8 @@ struct form *form_load_from_file(const char *filename, void (*form_close)(struct
 }
 
 /** undocumented - please add documentation. */
-int form_module_init(void)
+int
+form_module_init(void)
 {
 	struct formitem *fi;
 
@@ -4964,7 +5116,8 @@ int form_module_init(void)
 }
 
 /** undocumented - please add documentation. */
-void form_module_shutdown(void)
+void
+form_module_shutdown(void)
 {
 	form_free(form_newuser_app);
 	free(form_newuser_app);
@@ -4976,7 +5129,8 @@ void form_module_shutdown(void)
  ******************************************************************************/
 
 /** undocumented - please add documentation. */
-int game_init(void)
+int
+game_init(void)
 {
 	if (worldclock_init())
 		return 0;
@@ -5003,7 +5157,8 @@ int game_init(void)
  ******************************************************************************/
 
 /* return 0 if more data is needed. return -1 on error. */
-static int http_parse(const char *request, size_t len)
+static int
+http_parse(const char *request, size_t len)
 {
 	const char *s, *end;
 
@@ -5174,7 +5329,8 @@ static struct socketio_handle *webserver_listen_handle;
 /**
  * marks a webserver socket as needing to be reaped.
  */
-static void webserver_close(struct webserver *ws)
+static void
+webserver_close(struct webserver *ws)
 {
 	if (ws && ws->sh && !ws->sh->delete_flag) {
 		ws->sh->delete_flag = 1; /* cause deletetion later */
@@ -5185,7 +5341,8 @@ static void webserver_close(struct webserver *ws)
 /**
  * try to fill the input buffers on a read-ready event.
  */
-static void webserver_read_event(struct socketio_handle *sh, SOCKET fd, void *extra)
+static void
+webserver_read_event(struct socketio_handle *sh, SOCKET fd, void *extra)
 {
 	struct webserver *ws = extra;
 	int res;
@@ -5244,17 +5401,18 @@ static void webserver_read_event(struct socketio_handle *sh, SOCKET fd, void *ex
 /**
  * empty the buffers into a socket on a write-ready event.
  */
-static void webserver_write_event(struct socketio_handle *sh, SOCKET fd, void *extra)
+static void
+webserver_write_event(struct socketio_handle *sh, SOCKET fd, void *extra)
 {
 	struct webserver *ws = extra;
 	int res;
 	const char data[] =
-		"HTTP/1.1 200 OK\r\n"
-		"Server: " __FILE__ "\r\n"
-		"Connection: close\r\n"
-		"Content-Type: text/plain\r\n"
-		"\r\n"
-		"Hello World. This is my webserver!\r\n";
+	        "HTTP/1.1 200 OK\r\n"
+	        "Server: " __FILE__ "\r\n"
+	        "Connection: close\r\n"
+	        "Content-Type: text/plain\r\n"
+	        "\r\n"
+	        "Hello World. This is my webserver!\r\n";
 	size_t data_len = strlen(data);
 
 	assert(sh != NULL);
@@ -5292,7 +5450,8 @@ static void webserver_write_event(struct socketio_handle *sh, SOCKET fd, void *e
 /**
  * free a struct webserver client connection.
  */
-static void webserver_free(struct socketio_handle *sh, void *p)
+static void
+webserver_free(struct socketio_handle *sh, void *p)
 {
 	struct webserver *ws = p;
 
@@ -5315,7 +5474,8 @@ static void webserver_free(struct socketio_handle *sh, void *p)
 /**
  * creates a new webserver client connections from a socketio_handle.
  */
-static struct webserver *webserver_newclient(struct socketio_handle *sh)
+static struct webserver *
+webserver_newclient(struct socketio_handle *sh)
 {
 	struct webserver *ws;
 	ws = calloc(1, sizeof * ws);
@@ -5336,7 +5496,8 @@ static struct webserver *webserver_newclient(struct socketio_handle *sh)
 /**
  * create a new webserver on a new connection event from a listening socket.
  */
-static void webserver_new_event(struct socketio_handle *sh)
+static void
+webserver_new_event(struct socketio_handle *sh)
 {
 	struct webserver *ws; /**< client connected to our webserver. */
 
@@ -5347,7 +5508,8 @@ static void webserver_new_event(struct socketio_handle *sh)
 /**
  * initialize the webserver module by binding a listening socket for the server.
  */
-int webserver_init(int family, unsigned port)
+int
+webserver_init(int family, unsigned port)
 {
 	char port_str[16];
 	snprintf(port_str, sizeof port_str, "%u", port);
@@ -5363,7 +5525,8 @@ int webserver_init(int family, unsigned port)
 /**
  * delete the the server's socketio_handle.
  */
-void webserver_shutdown(void)
+void
+webserver_shutdown(void)
 {
 	if (webserver_listen_handle) {
 		webserver_listen_handle->delete_flag = 1;
@@ -5377,7 +5540,8 @@ void webserver_shutdown(void)
  ******************************************************************************/
 
 /** undocumented - please add documentation. */
-static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
+static int
+do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
 {
 	char **target;
 	size_t len;
@@ -5402,7 +5566,8 @@ static int do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const
 }
 
 /** undocumented - please add documentation. */
-static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
+static int
+do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
 {
 	size_t len;
 	unsigned i;
@@ -5438,7 +5603,8 @@ static int do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const ch
 }
 
 /** undocumented - please add documentation. */
-static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
+static int
+do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
 {
 	unsigned i;
 	const struct {
@@ -5474,7 +5640,8 @@ static int do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, cons
 }
 
 /** undocumented - please add documentation. */
-static int do_config_string(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value)
+static int
+do_config_string(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value)
 {
 	char **target = extra;
 	assert(value != NULL);
@@ -5489,7 +5656,8 @@ static int do_config_string(struct config *cfg UNUSED, void *extra, const char *
 /**
  * @brief handles the 'server.port' property.
  */
-static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
+static int
+do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
 {
 	if (!socketio_listen(mud_config.default_family, SOCK_STREAM, NULL, value, telnetclient_new_event)) {
 		ERROR_FMT("problem with config option '%s' = '%s'\n", id, value);
@@ -5500,7 +5668,8 @@ static int do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const c
 }
 
 /** undocumented - please add documentation. */
-static int do_config_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value)
+static int
+do_config_uint(struct config *cfg UNUSED, void *extra, const char *id UNUSED, const char *value)
 {
 	char *endptr;
 	unsigned *uint_p = extra;
@@ -5526,7 +5695,8 @@ static int do_config_uint(struct config *cfg UNUSED, void *extra, const char *id
 /**
  * intialize default configuration. Config file overrides these defaults.
  */
-void mud_config_init(void)
+void
+mud_config_init(void)
 {
 	mud_config.config_filename = strdup("boris.cfg");
 	mud_config.menu_prompt = strdup("Selection: ");
@@ -5561,7 +5731,8 @@ void mud_config_init(void)
 /**
  * free all configuration data.
  */
-void mud_config_shutdown(void)
+void
+mud_config_shutdown(void)
 {
 	char **targets[] = {
 		&mud_config.menu_prompt,
@@ -5597,7 +5768,8 @@ void mud_config_shutdown(void)
 
 #if !defined(NDEBUG) && !defined(NTEST)
 /** test routine to dump a config option. */
-static int mud_config_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
+static int
+mud_config_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
 {
 	printf("MUD-CONFIG: %s=%s\n", id, value);
 
@@ -5609,7 +5781,8 @@ static int mud_config_show(struct config *cfg UNUSED, void *extra UNUSED, const 
  * setup config loging callback functions then reads in a configuration file.
  * @return 0 on failure, 1 on success.
  */
-int mud_config_process(void)
+int
+mud_config_process(void)
 {
 	struct config cfg;
 

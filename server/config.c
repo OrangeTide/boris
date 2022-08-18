@@ -40,13 +40,15 @@
 #include "boris.h"
 
 /** initialize a config handle. */
-void config_setup(struct config *cfg)
+void
+config_setup(struct config *cfg)
 {
 	LIST_INIT(&cfg->watchers);
 }
 
 /** free a config handle. */
-void config_free(struct config *cfg)
+void
+config_free(struct config *cfg)
 {
 	struct config_watcher *curr;
 	assert(cfg != NULL);
@@ -63,7 +65,8 @@ void config_free(struct config *cfg)
  * func can return 0 to end the chain, or return 1 if the operation should
  * continue on
  */
-void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value), void *extra)
+void
+config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value), void *extra)
 {
 	struct config_watcher *w;
 	assert(mask != NULL);
@@ -78,7 +81,8 @@ void config_watch(struct config *cfg, const char *mask, int (*func)(struct confi
 /** load a configuration using a config handle.
  * a config handle is a set of callbacks and wildcards.
  * */
-int config_load(const char *filename, struct config *cfg)
+int
+config_load(const char *filename, struct config *cfg)
 {
 	char buf[1024];
 	FILE *f;
@@ -190,14 +194,16 @@ failure:
 
 #ifndef NTEST
 /** test routine to dump a config option. */
-static int config_test_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
+static int
+config_test_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
 {
 	printf("CONFIG SHOW: %s=%s\n", id, value);
 	return 1;
 }
 
 /** test the config system. */
-void config_test(void)
+void
+config_test(void)
 {
 	struct config cfg;
 	config_setup(&cfg);

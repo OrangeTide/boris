@@ -72,7 +72,8 @@
  * Main - Option parsing and initialization
  ******************************************************************************/
 
-void show_version(void)
+void
+show_version(void)
 {
 	puts("Version " BORIS_VERSION_STR " (built " __DATE__ ")");
 }
@@ -85,7 +86,8 @@ static sig_atomic_t keep_going_fl = 1;
 /**
  * signal handler to cause the main loop to terminated by clearing keep_going_fl.
  */
-static void sh_quit(int s UNUSED)
+static void
+sh_quit(int s UNUSED)
 {
 	keep_going_fl = 0;
 }
@@ -93,7 +95,8 @@ static void sh_quit(int s UNUSED)
 /**
  * display a program usage message and terminated with an exit code.
  */
-static void usage(void)
+static void
+usage(void)
 {
 	fprintf(stderr,
 	        "usage: boris [-h46] [-p port]\n"
@@ -109,7 +112,8 @@ static void usage(void)
  * @param ch flag currently processing, used for printing error message.
  * @param next_arg string holding the next argument, or NULL if no argument.
  */
-static void need_parameter(int ch, const char *next_arg)
+static void
+need_parameter(int ch, const char *next_arg)
 {
 	if (!next_arg) {
 		ERROR_FMT("option -%c takes a parameter\n", ch);
@@ -124,7 +128,8 @@ static void need_parameter(int ch, const char *next_arg)
  * @param next_arg following argument.
  * @return 0 if the following argument is not consumed. 1 if the argument was used.
  */
-static int process_flag(int ch, const char *next_arg)
+static int
+process_flag(int ch, const char *next_arg)
 {
 	switch(ch) {
 	case '4':
@@ -171,7 +176,8 @@ static int process_flag(int ch, const char *next_arg)
  * @param argc count of arguments.
  * @param argv array of strings holding the arguments.
  */
-static void process_args(int argc, char **argv)
+static void
+process_args(int argc, char **argv)
 {
 	int i, j;
 
@@ -194,7 +200,8 @@ static void process_args(int argc, char **argv)
 /**
  * main - where it all starts.
  */
-int main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
 	show_version();
 

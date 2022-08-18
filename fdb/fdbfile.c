@@ -3,33 +3,24 @@
  *
  * fdb - database using text files as the backend.
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2020 Apr 27
+ * @author Jon Mayo <jon@rm-f.net>
+ * @date 2022 Aug 17
  *
- * Copyright (c) 2009-2020, Jon Mayo
+ * Copyright (c) 2009-2022, Jon Mayo <jon@rm-f.net>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation are
- * those of the authors and should not be interpreted as representing official
- * policies, either expressed or implied, of the Boris MUD project.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #include "fdb.h"
 #include "boris.h"
 #include "logging.h"
@@ -90,7 +81,8 @@ struct fdb_iterator {
 /**
  * return true if 2 characters are valid hexidecimal.
  */
-static int ishex(const char code[2])
+static int
+ishex(const char code[2])
 {
 	return isxdigit(code[0]) && isxdigit(code[0]);
 }
@@ -98,7 +90,8 @@ static int ishex(const char code[2])
 /**
  * verify with ishex() before calling.
  */
-static unsigned unhex(const char code[2])
+static unsigned
+unhex(const char code[2])
 {
 	const char hextab[] = {
 		['0'] = 0, ['1'] = 1, ['2'] = 2, ['3'] = 3, ['4'] = 4,
@@ -113,7 +106,8 @@ static unsigned unhex(const char code[2])
 /**
  * process %XX escapes in-place. removes trailing whitespace too.
  */
-static void unescape(char *str)
+static void
+unescape(char *str)
 {
 	char *e;
 
@@ -146,7 +140,8 @@ static void unescape(char *str)
 /**
  * generate the directory used for a domain.
  */
-static char *fdb_basepath(const char *domain)
+static char *
+fdb_basepath(const char *domain)
 {
 	char path[PATH_MAX];
 
@@ -158,7 +153,8 @@ static char *fdb_basepath(const char *domain)
 /**
  * creates a filename name.
  */
-static char *fdb_makepath(const char *domain, const char *id)
+static char *
+fdb_makepath(const char *domain, const char *id)
 {
 	char path[PATH_MAX];
 
@@ -170,7 +166,8 @@ static char *fdb_makepath(const char *domain, const char *id)
 /**
  * creates a temporary name.
  */
-static char *fdb_makepath_tmp(const char *domain, const char *id)
+static char *
+fdb_makepath_tmp(const char *domain, const char *id)
 {
 	char path[PATH_MAX];
 
@@ -183,7 +180,8 @@ static char *fdb_makepath_tmp(const char *domain, const char *id)
  * checks to see if filename is a temp filename.
  * must work with or without a path part.
  */
-static int fdb_istempname(const char *filename)
+static int
+fdb_istempname(const char *filename)
 {
 	size_t len, extlen = strlen(".tmp");
 
@@ -201,7 +199,8 @@ static int fdb_istempname(const char *filename)
 /**
  * frees a write handle. assumes f has already been closed.
  */
-static void fdb_write_handle_free(struct fdb_write_handle *h)
+static void
+fdb_write_handle_free(struct fdb_write_handle *h)
 {
 	free(h->filename_tmp);
 	h->filename_tmp = NULL;
@@ -215,7 +214,8 @@ static void fdb_write_handle_free(struct fdb_write_handle *h)
 /**
  * frees a read handle. assumes f has already been closed.
  */
-static void fdb_read_handle_free(struct fdb_read_handle *h)
+static void
+fdb_read_handle_free(struct fdb_read_handle *h)
 {
 	free(h->filename);
 	h->filename = NULL;
@@ -228,7 +228,8 @@ static void fdb_read_handle_free(struct fdb_read_handle *h)
  * modifies line and points name and value to the correct positions.
  * dequotes the value portion.
  */
-static int fdb_parse_line(char *line, const char **name, const char **value)
+static int
+fdb_parse_line(char *line, const char **name, const char **value)
 {
 	char *e, *b;
 
@@ -271,7 +272,8 @@ static int fdb_parse_line(char *line, const char **name, const char **value)
  * initializes a domain.
  * (creates a directory to hold files)
  */
-int fdb_domain_init(const char *domain)
+int
+fdb_domain_init(const char *domain)
 {
 	char *pathname;
 	pathname = fdb_basepath(domain);
@@ -328,7 +330,8 @@ struct fdb_write_handle *fdb_write_begin_uint(const char *domain, unsigned id)
  * write a string to an open record.
  * you can only use a name once per transaction (begin/end)
  */
-int fdb_write_pair(struct fdb_write_handle *h, const char *name, const char *value_str)
+int
+fdb_write_pair(struct fdb_write_handle *h, const char *name, const char *value_str)
 {
 	int res;
 	size_t escaped_len, i;
@@ -388,7 +391,8 @@ int fdb_write_pair(struct fdb_write_handle *h, const char *name, const char *val
  * you can only use a name once per transaction (begin/end)
  * @todo make this interface not limit the value.
  */
-int fdb_write_format(struct fdb_write_handle *h, const char *name, const char *value_fmt, ...)
+int
+fdb_write_format(struct fdb_write_handle *h, const char *name, const char *value_fmt, ...)
 {
 	char buf[FDB_VALUE_MAX]; /**< holds the largest possible value. */
 	va_list ap;
@@ -406,7 +410,8 @@ int fdb_write_format(struct fdb_write_handle *h, const char *name, const char *v
 /**
  * move the temp file over the real file then close it.
  */
-int fdb_write_end(struct fdb_write_handle *h)
+int
+fdb_write_end(struct fdb_write_handle *h)
 {
 	char *filename;
 
@@ -460,7 +465,8 @@ int fdb_write_end(struct fdb_write_handle *h)
  * terminate the creation of this record.
  * it is still necessary to call fdb_write_end()
  */
-void fdb_write_abort(struct fdb_write_handle *h)
+void
+fdb_write_abort(struct fdb_write_handle *h)
 {
 	h->error_fl = 1;
 }
@@ -506,7 +512,8 @@ struct fdb_read_handle *fdb_read_begin_uint(const char *domain, unsigned id)
 /**
  * read a line of data from the file.
  */
-int fdb_read_next(struct fdb_read_handle *h, const char **name, const char **value)
+int
+fdb_read_next(struct fdb_read_handle *h, const char **name, const char **value)
 {
 	size_t ofs, newofs;
 
@@ -561,7 +568,8 @@ int fdb_read_next(struct fdb_read_handle *h, const char **name, const char **val
 /**
  * end reading process, close the file and free the handle.
  */
-int fdb_read_end(struct fdb_read_handle *h)
+int
+fdb_read_end(struct fdb_read_handle *h)
 {
 	int ret;
 
@@ -621,7 +629,8 @@ struct fdb_iterator *fdb_iterator_begin(const char *domain)
  * get id of record.
  * return NULL if no more ids.
  */
-const char *fdb_iterator_next(struct fdb_iterator *it)
+const char *
+fdb_iterator_next(struct fdb_iterator *it)
 {
 	struct dirent *de;
 	struct stat st;
@@ -673,7 +682,8 @@ next:
 /**
  * finish the iterator.
  */
-void fdb_iterator_end(struct fdb_iterator *it)
+void
+fdb_iterator_end(struct fdb_iterator *it)
 {
 	assert(it != NULL);
 	closedir(it->d);
@@ -686,7 +696,8 @@ void fdb_iterator_end(struct fdb_iterator *it)
 	free(it);
 }
 
-int fdb_initialize(void)
+int
+fdb_initialize(void)
 {
 	fprintf(stderr, "loaded %s\n", "fdb");
 	b_log(B_LOG_INFO, "logging", "FDB-file system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
@@ -694,19 +705,22 @@ int fdb_initialize(void)
 	return 0;
 }
 
-void fdb_shutdown(void)
+void
+fdb_shutdown(void)
 {
 }
 
 /* compile with STAND_ALONE_TEST for unit test. */
 #ifdef STAND_ALONE_TEST
-static int fdb_test1(void)
+static int
+fdb_test1(void)
 {
 	struct fdb_write_handle *h;
 
 	fdb_domain_init("room");
 
 	h = fdb_write_begin("room", "123");
+
 	if (!h)
 		return 0;
 
@@ -719,12 +733,14 @@ static int fdb_test1(void)
 	return 1;
 }
 
-static int fdb_test2(void)
+static int
+fdb_test2(void)
 {
 	struct fdb_iterator *it;
 	const char *id;
 
 	it = fdb_iterator_begin("users");
+
 	if (!it)
 		return 0;
 
@@ -737,7 +753,8 @@ static int fdb_test2(void)
 	return 1;
 }
 
-static int fdb_test3(void)
+static int
+fdb_test3(void)
 {
 	struct fdb_read_handle *h;
 	const char *name, *id;
@@ -765,7 +782,8 @@ static int fdb_test3(void)
 /**
  * domain/id/name=value
  */
-int main()
+int
+main()
 {
 	fdb_initialize();
 

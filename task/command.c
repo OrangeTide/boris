@@ -51,7 +51,8 @@
  ******************************************************************************/
 
 /** action callback to do the "pose" command. */
-int command_do_pose(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_pose(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in current room");
@@ -61,7 +62,8 @@ int command_do_pose(struct telnetclient *cl, struct user *u UNUSED, const char *
 }
 
 /** action callback to do the "yell" command. */
-int command_do_yell(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_yell(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in yelling distance");
@@ -71,7 +73,8 @@ int command_do_yell(struct telnetclient *cl, struct user *u UNUSED, const char *
 }
 
 /** action callback to do the "say" command. */
-int command_do_say(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_say(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	struct channel *ch;
 	struct channel_member *exclude_list[1];
@@ -85,7 +88,8 @@ int command_do_say(struct telnetclient *cl, struct user *u UNUSED, const char *c
 }
 
 /** action callback to do the "emote" command. */
-int command_do_emote(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_emote(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	TODO("Get user name");
 	TODO("Broadcast to everyone in current room");
@@ -95,7 +99,8 @@ int command_do_emote(struct telnetclient *cl, struct user *u UNUSED, const char 
 }
 
 /** action callback to do the "chsay" command. */
-int command_do_chsay(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_chsay(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	TODO("pass the channel name in a way that makes sense");
 	TODO("Get user name");
@@ -106,7 +111,8 @@ int command_do_chsay(struct telnetclient *cl, struct user *u UNUSED, const char 
 }
 
 /** action callback to do the "quit" command. */
-int command_do_quit(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
+int
+command_do_quit(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
 	/** @todo
 	 * the close code needs to change the state so telnetclient_isstate
@@ -118,7 +124,8 @@ int command_do_quit(struct telnetclient *cl, struct user *u UNUSED, const char *
 }
 
 /** action callback to do the "roomget" command. */
-int command_do_roomget(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_roomget(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	struct room *r;
 	char roomnum_str[64];
@@ -152,7 +159,8 @@ int command_do_roomget(struct telnetclient *cl, struct user *u UNUSED, const cha
 }
 
 /** action callback to do the "char" command. */
-int command_do_character(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_character(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	struct character *ch;
 	char act[64];
@@ -208,7 +216,8 @@ int command_do_character(struct telnetclient *cl, struct user *u UNUSED, const c
 }
 
 /** action callback to do the "quit" command. */
-int command_do_time(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
+int
+command_do_time(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
 	show_gametime(cl);
 
@@ -216,7 +225,8 @@ int command_do_time(struct telnetclient *cl, struct user *u UNUSED, const char *
 }
 
 /** action callback to remote that a command is not implemented. */
-static int command_not_implemented(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
+static int
+command_not_implemented(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
 	telnetclient_puts(cl, "Not implemented\n");
 
@@ -267,7 +277,8 @@ static const struct command_short_table {
 /**
  * use cmd to run a command from the command_table array.
  */
-static int command_run(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg)
+static int
+command_run(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg)
 {
 	unsigned i;
 
@@ -286,7 +297,8 @@ static int command_run(struct telnetclient *cl, struct user *u, const char *cmd,
 /**
  * executes a command for user u.
  */
-static int command_execute(struct telnetclient *cl, struct user *u, const char *line)
+static int
+command_execute(struct telnetclient *cl, struct user *u, const char *line)
 {
 	char cmd[64];
 	const char *e, *arg;
@@ -345,7 +357,8 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 }
 
 /** callback to process line input. */
-static void command_lineinput(struct telnetclient *cl, const char *line)
+static void
+command_lineinput(struct telnetclient *cl, const char *line)
 {
 	assert(cl != NULL);
 	DEBUG("%s:entered command '%s'\n", telnetclient_username(cl), line);
@@ -363,7 +376,8 @@ static void command_lineinput(struct telnetclient *cl, const char *line)
 }
 
 /** start line input mode and send it to command_lineinput. */
-static void command_start_lineinput(struct telnetclient *cl)
+static void
+command_start_lineinput(struct telnetclient *cl)
 {
 	const struct terminal *term = telnetclient_get_terminal(cl);
 
@@ -376,7 +390,8 @@ static void command_start_lineinput(struct telnetclient *cl)
 }
 
 /** wrapper callback for a menuitem to start command mode. */
-void command_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
+void
+command_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
 {
 	command_start_lineinput(p);
 }
