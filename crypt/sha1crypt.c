@@ -3,10 +3,10 @@
  *
  * SHA-1 password hashing
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
+ * @author Jon Mayo <jon@rm-f.net>
  * @date 2019 Dec 25
  *
- * Written in 2009 by Jon Mayo <jon.mayo@gmail.com>
+ * Written in 2009 by Jon Mayo <jon@rm-f.net>
  *
  * To the extent possible under law, the author(s) have dedicated all copyright
  * and related and neighboring rights to this software to the public domain
