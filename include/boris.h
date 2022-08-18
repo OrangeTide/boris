@@ -55,6 +55,7 @@ struct form_state;
  ******************************************************************************/
 #include <stdarg.h>
 #include <sys/socket.h>
+#include <string.h>
 
 #include "mudconfig.h"
 #include "list.h"
@@ -101,15 +102,6 @@ struct form_state;
 #  define BORIS_VERSION_STR \
 	_make_string(BORIS_VERSION_MAJ) "." \
 	_make_string(BORIS_VERSION_MIN)
-#endif
-
-/* controls how external functions are exported */
-#ifndef NDEBUG
-/** tag a function as being an exported symbol. */
-#define EXPORT
-#else
-/** fake out the export and keep the functions internal. */
-#define EXPORT static
 #endif
 
 /*=* Byte-order functions *=*/
@@ -328,6 +320,8 @@ struct channel_member {
 	void *p;
 };
 
+struct heapqueue_elm;
+
 /******************************************************************************
  * Global variables
  ******************************************************************************/
@@ -348,6 +342,11 @@ int parse_str(const char *name, const char *value, char **str_p);
 int parse_attr(const char *name, const char *value, struct attr_list *al);
 int value_set(const char *value, enum value_type type, void *p);
 const char *value_get(enum value_type type, void *p);
+
+int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret);
+void heapqueue_enqueue(struct heapqueue_elm *elm);
+int heapqueue_dequeue(struct heapqueue_elm *ret);
+void heapqueue_test(void);
 
 void freelist_init(struct freelist *fl);
 void freelist_free(struct freelist *fl);

@@ -30,6 +30,13 @@ file(GLOB mud_SOURCES
 
 add_executable(mud ${mud_SOURCES})
 
+target_compile_options(mud
+	PRIVATE -Wall -W -O2
+	PUBLIC -flto -g)
+target_compile_definitions(mud
+	PRIVATE NTEST
+	PRIVATE NDEBUG)
+
 target_link_libraries(mud
 	PRIVATE Threads::Threads
 	PUBLIC telnet

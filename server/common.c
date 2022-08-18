@@ -448,7 +448,7 @@ static const char *util_convertnumber(unsigned n, unsigned base, unsigned pad)
 #define SHVAR_ESCAPE '$'
 
 /** evaluate "shell variables", basically expand ${FOO} in a string. */
-EXPORT int shvar_eval(char *out, size_t len, const char *src, const char *(*match)(const char *key))
+int shvar_eval(char *out, size_t len, const char *src, const char *(*match)(const char *key))
 {
 	const char *old;
 	char key[SHVAR_ID_MAX];
@@ -625,7 +625,7 @@ static int heapqueue_ll_siftup(unsigned i, struct heapqueue_elm *elm)
 
 /**
  * removes entry at i. */
-EXPORT int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret)
+int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret)
 {
 	/* 1. copy the value at i into ret
 	 * 2. put last node into empty position
@@ -688,7 +688,7 @@ EXPORT int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret)
  * -# Compare the added element with its parent; if they are in the correct order, stop.
  * -# If not, swap the element with its parent and return to the previous step.
  */
-EXPORT void heapqueue_enqueue(struct heapqueue_elm *elm)
+void heapqueue_enqueue(struct heapqueue_elm *elm)
 {
 	unsigned i;
 	assert(elm != NULL);
@@ -703,7 +703,7 @@ EXPORT void heapqueue_enqueue(struct heapqueue_elm *elm)
  * sift-down operation for dequeueing.
  * removes the root entry and copies it to ret.
  */
-EXPORT int heapqueue_dequeue(struct heapqueue_elm *ret)
+int heapqueue_dequeue(struct heapqueue_elm *ret)
 {
 	unsigned i;
 	assert(ret != NULL);
@@ -753,7 +753,7 @@ static void heapqueue_dump(void)
 }
 
 /** test the heapqueue system. */
-EXPORT void heapqueue_test(void)
+void heapqueue_test(void)
 {
 	struct heapqueue_elm elm, tmp;
 	unsigned i;
@@ -1118,7 +1118,7 @@ int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count)
 
 #ifndef NTEST
 /** test the freelist. */
-EXPORT void freelist_test(void)
+void freelist_test(void)
 {
 	struct freelist fl;
 	unsigned n;
@@ -1204,7 +1204,7 @@ struct bitmap {
 /**
  * initialize an bitmap structure to be empty.
  */
-EXPORT void bitmap_init(struct bitmap *bitmap)
+void bitmap_init(struct bitmap *bitmap)
 {
 	assert(bitmap != NULL);
 	bitmap->bitmap = 0;
@@ -1214,7 +1214,7 @@ EXPORT void bitmap_init(struct bitmap *bitmap)
 /**
  * free a bitmap structure.
  */
-EXPORT void bitmap_free(struct bitmap *bitmap)
+void bitmap_free(struct bitmap *bitmap)
 {
 	assert(bitmap != NULL); /* catch when calling free on NULL */
 
@@ -1229,7 +1229,7 @@ EXPORT void bitmap_free(struct bitmap *bitmap)
  * @param bitmap the bitmap structure.
  * @param newbits is in bits (not bytes).
  */
-EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits)
+int bitmap_resize(struct bitmap *bitmap, size_t newbits)
 {
 	unsigned *tmp;
 
@@ -1261,7 +1261,7 @@ EXPORT int bitmap_resize(struct bitmap *bitmap, size_t newbits)
  * @param ofs first bit to clear.
  * @param len number of bits to clear.
  */
-EXPORT void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len)
+void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len)
 {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
@@ -1301,7 +1301,7 @@ EXPORT void bitmap_clear(struct bitmap *bitmap, unsigned ofs, unsigned len)
  * @param ofs first bit to set.
  * @param len number of bits to set.
  */
-EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len)
+void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len)
 {
 	unsigned *p, mask;
 	unsigned head_ofs, head_len;
@@ -1340,7 +1340,7 @@ EXPORT void bitmap_set(struct bitmap *bitmap, unsigned ofs, unsigned len)
  * @param ofs the index of the bit.
  * @return 0 or 1 depending on value of the bit.
  */
-EXPORT int bitmap_get(struct bitmap *bitmap, unsigned ofs)
+int bitmap_get(struct bitmap *bitmap, unsigned ofs)
 {
 	if (ofs < bitmap->bitmap_allocbits) {
 		return (bitmap->bitmap[ofs / BITMAP_BITSIZE] >> (ofs % BITMAP_BITSIZE)) & 1;
@@ -1355,7 +1355,7 @@ EXPORT int bitmap_get(struct bitmap *bitmap, unsigned ofs)
  * @param ofs the index of the bit to begin scanning.
  * @return the position of the next set bit. -1 if the end of the bits was reached
  */
-EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs)
+int bitmap_next_set(struct bitmap *bitmap, unsigned ofs)
 {
 	unsigned i, len, bofs;
 	assert(bitmap != NULL);
@@ -1381,7 +1381,7 @@ EXPORT int bitmap_next_set(struct bitmap *bitmap, unsigned ofs)
  * @param ofs the index of the bit to begin scanning.
  * @return the position of the next cleared bit. -1 if the end of the bits was reached
  */
-EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs)
+int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs)
 {
 	unsigned i, len, bofs;
 	assert(bitmap != NULL);
@@ -1408,7 +1408,7 @@ EXPORT int bitmap_next_clear(struct bitmap *bitmap, unsigned ofs)
  * @param d a buffer to use for initializing the bitmap.
  * @param len length in bytes of the buffer d.
  */
-EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len)
+void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len)
 {
 	unsigned *p, word_count, i;
 
@@ -1451,7 +1451,7 @@ EXPORT void bitmap_loadmem(struct bitmap *bitmap, unsigned char *d, size_t len)
  * Get the length (in bytes) of the bitmap table.
  * @return the length in bytes of the entire bitmap table.
  */
-EXPORT unsigned bitmap_length(struct bitmap *bitmap)
+unsigned bitmap_length(struct bitmap *bitmap)
 {
 	return bitmap ? ROUNDUP(bitmap->bitmap_allocbits, CHAR_BIT) / CHAR_BIT : 0;
 }
@@ -1460,7 +1460,7 @@ EXPORT unsigned bitmap_length(struct bitmap *bitmap)
 /**
  * unit tests for struct bitmap data structure.
  */
-EXPORT void bitmap_test(void)
+void bitmap_test(void)
 {
 	int i;
 	struct bitmap bitmap;
@@ -1896,8 +1896,8 @@ static struct freelist user_id_freelist;
 
 /*=* user:prototypes. *=*/
 
-EXPORT int user_illegal(const char *username);
-EXPORT int user_exists(const char *username);
+int user_illegal(const char *username);
+int user_exists(const char *username);
 
 /*=* user:internal functions *=*/
 
@@ -2086,7 +2086,7 @@ static int user_write(const struct user *u)
 /** test to see if a username is illegal.
  * username must start with a letter. Remaining character can only be letters,
  * numbers, and _ */
-EXPORT int user_illegal(const char *username)
+int user_illegal(const char *username)
 {
 	const char *s;
 
@@ -2107,7 +2107,7 @@ EXPORT int user_illegal(const char *username)
 }
 
 /** test to see if a user exists. */
-EXPORT int user_exists(const char *username)
+int user_exists(const char *username)
 {
 	struct userdb_entry *curr;
 
@@ -2130,7 +2130,7 @@ EXPORT int user_exists(const char *username)
 /**
  * loads a user into the cache.
  */
-EXPORT struct user *user_lookup(const char *username)
+struct user *user_lookup(const char *username)
 {
 	struct userdb_entry *curr;
 
@@ -2158,7 +2158,7 @@ EXPORT struct user *user_lookup(const char *username)
 }
 
 /** create a user and initialize the password. */
-EXPORT struct user *user_create(const char *username, const char *password, const char *email)
+struct user *user_create(const char *username, const char *password, const char *email)
 {
 	struct user *u;
 	long id;
@@ -2302,7 +2302,7 @@ struct buffer {
  * space is left in the buffer for null terminator, so best to make the size a
  * multiple of a power of 2 minus 1.
  */
-EXPORT void buffer_init(struct buffer *b, size_t max)
+void buffer_init(struct buffer *b, size_t max)
 {
 	assert(b != NULL);
 	b->data = malloc(max + 1); /* allocate an extra byte past max for null */
@@ -2313,7 +2313,7 @@ EXPORT void buffer_init(struct buffer *b, size_t max)
 /**
  * free the buffer.
  */
-EXPORT void buffer_free(struct buffer *b)
+void buffer_free(struct buffer *b)
 {
 	free(b->data);
 	b->data = NULL;
@@ -2352,7 +2352,7 @@ static int buffer_ll_expandnl(struct buffer *b, size_t len)
  * special write that does not expand its input.
  * unlike the other calls, truncation will not load partial data into a buffer
  */
-EXPORT int buffer_write_noexpand(struct buffer *b, const void *data, size_t len)
+int buffer_write_noexpand(struct buffer *b, const void *data, size_t len)
 {
 	if (b->used + len > b->max) {
 		DEBUG_MSG("Overflow detected. refusing to send any data.\n");
@@ -2369,7 +2369,7 @@ EXPORT int buffer_write_noexpand(struct buffer *b, const void *data, size_t len)
 /**
  * writes data and exapands newline to CR/LF.
  */
-EXPORT int buffer_write(struct buffer *b, const char *str, size_t len)
+int buffer_write(struct buffer *b, const char *str, size_t len)
 {
 	size_t i, j;
 	int ret;
@@ -2414,7 +2414,7 @@ static int buffer_puts(struct buffer *b, const char *str)
 /**
  * printfs and expands newline to CR/LF.
  */
-EXPORT int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap)
+int buffer_vprintf(struct buffer *b, const char *fmt, va_list ap)
 {
 	int res;
 	assert(b != NULL);
@@ -2469,7 +2469,7 @@ static int buffer_printf(struct buffer *b, const char *fmt, ...)
 }
 
 /** return the current data in the buffer and update len with the length. */
-EXPORT const char *buffer_data(struct buffer *b, size_t *len)
+const char *buffer_data(struct buffer *b, size_t *len)
 {
 	assert(b != NULL);
 	assert(len != NULL);
@@ -2489,7 +2489,7 @@ EXPORT const char *buffer_data(struct buffer *b, size_t *len)
  * @param b a buffer
  * @param len the amount remaining in the buffer
  */
-EXPORT char *buffer_load(struct buffer *b, size_t *len)
+char *buffer_load(struct buffer *b, size_t *len)
 {
 	assert(b != NULL);
 	assert(len != NULL);
@@ -2506,7 +2506,7 @@ EXPORT char *buffer_load(struct buffer *b, size_t *len)
 /**
  * @return the remaining data in the buffer
  */
-EXPORT unsigned buffer_consume(struct buffer *b, size_t len)
+unsigned buffer_consume(struct buffer *b, size_t len)
 {
 	assert(b != NULL);
 	DEBUG("len=%zu used=%zu rem=%zu\n", len, b->used, b->max - b->used);
@@ -2526,7 +2526,7 @@ EXPORT unsigned buffer_consume(struct buffer *b, size_t len)
 /**
  * commits data to buffer.
  */
-EXPORT void buffer_emit(struct buffer *b, size_t len)
+void buffer_emit(struct buffer *b, size_t len)
 {
 	assert(b != NULL);
 	assert(b->used <= b->max);
@@ -2600,7 +2600,7 @@ static char *buffer_findnl(char *d, size_t *len, size_t (*iac_process)(const cha
 /** read a line of data from the buffer.
  * handles CR/LF and LF terminated lines.
  */
-EXPORT const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p)
+const char *buffer_getline(struct buffer *b, size_t *consumed_len, size_t (*iac_process)(const char *data, size_t len, void *p), void *p)
 {
 	char *d;
 	assert(b != NULL);
@@ -2827,7 +2827,7 @@ void socketio_shutdown(void)
 }
 
 /** close a socket and write INVALID_SOCKET to its handle. */
-EXPORT int socketio_close(SOCKET *fd)
+int socketio_close(SOCKET *fd)
 {
 	int res;
 	assert(fd != 0);
@@ -3239,7 +3239,7 @@ struct server {
 };
 
 /** handler for read-ready events - calls accept(). */
-EXPORT void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p)
+void server_read_event(struct socketio_handle *sh, SOCKET fd, void *p)
 {
 	struct sockaddr_storage ss;
 	socklen_t sslen;
@@ -3782,7 +3782,7 @@ static int telnetclient_linemode(struct telnetclient *cl, int mode)
 }
 
 /** callback used when a socketio_handle for a telnetclient is write-ready. */
-EXPORT void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void *p)
+void telnetclient_write_event(struct socketio_handle *sh, SOCKET fd, void *p)
 {
 	const char *data;
 	size_t len;
@@ -3993,7 +3993,7 @@ failure:
 }
 
 /** read event callback when a telnetclient is doing line oriented input. */
-EXPORT void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, void *extra)
+void telnetclient_rdev_lineinput(struct socketio_handle *sh, SOCKET fd, void *extra)
 {
 	const char *line;
 	size_t consumed;
@@ -4156,7 +4156,7 @@ struct menuitem {
 };
 
 /** initialize a menuinfo structure. */
-EXPORT void menu_create(struct menuinfo *mi, const char *title)
+void menu_create(struct menuinfo *mi, const char *title)
 {
 	assert(mi != NULL);
 	LIST_INIT(&mi->items);
@@ -4170,7 +4170,7 @@ failed:
 }
 
 /** add a new menuitem to a menuinfo. */
-EXPORT void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*, long, void*), long extra2, void *extra3)
+void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*, long, void*), long extra2, void *extra3)
 {
 	struct menuitem *newitem;
 	newitem = malloc(sizeof * newitem);
@@ -4388,7 +4388,7 @@ void form_init(struct form *f, const char *title, void (*form_close)(struct teln
 /**
  * define a message to be displayed on start.
  */
-EXPORT void form_setmessage(struct form *f, const char *message)
+void form_setmessage(struct form *f, const char *message)
 {
 	f->message = message;
 }
