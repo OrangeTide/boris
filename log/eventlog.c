@@ -24,7 +24,7 @@
 
 #include "eventlog.h"
 #include "boris.h"
-#include "debug.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <time.h>
@@ -50,7 +50,7 @@ eventlog_init(void)
 	eventlog_file = fopen(mud_config.eventlog_filename, "a");
 
 	if (!eventlog_file) {
-		PERROR(mud_config.eventlog_filename);
+		LOG_PERROR(mud_config.eventlog_filename);
 		return 0; /* failure */
 	}
 
@@ -84,7 +84,7 @@ eventlog(const char *type, const char *fmt, ...)
 	va_end(ap);
 
 	if (n < 0) {
-		ERROR_MSG("vsnprintf() failure");
+		LOG_ERROR("vsnprintf() failure");
 		return; /* failure */
 	}
 
@@ -98,7 +98,7 @@ eventlog(const char *type, const char *fmt, ...)
 
 		buf[n] = '\n';
 		buf[n + 1] = 0;
-		DEBUG_MSG("Adding newline to message");
+		LOG_DEBUG("Adding newline to message");
 	}
 
 	time(&t);
@@ -106,7 +106,7 @@ eventlog(const char *type, const char *fmt, ...)
 
 	if (fprintf(eventlog_file ? eventlog_file : stderr, "%s:%s:%s", timestamp, type, buf) < 0) {
 		/* there was a write error */
-		PERROR(eventlog_file ? mud_config.eventlog_filename : "stderr");
+		LOG_PERROR(eventlog_file ? mud_config.eventlog_filename : "stderr");
 	}
 }
 

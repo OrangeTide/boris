@@ -1,7 +1,7 @@
 #ifndef MUDCONFIG_H_
 
 /** global configuration of the mud. */
-extern struct mud_config {
+struct mud_config {
 	char *config_filename;
 	char *menu_prompt;
 	char *form_prompt;
@@ -30,5 +30,9 @@ extern struct mud_config {
 	unsigned webserver_port;
 	char *form_newuser_filename;
 	int default_family; /* IPv4 or IPv6 */
-} mud_config;
+};
+
+typedef struct mud_config MUD_CONFIG;
+extern MUD_CONFIG mud_config;
+
 #endif

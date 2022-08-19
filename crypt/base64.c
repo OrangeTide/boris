@@ -21,6 +21,8 @@
 #include <string.h>
 #include "base64.h"
 #include "boris.h"
+#define LOG_SUBSYSTEM "crypt"
+#include "log.h"
 #include "debug.h"
 
 static const uint8_t base64enc_tab[64] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -88,7 +90,7 @@ int base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *
 		base64dec_tab = malloc(256);
 
 		if (!base64dec_tab) {
-			PERROR("malloc()");
+			LOG_PERROR("malloc()");
 			return 0;
 		}
 

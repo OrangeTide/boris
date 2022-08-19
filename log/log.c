@@ -1,13 +1,13 @@
 /**
- * @file logging.c
+ * @file log.c
  *
- * Logging module.
+ * Logging service.
  *
  * @author Jon Mayo <jon@rm-f.net>
  * @version 0.7
  * @date 2022 Aug 27
  *
- * Copyright (c) 2009-2022, Jon Mayo <jon@rm-f.net>
+ * Copyright (c) 2022, Jon Mayo <jon@rm-f.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -22,44 +22,38 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "logging.h"
-#include "boris.h"
+#define LOG_SUBSYSTEM "logging"
+#include "log.h"
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 
-#define LOGBASIC_LENGTH_MAX 1024
-
-static int log_level = B_LOG_INFO;
-
-static char *prio_names[] = {
+static char *level_names[] = {
 	"ASSERT", "CRITIAL", "ERROR", "WARNING",
 	"INFO", "TODO", "DEBUG", "TRACE"
 };
 
 void
-logging_do_log(int priority, const char *domain, const char *fmt, ...)
+log_vlogf(int level, const char *subsystem, const char *fmt, va_list ap)
 {
-	char buf[LOGBASIC_LENGTH_MAX];
+	char buf[512];
 	int i;
-	va_list ap;
 
-	assert(priority >= 0 && priority <= 7);
+	assert(level >= 0 && level <= 7);
 	assert(fmt != NULL);
 
-	/* write priority */
+	/* write level */
 	i = snprintf(buf, sizeof buf - 1, "%s:",
-	             priority >= 0 && priority <= 7 ? prio_names[priority] : "UNKNOWN");
+	             level >= 0 && level <= 7 ? level_names[level] : "UNKNOWN");
 
-	/* write domain - if it is set. */
-	if (domain)
-		i += snprintf(buf + i, sizeof buf - i - 1, "%s:", domain);
+	/* write subsystem - if it is set. */
+	if (subsystem)
+		i += snprintf(buf + i, sizeof buf - i - 1, "%s:", subsystem);
 
 	/* apply format string. */
-	va_start(ap, fmt);
 	i += vsnprintf(buf + i, sizeof buf - i - 1, fmt, ap);
-	va_end(ap);
 
 	/* add newline if one not found. */
 	if (i && buf[i - 1] != '\n') strcpy(buf + i, "\n");
@@ -67,31 +61,30 @@ logging_do_log(int priority, const char *domain, const char *fmt, ...)
 	fputs(buf, stderr);
 }
 
+void
+log_logf(int level, const char *subsystem, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	log_vlogf(level, subsystem, fmt, ap);
+	va_end(ap);
+}
+
+void
+log_perror(int level, const char *subsystem, const char *reason)
+{
+	log_logf(level, subsystem, "%s:%s", reason, strerror(errno));
+}
+
 int
-logging_initialize(void)
+log_init(void)
 {
-	fprintf(stderr, "loaded %s\n", "logging");
-	b_log(B_LOG_INFO, "logging", "Logging system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	LOG_INFO("Logging system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 
-	return 0;
+	return LOG_OK;
 }
 
 void
-logging_shutdown(void)
+log_done(void)
 {
-}
-
-/**
- * set the currnet logging level.
- */
-void
-logging_set_level(int level)
-{
-	if (level > 7)
-		level = 7;
-
-	if (level < 0)
-		level = 0;
-
-	log_level = level;
 }

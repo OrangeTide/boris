@@ -25,16 +25,18 @@
 #include "boris.h"
 #include "channel.h"
 #include "character.h"
-#include "debug.h"
 #include "eventlog.h"
 #include "fdb.h"
 #include "room.h"
-#include "logging.h"
+#define LOG_SUBSYSTEM "server"
+#include <log.h>
+#include <debug.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <time.h>
+#include <dyad.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
@@ -92,6 +94,7 @@ usage(void)
 	        "usage: boris [-h46] [-p port]\n"
 	        "-4      use IPv4-only server addresses\n"
 	        "-6      use IPv6-only server addresses\n"
+		"-p n    listen on TCP port <n>\n"
 	        "-h      help\n"
 	       );
 	exit(EXIT_FAILURE);
@@ -106,7 +109,7 @@ static void
 need_parameter(int ch, const char *next_arg)
 {
 	if (!next_arg) {
-		ERROR_FMT("option -%c takes a parameter\n", ch);
+		LOG_ERROR("option -%c takes a parameter\n", ch);
 		usage();
 	}
 }
@@ -136,14 +139,21 @@ process_flag(int ch, const char *next_arg)
 		mud_config.config_filename = strdup(next_arg);
 		return 1; /* uses next arg */
 
-	case 'p':
-		need_parameter(ch, next_arg);
+	case 'p': {
+			char *endptr;
 
-		if (!socketio_listen(mud_config.default_family, SOCK_STREAM, NULL, next_arg, telnetclient_new_event)) {
-			usage();
+			need_parameter(ch, next_arg);
+
+			errno = 0;
+			mud.params.port = strtoul(next_arg, &endptr, 0);
+			if (errno || *endptr != 0) {
+				LOG_ERROR("Not a number. problem with paramter '%s'", next_arg);
+				usage();
+			}
+
+			return 1; /* uses next arg */
 		}
-
-		return 1; /* uses next arg */
+		break;
 
 	case 'V': /* print version and exit. */
 		show_version();
@@ -151,7 +161,7 @@ process_flag(int ch, const char *next_arg)
 		return 0;
 
 	default:
-		ERROR_FMT("Unknown option -%c\n", ch);
+		LOG_ERROR("Unknown option -%c\n", ch);
 
 	/* fall through */
 	case 'h':
@@ -181,7 +191,7 @@ process_args(int argc, char **argv)
 				}
 			}
 		} else {
-			TODO("process arguments");
+			LOG_TODO("process arguments");
 			fprintf(stderr, "TODO: process argument '%s'\n", argv[i]);
 		}
 	}
@@ -211,15 +221,12 @@ main(int argc, char **argv)
 	srand((unsigned)time(NULL));
 
 	if (MKDIR("data") == -1 && errno != EEXIST) {
-		PERROR("data/");
+		LOG_PERROR("data/");
 		return EXIT_FAILURE;
 	}
 
-	if (!socketio_init()) {
-		return EXIT_FAILURE;
-	}
-
-	atexit(socketio_shutdown);
+	dyad_init();
+	atexit(dyad_shutdown);
 
 	/* load default configuration into mud_config global */
 	mud_config_init();
@@ -230,40 +237,40 @@ main(int argc, char **argv)
 
 	/* process configuration file and load into mud_config global */
 	if (!mud_config_process()) {
-		ERROR_MSG("could not load configuration");
+		LOG_ERROR("could not load configuration");
 		return EXIT_FAILURE;
 	}
 
-	if (logging_initialize()) {
-		ERROR_MSG("could not initialize logging");
+	if (log_init()) {
+		LOG_ERROR("could not initialize logging");
 		return EXIT_FAILURE;
 	}
 
-	atexit(logging_shutdown);
+	atexit(log_done);
 
 	if (fdb_initialize()) {
-		ERROR_MSG("could not load database");
+		LOG_ERROR("could not load database");
 		return EXIT_FAILURE;
 	}
 
 	atexit(fdb_shutdown);
 
 	if (channel_initialize()) {
-		ERROR_MSG("could not load channels");
+		LOG_ERROR("could not load channels");
 		return EXIT_FAILURE;
 	}
 
 	atexit(channel_shutdown);
 
 	if (room_initialize()) {
-		ERROR_MSG("could not load room sub-system");
+		LOG_ERROR("could not load room sub-system");
 		return EXIT_FAILURE;
 	}
 
 	atexit(room_shutdown);
 
 	if (character_initialize()) {
-		ERROR_MSG("could not load character sub-system");
+		LOG_ERROR("could not load character sub-system");
 		return EXIT_FAILURE;
 	}
 
@@ -276,43 +283,54 @@ main(int argc, char **argv)
 	atexit(eventlog_shutdown);
 
 	if (!user_init()) {
-		ERROR_MSG("could not initialize users");
+		LOG_ERROR("could not initialize users");
 		return EXIT_FAILURE;
 	}
 
 	atexit(user_shutdown);
 
+#if 0 // DISABLED
 	if (!form_module_init()) {
-		ERROR_MSG("could not initialize forms");
+		LOG_ERROR("could not initialize forms");
 		return EXIT_FAILURE;
 	}
 
 	atexit(form_module_shutdown);
+#endif
 
+#if 0 // DISABLED
 	/* start the webserver if webserver.port is defined. */
-	if (mud_config.webserver_port) {
+	if (mud_config.webserver_port > 0) {
 		if (!webserver_init(mud_config.default_family, mud_config.webserver_port)) {
-			ERROR_MSG("could not initialize webserver");
+			LOG_ERROR("could not initialize webserver");
 			return EXIT_FAILURE;
 		}
 
 		atexit(webserver_shutdown);
 	}
+#endif
 
 	if (!game_init()) {
-		ERROR_MSG("could not start game");
+		LOG_ERROR("could not start game");
 		return EXIT_FAILURE;
 	}
 
 	eventlog_server_startup();
 
-	TODO("use the next event for the timer");
+	if (telnetserver_listen(mud.params.port)) {
+		LOG_ERROR("could not listen to port %u", mud.params.port);
+		return EXIT_FAILURE;
+	}
 
-	while (keep_going_fl) {
-		telnetclient_prompt_refresh_all();
+	LOG_TODO("use the next event for the timer");
 
-		if (!socketio_dispatch(-1))
-			break;
+	while (keep_going_fl && dyad_getStreamCount() > 0) {
+		struct telnetserver *cur = telnetserver_first();
+		for (; cur; cur = telnetserver_next(cur)) {
+			telnetclient_prompt_refresh_all(cur);
+		}
+
+		dyad_update();
 
 		fprintf(stderr, "Tick\n");
 	}

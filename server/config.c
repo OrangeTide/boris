@@ -26,6 +26,8 @@
 #include <ctype.h>
 #include <stdlib.h>
 
+#define LOG_SUBSYSTEM "config"
+#include "log.h"
 #include "debug.h"
 #include "util.h"
 #include "config.h"
@@ -83,10 +85,12 @@ config_load(const char *filename, struct config *cfg)
 	char quote;
 	struct config_watcher *curr;
 
+	LOG_INFO("Loading configuration (%s) ...", filename);
+
 	f = fopen(filename, "r");
 
 	if (!f) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		return 0;
 	}
 
@@ -126,7 +130,7 @@ config_load(const char *filename, struct config *cfg)
 
 		if (!e) {
 			/* invalid directive */
-			ERROR_FMT("%s:%d:invalid directive\n", filename, line);
+			LOG_ERROR("%s:%d:invalid directive\n", filename, line);
 			goto failure;
 		}
 
@@ -148,18 +152,18 @@ config_load(const char *filename, struct config *cfg)
 
 			if (e) {
 				if (e[1]) {
-					ERROR_FMT("%s:%u:error in loading file:trailing garbage after quote\n", filename, line);
+					LOG_ERROR("%s:%u:error in loading file:trailing garbage after quote\n", filename, line);
 					goto failure;
 				}
 
 				*e = 0;
 			} else {
-				ERROR_FMT("%s:%u:error in loading file:missing quote\n", filename, line);
+				LOG_ERROR("%s:%u:error in loading file:missing quote\n", filename, line);
 				goto failure;
 			}
 		}
 
-		DEBUG("id='%s' value='%s'\n", buf, value);
+		LOG_DEBUG("id='%s' value='%s'\n", buf, value);
 
 		/* check the masks */
 		for (curr = LIST_TOP(cfg->watchers); curr; curr = LIST_NEXT(curr, list)) {
@@ -170,7 +174,7 @@ config_load(const char *filename, struct config *cfg)
 				if (!res) {
 					break; /* return 0 from the callback will terminate the list */
 				} else if (res < 0) {
-					ERROR_FMT("%s:%u:error in loading file\n", filename, line);
+					LOG_ERROR("%s:%u:error in loading file\n", filename, line);
 					goto failure;
 				}
 			}

@@ -26,7 +26,9 @@
 #include "boris.h"
 #include "list.h"
 #include "fdb.h"
-#include "logging.h"
+
+#define LOG_SUBSYSTEM "room"
+#include <log.h>
 
 #include <assert.h>
 #include <stdarg.h>
@@ -34,7 +36,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SUBSYSTEM_NAME "room"
 #define LOGBASIC_LENGTH_MAX 1024
 
 /******************************************************************************
@@ -187,7 +188,7 @@ room_load(unsigned room_id)
 	h = fdb_read_begin(DOMAIN_ROOM, numbuf);
 
 	if (!h) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not load room \"%s\"", numbuf);
+		LOG_ERROR("could not load room \"%s\"", numbuf);
 		return NULL;
 	}
 
@@ -195,14 +196,14 @@ room_load(unsigned room_id)
 
 	if (!r) {
 		/* TODO: do perror? */
-		b_log(B_LOG_ERROR, "calloc", "not allocate room \"%s\"", numbuf);
+		LOG_ERROR("not allocate room \"%s\"", numbuf);
 		fdb_read_end(h);
 		return NULL;
 	}
 
 	while (fdb_read_next(h, &name, &value)) {
 		if (!room_attr_set(r, name, value)) {
-			b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not load room \"%s\"", numbuf);
+			LOG_ERROR("could not load room \"%s\"", numbuf);
 			room_ll_free(r);
 			fdb_read_end(h);
 			return NULL;
@@ -213,14 +214,14 @@ room_load(unsigned room_id)
 
 	/* r->id wasn't set, this is a problem. */
 	if (!r->id) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "id not set for room \"%u\"", room_id);
+		LOG_ERROR("id not set for room \"%u\"", room_id);
 		room_ll_free(r);
 		return NULL;
 	}
 
 	/* r->id doesn't match the file the room is stored under. */
 	if (r->id != room_id) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "id was set to \"%u\" but should be \"%u\"", r->id, room_id);
+		LOG_ERROR("id was set to \"%u\" but should be \"%u\"", r->id, room_id);
 		room_ll_free(r);
 		return NULL;
 	}
@@ -245,7 +246,7 @@ room_save(struct room *r)
 
 	/* refuse to save room 0. */
 	if (!r->id) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "attempted to save room \"%u\", but it is reserved", r->id);
+		LOG_ERROR("attempted to save room \"%u\", but it is reserved", r->id);
 		return 0;
 	}
 
@@ -254,7 +255,7 @@ room_save(struct room *r)
 	h = fdb_write_begin(DOMAIN_ROOM, numbuf);
 
 	if (!h) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not save room \"%s\"", numbuf);
+		LOG_ERROR("could not save room \"%s\"", numbuf);
 		return 0; /* failure */
 	}
 
@@ -283,12 +284,12 @@ room_save(struct room *r)
 	}
 
 	if (!fdb_write_end(h)) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not save room \"%s\"", numbuf);
+		LOG_ERROR("could not save room \"%s\"", numbuf);
 		return 0; /* failure */
 	}
 
 	r->dirty_fl = 0;
-	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "saved room \"%s\"", numbuf);
+	LOG_INFO("saved room \"%s\"", numbuf);
 	return 1;
 }
 
@@ -321,7 +322,7 @@ struct room *room_get(unsigned room_id)
 	}
 
 	if (!curr) {
-		b_log(B_LOG_WARN, SUBSYSTEM_NAME, "could not access room \"%u\"", room_id);
+		LOG_WARNING("could not access room \"%u\"", room_id);
 	}
 
 	return curr;
@@ -350,18 +351,18 @@ room_initialize(void)
 	struct fdb_iterator *it;
 	const char *id;
 
-	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	LOG_INFO("Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	LIST_INIT(&room_cache);
 
 	if (!fdb_domain_init(DOMAIN_ROOM)) {
-		b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "could not load rooms!");
+		LOG_CRITICAL("could not load rooms!");
 		return -1; /* could not load. */
 	}
 
 	it = fdb_iterator_begin(DOMAIN_ROOM);
 
 	if (!it) {
-		b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "could not load rooms!");
+		LOG_CRITICAL("could not load rooms!");
 		return -1; /* could not load. */
 	}
 
@@ -370,11 +371,11 @@ room_initialize(void)
 		struct room *r;
 		unsigned room_id;
 		char *endptr;
-		b_log(B_LOG_DEBUG, SUBSYSTEM_NAME, "Found room: \"%s\"", id);
+		LOG_DEBUG("Found room: \"%s\"", id);
 		room_id = strtoul(id, &endptr, 10);
 
 		if (*endptr) {
-			b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "room id \"%s\" is invalid!", id);
+			LOG_CRITICAL("room id \"%s\" is invalid!", id);
 			fdb_iterator_end(it);
 			return -1; /* could not load */
 		}
@@ -382,7 +383,7 @@ room_initialize(void)
 		r = room_load(room_id);
 
 		if (!r) {
-			b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "could not load rooms!");
+			LOG_CRITICAL("could not load rooms!");
 			fdb_iterator_end(it);
 			return -1; /* could not load */
 		}
@@ -401,7 +402,7 @@ room_shutdown(void)
 	struct room *curr;
 	struct room_cache blocked_cache;
 
-	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "Room system shutting down..");
+	LOG_INFO("Room system shutting down..");
 
 	/* save all dirty objects and free all data. */
 	LIST_INIT(&blocked_cache); /* keep a temporary list of unfreed rooms */
@@ -412,7 +413,7 @@ room_shutdown(void)
 
 		/* check to make sure no rooms are still in use. */
 		if (curr->refcount > 0) {
-			b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "cannot shut down, room \"%u\" still in use.", curr->id);
+			LOG_ERROR("cannot shut down, room \"%u\" still in use.", curr->id);
 			LIST_INSERT_HEAD(&blocked_cache, curr, room_cache);
 		} else {
 			room_ll_free(curr);
@@ -424,5 +425,5 @@ room_shutdown(void)
 		room_cache = blocked_cache;
 	}
 
-	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "Room system ended.");
+	LOG_INFO("Room system ended.");
 }

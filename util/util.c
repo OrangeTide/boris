@@ -22,6 +22,8 @@
  */
 
 #include "util.h"
+#define LOG_SUBSYSTEM "util"
+#include "log.h"
 #include "debug.h"
 
 #include <assert.h>
@@ -65,7 +67,7 @@ util_fnmatch(const char *pattern, const char *string, int flags)
 		case '[':
 		case ']':
 		case '\\':
-			TODO("support [] and \\");
+			LOG_TODO("support [] and \\");
 
 		/* fall through */
 		default:
@@ -93,49 +95,49 @@ util_textfile_load(const char *filename)
 	f = fopen(filename, "r");
 
 	if (!f) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure0;
 	}
 
 	if (fseek(f, 0l, SEEK_END) != 0) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure1;
 	}
 
 	len = ftell(f);
 
 	if (len == EOF) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure1;
 	}
 
 	assert(len >= 0); /* len must not be negative */
 
 	if (fseek(f, 0l, SEEK_SET) != 0) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure1;
 	}
 
 	ret = malloc((unsigned)len + 1);
 
 	if (!ret) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure1;
 	}
 
 	res = fread(ret, 1, (unsigned)len, f);
 
 	if (ferror(f)) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure2;
 	} else if (res != (size_t)len) {
-		ERROR_MSG("short read");
+		LOG_ERROR("short read");
 		goto failure2;
 	}
 
 	ret[len] = 0; /* null terminate the string */
 
-	DEBUG("%s:loaded %ld bytes\n", filename, len);
+	LOG_DEBUG("%s:loaded %ld bytes\n", filename, len);
 
 	fclose(f);
 	return ret;

@@ -25,6 +25,8 @@
 
 #include <time.h>
 
+#define LOG_SUBSYSTEM "worldclock"
+#include "log.h"
 #include "debug.h"
 
 static worldclock_t worldclock_epoch = 914544000ll; // 1998 Dec 25
@@ -35,7 +37,7 @@ int
 worldclock_init(void)
 {
 	if (real_epoch) {
-		ERROR_MSG("duplicate initialization of worldclock!");
+		LOG_ERROR("duplicate initialization of worldclock!");
 		return -1;
 	}
 

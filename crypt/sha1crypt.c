@@ -20,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "base64.h"
+#define LOG_SUBSYSTEM "crypt"
+#include "log.h"
 #include "debug.h"
 #include "sha1.h"
 #include "sha1crypt.h"
@@ -46,7 +48,7 @@ static int sha1crypt_create_password(char *buf, size_t max, const char *plaintex
 	char tmp[((SHA1_DIGEST_LENGTH + SHA1CRYPT_GENSALT_MAX + 3) / 4 * 4) * 4 / 3 + 1];
 
 	if (salt_len > SHA1CRYPT_GENSALT_MAX) {
-		ERROR_MSG("Salt is too large.");
+		LOG_ERROR("Salt is too large.");
 		return 0; /**< salt too large. */
 	}
 
@@ -61,7 +63,7 @@ static int sha1crypt_create_password(char *buf, size_t max, const char *plaintex
 
 	/* encode digest+salt into buf. */
 	if (base64_encode(SHA1_DIGEST_LENGTH + salt_len, digest, sizeof tmp, tmp) < 0) {
-		ERROR_MSG("Buffer cannot hold password.");
+		LOG_ERROR("Buffer cannot hold password.");
 		return 0; /**< no room. */
 	}
 
@@ -101,7 +103,7 @@ int sha1crypt_checkpass(const char *crypttext, const char *plaintext)
 
 	/* check for password magic at beginning. */
 	if (crypttext_len <= SHA1PASSWD_MAGIC_LEN || strncmp(crypttext, SHA1PASSWD_MAGIC, SHA1PASSWD_MAGIC_LEN)) {
-		ERROR_MSG("not a SHA1 crypt.");
+		LOG_ERROR("not a SHA1 crypt.");
 		return 0; /**< bad base64 string, too large or too small. */
 	}
 
@@ -109,7 +111,7 @@ int sha1crypt_checkpass(const char *crypttext, const char *plaintext)
 	res = base64_decode(crypttext_len - SHA1PASSWD_MAGIC_LEN, crypttext + SHA1PASSWD_MAGIC_LEN, sizeof digest, digest);
 
 	if (res < 0 || res < SHA1_DIGEST_LENGTH) {
-		ERROR_MSG("crypt decode error.");
+		LOG_ERROR("crypt decode error.");
 		return 0; /**< bad base64 string, too large or too small. */
 	}
 
@@ -119,7 +121,7 @@ int sha1crypt_checkpass(const char *crypttext, const char *plaintext)
 	res = sha1crypt_create_password(tmp, sizeof tmp, plaintext, res - SHA1_DIGEST_LENGTH, salt);
 
 	if (!res) {
-		ERROR_MSG("crypt decode error2.");
+		LOG_ERROR("crypt decode error2.");
 		return 0; /**< couldn't encode? weird. this shouldn't ever happen. */
 	}
 
@@ -155,26 +157,26 @@ void sha1crypt_test(void)
 	sha1crypt_makepass(buf, sizeof buf, "abcdef");
 	printf("buf=\"%s\"\n", buf);
 	res = sha1crypt_checkpass(buf, "abcdef");
-	DEBUG("sha1crypt_checkpass() positive:%s (res=%d)\n", !res ? "FAILED" : "PASSED", res);
+	LOG_DEBUG("sha1crypt_checkpass() positive:%s (res=%d)\n", !res ? "FAILED" : "PASSED", res);
 
 	if (!res) {
-		ERROR_MSG("sha1crypt_checkpass() must succeed on positive test.");
+		LOG_ERROR("sha1crypt_checkpass() must succeed on positive test.");
 		exit(1);
 	}
 
 	/* checking - negative testing. */
 	res = sha1crypt_checkpass(buf, "abcdeg");
-	DEBUG("sha1crypt_checkpass() negative:%s (res=%d)\n", res ? "FAILED" : "PASSED", res);
+	LOG_DEBUG("sha1crypt_checkpass() negative:%s (res=%d)\n", res ? "FAILED" : "PASSED", res);
 
 	if (res) {
-		ERROR_MSG("sha1crypt_checkpass() must fail on negative test.");
+		LOG_ERROR("sha1crypt_checkpass() must fail on negative test.");
 		exit(1);
 	}
 
 	/* loop through all hardcoded examples. */
 	for (i = 0; i < NR(examples); i++) {
 		res = sha1crypt_checkpass(examples[i].hash, examples[i].pass);
-		DEBUG("Example %d:%s (res=%d) hash:%s\n", i + 1, !res ? "FAILED" : "PASSED", res, examples[i].hash);
+		LOG_DEBUG("Example %d:%s (res=%d) hash:%s\n", i + 1, !res ? "FAILED" : "PASSED", res, examples[i].hash);
 	}
 }
 #endif

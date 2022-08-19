@@ -34,10 +34,6 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 ### Build requirements
 
 - GNU Make
-- libtelnet
-- libevent
-- libssh
-- libmicrohttpd
 
 ```sh
 sudo apt-get install libtelnet-dev libevent-dev libssh-dev libmicrohttpd-dev

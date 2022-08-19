@@ -26,7 +26,7 @@
 #include <time.h>
 
 void
-show_gametime(struct telnetclient *cl)
+show_gametime(DESCRIPTOR_DATA *cl)
 {
 	char systime[64];
 	char gametime[64];

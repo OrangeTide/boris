@@ -18,6 +18,8 @@
 #ifndef LIST_H_
 #define LIST_H_
 
+#include <assert.h>
+
 /*=* Linked list macros *=*/
 
 /* internal macro to hide GCC warnings:

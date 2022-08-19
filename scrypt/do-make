@@ -1,0 +1,1 @@
+gcc -o test_scrypt crypto_scrypt.c crypto_scrypt_smix.c humansize.c memlimit.c sha256.c test_scrypt.c

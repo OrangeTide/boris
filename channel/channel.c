@@ -24,7 +24,9 @@
 
 #include "channel.h"
 #include "boris.h"
-#include "logging.h"
+
+#define LOG_SUBSYSTEM "channel"
+#include <log.h>
 
 #include <assert.h>
 #include <stdarg.h>
@@ -37,10 +39,6 @@
  * Defines
  ******************************************************************************/
 #define CHANNEL_SEND_MAX 1024
-#define DEBUG(msg, ...) fprintf(stderr, "%s():%d:" msg "\n",  __func__, __LINE__, __VA_ARGS__)
-#if 0
-#define DEBUG(msg, ...) b_log(B_LOG_DEBUG, "channel", "%s():%d:" msg, __func__, __LINE__, __VA_ARGS__)
-#endif
 
 /******************************************************************************
  * Types
@@ -84,18 +82,18 @@ channel_find_member(struct channel *ch, struct channel_member *cm)
 {
 	unsigned i;
 
-	DEBUG("looking for channel member %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
+	LOG_DEBUG("looking for channel member %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
 
 	if (!ch) return NULL;
 
 	for (i = 0; i < ch->nr_member; i++) {
-		DEBUG("looking at %p...", (void*)ch->member[i]);
+		LOG_DEBUG("looking at %p...", (void*)ch->member[i]);
 
 		if (ch->member[i] == cm) return &ch->member[i];
 
 	}
 
-	DEBUG("not found %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
+	LOG_DEBUG("not found %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
 	return NULL;
 }
 
@@ -117,7 +115,7 @@ channel_add_member(struct channel *ch, struct channel_member *cm)
 	newlist = realloc(ch->member, sizeof * ch->member * (ch->nr_member + 1));
 
 	if (!newlist) {
-		b_log(B_LOG_ERROR, "channel", "could not add member to channel.");
+		LOG_ERROR("could not add member to channel.");
 		return 0; /* could not allocate. */
 	}
 
@@ -143,7 +141,7 @@ channel_delete_member(struct channel *ch, struct channel_member *cm)
 
 	if (!d) return 0; /* not a member */
 
-	DEBUG("found channel member %p at %p", (void*)cm, (void*)d);
+	LOG_DEBUG("found channel member %p at %p", (void*)cm, (void*)d);
 
 	assert(ch->nr_member > 0);
 
@@ -185,6 +183,10 @@ channel_public_add(const char *name)
 {
 	struct channel_public *newch;
 
+	if (!name) {
+		return 0; /* failure : refuse to create channel NULL */
+	}
+
 	if (channel_public_find(name)) {
 		return 0; /* refuse to create duplicate channel. */
 	}
@@ -193,7 +195,7 @@ channel_public_add(const char *name)
 
 	if (!newch) {
 		perror("calloc()");
-		b_log(B_LOG_ERROR, "channel", "could not allocate channel.");
+		LOG_ERROR("could not allocate channel.");
 		return 0; /* failure. */
 	}
 
@@ -202,7 +204,7 @@ channel_public_add(const char *name)
 
 		if (!newch->name) {
 			perror("strdup()");
-			b_log(B_LOG_ERROR, "channel", "could not allocate channel.");
+			LOG_ERROR("could not allocate channel.");
 			free(newch);
 			return 0; /* failure. */
 		}
@@ -217,7 +219,7 @@ channel_public_add(const char *name)
 }
 
 /**
- * get a channel by numeric id.
+ * get a channel by name.
  */
 struct channel *channel_public(const char *name)
 {
@@ -237,10 +239,10 @@ struct channel *channel_public(const char *name)
 int
 channel_initialize(void)
 {
-	b_log(B_LOG_INFO, "channel", "channel sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
-	channel_public_add("Wiz");
-	channel_public_add("OOC");
-	channel_public_add(NULL); /* system channel. */
+	LOG_INFO("channel sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	channel_public_add(CHANNEL_WIZ); /* Wizards */
+	channel_public_add(CHANNEL_OOC); /* Out-of-Character chat */
+	channel_public_add(CHANNEL_SYS); /* system channel. */
 	return 0;
 }
 
@@ -250,8 +252,8 @@ channel_initialize(void)
 void
 channel_shutdown(void)
 {
-	b_log(B_LOG_INFO, "channel", "channel sub-system shutting down...");
-	b_log(B_LOG_INFO, "channel", "channel sub-system ended.");
+	LOG_INFO("channel sub-system shutting down...");
+	LOG_INFO("channel sub-system ended.");
 }
 
 /**
@@ -260,7 +262,7 @@ channel_shutdown(void)
 int
 channel_join(struct channel *ch, struct channel_member *cm)
 {
-	b_log(B_LOG_TRACE, "channel", "someone(%p) joined\n", cm ? cm->p : NULL);
+	LOG_TRACE("someone(%p) joined\n", cm ? cm->p : NULL);
 	return channel_add_member(ch, cm);
 }
 
@@ -270,10 +272,10 @@ channel_join(struct channel *ch, struct channel_member *cm)
 void
 channel_part(struct channel *ch, struct channel_member *cm)
 {
-	b_log(B_LOG_TRACE, "channel", "someone(%p) parted\n", cm ? cm->p : NULL);
+	LOG_TRACE("someone(%p) parted\n", cm ? cm->p : NULL);
 
 	if (!channel_delete_member(ch, cm)) {
-		b_log(B_LOG_WARN, "channel", "could not find channel member %p", cm);
+		LOG_WARNING("could not find channel member %p", cm);
 	}
 }
 
@@ -308,7 +310,7 @@ channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsi
 
 	for (i = 0; i < ch->nr_member; i++) {
 		struct channel_member *cm = ch->member[i];
-		DEBUG("cm=%p p=%p\n", (void*)cm, cm ? cm->p : NULL);
+		LOG_DEBUG("cm=%p p=%p\n", (void*)cm, cm ? cm->p : NULL);
 
 		if (cm && cm->send && !is_on_list(cm, exclude_list, exclude_list_len)) {
 			cm->send(cm, ch, buf);

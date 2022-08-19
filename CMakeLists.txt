@@ -5,8 +5,22 @@ if ( ${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR} )
 	message( FATAL_ERROR "In-source builds not allowed. Please make a new directory (called a build directory) and run CMake from there. You may need to remove CMakeCache.txt." )
 endif()
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+
+set( CMAKE_BUILD_TYPE Debug )
+
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+
+add_subdirectory(thirdparty)
+add_subdirectory(scrypt)
+add_subdirectory(passwd)
+add_subdirectory(log)
+
+file(GLOB boris_SOURCES
+	server/boris.c
+)
 
 file(GLOB mud_SOURCES
 	channel/channel.c
@@ -15,12 +29,12 @@ file(GLOB mud_SOURCES
 	crypt/sha1.c
 	crypt/sha1crypt.c
 	fdb/fdbfile.c
-	log/eventlog.c
-	log/logging.c
 	room/room.c
 	server/boris.c
 	server/common.c
 	server/config.c
+	server/freelist.c
+	server/telnetclient.c
 	stackvm/stackvm.c
 	task/command.c
 	task/comutil.c
@@ -28,26 +42,44 @@ file(GLOB mud_SOURCES
 	worldclock/worldclock.c
 )
 
-add_executable(mud ${mud_SOURCES})
+add_executable(boris ${boris_SOURCES})
+target_link_libraries(boris PUBLIC mud)
+
+target_compile_options(boris
+	PRIVATE -Wall -W -O2
+	PUBLIC -flto -g)
+
+target_compile_definitions(boris
+	PRIVATE NTEST
+	PRIVATE NDEBUG)
+
+
+add_library(mud ${mud_SOURCES})
 
 target_compile_options(mud
 	PRIVATE -Wall -W -O2
 	PUBLIC -flto -g)
+
 target_compile_definitions(mud
 	PRIVATE NTEST
 	PRIVATE NDEBUG)
 
 target_link_libraries(mud
-	PRIVATE Threads::Threads
-	PUBLIC telnet
-	PUBLIC event_pthreads event_core
-	PUBLIC ssh
-	PUBLIC microhttpd
-	PUBLIC lmdb
-	PUBLIC dl
-	PUBLIC m
-)
+	PUBLIC Threads::Threads
+	PRIVATE telnet
+	PRIVATE lmdb
+	PUBLIC dyad
+	PRIVATE mth
+	PRIVATE scrypt
+	PUBLIC log)
 
 target_include_directories(mud
-	PUBLIC include channel character crypt fdb log room task util worldclock
-)
+	PUBLIC include
+	PUBLIC channel
+	PUBLIC character
+	PUBLIC crypt
+	PUBLIC fdb
+	PUBLIC room
+	PUBLIC task
+	PUBLIC util
+	PUBLIC worldclock)

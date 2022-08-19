@@ -23,7 +23,8 @@
 
 #include "fdb.h"
 #include "boris.h"
-#include "logging.h"
+#define LOG_SUBSYSTEM "fdb"
+#include <log.h>
 
 #include <assert.h>
 #include <ctype.h>
@@ -38,8 +39,6 @@
 #include <sys/types.h>
 
 #define MKDIR(d) mkdir(d, 0777)
-#define PERROR(m) perror(m)
-#define VERBOSE printf
 
 #define FDB_VALUE_MAX 4096
 
@@ -279,7 +278,7 @@ fdb_domain_init(const char *domain)
 	pathname = fdb_basepath(domain);
 
 	if (MKDIR(pathname) == -1 && errno != EEXIST) {
-		PERROR(pathname);
+		LOG_PERROR(pathname);
 		free(pathname);
 		return 0;
 	}
@@ -301,7 +300,7 @@ struct fdb_write_handle *fdb_write_begin(const char *domain, const char *id)
 	f = fopen(filename_tmp, "w");
 
 	if (!f) {
-		PERROR(filename_tmp);
+		LOG_PERROR(filename_tmp);
 		free(filename_tmp);
 		return 0; /* failure. */
 	}
@@ -359,7 +358,7 @@ fdb_write_pair(struct fdb_write_handle *h, const char *name, const char *value_s
 	escaped_value = malloc(escaped_len + 1);
 
 	if (!escaped_value) {
-		PERROR("malloc()");
+		LOG_PERROR("malloc()");
 		return 0;
 	}
 
@@ -484,7 +483,7 @@ struct fdb_read_handle *fdb_read_begin(const char *domain, const char *id)
 	f = fopen(filename, "r");
 
 	if (!f) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		free(filename);
 		return 0; /* failure. */
 	}
@@ -527,7 +526,7 @@ fdb_read_next(struct fdb_read_handle *h, const char **name, const char **value)
 	while (!feof(h->f)) {
 		if (!fgets(h->line + ofs, h->alloc_len - ofs, h->f)) {
 			if (ofs) {
-				VERBOSE("%s:%d:missing newline before EOF.\n", h->filename, h->line_number);
+				LOG_INFO("%s:%d:missing newline before EOF.", h->filename, h->line_number);
 				h->error_fl = 1;
 			}
 
@@ -552,7 +551,7 @@ fdb_read_next(struct fdb_read_handle *h, const char **name, const char **value)
 			newline = realloc(h->line, newlen);
 
 			if (!newline) {
-				PERROR(h->filename);
+				LOG_PERROR(h->filename);
 				h->error_fl = 1;
 				return 0;
 			}
@@ -604,7 +603,7 @@ struct fdb_iterator *fdb_iterator_begin(const char *domain)
 	d = opendir(pathname);
 
 	if (!d) {
-		PERROR(pathname);
+		LOG_PERROR(pathname);
 		free(pathname);
 		return 0; /* failure */
 	}
@@ -612,7 +611,7 @@ struct fdb_iterator *fdb_iterator_begin(const char *domain)
 	it = calloc(1, sizeof * it);
 
 	if (!it) {
-		PERROR("calloc()");
+		LOG_PERROR("calloc()");
 		free(pathname);
 		return 0;
 	}
@@ -654,7 +653,7 @@ next:
 	}
 
 	if (de->d_name[0] && de->d_name[strlen(de->d_name) - 1] == '~') {
-		VERBOSE("skip things that don't look like data files:%s\n", de->d_name);
+		LOG_INFO("skip things that don't look like data files:%s", de->d_name);
 		goto next; /* ignore temp files. */
 	}
 
@@ -662,7 +661,7 @@ next:
 	filename = fdb_makepath(it->domain, de->d_name);
 
 	if (stat(filename, &st)) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		free(filename);
 		goto next;
 	}
@@ -670,7 +669,7 @@ next:
 	free(filename);
 
 	if (!S_ISREG(st.st_mode)) {
-		VERBOSE("Ignoring directories and other non-regular files:%s\n", de->d_name);
+		LOG_INFO("Ignoring directories and other non-regular files:%s", de->d_name);
 		goto next;
 	}
 
@@ -700,7 +699,7 @@ int
 fdb_initialize(void)
 {
 	fprintf(stderr, "loaded %s\n", "fdb");
-	b_log(B_LOG_INFO, "logging", "FDB-file system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	LOG_INFO("FDB-file system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 
 	return 0;
 }
@@ -745,7 +744,7 @@ fdb_test2(void)
 		return 0;
 
 	while ((id = fdb_iterator_next(it))) {
-		VERBOSE("Found item \"%s\"\n", id);
+		LOG_INFO("Found item \"%s\"", id);
 	}
 
 	fdb_iterator_end(it);
@@ -767,13 +766,13 @@ fdb_test3(void)
 	if (!h) return 0;
 
 	while (fdb_read_next(h, &name, &id)) {
-		VERBOSE("Read \"%s\"=\"%s\"\n", name, id);
+		LOG_INFO("Read \"%s\"=\"%s\"", name, id);
 	}
 
 	res = fdb_read_end(h);
 
 	if (!res) {
-		VERBOSE("Read failure.\n");
+		LOG_INFO("Read failure.");
 	}
 
 	return res;
@@ -787,17 +786,17 @@ main()
 {
 	fdb_initialize();
 
-	VERBOSE("*** TEST 1 ***\n");
+	LOG_INFO("*** TEST 1 ***");
 
 	if (!fdb_test1())
 		goto failure;
 
-	VERBOSE("*** TEST 2 ***\n");
+	LOG_INFO("*** TEST 2 ***");
 
 	if (!fdb_test2())
 		goto failure;
 
-	VERBOSE("*** TEST 3 ***\n");
+	LOG_INFO("*** TEST 3 ***");
 
 	if (!fdb_test3())
 		goto failure;
@@ -805,7 +804,7 @@ main()
 	fdb_shutdown();
 	return 0;
 failure:
-	fprintf(stderr, "It didn't work.\n");
+	fprintf(stderr, "It didn't work.");
 
 	fdb_shutdown();
 	return 1;
