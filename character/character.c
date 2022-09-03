@@ -1,39 +1,34 @@
 /**
  * @file character.c
  *
- * Plugin that provides a Character service.
+ * Character service.
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Dec 25
+ * @author Jon Mayo <jon@rm-f.net>
+ * @version 0.7
+ * @date 2022 Aug 27
  *
- * Copyright (c) 2009-2019, Jon Mayo
+ * Copyright (c) 2009-2022, Jon Mayo <jon@rm-f.net>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation are
- * those of the authors and should not be interpreted as representing official
- * policies, either expressed or implied, of the Boris MUD project.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #include "character.h"
 #include "boris.h"
+#include "freelist.h"
 #include "fdb.h"
-#include "logging.h"
+
+#define LOG_SUBSYSTEM "character"
+#include "log.h"
 
 #include <assert.h>
 #include <stddef.h>
@@ -92,7 +87,8 @@ static struct freelist character_id_freelist;
 /**
  * deallocate a character structure immediately.
  */
-static void character_ll_free(struct character *ch)
+static void
+character_ll_free(struct character *ch)
 {
 	unsigned i;
 
@@ -119,13 +115,14 @@ static void character_ll_free(struct character *ch)
 /**
  * allocate an empty character.
  */
-static struct character *character_ll_alloc(void)
+static struct character *
+character_ll_alloc(void)
 {
 	struct character *ret;
 	ret = calloc(1, sizeof * ret);
 
 	if (!ret) {
-		b_log(B_LOG_CRIT, "character", "out of memory");
+		LOG_CRITICAL("out of memory");
 	}
 
 	return ret;
@@ -134,7 +131,8 @@ static struct character *character_ll_alloc(void)
 /**
  *
  */
-int character_attr_set(struct character *ch, const char *name, const char *value)
+int
+character_attr_set(struct character *ch, const char *name, const char *value)
 {
 	unsigned i;
 	int res;
@@ -162,7 +160,8 @@ int character_attr_set(struct character *ch, const char *name, const char *value
 /**
  *
  */
-const char *character_attr_get(struct character *ch, const char *name)
+const char *
+character_attr_get(struct character *ch, const char *name)
 {
 	unsigned i;
 	struct attr_entry *at;
@@ -185,7 +184,8 @@ const char *character_attr_get(struct character *ch, const char *name)
 /**
  * load a character from fdb.
  */
-static struct character *character_load(unsigned character_id)
+static struct character *
+character_load(unsigned character_id)
 {
 	struct character *ch;
 	struct fdb_read_handle *h;
@@ -198,7 +198,7 @@ static struct character *character_load(unsigned character_id)
 	h = fdb_read_begin_uint(DOMAIN_CHARACTER, character_id);
 
 	if (!h) {
-		b_log(B_LOG_ERROR, "character", "could not load character \"%u\"", character_id);
+		LOG_ERROR("could not load character \"%u\"", character_id);
 		return NULL;
 	}
 
@@ -211,7 +211,7 @@ static struct character *character_load(unsigned character_id)
 
 	while (fdb_read_next(h, &name, &value)) {
 		if (!character_attr_set(ch, name, value)) {
-			b_log(B_LOG_ERROR, "character", "could not load character \"%u\"", character_id);
+			LOG_ERROR("could not load character \"%u\"", character_id);
 			character_ll_free(ch);
 			fdb_read_end(h);
 			return NULL;
@@ -221,7 +221,7 @@ static struct character *character_load(unsigned character_id)
 	fdb_read_end(h);
 
 	if (character_id != ch->id) {
-		b_log(B_LOG_ERROR, "character", "could not load character \"%u\" (bad, missing or mismatched id)", character_id);
+		LOG_ERROR("could not load character \"%u\" (bad, missing or mismatched id)", character_id);
 		character_ll_free(ch);
 		return NULL;
 	}
@@ -232,7 +232,8 @@ static struct character *character_load(unsigned character_id)
 /**
  * save a character record, but only if the dirty_fl is set.
  */
-int character_save(struct character *ch)
+int
+character_save(struct character *ch)
 {
 	struct attr_entry *curr;
 	struct fdb_write_handle *h;
@@ -245,7 +246,7 @@ int character_save(struct character *ch)
 	h = fdb_write_begin_uint(DOMAIN_CHARACTER, ch->id);
 
 	if (!h) {
-		b_log(B_LOG_ERROR, "character", "could not save character \"%u\"", ch->id);
+		LOG_ERROR("could not save character \"%u\"", ch->id);
 		return 0; /* failure */
 	}
 
@@ -270,12 +271,12 @@ int character_save(struct character *ch)
 	}
 
 	if (!fdb_write_end(h)) {
-		b_log(B_LOG_ERROR, "character", "could not save character \"%u\"", ch->id);
+		LOG_ERROR("could not save character \"%u\"", ch->id);
 		return 0; /* failure */
 	}
 
 	ch->dirty_fl = 0;
-	b_log(B_LOG_INFO, "character", "saved character \"%u\"", ch->id);
+	LOG_INFO("saved character \"%u\"", ch->id);
 
 	return 1;
 }
@@ -305,7 +306,7 @@ struct character *character_get(unsigned character_id)
 	}
 
 	if (!curr) {
-		b_log(B_LOG_WARN, "character", "could not access character \"%u\"", character_id);
+		LOG_WARNING("could not access character \"%u\"", character_id);
 	}
 
 	return curr;
@@ -314,7 +315,8 @@ struct character *character_get(unsigned character_id)
 /**
  * reduce reference count of character.
  */
-void character_put(struct character *ch)
+void
+character_put(struct character *ch)
 {
 	assert(ch != NULL);
 
@@ -340,7 +342,7 @@ struct character *character_new(void)
 	id = freelist_alloc(&character_id_freelist, 1);
 
 	if (id < 0) {
-		b_log(B_LOG_CRIT, "character", "could not allocate new character id.");
+		LOG_CRITICAL("could not allocate new character id.");
 		character_ll_free(ret);
 		return NULL;
 	}
@@ -361,7 +363,8 @@ struct character *character_new(void)
 /**
  * preflight all of the characters by loading every one of them.
  */
-static int character_preflight(void)
+static int
+character_preflight(void)
 {
 	struct fdb_iterator *it;
 	const char *id;
@@ -369,7 +372,7 @@ static int character_preflight(void)
 	it = fdb_iterator_begin(DOMAIN_CHARACTER);
 
 	if (!it) {
-		b_log(B_LOG_CRIT, "character", "could not load characters!");
+		LOG_CRITICAL("could not load characters!");
 		return 0; /* could not load. */
 	}
 
@@ -377,11 +380,11 @@ static int character_preflight(void)
 		struct character *ch;
 		unsigned character_id;
 		char *endptr;
-		b_log(B_LOG_DEBUG, "character", "Found character: \"%s\"", id);
+		LOG_DEBUG("Found character: \"%s\"", id);
 		character_id = strtoul(id, &endptr, 10);
 
 		if (*endptr) {
-			b_log(B_LOG_CRIT, "character", "character id \"%s\" is invalid!", id);
+			LOG_CRITICAL("character id \"%s\" is invalid!", id);
 			fdb_iterator_end(it);
 			return 0; /* could not load */
 		}
@@ -389,21 +392,21 @@ static int character_preflight(void)
 		ch = character_load(character_id);
 
 		if (!ch) {
-			b_log(B_LOG_CRIT, "character", "could not load character id \"%u\"", character_id);
+			LOG_CRITICAL("could not load character id \"%u\"", character_id);
 			fdb_iterator_end(it);
 			return 0; /* could not load */
 		}
 
 		/* compare ch->id with character_id */
 		if (ch->id != character_id) {
-			b_log(B_LOG_CRIT, "character", "bad or non-matching character id \"%u\"", character_id);
+			LOG_CRITICAL("bad or non-matching character id \"%u\"", character_id);
 			character_ll_free(ch);
 			fdb_iterator_end(it);
 		}
 
 		/* allocate id from the pool */
 		if (!freelist_thwack(&character_id_freelist, ch->id, 1)) {
-			b_log(B_LOG_CRIT, "character", "bad or duplicate character id \"%u\"", character_id);
+			LOG_CRITICAL("bad or duplicate character id \"%u\"", character_id);
 			character_ll_free(ch);
 			fdb_iterator_end(it);
 			return 0; /* could not load */
@@ -419,20 +422,21 @@ static int character_preflight(void)
 /**
  *
  */
-int character_initialize(void)
+int
+character_initialize(void)
 {
-	b_log(B_LOG_INFO, "character", "Character sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	LOG_INFO("Character sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	freelist_init(&character_id_freelist);
 	freelist_pool(&character_id_freelist, 1, ID_MAX);
 
 	if (!fdb_domain_init(DOMAIN_CHARACTER)) {
-		b_log(B_LOG_CRIT, "character", "could not access database!");
+		LOG_CRITICAL("could not access database!");
 		return -1;
 	}
 
 	/* load all characters to check and to configure pool space. */
 	if (!character_preflight()) {
-		b_log(B_LOG_CRIT, "character", "could not load characters!");
+		LOG_CRITICAL("could not load characters!");
 		return -1;
 	}
 
@@ -442,8 +446,9 @@ int character_initialize(void)
 /**
  *
  */
-void character_shutdown(void)
+void
+character_shutdown(void)
 {
-	b_log(B_LOG_INFO, "character", "Character sub-system shutting down...");
-	b_log(B_LOG_INFO, "character", "Character sub-system ended.");
+	LOG_INFO("Character sub-system shutting down...");
+	LOG_INFO("Character sub-system ended.");
 }

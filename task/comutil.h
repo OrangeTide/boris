@@ -2,5 +2,5 @@
 #define COMUTIL_H_
 #include "boris.h"
 
-void show_gametime(struct telnetclient *cl);
+void show_gametime(DESCRIPTOR_DATA *cl);
 #endif

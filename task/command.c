@@ -3,32 +3,23 @@
  *
  * Commands and actions
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2020 Jan 05
+ * @author Jon Mayo <jon@rm-f.net>
+ * @version 0.7
+ * @date 2022 Aug 27
  *
- * Copyright (c) 2008-2020, Jon Mayo
+ * Copyright (c) 2008-2022, Jon Mayo <jon@rm-f.net>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation are
- * those of the authors and should not be interpreted as representing official
- * policies, either expressed or implied, of the Boris MUD project.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include "command.h"
@@ -37,7 +28,8 @@
 #include "character.h"
 #include "room.h"
 #include "comutil.h"
-#include "debug.h"
+#define LOG_SUBSYSTEM "command"
+#include "log.h"
 #include "util.h"
 #include "eventlog.h"
 
@@ -51,31 +43,34 @@
  ******************************************************************************/
 
 /** action callback to do the "pose" command. */
-int command_do_pose(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_pose(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
-	TODO("Get user name");
-	TODO("Broadcast to everyone in current room");
+	LOG_TODO("Get user name");
+	LOG_TODO("Broadcast to everyone in current room");
 	telnetclient_printf(cl, "%s %s\n", telnetclient_username(cl), arg);
 
 	return 1; /* success */
 }
 
 /** action callback to do the "yell" command. */
-int command_do_yell(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_yell(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
-	TODO("Get user name");
-	TODO("Broadcast to everyone in yelling distance");
+	LOG_TODO("Get user name");
+	LOG_TODO("Broadcast to everyone in yelling distance");
 	telnetclient_printf(cl, "%s yells \"%s\"\n", telnetclient_username(cl), arg);
 
 	return 1; /* success */
 }
 
 /** action callback to do the "say" command. */
-int command_do_say(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_say(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	struct channel *ch;
 	struct channel_member *exclude_list[1];
-	TODO("Get user name");
+	LOG_TODO("Get user name");
 	telnetclient_printf(cl, "You say \"%s\"\n", arg);
 	ch = channel_public(0);
 	exclude_list[0] = telnetclient_channel_member(cl); /* don't send message to self. */
@@ -85,28 +80,31 @@ int command_do_say(struct telnetclient *cl, struct user *u UNUSED, const char *c
 }
 
 /** action callback to do the "emote" command. */
-int command_do_emote(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_emote(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
-	TODO("Get user name");
-	TODO("Broadcast to everyone in current room");
+	LOG_TODO("Get user name");
+	LOG_TODO("Broadcast to everyone in current room");
 	telnetclient_printf(cl, "%s %s\n", telnetclient_username(cl), arg);
 
 	return 1; /* success */
 }
 
 /** action callback to do the "chsay" command. */
-int command_do_chsay(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_chsay(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
-	TODO("pass the channel name in a way that makes sense");
-	TODO("Get user name");
-	TODO("Broadcast to everyone in a channel");
+	LOG_TODO("pass the channel name in a way that makes sense");
+	LOG_TODO("Get user name");
+	LOG_TODO("Broadcast to everyone in a channel");
 	telnetclient_printf(cl, "%s says \"%s\"\n", telnetclient_username(cl), arg);
 
 	return 1; /* success */
 }
 
 /** action callback to do the "quit" command. */
-int command_do_quit(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
+int
+command_do_quit(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
 	/** @todo
 	 * the close code needs to change the state so telnetclient_isstate
@@ -118,7 +116,8 @@ int command_do_quit(struct telnetclient *cl, struct user *u UNUSED, const char *
 }
 
 /** action callback to do the "roomget" command. */
-int command_do_roomget(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_roomget(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	struct room *r;
 	char roomnum_str[64];
@@ -152,7 +151,8 @@ int command_do_roomget(struct telnetclient *cl, struct user *u UNUSED, const cha
 }
 
 /** action callback to do the "char" command. */
-int command_do_character(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+int
+command_do_character(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
 	struct character *ch;
 	char act[64];
@@ -208,7 +208,8 @@ int command_do_character(struct telnetclient *cl, struct user *u UNUSED, const c
 }
 
 /** action callback to do the "quit" command. */
-int command_do_time(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
+int
+command_do_time(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
 	show_gametime(cl);
 
@@ -216,7 +217,8 @@ int command_do_time(struct telnetclient *cl, struct user *u UNUSED, const char *
 }
 
 /** action callback to remote that a command is not implemented. */
-static int command_not_implemented(struct telnetclient *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
+static int
+command_not_implemented(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
 	telnetclient_puts(cl, "Not implemented\n");
 
@@ -226,7 +228,7 @@ static int command_not_implemented(struct telnetclient *cl, struct user *u UNUSE
 /** table of every command string and its callback function. */
 static const struct command_table {
 	char *name; /**< full command name. */
-	int (*cb)(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg);
+	int (*cb)(DESCRIPTOR_DATA *cl, struct user *u, const char *cmd, const char *arg);
 } command_table[] = {
 	{ "who", command_not_implemented },
 	{ "quit", command_do_quit },
@@ -267,7 +269,8 @@ static const struct command_short_table {
 /**
  * use cmd to run a command from the command_table array.
  */
-static int command_run(struct telnetclient *cl, struct user *u, const char *cmd, const char *arg)
+static int
+command_run(DESCRIPTOR_DATA *cl, struct user *u, const char *cmd, const char *arg)
 {
 	unsigned i;
 
@@ -286,7 +289,8 @@ static int command_run(struct telnetclient *cl, struct user *u, const char *cmd,
 /**
  * executes a command for user u.
  */
-static int command_execute(struct telnetclient *cl, struct user *u, const char *line)
+static int
+command_execute(DESCRIPTOR_DATA *cl, struct user *u, const char *line)
 {
 	char cmd[64];
 	const char *e, *arg;
@@ -297,9 +301,9 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 
 	while (*line && isspace(*line)) line++; /* ignore leading spaces */
 
-	TODO("Can we eliminate trailing spaces?");
+	LOG_TODO("Can we eliminate trailing spaces?");
 
-	TODO("can we define these 1 character commands as aliases?");
+	LOG_TODO("can we define these 1 character commands as aliases?");
 
 	if (ispunct(line[0])) {
 		for (i = 0; i < NR(command_short_table); i++) {
@@ -328,27 +332,28 @@ static int command_execute(struct telnetclient *cl, struct user *u, const char *
 	assert(e >= line);
 
 	if ((unsigned)(e - line) > sizeof cmd - 1) { /* first word is too long */
-		DEBUG("Command length %td is too long, truncating\n", e - line);
+		LOG_DEBUG("Command length %td is too long, truncating\n", e - line);
 		e = line + sizeof cmd - 1;
 	}
 
 	memcpy(cmd, line, (unsigned)(e - line));
 	cmd[e - line] = 0;
 
-	TODO("check for \"playername,\" syntax for directed speech");
+	LOG_TODO("check for \"playername,\" syntax for directed speech");
 
-	TODO("check user aliases");
+	LOG_TODO("check user aliases");
 
-	DEBUG("cmd=\"%s\"\n", cmd);
+	LOG_DEBUG("cmd=\"%s\"\n", cmd);
 
 	return command_run(cl, u, cmd, arg);
 }
 
 /** callback to process line input. */
-static void command_lineinput(struct telnetclient *cl, const char *line)
+static void
+command_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 {
 	assert(cl != NULL);
-	DEBUG("%s:entered command '%s'\n", telnetclient_username(cl), line);
+	LOG_DEBUG("%s:entered command '%s'\n", telnetclient_username(cl), line);
 
 	/* log command input */
 	eventlog_commandinput(telnetclient_socket_name(cl), telnetclient_username(cl), line);
@@ -363,7 +368,8 @@ static void command_lineinput(struct telnetclient *cl, const char *line)
 }
 
 /** start line input mode and send it to command_lineinput. */
-static void command_start_lineinput(struct telnetclient *cl)
+static void
+command_start_lineinput(DESCRIPTOR_DATA *cl)
 {
 	const struct terminal *term = telnetclient_get_terminal(cl);
 
@@ -376,7 +382,8 @@ static void command_start_lineinput(struct telnetclient *cl)
 }
 
 /** wrapper callback for a menuitem to start command mode. */
-void command_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
+void
+command_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
 {
 	command_start_lineinput(p);
 }

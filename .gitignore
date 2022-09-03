@@ -9,6 +9,7 @@ junk*/
 *.dll
 *.lib
 *.exe
-*.d
 
-data/users/
+/data/users/
+/build
+/bin

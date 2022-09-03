@@ -1,40 +1,34 @@
 /**
  * @file room.c
  *
- * Plugin that provides basic room support.
+ * Room support.
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Dec 25
+ * @author Jon Mayo <jon@rm-f.net>
+ * @version 0.7
+ * @date 2022 Aug 27
  *
- * Copyright (c) 2009-2019, Jon Mayo
+ * Copyright (c) 2009-2022, Jon Mayo <jon@rm-f.net>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation are
- * those of the authors and should not be interpreted as representing official
- * policies, either expressed or implied, of the Boris MUD project.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #include "room.h"
 #include "boris.h"
 #include "list.h"
 #include "fdb.h"
-#include "logging.h"
+
+#define LOG_SUBSYSTEM "room"
+#include <log.h>
 
 #include <assert.h>
 #include <stdarg.h>
@@ -42,7 +36,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SUBSYSTEM_NAME "room"
 #define LOGBASIC_LENGTH_MAX 1024
 
 /******************************************************************************
@@ -80,7 +73,8 @@ static struct room_cache room_cache;
 /**
  * deallocate a room structure immediately.
  */
-static void room_ll_free(struct room *r)
+static void
+room_ll_free(struct room *r)
 {
 	assert(r != NULL);
 
@@ -110,7 +104,8 @@ static void room_ll_free(struct room *r)
 /**
  * set an attribute on a room.
  */
-int room_attr_set(struct room *r, const char *name, const char *value)
+int
+room_attr_set(struct room *r, const char *name, const char *value)
 {
 	int res;
 
@@ -144,7 +139,8 @@ int room_attr_set(struct room *r, const char *name, const char *value)
 	return res;
 }
 
-const char *room_attr_get(struct room *r, const char *name)
+const char *
+room_attr_get(struct room *r, const char *name)
 {
 	static char numbuf[22]; /* big enough for a signed 64-bit decimal */
 
@@ -174,7 +170,8 @@ const char *room_attr_get(struct room *r, const char *name)
 	return NULL; /* failure - not found. */
 }
 
-static struct room *room_load(unsigned room_id)
+static struct room *
+room_load(unsigned room_id)
 {
 	struct room *r;
 	char numbuf[22]; /* big enough for a signed 64-bit decimal */
@@ -191,7 +188,7 @@ static struct room *room_load(unsigned room_id)
 	h = fdb_read_begin(DOMAIN_ROOM, numbuf);
 
 	if (!h) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not load room \"%s\"", numbuf);
+		LOG_ERROR("could not load room \"%s\"", numbuf);
 		return NULL;
 	}
 
@@ -199,14 +196,14 @@ static struct room *room_load(unsigned room_id)
 
 	if (!r) {
 		/* TODO: do perror? */
-		b_log(B_LOG_ERROR, "calloc", "not allocate room \"%s\"", numbuf);
+		LOG_ERROR("not allocate room \"%s\"", numbuf);
 		fdb_read_end(h);
 		return NULL;
 	}
 
 	while (fdb_read_next(h, &name, &value)) {
 		if (!room_attr_set(r, name, value)) {
-			b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not load room \"%s\"", numbuf);
+			LOG_ERROR("could not load room \"%s\"", numbuf);
 			room_ll_free(r);
 			fdb_read_end(h);
 			return NULL;
@@ -217,14 +214,14 @@ static struct room *room_load(unsigned room_id)
 
 	/* r->id wasn't set, this is a problem. */
 	if (!r->id) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "id not set for room \"%u\"", room_id);
+		LOG_ERROR("id not set for room \"%u\"", room_id);
 		room_ll_free(r);
 		return NULL;
 	}
 
 	/* r->id doesn't match the file the room is stored under. */
 	if (r->id != room_id) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "id was set to \"%u\" but should be \"%u\"", r->id, room_id);
+		LOG_ERROR("id was set to \"%u\" but should be \"%u\"", r->id, room_id);
 		room_ll_free(r);
 		return NULL;
 	}
@@ -235,7 +232,8 @@ static struct room *room_load(unsigned room_id)
 /**
  * write a room structure to disk, if it is not dirty (dirty_fl).
  */
-int room_save(struct room *r)
+int
+room_save(struct room *r)
 {
 	struct attr_entry *curr;
 	struct fdb_write_handle *h;
@@ -248,7 +246,7 @@ int room_save(struct room *r)
 
 	/* refuse to save room 0. */
 	if (!r->id) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "attempted to save room \"%u\", but it is reserved", r->id);
+		LOG_ERROR("attempted to save room \"%u\", but it is reserved", r->id);
 		return 0;
 	}
 
@@ -257,7 +255,7 @@ int room_save(struct room *r)
 	h = fdb_write_begin(DOMAIN_ROOM, numbuf);
 
 	if (!h) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not save room \"%s\"", numbuf);
+		LOG_ERROR("could not save room \"%s\"", numbuf);
 		return 0; /* failure */
 	}
 
@@ -286,12 +284,12 @@ int room_save(struct room *r)
 	}
 
 	if (!fdb_write_end(h)) {
-		b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "could not save room \"%s\"", numbuf);
+		LOG_ERROR("could not save room \"%s\"", numbuf);
 		return 0; /* failure */
 	}
 
 	r->dirty_fl = 0;
-	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "saved room \"%s\"", numbuf);
+	LOG_INFO("saved room \"%s\"", numbuf);
 	return 1;
 }
 
@@ -324,7 +322,7 @@ struct room *room_get(unsigned room_id)
 	}
 
 	if (!curr) {
-		b_log(B_LOG_WARN, SUBSYSTEM_NAME, "could not access room \"%u\"", room_id);
+		LOG_WARNING("could not access room \"%u\"", room_id);
 	}
 
 	return curr;
@@ -333,7 +331,8 @@ struct room *room_get(unsigned room_id)
 /**
  * reduce reference count of room.
  */
-void room_put(struct room *r)
+void
+room_put(struct room *r)
 {
 	assert(r != NULL);
 
@@ -346,23 +345,24 @@ void room_put(struct room *r)
 	}
 }
 
-int room_initialize(void)
+int
+room_initialize(void)
 {
 	struct fdb_iterator *it;
 	const char *id;
 
-	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	LOG_INFO("Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	LIST_INIT(&room_cache);
 
 	if (!fdb_domain_init(DOMAIN_ROOM)) {
-		b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "could not load rooms!");
+		LOG_CRITICAL("could not load rooms!");
 		return -1; /* could not load. */
 	}
 
 	it = fdb_iterator_begin(DOMAIN_ROOM);
 
 	if (!it) {
-		b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "could not load rooms!");
+		LOG_CRITICAL("could not load rooms!");
 		return -1; /* could not load. */
 	}
 
@@ -371,11 +371,11 @@ int room_initialize(void)
 		struct room *r;
 		unsigned room_id;
 		char *endptr;
-		b_log(B_LOG_DEBUG, SUBSYSTEM_NAME, "Found room: \"%s\"", id);
+		LOG_DEBUG("Found room: \"%s\"", id);
 		room_id = strtoul(id, &endptr, 10);
 
 		if (*endptr) {
-			b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "room id \"%s\" is invalid!", id);
+			LOG_CRITICAL("room id \"%s\" is invalid!", id);
 			fdb_iterator_end(it);
 			return -1; /* could not load */
 		}
@@ -383,7 +383,7 @@ int room_initialize(void)
 		r = room_load(room_id);
 
 		if (!r) {
-			b_log(B_LOG_CRIT, SUBSYSTEM_NAME, "could not load rooms!");
+			LOG_CRITICAL("could not load rooms!");
 			fdb_iterator_end(it);
 			return -1; /* could not load */
 		}
@@ -396,22 +396,24 @@ int room_initialize(void)
 	return 0; /* success */
 }
 
-void room_shutdown(void)
+void
+room_shutdown(void)
 {
 	struct room *curr;
 	struct room_cache blocked_cache;
 
-	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "Room system shutting down..");
+	LOG_INFO("Room system shutting down..");
 
 	/* save all dirty objects and free all data. */
 	LIST_INIT(&blocked_cache); /* keep a temporary list of unfreed rooms */
+
 	while ((curr = LIST_TOP(room_cache))) {
 		LIST_REMOVE(curr, room_cache);
 		room_save(curr);
 
 		/* check to make sure no rooms are still in use. */
 		if (curr->refcount > 0) {
-			b_log(B_LOG_ERROR, SUBSYSTEM_NAME, "cannot shut down, room \"%u\" still in use.", curr->id);
+			LOG_ERROR("cannot shut down, room \"%u\" still in use.", curr->id);
 			LIST_INSERT_HEAD(&blocked_cache, curr, room_cache);
 		} else {
 			room_ll_free(curr);
@@ -423,5 +425,5 @@ void room_shutdown(void)
 		room_cache = blocked_cache;
 	}
 
-	b_log(B_LOG_INFO, SUBSYSTEM_NAME, "Room system ended.");
+	LOG_INFO("Room system ended.");
 }

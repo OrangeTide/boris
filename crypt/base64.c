@@ -3,10 +3,10 @@
  *
  * Base64 encode and decode routines
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Dec 25
+ * @author Jon Mayo <jon@rm-f.net>
+ * @date 2022 Aug 17
  *
- * Written in 2009 by Jon Mayo <jon.mayo@gmail.com>
+ * Written in 2009-2022 by Jon Mayo <jon@rm-f.net>
  *
  * To the extent possible under law, the author(s) have dedicated all copyright
  * and related and neighboring rights to this software to the public domain
@@ -21,6 +21,8 @@
 #include <string.h>
 #include "base64.h"
 #include "boris.h"
+#define LOG_SUBSYSTEM "crypt"
+#include "log.h"
 #include "debug.h"
 
 static const uint8_t base64enc_tab[64] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -88,7 +90,7 @@ int base64_decode(size_t in_len, const char *in, size_t out_len, unsigned char *
 		base64dec_tab = malloc(256);
 
 		if (!base64dec_tab) {
-			PERROR("malloc()");
+			LOG_PERROR("malloc()");
 			return 0;
 		}
 

@@ -1,50 +1,42 @@
 /**
- * @file common.c
+ * @file boris.c
  *
  * 20th Century MUD.
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
+ * @author Jon Mayo <jon@rm-f.net>
  * @version 0.7
- * @date 2020 Apr 27
+ * @date 2022 Aug 27
  *
- * Copyright (c) 2008-2020, Jon Mayo
+ * Copyright (c) 2008-2022, Jon Mayo <jon@rm-f.net>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation are
- * those of the authors and should not be interpreted as representing official
- * policies, either expressed or implied, of the Boris MUD project.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include "boris.h"
 #include "channel.h"
 #include "character.h"
-#include "debug.h"
 #include "eventlog.h"
 #include "fdb.h"
 #include "room.h"
-#include "logging.h"
+#define LOG_SUBSYSTEM "server"
+#include <log.h>
+#include <debug.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <time.h>
+#include <dyad.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
@@ -72,7 +64,8 @@
  * Main - Option parsing and initialization
  ******************************************************************************/
 
-void show_version(void)
+void
+show_version(void)
 {
 	puts("Version " BORIS_VERSION_STR " (built " __DATE__ ")");
 }
@@ -85,7 +78,8 @@ static sig_atomic_t keep_going_fl = 1;
 /**
  * signal handler to cause the main loop to terminated by clearing keep_going_fl.
  */
-static void sh_quit(int s UNUSED)
+static void
+sh_quit(int s UNUSED)
 {
 	keep_going_fl = 0;
 }
@@ -93,12 +87,14 @@ static void sh_quit(int s UNUSED)
 /**
  * display a program usage message and terminated with an exit code.
  */
-static void usage(void)
+static void
+usage(void)
 {
 	fprintf(stderr,
 	        "usage: boris [-h46] [-p port]\n"
 	        "-4      use IPv4-only server addresses\n"
 	        "-6      use IPv6-only server addresses\n"
+		"-p n    listen on TCP port <n>\n"
 	        "-h      help\n"
 	       );
 	exit(EXIT_FAILURE);
@@ -109,10 +105,11 @@ static void usage(void)
  * @param ch flag currently processing, used for printing error message.
  * @param next_arg string holding the next argument, or NULL if no argument.
  */
-static void need_parameter(int ch, const char *next_arg)
+static void
+need_parameter(int ch, const char *next_arg)
 {
 	if (!next_arg) {
-		ERROR_FMT("option -%c takes a parameter\n", ch);
+		LOG_ERROR("option -%c takes a parameter\n", ch);
 		usage();
 	}
 }
@@ -124,7 +121,8 @@ static void need_parameter(int ch, const char *next_arg)
  * @param next_arg following argument.
  * @return 0 if the following argument is not consumed. 1 if the argument was used.
  */
-static int process_flag(int ch, const char *next_arg)
+static int
+process_flag(int ch, const char *next_arg)
 {
 	switch(ch) {
 	case '4':
@@ -141,14 +139,21 @@ static int process_flag(int ch, const char *next_arg)
 		mud_config.config_filename = strdup(next_arg);
 		return 1; /* uses next arg */
 
-	case 'p':
-		need_parameter(ch, next_arg);
+	case 'p': {
+			char *endptr;
 
-		if (!socketio_listen(mud_config.default_family, SOCK_STREAM, NULL, next_arg, telnetclient_new_event)) {
-			usage();
+			need_parameter(ch, next_arg);
+
+			errno = 0;
+			mud.params.port = strtoul(next_arg, &endptr, 0);
+			if (errno || *endptr != 0) {
+				LOG_ERROR("Not a number. problem with paramter '%s'", next_arg);
+				usage();
+			}
+
+			return 1; /* uses next arg */
 		}
-
-		return 1; /* uses next arg */
+		break;
 
 	case 'V': /* print version and exit. */
 		show_version();
@@ -156,7 +161,7 @@ static int process_flag(int ch, const char *next_arg)
 		return 0;
 
 	default:
-		ERROR_FMT("Unknown option -%c\n", ch);
+		LOG_ERROR("Unknown option -%c\n", ch);
 
 	/* fall through */
 	case 'h':
@@ -171,7 +176,8 @@ static int process_flag(int ch, const char *next_arg)
  * @param argc count of arguments.
  * @param argv array of strings holding the arguments.
  */
-static void process_args(int argc, char **argv)
+static void
+process_args(int argc, char **argv)
 {
 	int i, j;
 
@@ -185,7 +191,7 @@ static void process_args(int argc, char **argv)
 				}
 			}
 		} else {
-			TODO("process arguments");
+			LOG_TODO("process arguments");
 			fprintf(stderr, "TODO: process argument '%s'\n", argv[i]);
 		}
 	}
@@ -194,7 +200,8 @@ static void process_args(int argc, char **argv)
 /**
  * main - where it all starts.
  */
-int main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
 	show_version();
 
@@ -214,15 +221,12 @@ int main(int argc, char **argv)
 	srand((unsigned)time(NULL));
 
 	if (MKDIR("data") == -1 && errno != EEXIST) {
-		PERROR("data/");
+		LOG_PERROR("data/");
 		return EXIT_FAILURE;
 	}
 
-	if (!socketio_init()) {
-		return EXIT_FAILURE;
-	}
-
-	atexit(socketio_shutdown);
+	dyad_init();
+	atexit(dyad_shutdown);
 
 	/* load default configuration into mud_config global */
 	mud_config_init();
@@ -233,40 +237,40 @@ int main(int argc, char **argv)
 
 	/* process configuration file and load into mud_config global */
 	if (!mud_config_process()) {
-		ERROR_MSG("could not load configuration");
+		LOG_ERROR("could not load configuration");
 		return EXIT_FAILURE;
 	}
 
-	if (logging_initialize()) {
-		ERROR_MSG("could not initialize logging");
+	if (log_init()) {
+		LOG_ERROR("could not initialize logging");
 		return EXIT_FAILURE;
 	}
 
-	atexit(logging_shutdown);
+	atexit(log_done);
 
 	if (fdb_initialize()) {
-		ERROR_MSG("could not load database");
+		LOG_ERROR("could not load database");
 		return EXIT_FAILURE;
 	}
 
 	atexit(fdb_shutdown);
 
 	if (channel_initialize()) {
-		ERROR_MSG("could not load channels");
+		LOG_ERROR("could not load channels");
 		return EXIT_FAILURE;
 	}
 
 	atexit(channel_shutdown);
 
 	if (room_initialize()) {
-		ERROR_MSG("could not load room sub-system");
+		LOG_ERROR("could not load room sub-system");
 		return EXIT_FAILURE;
 	}
 
 	atexit(room_shutdown);
 
 	if (character_initialize()) {
-		ERROR_MSG("could not load character sub-system");
+		LOG_ERROR("could not load character sub-system");
 		return EXIT_FAILURE;
 	}
 
@@ -279,43 +283,54 @@ int main(int argc, char **argv)
 	atexit(eventlog_shutdown);
 
 	if (!user_init()) {
-		ERROR_MSG("could not initialize users");
+		LOG_ERROR("could not initialize users");
 		return EXIT_FAILURE;
 	}
 
 	atexit(user_shutdown);
 
+#if 0 // DISABLED
 	if (!form_module_init()) {
-		ERROR_MSG("could not initialize forms");
+		LOG_ERROR("could not initialize forms");
 		return EXIT_FAILURE;
 	}
 
 	atexit(form_module_shutdown);
+#endif
 
+#if 0 // DISABLED
 	/* start the webserver if webserver.port is defined. */
-	if (mud_config.webserver_port) {
+	if (mud_config.webserver_port > 0) {
 		if (!webserver_init(mud_config.default_family, mud_config.webserver_port)) {
-			ERROR_MSG("could not initialize webserver");
+			LOG_ERROR("could not initialize webserver");
 			return EXIT_FAILURE;
 		}
 
 		atexit(webserver_shutdown);
 	}
+#endif
 
 	if (!game_init()) {
-		ERROR_MSG("could not start game");
+		LOG_ERROR("could not start game");
 		return EXIT_FAILURE;
 	}
 
 	eventlog_server_startup();
 
-	TODO("use the next event for the timer");
+	if (telnetserver_listen(mud.params.port)) {
+		LOG_ERROR("could not listen to port %u", mud.params.port);
+		return EXIT_FAILURE;
+	}
 
-	while (keep_going_fl) {
-		telnetclient_prompt_refresh_all();
+	LOG_TODO("use the next event for the timer");
 
-		if (!socketio_dispatch(-1))
-			break;
+	while (keep_going_fl && dyad_getStreamCount() > 0) {
+		struct telnetserver *cur = telnetserver_first();
+		for (; cur; cur = telnetserver_next(cur)) {
+			telnetclient_prompt_refresh_all(cur);
+		}
+
+		dyad_update();
 
 		fprintf(stderr, "Tick\n");
 	}

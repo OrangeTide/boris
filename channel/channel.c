@@ -1,38 +1,32 @@
 /**
  * @file channel.c
  *
- * Plugin that provides a Channel service.
+ * Channel service.
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2019 Dec 25
+ * @author Jon Mayo <jon@rm-f.net>
+ * @version 0.7
+ * @date 2022 Aug 27
  *
- * Copyright (c) 2009-2019, Jon Mayo
+ * Copyright (c) 2009-2022, Jon Mayo <jon@rm-f.net>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation are
- * those of the authors and should not be interpreted as representing official
- * policies, either expressed or implied, of the Boris MUD project.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #include "channel.h"
 #include "boris.h"
-#include "logging.h"
+
+#define LOG_SUBSYSTEM "channel"
+#include <log.h>
 
 #include <assert.h>
 #include <stdarg.h>
@@ -45,10 +39,6 @@
  * Defines
  ******************************************************************************/
 #define CHANNEL_SEND_MAX 1024
-#define DEBUG(msg, ...) fprintf(stderr, "%s():%d:" msg "\n",  __func__, __LINE__, __VA_ARGS__)
-#if 0
-#define DEBUG(msg, ...) b_log(B_LOG_DEBUG, "channel", "%s():%d:" msg, __func__, __LINE__, __VA_ARGS__)
-#endif
 
 /******************************************************************************
  * Types
@@ -77,7 +67,8 @@ static struct channel_public_list channel_public_list;
 /******************************************************************************
  * Functions
  ******************************************************************************/
-static void channel_init(struct channel *ch)
+static void
+channel_init(struct channel *ch)
 {
 	ch->nr_member = 0;
 	ch->member = NULL;
@@ -86,29 +77,31 @@ static void channel_init(struct channel *ch)
 /**
  * test for membership in a channel.
  */
-static struct channel_member **channel_find_member(struct channel *ch, struct channel_member *cm)
+static struct channel_member **
+channel_find_member(struct channel *ch, struct channel_member *cm)
 {
 	unsigned i;
 
-	DEBUG("looking for channel member %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
+	LOG_DEBUG("looking for channel member %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
 
 	if (!ch) return NULL;
 
 	for (i = 0; i < ch->nr_member; i++) {
-		DEBUG("looking at %p...", (void*)ch->member[i]);
+		LOG_DEBUG("looking at %p...", (void*)ch->member[i]);
 
 		if (ch->member[i] == cm) return &ch->member[i];
 
 	}
 
-	DEBUG("not found %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
+	LOG_DEBUG("not found %p(p=%p)", (void*)cm, cm ? cm->p : NULL);
 	return NULL;
 }
 
 /**
  * add member to a channel.
  */
-static int channel_add_member(struct channel *ch, struct channel_member *cm)
+static int
+channel_add_member(struct channel *ch, struct channel_member *cm)
 {
 	struct channel_member **newlist;
 
@@ -122,7 +115,7 @@ static int channel_add_member(struct channel *ch, struct channel_member *cm)
 	newlist = realloc(ch->member, sizeof * ch->member * (ch->nr_member + 1));
 
 	if (!newlist) {
-		b_log(B_LOG_ERROR, "channel", "could not add member to channel.");
+		LOG_ERROR("could not add member to channel.");
 		return 0; /* could not allocate. */
 	}
 
@@ -134,7 +127,8 @@ static int channel_add_member(struct channel *ch, struct channel_member *cm)
 /**
  * remove a member from a channel.
  */
-static int channel_delete_member(struct channel *ch, struct channel_member *cm)
+static int
+channel_delete_member(struct channel *ch, struct channel_member *cm)
 {
 	struct channel_member **d;
 
@@ -147,7 +141,7 @@ static int channel_delete_member(struct channel *ch, struct channel_member *cm)
 
 	if (!d) return 0; /* not a member */
 
-	DEBUG("found channel member %p at %p", (void*)cm, (void*)d);
+	LOG_DEBUG("found channel member %p at %p", (void*)cm, (void*)d);
 
 	assert(ch->nr_member > 0);
 
@@ -164,7 +158,8 @@ static int channel_delete_member(struct channel *ch, struct channel_member *cm)
 	return 1; /* success */
 }
 
-static struct channel_public *channel_public_find(const char *name)
+static struct channel_public *
+channel_public_find(const char *name)
 {
 	struct channel_public *curr;
 
@@ -183,9 +178,14 @@ static struct channel_public *channel_public_find(const char *name)
 /**
  * define a new public channel.
  */
-static int channel_public_add(const char *name)
+static int
+channel_public_add(const char *name)
 {
 	struct channel_public *newch;
+
+	if (!name) {
+		return 0; /* failure : refuse to create channel NULL */
+	}
 
 	if (channel_public_find(name)) {
 		return 0; /* refuse to create duplicate channel. */
@@ -195,7 +195,7 @@ static int channel_public_add(const char *name)
 
 	if (!newch) {
 		perror("calloc()");
-		b_log(B_LOG_ERROR, "channel", "could not allocate channel.");
+		LOG_ERROR("could not allocate channel.");
 		return 0; /* failure. */
 	}
 
@@ -204,7 +204,7 @@ static int channel_public_add(const char *name)
 
 		if (!newch->name) {
 			perror("strdup()");
-			b_log(B_LOG_ERROR, "channel", "could not allocate channel.");
+			LOG_ERROR("could not allocate channel.");
 			free(newch);
 			return 0; /* failure. */
 		}
@@ -219,7 +219,7 @@ static int channel_public_add(const char *name)
 }
 
 /**
- * get a channel by numeric id.
+ * get a channel by name.
  */
 struct channel *channel_public(const char *name)
 {
@@ -236,49 +236,54 @@ struct channel *channel_public(const char *name)
 /**
  * Initialize the sub-system.
  */
-int channel_initialize(void)
+int
+channel_initialize(void)
 {
-	b_log(B_LOG_INFO, "channel", "channel sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
-	channel_public_add("Wiz");
-	channel_public_add("OOC");
-	channel_public_add(NULL); /* system channel. */
+	LOG_INFO("channel sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	channel_public_add(CHANNEL_WIZ); /* Wizards */
+	channel_public_add(CHANNEL_OOC); /* Out-of-Character chat */
+	channel_public_add(CHANNEL_SYS); /* system channel. */
 	return 0;
 }
 
 /**
  * Shutdown the sub-system.
  */
-void channel_shutdown(void)
+void
+channel_shutdown(void)
 {
-	b_log(B_LOG_INFO, "channel", "channel sub-system shutting down...");
-	b_log(B_LOG_INFO, "channel", "channel sub-system ended.");
+	LOG_INFO("channel sub-system shutting down...");
+	LOG_INFO("channel sub-system ended.");
 }
 
 /**
  * join a channel.
  */
-int channel_join(struct channel *ch, struct channel_member *cm)
+int
+channel_join(struct channel *ch, struct channel_member *cm)
 {
-	b_log(B_LOG_TRACE, "channel", "someone(%p) joined\n", cm ? cm->p : NULL);
+	LOG_TRACE("someone(%p) joined\n", cm ? cm->p : NULL);
 	return channel_add_member(ch, cm);
 }
 
 /**
  * leave a channel.
  */
-void channel_part(struct channel *ch, struct channel_member *cm)
+void
+channel_part(struct channel *ch, struct channel_member *cm)
 {
-	b_log(B_LOG_TRACE, "channel", "someone(%p) parted\n", cm ? cm->p : NULL);
+	LOG_TRACE("someone(%p) parted\n", cm ? cm->p : NULL);
 
 	if (!channel_delete_member(ch, cm)) {
-		b_log(B_LOG_WARN, "channel", "could not find channel member %p", cm);
+		LOG_WARNING("could not find channel member %p", cm);
 	}
 }
 
 /**
  * exclude_list can only be NULL if exclude_list_len is 0.
  */
-static int is_on_list(const struct channel_member *cm, struct channel_member **exclude_list, unsigned exclude_list_len)
+static int
+is_on_list(const struct channel_member *cm, struct channel_member **exclude_list, unsigned exclude_list_len)
 {
 	unsigned i;
 
@@ -292,7 +297,8 @@ static int is_on_list(const struct channel_member *cm, struct channel_member **e
 /**
  * send a message to everyone except those on exclude_list.
  */
-int channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...)
+int
+channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...)
 {
 	va_list ap;
 	unsigned i;
@@ -304,7 +310,7 @@ int channel_broadcast(struct channel *ch, struct channel_member **exclude_list, 
 
 	for (i = 0; i < ch->nr_member; i++) {
 		struct channel_member *cm = ch->member[i];
-		DEBUG("cm=%p p=%p\n", (void*)cm, cm ? cm->p : NULL);
+		LOG_DEBUG("cm=%p p=%p\n", (void*)cm, cm ? cm->p : NULL);
 
 		if (cm && cm->send && !is_on_list(cm, exclude_list, exclude_list_len)) {
 			cm->send(cm, ch, buf);

@@ -3,34 +3,27 @@
  *
  * Utility routines - fnmatch, load text files, string utilities
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2020 Apr 27
+ * @author Jon Mayo <jon@rm-f.net>
+ * @date 2022 Aug 17
  *
- * Copyright (c) 2009-2020, Jon Mayo
+ * Copyright (c) 2009-2022 Jon Mayo <jon@rm-f.net>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation are
- * those of the authors and should not be interpreted as representing official
- * policies, either expressed or implied, of the Boris MUD project.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #include "util.h"
+#define LOG_SUBSYSTEM "util"
+#include "log.h"
 #include "debug.h"
 
 #include <assert.h>
@@ -47,7 +40,8 @@
  * @param flags zero or UTIL_FNM_CASEFOLD for case-insensitive matches..
  * @return 0 on a match, UTIL_FNM_NOMATCH on failure.
  */
-int util_fnmatch(const char *pattern, const char *string, int flags)
+int
+util_fnmatch(const char *pattern, const char *string, int flags)
 {
 	char c;
 
@@ -73,7 +67,7 @@ int util_fnmatch(const char *pattern, const char *string, int flags)
 		case '[':
 		case ']':
 		case '\\':
-			TODO("support [] and \\");
+			LOG_TODO("support [] and \\");
 
 		/* fall through */
 		default:
@@ -90,7 +84,8 @@ int util_fnmatch(const char *pattern, const char *string, int flags)
  * @param filename
  * @return NULL on failure. A malloc'd string containing the file on success.
  */
-char *util_textfile_load(const char *filename)
+char *
+util_textfile_load(const char *filename)
 {
 	FILE *f;
 	char *ret;
@@ -100,49 +95,49 @@ char *util_textfile_load(const char *filename)
 	f = fopen(filename, "r");
 
 	if (!f) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure0;
 	}
 
 	if (fseek(f, 0l, SEEK_END) != 0) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure1;
 	}
 
 	len = ftell(f);
 
 	if (len == EOF) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure1;
 	}
 
 	assert(len >= 0); /* len must not be negative */
 
 	if (fseek(f, 0l, SEEK_SET) != 0) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure1;
 	}
 
 	ret = malloc((unsigned)len + 1);
 
 	if (!ret) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure1;
 	}
 
 	res = fread(ret, 1, (unsigned)len, f);
 
 	if (ferror(f)) {
-		PERROR(filename);
+		LOG_PERROR(filename);
 		goto failure2;
 	} else if (res != (size_t)len) {
-		ERROR_MSG("short read");
+		LOG_ERROR("short read");
 		goto failure2;
 	}
 
 	ret[len] = 0; /* null terminate the string */
 
-	DEBUG("%s:loaded %ld bytes\n", filename, len);
+	LOG_DEBUG("%s:loaded %ld bytes\n", filename, len);
 
 	fclose(f);
 	return ret;
@@ -159,7 +154,8 @@ failure0:
  * copies a word into out, silently truncate word if it is too long.
  * return updated position of s.
  */
-const char *util_getword(const char *s, char *out, size_t outlen)
+const char *
+util_getword(const char *s, char *out, size_t outlen)
 {
 	const char *b, *e;
 
@@ -181,7 +177,8 @@ const char *util_getword(const char *s, char *out, size_t outlen)
  ******************************************************************************/
 
 /** initialize a util_strfile with a new string. */
-void util_strfile_open(struct util_strfile *h, const char *buf)
+void
+util_strfile_open(struct util_strfile *h, const char *buf)
 {
 	assert(h != NULL);
 	assert(buf != NULL);
@@ -189,7 +186,8 @@ void util_strfile_open(struct util_strfile *h, const char *buf)
 }
 
 /** clean up a util_strfile structure. */
-void util_strfile_close(struct util_strfile *h)
+void
+util_strfile_close(struct util_strfile *h)
 {
 	h->buf = NULL;
 }
@@ -198,7 +196,8 @@ void util_strfile_close(struct util_strfile *h)
  * line won't be null terminated or anything useful like that. this abstraction
  * just moves a pointer around.
  */
-const char *util_strfile_readline(struct util_strfile *h, size_t *len)
+const char *
+util_strfile_readline(struct util_strfile *h, size_t *len)
 {
 	const char *ret;
 
@@ -221,7 +220,8 @@ const char *util_strfile_readline(struct util_strfile *h, size_t *len)
  * removes a trailing newline if one exists.
  * @param line the string to modify.
  */
-void trim_nl(char *line)
+void
+trim_nl(char *line)
 {
 	line = strrchr(line, '\n');
 
@@ -233,7 +233,8 @@ void trim_nl(char *line)
  * @param line the string to modify.
  * @return pointer that may be offset into original string.
  */
-char *trim_whitespace(char *line)
+char *
+trim_whitespace(char *line)
 {
 	char *tmp;
 
@@ -250,7 +251,8 @@ char *trim_whitespace(char *line)
  * @param data pointer to the data.
  * @param len length to hexdump.
  */
-void util_hexdump(FILE *f, const void *data, int len)
+void
+util_hexdump(FILE *f, const void *data, int len)
 {
 	fprintf(f, "[%d]", len);
 

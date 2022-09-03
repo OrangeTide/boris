@@ -1,6 +1,6 @@
 /* prioq.c - priority queue, implement as a heap holding a complete binary tree
  * This software is PUBLIC DOMAIN as of September 2008. No copyright is claimed.
- * Jon Mayo <jon.mayo@gmail.com>
+ * Jon Mayo <jon@rm-f.net>
  * Initial: September 1, 2008
  * Updated: June 19, 2020
  */

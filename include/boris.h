@@ -3,33 +3,25 @@
  *
  * 20th Century MUD.
  *
- * @author Jon Mayo <jon.mayo@gmail.com>
- * @date 2020 Apr 27
+ * @author Jon Mayo <jon@rm-f.net>
+ * @version 0.7
+ * @date 2022 Apr 27
  *
- * Copyright (c) 2009-2020 Jon Mayo
+ * Copyright (c) 2009-2022 Jon Mayo <jon@rm-f.net>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- * The views and conclusions contained in the software and documentation are
- * those of the authors and should not be interpreted as representing official
- * policies, either expressed or implied, of the Boris MUD project.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
 #ifndef BORIS_H_
 #define BORIS_H_
 
@@ -41,24 +33,21 @@
 /******************************************************************************
  * Forward declarations
  ******************************************************************************/
-struct channel;
-struct channel_member;
-struct freelist_entry;
 struct menuinfo;
-struct telnetclient;
 struct user;
-struct form;
-struct form_state;
 
 /******************************************************************************
  * Includes
  ******************************************************************************/
 #include <stdarg.h>
 #include <sys/socket.h>
+#include <string.h>
+#include <dyad.h>
 
 #include "mudconfig.h"
 #include "list.h"
 #include "terminal.h"
+#include "telnetclient.h"
 
 /******************************************************************************
  * Macros
@@ -101,15 +90,6 @@ struct form_state;
 #  define BORIS_VERSION_STR \
 	_make_string(BORIS_VERSION_MAJ) "." \
 	_make_string(BORIS_VERSION_MIN)
-#endif
-
-/* controls how external functions are exported */
-#ifndef NDEBUG
-/** tag a function as being an exported symbol. */
-#define EXPORT
-#else
-/** fake out the export and keep the functions internal. */
-#define EXPORT static
 #endif
 
 /*=* Byte-order functions *=*/
@@ -302,31 +282,7 @@ struct description_string {
 	char *long_str;
 };
 
-/**
- * head for a list of number ranges.
- */
-LIST_HEAD(struct freelist_listhead, struct freelist_entry);
-
-/**
- * a pool of number ranges.
- * originally there were many lists, bucketed by length, but it grew cumbersome.
- */
-struct freelist {
-	/* single list ordered by offset to find adjacent chunks. */
-	struct freelist_listhead global;
-};
-
-/**
- * used to subscribe to a channel.
- * see channel.join() and channel.part().
- *
- * HINT: a fancy macro using offsetof() and casting could be used to find the
- * pointer of the containing struct and avoid the need for the void *p.
- */
-struct channel_member {
-	void (*send)(struct channel_member *cm, struct channel *ch, const char *msg);
-	void *p;
-};
+struct heapqueue_elm;
 
 /******************************************************************************
  * Global variables
@@ -349,43 +305,10 @@ int parse_attr(const char *name, const char *value, struct attr_list *al);
 int value_set(const char *value, enum value_type type, void *p);
 const char *value_get(enum value_type type, void *p);
 
-void freelist_init(struct freelist *fl);
-void freelist_free(struct freelist *fl);
-long freelist_alloc(struct freelist *fl, unsigned count);
-void freelist_pool(struct freelist *fl, unsigned ofs, unsigned count);
-int freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count);
-#ifndef NTEST
-void freelist_test(void);
-#endif
-
-void telnetclient_new_event(struct socketio_handle *sh);
-const char *telnetclient_username(struct telnetclient *cl);
-int telnetclient_puts(struct telnetclient *cl, const char *str);
-int telnetclient_vprintf(struct telnetclient *cl, const char *fmt, va_list ap);
-int telnetclient_printf(struct telnetclient *cl, const char *fmt, ...);
-void telnetclient_setprompt(struct telnetclient *cl, const char *prompt);
-void telnetclient_start_lineinput(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt);
-int telnetclient_isstate(struct telnetclient *cl, void (*line_input)(struct telnetclient *cl, const char *line), const char *prompt);
-void telnetclient_close(struct telnetclient *cl);
-struct channel_member *telnetclient_channel_member(struct telnetclient *cl);
-struct socketio_handle *telnetclient_socket_handle(struct telnetclient *cl);
-const char *telnetclient_socket_name(struct telnetclient *cl);
-const struct terminal *telnetclient_get_terminal(struct telnetclient *cl);
-void telnetclient_prompt_refresh(struct telnetclient *cl);
-void telnetclient_prompt_refresh_all(void);
-
-void menu_show(struct telnetclient *cl, const struct menuinfo *mi);
-void menu_input(struct telnetclient *cl, const struct menuinfo *mi, const char *line);
-
-int form_module_init(void);
-void form_module_shutdown(void);
-struct form *form_load(const char *buf, void (*form_close)(struct telnetclient *cl, struct form_state *fs));
-struct form *form_load_from_file(const char *filename, void (*form_close)(struct telnetclient *cl, struct form_state *fs));
-void form_state_init(struct form_state *fs, const struct form *f);
-void form_additem(struct form *f, unsigned flags, const char *name, const char *prompt, const char *description, int (*form_check)(struct telnetclient *cl, const char *str));
-void form_init(struct form *f, const char *title, void (*form_close)(struct telnetclient *cl, struct form_state *fs));
-void form_setmessage(struct form *f, const char *message);
-void form_free(struct form *f);
+int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret);
+void heapqueue_enqueue(struct heapqueue_elm *elm);
+int heapqueue_dequeue(struct heapqueue_elm *ret);
+void heapqueue_test(void);
 
 void mud_config_init(void);
 void mud_config_shutdown(void);
