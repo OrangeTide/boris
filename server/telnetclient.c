@@ -33,6 +33,8 @@
 #include <log.h>
 #include <debug.h>
 #include <eventlog.h>
+#include <game.h>
+#include <mudconfig.h>
 
 #define OK (0)
 #define ERR (-1)
@@ -186,13 +188,11 @@ static LIST_HEAD(struct server_list_head, struct telnetserver) server_list;
 
 static void telnetclient_on_accept(dyad_Event *e);
 static void telnetclient_on_error(dyad_Event *e);
-static void telnetclient_clear_statedata(DESCRIPTOR_DATA *cl);
 static int telnetclient_channel_add(DESCRIPTOR_DATA *cl, struct channel *ch);
 static int telnetclient_channel_remove(DESCRIPTOR_DATA *cl, struct channel *ch);
 static void telnetclient_free(dyad_Event *e);
 static void telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const char *msg);
 static DESCRIPTOR_DATA *telnetclient_newclient(dyad_Stream *stream);
-// static void telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u);
 static int telnetclient_telnet_init(DESCRIPTOR_DATA *cl);
 static int telnetclient_echomode(DESCRIPTOR_DATA *cl, int mode);
 static int telnetclient_linemode(DESCRIPTOR_DATA *cl, int mode);
@@ -201,9 +201,26 @@ static int telnetclient_linemode(DESCRIPTOR_DATA *cl, int mode);
  * Functions
  ******************************************************************************/
 
+/** start line input mode on a telnetclient. */
+void
+telnetclient_start_lineinput(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA *cl, const char *line), const char *prompt)
+{
+	assert(cl != NULL);
+	telnetclient_setprompt(cl, prompt);
+	cl->line_input = line_input;
+}
+
 static void
 telnetclient_on_data(dyad_Event *e)
 {
+	DESCRIPTOR_DATA *cl = e->udata;
+
+	if (!cl) {
+		LOG_ERROR("Illegal client state! [fd=%ld, %s:%u]\n", (long)dyad_getSocket(e->remote), dyad_getAddress(e->remote), dyad_getPort(e->remote));
+		dyad_close(e->remote);
+		return;
+	}
+
 	// TODO: replace this simple echo code
 	dyad_write(e->stream, e->data, e->size);
 }
@@ -292,7 +309,7 @@ telnetclient_printf(DESCRIPTOR_DATA *cl, const char *fmt, ...)
 }
 
 /** releases current state (frees it). */
-static void
+void
 telnetclient_clear_statedata(DESCRIPTOR_DATA *cl)
 {
 	if (cl->state_free) {
@@ -444,16 +461,17 @@ telnetclient_newclient(dyad_Stream *stream)
 	dyad_addListener(stream, DYAD_EVENT_DESTROY, telnetclient_free, cl);
 	dyad_addListener(stream, DYAD_EVENT_DATA, telnetclient_on_data, cl);
 
+	menu_start_input(cl, &gamemenu_login);
+
 	return cl;
 failed:
 	return NULL;
 }
 
-#if 0 // TODO: add user to DESCRIPTOR_DATA
 /**
  * replaces the current user with a different one and updates the reference counts.
  */
-static void
+void
 telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u)
 {
 	struct user *old_user;
@@ -463,7 +481,6 @@ telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u)
 	user_get(u);
 	user_put(&old_user);
 }
-#endif
 
 /**
  * posts telnet protocol necessary to begin negotiation of options.
@@ -726,19 +743,6 @@ telnetclient_setprompt(DESCRIPTOR_DATA *cl, const char *prompt)
 	cl->prompt_flag = 1;
 }
 
-#if 0 // TODO: broken, rewrite this
-/** start line input mode on a telnetclient. */
-void
-telnetclient_start_lineinput(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA *cl, const char *line), const char *prompt)
-{
-	assert(cl != NULL);
-	telnetclient_setprompt(cl, prompt);
-	cl->line_input = line_input;
-	cl->sh->read_event = telnetclient_rdev_lineinput;
-}
-#endif
-
-#if 0 // TODO: broken, rewrite this
 /**
  * @return true if client is still in this state
  */
@@ -748,21 +752,9 @@ telnetclient_isstate(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA *cl
 
 	if (!cl) return 0;
 
-	return cl->sh->read_event == telnetclient_rdev_lineinput && cl->line_input == line_input && cl->prompt_string == prompt;
+	return cl->line_input == line_input &&
+		(cl->prompt_string == prompt || strcmp(cl->prompt_string, prompt));
 }
-#endif
-
-#if 0 // TODO: fix this, it's broken
-/** start menu input mode for a telnet client. */
-static void
-telnetclient_start_menuinput(DESCRIPTOR_DATA *cl, struct menuinfo *menu)
-{
-	telnetclient_clear_statedata(cl); /* this is a fresh state */
-	cl->state.menu.menu = menu;
-	menu_show(cl, cl->state.menu.menu);
-	telnetclient_start_lineinput(cl, menu_lineinput, mud_config.menu_prompt);
-}
-#endif
 
 #if 0 // TODO: replace with dyad Event
 /**
@@ -782,7 +774,7 @@ telnetclient_new_event(struct socketio_handle *sh)
 	sh->write_event = telnetclient_write_event;
 	sh->read_event = NULL;
 
-	telnetclient_start_menuinput(cl, &gamemenu_login);
+	menu_start_input(cl, &gamemenu_login);
 }
 #endif
 

@@ -57,11 +57,17 @@ file( GLOB mud_SOURCES
 	crypt/sha1crypt.c
 	fdb/fdbfile.c
 	room/room.c
+	server/acs.c
 	server/boris.c
 	server/common.c
 	server/config.c
+	server/form.c
 	server/freelist.c
+	server/game.c
+	server/login.c
+	server/menu.c
 	server/telnetclient.c
+	server/user.c
 	stackvm/stackvm.c
 	task/command.c
 	task/comutil.c

@@ -314,13 +314,6 @@ void mud_config_init(void);
 void mud_config_shutdown(void);
 int mud_config_process(void);
 
-int game_init(void);
-
-int user_init(void);
-void user_shutdown(void);
-void user_put(struct user **user);
-void user_get(struct user *user);
-
 int socketio_init(void);
 void socketio_shutdown(void);
 int socketio_check_count(SOCKET fd);

@@ -79,7 +79,7 @@ static const struct {
 /** list of all loaded characters. */
 static struct character_cache character_cache;
 
-static struct freelist character_id_freelist;
+static struct freelist *character_id_freelist;
 /******************************************************************************
  * Functions
  ******************************************************************************/
@@ -339,7 +339,7 @@ struct character *character_new(void)
 	if (!ret) return NULL;
 
 	/* allocate next entry from a pool. */
-	id = freelist_alloc(&character_id_freelist, 1);
+	id = freelist_alloc(character_id_freelist, 1);
 
 	if (id < 0) {
 		LOG_CRITICAL("could not allocate new character id.");
@@ -405,7 +405,7 @@ character_preflight(void)
 		}
 
 		/* allocate id from the pool */
-		if (!freelist_thwack(&character_id_freelist, ch->id, 1)) {
+		if (!freelist_thwack(character_id_freelist, ch->id, 1)) {
 			LOG_CRITICAL("bad or duplicate character id \"%u\"", character_id);
 			character_ll_free(ch);
 			fdb_iterator_end(it);
@@ -426,8 +426,11 @@ int
 character_initialize(void)
 {
 	LOG_INFO("Character sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
-	freelist_init(&character_id_freelist);
-	freelist_pool(&character_id_freelist, 1, ID_MAX);
+	character_id_freelist = freelist_new(1, ID_MAX);
+	if (!character_id_freelist) {
+		LOG_CRITICAL("could not allocate IDs!");
+		return -1;
+	}
 
 	if (!fdb_domain_init(DOMAIN_CHARACTER)) {
 		LOG_CRITICAL("could not access database!");

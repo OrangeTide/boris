@@ -11,6 +11,7 @@ void telnetclient_setprompt(DESCRIPTOR_DATA *cl, const char *prompt);
 void telnetclient_start_lineinput(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA *cl, const char *line), const char *prompt);
 int telnetclient_isstate(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA *cl, const char *line), const char *prompt);
 void telnetclient_close(DESCRIPTOR_DATA *cl);
+void telnetclient_clear_statedata(DESCRIPTOR_DATA *cl);
 struct channel_member *telnetclient_channel_member(DESCRIPTOR_DATA *cl);
 dyad_Stream *telnetclient_socket_handle(DESCRIPTOR_DATA *cl);
 const char *telnetclient_socket_name(DESCRIPTOR_DATA *cl);
@@ -20,4 +21,5 @@ void telnetclient_prompt_refresh(DESCRIPTOR_DATA *cl);
 void telnetclient_prompt_refresh_all(struct telnetserver *);
 struct telnetserver *telnetserver_first(void);
 struct telnetserver *telnetserver_next(struct telnetserver *server);
+void telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u);
 #endif

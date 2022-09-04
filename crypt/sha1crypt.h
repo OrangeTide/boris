@@ -19,6 +19,8 @@
 #ifndef SHA1CRYPT_H_
 #define SHA1CRYPT_H_
 
+#include "sha1.h"
+
 /** Number of bits used by SHA-1 */
 #define SHA1CRYPT_BITS 128
 

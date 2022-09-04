@@ -29,6 +29,21 @@
 #include "debug.h"
 #include <stdlib.h>
 
+struct freelist_entry;
+/**
+ * head for a list of number ranges.
+ */
+LIST_HEAD(struct freelist_listhead, struct freelist_entry);
+
+/**
+ * a pool of number ranges.
+ * originally there were many lists, bucketed by length, but it grew cumbersome.
+ */
+struct freelist {
+	/* single list ordered by offset to find adjacent chunks. */
+	struct freelist_listhead global;
+};
+
 /** range of numbers used to represent part of the freelist. */
 struct freelist_extent {
 	unsigned length, offset; /* both are in block-sized units */
@@ -111,14 +126,26 @@ freelist_ll_isbridge(struct freelist_extent *prev_ext, unsigned ofs, unsigned co
 	return prev_ext->offset + prev_ext->length == ofs && next_ext->offset == ofs + count;
 }
 
-/** initialize a freelist. starts off as empty. */
-void
-freelist_init(struct freelist *fl)
+/** allocate a new freelist. starts off as empty. */
+struct freelist *
+freelist_new(unsigned start, unsigned count)
 {
+	struct freelist *fl = malloc(sizeof(*fl));
+
+	if (!fl) {
+		return NULL;
+	}
+
+	*fl = (struct freelist){};
 	LIST_INIT(&fl->global);
+	if (count) {
+		freelist_pool(fl, start, count);
+	}
+
+	return fl;
 }
 
-/** deallocate all entries on the freelist. */
+/** deallocate all entries on the freelist and free it. */
 void
 freelist_free(struct freelist *fl)
 {
@@ -127,6 +154,7 @@ freelist_free(struct freelist *fl)
 	}
 
 	assert(LIST_TOP(fl->global) == NULL);
+	free(fl);
 }
 
 /** allocate memory from the pool.
@@ -336,65 +364,65 @@ freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count)
 void
 freelist_test(void)
 {
-	struct freelist fl;
+	struct freelist *fl;
 	unsigned n;
-	freelist_init(&fl);
+	fl = freelist_new(fl, 0, 0);
 	fprintf(stderr, "::: Making some fragments :::\n");
 
 	for (n = 0; n < 60; n += 12) {
-		freelist_pool(&fl, n, 6);
+		freelist_pool(fl, n, 6);
 	}
 
 	fprintf(stderr, "::: Filling in gaps :::\n");
 
 	for (n = 0; n < 60; n += 12) {
-		freelist_pool(&fl, n + 6, 6);
+		freelist_pool(fl, n + 6, 6);
 	}
 
 	fprintf(stderr, "::: Walking backwards :::\n");
 
 	for (n = 120; n > 60;) {
 		n -= 6;
-		freelist_pool(&fl, n, 6);
+		freelist_pool(fl, n, 6);
 	}
 
-	freelist_dump(&fl);
+	freelist_dump(fl);
 
 	/* test freelist_alloc() */
 	fprintf(stderr, "::: Allocating :::\n");
 
 	for (n = 0; n < 60; n += 6) {
 		long ofs;
-		ofs = freelist_alloc(&fl, 6);
+		ofs = freelist_alloc(fl, 6);
 		TRACE("alloc: %lu+%u\n", ofs, 6);
 	}
 
-	freelist_dump(&fl);
+	freelist_dump(fl);
 
 	fprintf(stderr, "::: Allocating :::\n");
 
 	for (n = 0; n < 60; n += 6) {
 		long ofs;
-		ofs = freelist_alloc(&fl, 6);
+		ofs = freelist_alloc(fl, 6);
 		TRACE("alloc: %lu+%u\n", ofs, 6);
 	}
 
-	freelist_dump(&fl);
+	freelist_dump(fl);
 	fprintf(stderr, "<freelist should be empty>\n");
 
-	freelist_pool(&fl, 1003, 1015);
+	freelist_pool(fl, 1003, 1015);
 
-	freelist_dump(&fl);
+	freelist_dump(fl);
 
-	freelist_thwack(&fl, 1007, 1005);
+	freelist_thwack(fl, 1007, 1005);
 
-	freelist_thwack(&fl, 2012, 6);
+	freelist_thwack(fl, 2012, 6);
 
-	freelist_thwack(&fl, 1003, 4);
+	freelist_thwack(fl, 1003, 4);
 
-	freelist_dump(&fl);
+	freelist_dump(fl);
 	fprintf(stderr, "<freelist should be empty>\n");
 
-	freelist_free(&fl);
+	freelist_free(fl);
 }
 #endif

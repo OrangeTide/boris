@@ -23,20 +23,20 @@
  */
 
 #include "boris.h"
-#include "channel.h"
-#include "character.h"
-#include "eventlog.h"
-#include "fdb.h"
-#include "room.h"
-#define LOG_SUBSYSTEM "server"
-#include <log.h>
-#include <debug.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <time.h>
+#include <channel.h>
+#include <character.h>
+#include <eventlog.h>
+#include <fdb.h>
+#include <room.h>
+#define LOG_SUBSYSTEM "server"
+#include <log.h>
+#include <debug.h>
 #include <dyad.h>
+#include <user.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
@@ -48,13 +48,14 @@
 /** require at least NT5.1 API for getaddinfo() and others */
 #define _WIN32_WINNT 0x0501
 #endif
+#include <windows.h>
 
 /** macro used to wrap mkdir() function from UNIX and Windows */
 #define MKDIR(d) mkdir(d)
 #else
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
 
 /** macro used to wrap mkdir() function from UNIX and Windows */
 #define MKDIR(d) mkdir(d, 0777)
@@ -324,6 +325,8 @@ main(int argc, char **argv)
 
 	LOG_TODO("use the next event for the timer");
 
+	dyad_setUpdateTimeout(10);
+
 	while (keep_going_fl && dyad_getStreamCount() > 0) {
 		struct telnetserver *cur = telnetserver_first();
 		for (; cur; cur = telnetserver_next(cur)) {
@@ -332,7 +335,7 @@ main(int argc, char **argv)
 
 		dyad_update();
 
-		fprintf(stderr, "Tick\n");
+		LOG_INFO("Tick\n");
 	}
 
 	eventlog_server_shutdown();
