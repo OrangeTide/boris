@@ -1,28 +1,55 @@
-project(boris C)
-cmake_minimum_required(VERSION 3.8)
+project( boris C )
+cmake_minimum_required( VERSION 3.8 )
 
 if ( ${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR} )
 	message( FATAL_ERROR "In-source builds not allowed. Please make a new directory (called a build directory) and run CMake from there. You may need to remove CMakeCache.txt." )
 endif()
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin )
+set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin )
 
 set( CMAKE_BUILD_TYPE Debug )
 
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
+SET( CMAKE_AR "gcc-ar" )
+SET( CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>"  )
+SET( CMAKE_C_ARCHIVE_FINISH true )
 
-add_subdirectory(thirdparty)
-add_subdirectory(scrypt)
-add_subdirectory(passwd)
-add_subdirectory(log)
+set( THREADS_PREFER_PTHREAD_FLAG ON )
+find_package( Threads REQUIRED )
 
-file(GLOB boris_SOURCES
+add_subdirectory( thirdparty )
+add_subdirectory( scrypt )
+add_subdirectory( passwd )
+add_subdirectory( log )
+
+include_directories( include )
+
+file( GLOB boris_SOURCES
 	server/boris.c
 )
 
-file(GLOB mud_SOURCES
+add_executable( boris ${boris_SOURCES} )
+
+target_compile_options( boris
+	PRIVATE -Wall -W -O2
+	PUBLIC -flto -g
+	)
+
+target_compile_definitions( boris
+	PRIVATE NTEST
+	PRIVATE NDEBUG
+	)
+
+target_link_libraries( boris
+	PRIVATE mud
+	)
+
+target_include_directories( boris
+	PUBLIC include
+	PUBLIC server
+	)
+
+file( GLOB mud_SOURCES
 	channel/channel.c
 	character/character.c
 	crypt/base64.c
@@ -42,38 +69,30 @@ file(GLOB mud_SOURCES
 	worldclock/worldclock.c
 )
 
-add_executable(boris ${boris_SOURCES})
-target_link_libraries(boris PUBLIC mud)
+add_library( mud ${mud_SOURCES} )
 
-target_compile_options(boris
+target_compile_options( mud
 	PRIVATE -Wall -W -O2
-	PUBLIC -flto -g)
+	PUBLIC -flto -g
+	)
 
-target_compile_definitions(boris
+target_compile_definitions( mud
 	PRIVATE NTEST
-	PRIVATE NDEBUG)
+	PRIVATE NDEBUG
+	)
 
-
-add_library(mud ${mud_SOURCES})
-
-target_compile_options(mud
-	PRIVATE -Wall -W -O2
-	PUBLIC -flto -g)
-
-target_compile_definitions(mud
-	PRIVATE NTEST
-	PRIVATE NDEBUG)
-
-target_link_libraries(mud
+target_link_libraries( mud
 	PUBLIC Threads::Threads
-	PRIVATE lmdb
+	PUBLIC lmdb
 	PUBLIC dyad
-	PRIVATE mth
-	PRIVATE scrypt
-	PUBLIC log)
+	PUBLIC mth
+	PUBLIC scrypt
+	PUBLIC log
+	)
 
-target_include_directories(mud
+target_include_directories( mud
 	PUBLIC include
+	PRIVATE server
 	PUBLIC channel
 	PUBLIC character
 	PUBLIC crypt
@@ -81,4 +100,5 @@ target_include_directories(mud
 	PUBLIC room
 	PUBLIC task
 	PUBLIC util
-	PUBLIC worldclock)
+	PUBLIC worldclock
+	)

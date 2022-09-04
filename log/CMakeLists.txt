@@ -4,6 +4,4 @@ target_compile_options( log
 	PRIVATE -Wall -W -O2
 	PUBLIC -flto -g)
 target_include_directories( log PUBLIC "." )
-target_link_libraries( log
-	PUBLIC mud
-	)
+target_link_libraries( log PRIVATE mud )
