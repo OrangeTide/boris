@@ -11,4 +11,3 @@ addons:
 script:
   - make -v | head -n1
   - make all
-  - make clean-all
