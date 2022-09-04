@@ -66,7 +66,6 @@ target_compile_definitions(mud
 
 target_link_libraries(mud
 	PUBLIC Threads::Threads
-	PRIVATE telnet
 	PRIVATE lmdb
 	PUBLIC dyad
 	PRIVATE mth
