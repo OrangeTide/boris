@@ -1068,9 +1068,9 @@ void end_mccp2( DESCRIPTOR_DATA *d )
 }
 
 
-void write_mccp2( DESCRIPTOR_DATA *d, char *txt, int length)
+void write_mccp2( DESCRIPTOR_DATA *d, const char *txt, int length)
 {
-	d->mth->mccp2->next_in    = (unsigned char *) txt;
+	d->mth->mccp2->next_in    = (const unsigned char *) txt;
 	d->mth->mccp2->avail_in   = length;
 
 	d->mth->mccp2->next_out   = (unsigned char *) mud.mccp_buf;

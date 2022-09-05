@@ -31,6 +31,7 @@
 #include <log.h>
 #include <debug.h>
 #include <game.h>
+#include <user.h>
 
 /******************************************************************************
  * Types and data structures
@@ -279,12 +280,25 @@ form_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 static void
 form_menu_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 {
-	struct form_state *fs = &cl->state.form;
-	const struct form *f = fs->form;
-	char *endptr;
-
 	assert(cl != NULL);
 	assert(line != NULL);
+
+	if (!cl || !line) {
+		return;
+	}
+
+	struct form_state *fs = cl->state.form;
+	if (!fs) {
+		LOG_ERROR("No form state. [%s]", telnetclient_socket_name(cl));
+		return;
+	}
+	const struct form *f = fs->form;
+	if (!f) {
+		LOG_ERROR("No form. [%s]", telnetclient_socket_name(cl));
+		return;
+	}
+
+	char *endptr;
 
 	while (*line && isspace(*line)) line++; /* ignore leading spaces */
 
@@ -329,7 +343,7 @@ form_menu_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 static void
 form_state_free(DESCRIPTOR_DATA *cl)
 {
-	struct form_state *fs = &cl->state.form;
+	struct form_state *fs = cl->state.form;
 	unsigned i;
 	LOG_DEBUG("%s:freeing state\n", telnetclient_socket_name(cl));
 
@@ -352,13 +366,18 @@ form_state_free(DESCRIPTOR_DATA *cl)
 }
 
 /** undocumented - please add documentation. */
-void
-form_state_init(struct form_state *fs, const struct form *f)
+static struct form_state *
+form_state_new(const struct form *f)
 {
-	fs->form = f;
-	fs->nr_value = 0;
-	fs->value = NULL;
-	fs->done = 0;
+	struct form_state *fs = malloc(sizeof(*fs));
+	if (!fs) {
+		LOG_CRITICAL(__func__);
+		return NULL;
+	}
+
+	*fs = (struct form_state){ .form = f };
+
+	return fs;
 }
 
 /** undocumented - please add documentation. */
@@ -377,7 +396,7 @@ form_createaccount_username_check(DESCRIPTOR_DATA *cl, const char *str)
 
 	if (len < 3) {
 		telnetclient_puts(cl, mud_config.msg_usermin3);
-		LOG_DEBUG_MSG("failure: username too short.");
+		LOG_DEBUG("failure: username too short.");
 		goto failure;
 	}
 
@@ -386,18 +405,18 @@ form_createaccount_username_check(DESCRIPTOR_DATA *cl, const char *str)
 
 		if (!res) {
 			telnetclient_puts(cl, mud_config.msg_useralphanumeric);
-			LOG_DEBUG_MSG("failure: bad characters");
+			LOG_DEBUG("failure: bad characters");
 			goto failure;
 		}
 	}
 
 	if (user_exists(str)) {
 		telnetclient_puts(cl, mud_config.msg_userexists);
-		LOG_DEBUG_MSG("failure: user exists.");
+		LOG_DEBUG("failure: user exists.");
 		goto failure;
 	}
 
-	LOG_DEBUG_MSG("success.");
+	LOG_DEBUG("success.");
 
 	return 1;
 failure:
@@ -418,7 +437,7 @@ form_createaccount_password_check(DESCRIPTOR_DATA *cl, const char *str)
 	assert(cl->state.form->form != NULL);
 
 	if (str && strlen(str) > 3) {
-		LOG_DEBUG_MSG("success.");
+		LOG_DEBUG("success.");
 		return 1;
 	}
 
@@ -434,7 +453,7 @@ static int
 form_createaccount_password2_check(DESCRIPTOR_DATA *cl, const char *str)
 {
 	const char *password1;
-	struct form_state *fs = &cl->state.form;
+	struct form_state *fs = cl->state.form;
 
 	TRACE_ENTER();
 
@@ -444,7 +463,7 @@ form_createaccount_password2_check(DESCRIPTOR_DATA *cl, const char *str)
 	password1 = form_getvalue(fs->form, fs->nr_value, fs->value, "PASSWORD");
 
 	if (password1 && !strcmp(password1, str)) {
-		LOG_DEBUG_MSG("success.");
+		LOG_DEBUG("success.");
 		return 1;
 	}
 
@@ -475,14 +494,14 @@ form_createaccount_close(DESCRIPTOR_DATA *cl, struct form_state *fs)
 	}
 
 	LOG_TODO("u = user_create(\"%s\", \"%s\", \"%s\");", username, password, email);
-	// u = user_create(username, password, email);
+	u = user_create(username, password, email);
 
 	if (!u) {
 		telnetclient_printf(cl, "Could not create user named '%s'\n", username);
 		return;
 	}
 
-	user_free(u);
+	user_put(&u);
 
 	telnetclient_puts(cl, mud_config.msg_usercreatesuccess);
 
@@ -497,8 +516,6 @@ form_start(void *p, long unused2, void *form)
 	(void)unused2;
 
 	DESCRIPTOR_DATA *cl = p;
-	struct form *f = form;
-	struct form_state *fs = cl->state.form;
 
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
 
@@ -509,11 +526,13 @@ form_start(void *p, long unused2, void *form)
 		return;
 	}
 
+	struct form *f = form;
+
 	if (f->message)
 		telnetclient_puts(cl, f->message);
 
 	cl->state_free = form_state_free;
-	fs->form = f;
+	struct form_state *fs = cl->state.form = form_state_new(f);
 	fs->curritem = LIST_TOP(f->items);
 	fs->nr_value = f->item_count;
 	fs->value = calloc(fs->nr_value, sizeof * fs->value);

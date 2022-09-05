@@ -27,7 +27,7 @@ struct descriptor_data {
 		struct login_state {
 			char username[16];
 		} login;
-		const struct form_state *form;
+		struct form_state *form;
 		const struct menuinfo *menu;
 	} state;
 	void (*line_input)(DESCRIPTOR_DATA *cl, const char *line);

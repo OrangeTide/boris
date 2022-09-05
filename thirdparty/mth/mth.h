@@ -122,7 +122,7 @@ struct mth_data
 int         translate_telopts        ( DESCRIPTOR_DATA *d, unsigned char *src, int srclen, unsigned char *out, int outlen );
 void        announce_support         ( DESCRIPTOR_DATA *d );
 void        unannounce_support       ( DESCRIPTOR_DATA *d );
-void        write_mccp2              ( DESCRIPTOR_DATA *d, char *txt, int length );
+void        write_mccp2              ( DESCRIPTOR_DATA *d, const char *txt, int length );
 void        send_echo_on             ( DESCRIPTOR_DATA *d );
 void        send_echo_off            ( DESCRIPTOR_DATA *d );
 /*
@@ -158,7 +158,7 @@ int         json2msdp                     ( unsigned char *src, int srclen, char
 	External.
 */
 
-int         write_to_descriptor           ( DESCRIPTOR_DATA *d, char *txt, int length );
+int         write_to_descriptor           ( DESCRIPTOR_DATA *d, const char *txt, int length );
 
 /*
 	tables.c
@@ -225,9 +225,10 @@ extern struct msdp_type msdp_table[];
 
 #define     TELOPT_ECHO           1   /* used to toggle local echo */
 #define     TELOPT_SGA            3   /* used to toggle character mode */
-#define     TELOPT_TTYPE         24   /* used to send client terminal type */
+#define     TELOPT_TTYPE         24   /* used to send client terminal type [RFC1091] */
 #define     TELOPT_EOR           25   /* used to toggle eor mode */
-#define     TELOPT_NAWS          31   /* used to send client window size */
+#define     TELOPT_NAWS          31   /* used to send client window size [RFC1073] */
+#define     TELOPT_LINEMODE      34   /* line mode option [RFC1116] */
 #define     TELOPT_NEW_ENVIRON   39   /* used to send information */
 #define     TELOPT_CHARSET       42   /* used to detect UTF-8 support */
 #define     TELOPT_MSDP          69   /* used to send mud server data */
@@ -264,5 +265,30 @@ extern struct msdp_type msdp_table[];
 #define     TELCMD_OK(c)    ((unsigned char) (c) >= xEOF)
 #define     TELCMD(c)       (telcmds[(unsigned char) (c) - xEOF])
 #define     TELOPT(c)       (telnet_table[(unsigned char) (c)].name)
+
+/*
+	generic sub-options
+*/
+#define     TELQUAL_IS            0
+#define     TELQUAL_SEND          1
+#define     TELQUAL_INFO          2
+
+/*
+	line mode options
+*/
+
+#define     MODE_EDIT             1
+#define     MODE_TRAPSIG          2
+#define     MODE_ACK              4
+#define     MODE_SOFT_TAB         8
+#define     MODE_LIT_ECHO        16
+#define     MODE_MASK            31
+
+/*
+	line mode sub-options
+*/
+#define     LM_MODE               1
+#define     LM_FORWARDMASK        2
+#define     LM_SLC                3
 
 #endif

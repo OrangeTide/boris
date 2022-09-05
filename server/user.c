@@ -35,13 +35,13 @@
 #include <acs.h>
 #include <freelist.h>
 #include <fdb.h>
+#include <user.h>
 
 /** default level for new users. */
 #define USER_LEVEL_NEWUSER mud_config.newuser_level
 
 /** default flags for new users. */
 #define USER_FLAGS_NEWUSER mud_config.newuser_flags
-
 /******************************************************************************
  * Data Types
  ******************************************************************************/
@@ -282,19 +282,19 @@ user_illegal(const char *username)
 	const char *s;
 
 	if (!username || !*username)
-		return 1; // illegal username
+		return 1; /* illegal username */
 
 	s = username;
 
 	if (!isalpha(*s))
-		return 1; // illegal username
+		return 1; /* illegal username */
 
 	while (*++s) {
 		if (!isalnum(*s) && *s != '_')
-			return 1; // illegal username
+			return 1; /* illegal username */
 	}
 
-	return 0; // OK - it's good
+	return 0; /* OK - it's good */
 }
 
 /** test to see if a user exists. */
@@ -404,6 +404,8 @@ user_create(const char *username, const char *password, const char *email)
 		user_free(u);
 		return NULL; /* failure */
 	}
+
+	user_get(u);
 
 	return u; /* success */
 }

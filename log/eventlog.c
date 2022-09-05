@@ -24,7 +24,8 @@
 
 #include "eventlog.h"
 #include "boris.h"
-#include "log.h"
+#define LOG_SUBSYSTEM "eventlog"
+#include <log.h>
 
 #include <stdio.h>
 #include <time.h>

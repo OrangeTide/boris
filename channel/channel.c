@@ -24,9 +24,9 @@
 
 #include "channel.h"
 #include "boris.h"
-
 #define LOG_SUBSYSTEM "channel"
 #include <log.h>
+#include <list.h>
 
 #include <assert.h>
 #include <stdarg.h>
@@ -38,7 +38,12 @@
 /******************************************************************************
  * Defines
  ******************************************************************************/
+
+/* maximum length of message that can be sent to a channel */
 #define CHANNEL_SEND_MAX 1024
+
+#define OK (0)
+#define ERR (-1)
 
 /******************************************************************************
  * Types
@@ -135,11 +140,13 @@ channel_delete_member(struct channel *ch, struct channel_member *cm)
 	assert(ch != NULL);
 	assert(cm != NULL);
 
-	if (!ch) return 0;
+	if (!ch)
+		return ERR;
 
 	d = channel_find_member(ch, cm);
 
-	if (!d) return 0; /* not a member */
+	if (!d)
+		return ERR; /* not a member */
 
 	LOG_DEBUG("found channel member %p at %p", (void*)cm, (void*)d);
 
@@ -155,7 +162,23 @@ channel_delete_member(struct channel *ch, struct channel_member *cm)
 		ch->member = NULL;
 	}
 
-	return 1; /* success */
+	return OK; /* success */
+}
+
+static int
+channel_close(struct channel *ch)
+{
+	if (!ch)
+		return ERR;
+
+	while (ch->nr_member) {
+		if (channel_delete_member(ch, ch->member[0]) != OK) {
+			LOG_ERROR("could not remove member from channel.");
+			break;
+		}
+	}
+
+	return OK;
 }
 
 static struct channel_public *
@@ -184,11 +207,11 @@ channel_public_add(const char *name)
 	struct channel_public *newch;
 
 	if (!name) {
-		return 0; /* failure : refuse to create channel NULL */
+		return ERR; /* refuse to create channel NULL */
 	}
 
 	if (channel_public_find(name)) {
-		return 0; /* refuse to create duplicate channel. */
+		return ERR; /* refuse to create duplicate channel. */
 	}
 
 	newch = calloc(1, sizeof * newch);
@@ -196,7 +219,7 @@ channel_public_add(const char *name)
 	if (!newch) {
 		perror("calloc()");
 		LOG_ERROR("could not allocate channel.");
-		return 0; /* failure. */
+		return ERR;
 	}
 
 	if (name) {
@@ -206,7 +229,7 @@ channel_public_add(const char *name)
 			perror("strdup()");
 			LOG_ERROR("could not allocate channel.");
 			free(newch);
-			return 0; /* failure. */
+			return ERR;
 		}
 	} else {
 		newch->name = NULL;
@@ -215,13 +238,32 @@ channel_public_add(const char *name)
 	channel_init(&newch->channel);
 	LIST_INSERT_HEAD(&channel_public_list, newch, list);
 
-	return 1; /* success */
+	return OK;
+}
+
+static int
+channel_public_close(struct channel_public *cp)
+{
+	if (!cp) {
+		return ERR;
+	}
+
+	LIST_REMOVE(cp, list);
+
+	if (channel_close(&cp->channel) != OK) {
+		return ERR;
+	}
+
+	free(cp);
+
+	return OK;
 }
 
 /**
  * get a channel by name.
  */
-struct channel *channel_public(const char *name)
+struct channel *
+channel_public(const char *name)
 {
 	struct channel_public *cp;
 	cp = channel_public_find(name);
@@ -240,9 +282,13 @@ int
 channel_initialize(void)
 {
 	LOG_INFO("channel sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+
+	channel_public_add(CHANNEL_MUDLIST); /* Mudlist channel. */
+	channel_public_add(CHANNEL_DEV); /* Developers channel. */
 	channel_public_add(CHANNEL_WIZ); /* Wizards */
 	channel_public_add(CHANNEL_OOC); /* Out-of-Character chat */
 	channel_public_add(CHANNEL_SYS); /* system channel. */
+
 	return 0;
 }
 
@@ -252,7 +298,15 @@ channel_initialize(void)
 void
 channel_shutdown(void)
 {
+	struct channel_public *cp;
+
 	LOG_INFO("channel sub-system shutting down...");
+
+	while ((cp = LIST_TOP(channel_public_list))) {
+		LOG_INFO("Closing public channel \"%s\"", cp->name);
+		channel_public_close(cp);
+	}
+
 	LOG_INFO("channel sub-system ended.");
 }
 
@@ -274,7 +328,7 @@ channel_part(struct channel *ch, struct channel_member *cm)
 {
 	LOG_TRACE("someone(%p) parted\n", cm ? cm->p : NULL);
 
-	if (!channel_delete_member(ch, cm)) {
+	if (channel_delete_member(ch, cm) != OK) {
 		LOG_WARNING("could not find channel member %p", cm);
 	}
 }
@@ -298,24 +352,41 @@ is_on_list(const struct channel_member *cm, struct channel_member **exclude_list
  * send a message to everyone except those on exclude_list.
  */
 int
-channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...)
+channel_vbroadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, va_list ap)
 {
-	va_list ap;
 	unsigned i;
-	char buf[CHANNEL_SEND_MAX];
+	char scratch[CHANNEL_SEND_MAX];
 
-	va_start(ap, fmt);
-	vsnprintf(buf, sizeof buf, fmt, ap);
-	va_end(ap);
+	if (!ch) {
+		return ERR;
+	}
+
+	vsnprintf(scratch, sizeof(scratch), fmt, ap);
 
 	for (i = 0; i < ch->nr_member; i++) {
 		struct channel_member *cm = ch->member[i];
 		LOG_DEBUG("cm=%p p=%p\n", (void*)cm, cm ? cm->p : NULL);
 
 		if (cm && cm->send && !is_on_list(cm, exclude_list, exclude_list_len)) {
-			cm->send(cm, ch, buf);
+			cm->send(cm, ch, scratch);
 		}
 	}
 
-	return 0; /* failure */
+	return OK;
+}
+
+/**
+ * send a message to everyone except those on exclude_list.
+ */
+int
+channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...)
+{
+	va_list ap;
+	int res;
+
+	va_start(ap, fmt);
+	res = channel_vbroadcast(ch, exclude_list, exclude_list_len, fmt, ap);
+	va_end(ap);
+
+	return res;
 }

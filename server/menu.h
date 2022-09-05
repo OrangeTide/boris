@@ -28,4 +28,5 @@ void menu_titledraw(DESCRIPTOR_DATA *cl, const char *title, size_t len);
 void menu_show(DESCRIPTOR_DATA *cl, const struct menuinfo *mi);
 void menu_input(DESCRIPTOR_DATA *cl, const struct menuinfo *mi, const char *line);
 void menu_start(void *p, long unused2, void *extra3);
+void menu_start_input(DESCRIPTOR_DATA *cl, const struct menuinfo *menu);
 #endif

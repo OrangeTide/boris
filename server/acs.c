@@ -2,6 +2,8 @@
  * acs - access control string
  ******************************************************************************/
 #include "acs.h"
+#include <stdlib.h>
+#include <ctype.h>
 #include <limits.h>
 #define LOG_SUBSYSTEM "acs"
 #include <log.h>

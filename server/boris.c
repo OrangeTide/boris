@@ -37,6 +37,7 @@
 #include <debug.h>
 #include <dyad.h>
 #include <user.h>
+#include <game.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)

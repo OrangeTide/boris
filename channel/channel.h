@@ -1,11 +1,15 @@
 #ifndef BORIS_CHANNEL_H_
 #define BORIS_CHANNEL_H_
+#include <stdarg.h>
+
 struct channel;
 struct channel_member;
 
 #define CHANNEL_SYS "$sys"
 #define CHANNEL_OOC "OOC"
 #define CHANNEL_WIZ "Wiz"
+#define CHANNEL_DEV "Dev"
+#define CHANNEL_MUDLIST "Mudlist"
 
 /**
  * used to subscribe to a channel.
@@ -23,10 +27,7 @@ int channel_initialize(void);
 void channel_shutdown(void);
 int channel_join(struct channel *ch, struct channel_member *cm);
 void channel_part(struct channel *ch, struct channel_member *cm);
-/**
- * get a channel associated with a public(global) name.
- */
 struct channel *channel_public(const char *name);
+int channel_vbroadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, va_list ap);
 int channel_broadcast(struct channel *ch, struct channel_member **exclude_list, unsigned exclude_list_len, const char *fmt, ...);
-
 #endif

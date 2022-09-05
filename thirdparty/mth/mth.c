@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <channel.h>
 
 void init_mth(void)
 {
@@ -32,18 +33,37 @@ void uninit_mth_socket(DESCRIPTOR_DATA *d)
 	free(d->mth);
 }
 
-
-
 void arachnos_devel(char *fmt, ...)
 {
-	// mud specific broadcast goes here
+	static struct channel *devchan = NULL;
+
+	if (!devchan) {
+		devchan = channel_public(CHANNEL_DEV);
+		if (!devchan)
+			return;
+	}
+
+	va_list ap;
+	va_start(ap, fmt);
+	channel_vbroadcast(devchan, NULL, 0, fmt, ap);
+	va_end(ap);
 }
 
 void arachnos_mudlist(char *fmt, ...)
 {
-	// mud specific mudlist handler goes here
-}
+	static struct channel *devchan = NULL;
 
+	if (!devchan) {
+		devchan = channel_public(CHANNEL_MUDLIST);
+		if (!devchan)
+			return;
+	}
+
+	va_list ap;
+	va_start(ap, fmt);
+	channel_vbroadcast(devchan, NULL, 0, fmt, ap);
+	va_end(ap);
+}
 
 // Utility functions
 

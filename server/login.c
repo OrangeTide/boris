@@ -28,7 +28,9 @@
 #define LOG_SUBSYSTEM "login"
 #include <log.h>
 #include <debug.h>
+#include <eventlog.h>
 #include <game.h>
+#include <user.h>
 
 /** undocumented - please add documentation. */
 void
