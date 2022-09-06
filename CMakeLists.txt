@@ -59,6 +59,7 @@ file( GLOB mud_SOURCES
 	room/room.c
 	server/acs.c
 	server/boris.c
+	server/buf.c
 	server/common.c
 	server/config.c
 	server/form.c

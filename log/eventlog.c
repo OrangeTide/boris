@@ -48,16 +48,20 @@ static FILE *eventlog_file;
 int
 eventlog_init(void)
 {
-	eventlog_file = fopen(mud_config.eventlog_filename, "a");
+	if (mud_config.eventlog_filename) {
+		eventlog_file = fopen(mud_config.eventlog_filename, "a");
 
-	if (!eventlog_file) {
-		LOG_PERROR(mud_config.eventlog_filename);
-		return 0; /* failure */
+		if (!eventlog_file) {
+			LOG_PERROR(mud_config.eventlog_filename);
+			return 0; /* failure */
+		}
+
+		setvbuf(eventlog_file, NULL, _IOLBF, 0);
+
+		return 1; /* success */
 	}
 
-	setvbuf(eventlog_file, NULL, _IOLBF, 0);
-
-	return 1; /* success */
+	return 0; /* failure */
 }
 
 /** clean up eventlog module and close the logging file. */
@@ -103,7 +107,7 @@ eventlog(const char *type, const char *fmt, ...)
 	}
 
 	time(&t);
-	strftime(timestamp, sizeof timestamp, mud_config.eventlog_timeformat, gmtime(&t));
+	strftime(timestamp, sizeof timestamp, mud_config.eventlog_timeformat ? : "%c", gmtime(&t));
 
 	if (fprintf(eventlog_file ? eventlog_file : stderr, "%s:%s:%s", timestamp, type, buf) < 0) {
 		/* there was a write error */

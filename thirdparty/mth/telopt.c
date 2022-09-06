@@ -93,10 +93,12 @@ void announce_support( DESCRIPTOR_DATA *d)
 			if (HAS_BIT(telnet_table[i].flags, ANNOUNCE_WILL))
 			{
 				descriptor_printf(d, "%c%c%c", IAC, WILL, i);
+				// DEBUG: fprintf(stderr, "IAC WILL %d\n", i);
 			}
 			if (HAS_BIT(telnet_table[i].flags, ANNOUNCE_DO))
 			{
 				descriptor_printf(d, "%c%c%c", IAC, DO, i);
+				// DEBUG: fprintf(stderr, "IAC DO %d\n", i);
 			}
 		}
 	}
@@ -504,6 +506,9 @@ int process_will_ttype( DESCRIPTOR_DATA *d, unsigned char *src, int srclen )
 		descriptor_printf(d, "%c%c%c%c%c%c", IAC, SB, TELOPT_TTYPE, ENV_SEND, IAC, SE);
 		descriptor_printf(d, "%c%c%c%c%c%c", IAC, SB, TELOPT_TTYPE, ENV_SEND, IAC, SE);
 		descriptor_printf(d, "%c%c%c%c%c%c", IAC, SB, TELOPT_TTYPE, ENV_SEND, IAC, SE);
+
+		// TODO: descriptor_printf(d, "%c%c%c%c%c%c", IAC, SB, TELOPT_TTYPE, TELQUAL_SEND, IAC, SE, /* ask the terminal type */
+
 		descriptor_printf(d, "%c%c%c", IAC, DONT, TELOPT_TTYPE);
 	}
 	return 3;

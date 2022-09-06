@@ -9,6 +9,7 @@
 struct form_state;
 struct menuinfo;
 struct user;
+struct buf;
 
 typedef struct descriptor_data DESCRIPTOR_DATA;
 struct descriptor_data {
@@ -18,14 +19,14 @@ struct descriptor_data {
 	enum client_type { CLIENT_TYPE_USER = 1 } type;
 	char *host;
 	char *name;
+	struct buf *linebuf; /**< command input buffer */
 	struct user *user;
 	struct acs_info acs;
 	struct terminal terminal;
-	void (*state_free)(DESCRIPTOR_DATA *);
+	void (*state_free)(DESCRIPTOR_DATA *); /**< callback to free state_data */
 	union state_data {
-		/** undocumented - please add documentation. */
 		struct login_state {
-			char username[16];
+			char username[32];
 		} login;
 		struct form_state *form;
 		const struct menuinfo *menu;

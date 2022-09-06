@@ -283,9 +283,11 @@ channel_initialize(void)
 {
 	LOG_INFO("channel sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 
+	channel_public_add(CHANNEL_NEWBIE); /* Newbie help channel. */
+	channel_public_add(CHANNEL_CHAT); /* General chat channel. */
 	channel_public_add(CHANNEL_MUDLIST); /* Mudlist channel. */
 	channel_public_add(CHANNEL_DEV); /* Developers channel. */
-	channel_public_add(CHANNEL_WIZ); /* Wizards */
+	channel_public_add(CHANNEL_WIZ); /* Wizards channel. */
 	channel_public_add(CHANNEL_OOC); /* Out-of-Character chat */
 	channel_public_add(CHANNEL_SYS); /* system channel. */
 

@@ -38,6 +38,7 @@
 #include <dyad.h>
 #include <user.h>
 #include <game.h>
+#include <mth.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
@@ -227,9 +228,6 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	dyad_init();
-	atexit(dyad_shutdown);
-
 	/* load default configuration into mud_config global */
 	mud_config_init();
 	atexit(mud_config_shutdown);
@@ -242,6 +240,9 @@ main(int argc, char **argv)
 		LOG_ERROR("could not load configuration");
 		return EXIT_FAILURE;
 	}
+
+	dyad_init();
+	atexit(dyad_shutdown);
 
 	if (log_init()) {
 		LOG_ERROR("could not initialize logging");
@@ -256,6 +257,8 @@ main(int argc, char **argv)
 	}
 
 	atexit(fdb_shutdown);
+
+	init_mth();
 
 	if (channel_initialize()) {
 		LOG_ERROR("could not load channels");
@@ -329,10 +332,12 @@ main(int argc, char **argv)
 	dyad_setUpdateTimeout(10);
 
 	while (keep_going_fl && dyad_getStreamCount() > 0) {
+		/* TODO: fix prompt refresh code
 		struct telnetserver *cur = telnetserver_first();
 		for (; cur; cur = telnetserver_next(cur)) {
 			telnetclient_prompt_refresh_all(cur);
 		}
+		*/
 
 		dyad_update();
 

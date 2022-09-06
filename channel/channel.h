@@ -5,11 +5,13 @@
 struct channel;
 struct channel_member;
 
-#define CHANNEL_SYS "$sys"
+#define CHANNEL_SYS "@system"
 #define CHANNEL_OOC "OOC"
-#define CHANNEL_WIZ "Wiz"
-#define CHANNEL_DEV "Dev"
-#define CHANNEL_MUDLIST "Mudlist"
+#define CHANNEL_WIZ "@wiz"
+#define CHANNEL_DEV "devel"
+#define CHANNEL_MUDLIST "@mudlist"
+#define CHANNEL_CHAT "chat"
+#define CHANNEL_NEWBIE "newbie"
 
 /**
  * used to subscribe to a channel.

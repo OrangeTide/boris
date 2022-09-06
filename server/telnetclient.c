@@ -26,6 +26,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <dyad.h>
 #include <list.h>
 #include <mud.h>
@@ -38,6 +39,7 @@
 #include <user.h>
 #include <menu.h>
 #include <mth.h>
+#include <buf.h>
 
 #define OK (0)
 #define ERR (-1)
@@ -66,14 +68,9 @@ static void telnetclient_on_accept(dyad_Event *e);
 static void telnetclient_on_error(dyad_Event *e);
 static int telnetclient_channel_add(DESCRIPTOR_DATA *cl, struct channel *ch);
 static int telnetclient_channel_remove(DESCRIPTOR_DATA *cl, struct channel *ch);
-static void telnetclient_free(dyad_Event *e);
+static void telnetclient_on_destroy(dyad_Event *e);
 static void telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const char *msg);
 static DESCRIPTOR_DATA *telnetclient_newclient(dyad_Stream *stream);
-#if 0
-static int telnetclient_telnet_init(DESCRIPTOR_DATA *cl);
-static int telnetclient_echomode(DESCRIPTOR_DATA *cl, int mode);
-static int telnetclient_linemode(DESCRIPTOR_DATA *cl, int mode);
-#endif
 
 /******************************************************************************
  * Functions
@@ -93,14 +90,56 @@ telnetclient_on_data(dyad_Event *e)
 {
 	DESCRIPTOR_DATA *cl = e->udata;
 
+	LOG_INFO("Data received! (%d bytes)", (int)e->size);
+
 	if (!cl) {
-		LOG_ERROR("Illegal client state! [fd=%ld, %s:%u]\n", (long)dyad_getSocket(e->remote), dyad_getAddress(e->remote), dyad_getPort(e->remote));
+		LOG_ERROR("Illegal client state! [fd=%ld, %s:%u]\n",
+			  (long)dyad_getSocket(e->remote),
+			  dyad_getAddress(e->remote), dyad_getPort(e->remote));
 		dyad_close(e->remote);
 		return;
 	}
 
+	size_t outlen;
+	unsigned char *output = buf_reserve(cl->linebuf, &outlen, e->size + 1);
+	if (!output || (long)outlen < e->size) {
+		LOG_CRITICAL("Unable to reserse buffer memory. [fd=%ld, %s]",
+			     (long)dyad_getSocket(e->remote),
+			     telnetclient_socket_name(cl));
+		dyad_close(e->remote);
+		return;
+	}
+
+	LOG_DEBUG("[%s] e->size=%zd outlen=%zd\n",
+		  telnetclient_socket_name(cl),
+		  e->size,
+		  outlen);
+
+	int size = translate_telopts(cl, (unsigned char*)e->data, e->size, output, 0);
+	buf_commit(cl->linebuf, size);
+
 	// TODO: replace this simple echo code
-	write_to_descriptor(cl, e->data, e->size);
+	size_t cmdlen;
+	const char *cmd = buf_data(cl->linebuf, &cmdlen);
+	size_t consumed = 0;
+	while (consumed < cmdlen) {
+		const char *start = cmd + consumed;
+		const char *end = strchr(start, '\n');
+		if (!end) {
+			break; /* no more complete lines */
+		}
+		if (end == start) {
+			end++;
+			continue; /* ignore blank lines */
+		}
+
+		size_t linelen = end - start;
+		if (linelen > 0) {
+			telnetclient_printf(cl, "Line: \"%.*s\"\n", linelen, start);
+		}
+		consumed += linelen + 1;
+	}
+	buf_consume(cl->linebuf, consumed);
 }
 
 static void
@@ -123,6 +162,60 @@ static void
 telnetclient_on_error(dyad_Event *e)
 {
 	LOG_CRITICAL("telnet server error: %s", e->msg);
+}
+
+/** free a telnetclient structure. */
+static void
+telnetclient_on_destroy(dyad_Event *e)
+{
+	DESCRIPTOR_DATA *client = e->udata;
+
+	assert(client != NULL);
+
+	if (!client)
+		return;
+
+	telnetclient_clear_statedata(client); /* free data associated with current state */
+
+	free(client->prompt_string);
+	client->prompt_string = NULL;
+
+	uninit_mth_socket(client);
+
+	buf_free(client->linebuf);
+	client->linebuf = NULL;
+
+	LOG_TODO("free any other data structures associated with client"); /* TODO: be vigilant about memory leaks! */
+
+#ifndef NDEBUG
+	memset(client, 0xBB, sizeof * client); /* fill with fake data before freeing */
+#endif
+
+	free(client);
+}
+
+/** notifies a client's disconnect. */
+static void
+telnetclient_on_close(dyad_Event *e)
+{
+	DESCRIPTOR_DATA *client = e->udata;
+
+	assert(client != NULL);
+
+	if (!client)
+		return;
+
+	LOG_TODO("Determine if connection was logged in first");
+	eventlog_signoff(telnetclient_username(client), telnetclient_socket_name(client));
+	/* forcefully leave all channels */
+	/* TODO: nobody is notified that we left, this is not ideal. */
+	client->channel_member.send = NULL;
+	client->channel_member.p = NULL;
+	LOG_DEBUG("client->nr_channel=%d\n", client->nr_channel);
+
+	while (client->nr_channel) {
+		telnetclient_channel_remove(client, client->channel[0]);
+	}
 }
 
 /**
@@ -148,6 +241,9 @@ telnetclient_username(DESCRIPTOR_DATA *cl)
 int
 write_to_descriptor(DESCRIPTOR_DATA *d, const char *txt, int length)
 {
+	assert(d != NULL);
+	assert(d->stream != NULL);
+
 	int state = dyad_getState(d->stream);
 
 	if (state == DYAD_STATE_CONNECTED) {
@@ -172,7 +268,6 @@ telnetclient_puts(DESCRIPTOR_DATA *cl, const char *s)
 {
 	assert(cl != NULL);
 	assert(cl->stream != NULL);
-	// TODO: dyad_getState()
 
 	size_t n = strlen(s);
 	write_to_descriptor(cl, s, n);
@@ -190,11 +285,11 @@ telnetclient_vprintf(DESCRIPTOR_DATA *cl, const char *fmt, va_list ap)
 	assert(cl->stream != NULL);
 	assert(fmt != NULL);
 
-	// TODO: dyad_getState()
+	char buf[1024];
+	vsnprintf(buf, sizeof(buf), fmt, ap);
 
-	dyad_vwritef(cl->stream, fmt, ap);
+	write_to_descriptor(cl, buf, strlen(buf));
 	// TODO: check for error
-
 	cl->prompt_flag = 0;
 
 	return OK;
@@ -283,46 +378,6 @@ telnetclient_channel_remove(DESCRIPTOR_DATA *cl, struct channel *ch)
 	return 0; /* not found. */
 }
 
-/** free a telnetclient structure. */
-static void
-telnetclient_free(dyad_Event *e)
-{
-	DESCRIPTOR_DATA *client = e->udata;
-
-	assert(client != NULL);
-
-	if (!client)
-		return;
-
-	LOG_TODO("Determine if connection was logged in first");
-	eventlog_signoff(telnetclient_username(client), telnetclient_socket_name(client));
-
-	/* forcefully leave all channels */
-	/* TODO: nobody is notified that we left, this is not ideal. */
-	client->channel_member.send = NULL;
-	client->channel_member.p = NULL;
-	LOG_DEBUG("client->nr_channel=%d\n", client->nr_channel);
-
-	while (client->nr_channel) {
-		telnetclient_channel_remove(client, client->channel[0]);
-	}
-
-	telnetclient_clear_statedata(client); /* free data associated with current state */
-
-	free(client->prompt_string);
-	client->prompt_string = NULL;
-
-	uninit_mth_socket(client);
-
-	LOG_TODO("free any other data structures associated with client"); /* TODO: be vigilant about memory leaks! */
-
-#ifndef NDEBUG
-	memset(client, 0xBB, sizeof * client); /* fill with fake data before freeing */
-#endif
-
-	free(client);
-}
-
 static void
 telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const char *msg)
 {
@@ -350,6 +405,8 @@ telnetclient_newclient(dyad_Stream *stream)
 			.stream = stream,
 		};
 
+	cl->linebuf = buf_new();
+
 	cl->terminal.width = cl->terminal.height = 0;
 	strcpy(cl->terminal.name, "");
 
@@ -366,8 +423,9 @@ telnetclient_newclient(dyad_Stream *stream)
 
 	telnetclient_channel_add(cl, channel_public(CHANNEL_SYS));
 
-	dyad_addListener(stream, DYAD_EVENT_DESTROY, telnetclient_free, cl);
+	dyad_addListener(stream, DYAD_EVENT_DESTROY, telnetclient_on_destroy, cl);
 	dyad_addListener(stream, DYAD_EVENT_DATA, telnetclient_on_data, cl);
+	dyad_addListener(stream, DYAD_EVENT_CLOSE, telnetclient_on_close, cl);
 
 	init_mth_socket(cl);
 
@@ -392,29 +450,7 @@ telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u)
 	user_put(&old_user);
 }
 
-#if 0
-/**
- * posts telnet protocol necessary to begin negotiation of options.
- */
-static int
-telnetclient_telnet_init(DESCRIPTOR_DATA *cl)
-{
-	const char support[] = {
-		IAC, DO, TELOPT_LINEMODE,
-		IAC, DO, TELOPT_NAWS,		/* window size events */
-		IAC, DO, TELOPT_TTYPE,		/* accept terminal-type infomation */
-		IAC, SB, TELOPT_TTYPE, TELQUAL_SEND, IAC, SE, /* ask the terminal type */
-	};
-
-	write_to_descriptor(cl, s, n);
-	dyad_write(cl->stream, support, sizeof support);
-	// TODO: check for errors
-
-	return OK;
-}
-#endif
-
-#if 0
+#if 0 // TODO: use MTH to change ECHO mode
 /** send TELNET protocol messages to control echo mode. */
 static int
 telnetclient_echomode(DESCRIPTOR_DATA *cl, int mode)
@@ -439,7 +475,7 @@ telnetclient_echomode(DESCRIPTOR_DATA *cl, int mode)
 }
 #endif
 
-#if 0
+#if 0 // TODO: use MTH to change line mode
 /** send TELNET protocol messages to control line mode. */
 static int
 telnetclient_linemode(DESCRIPTOR_DATA *cl, int mode)
@@ -465,40 +501,6 @@ telnetclient_linemode(DESCRIPTOR_DATA *cl, int mode)
 	// TODO: check for errors
 
 	return OK;
-}
-#endif
-
-#if 0 // TODO: replace this with dyad Event handler
-/** callback used when a socketio_handle for a telnetclient is write-ready. */
-void
-telnetclient_write_event(DESCRIPTOR_DATA *d, SOCKET fd, void *p)
-{
-	const char *data;
-	size_t len;
-	int res;
-	DESCRIPTOR_DATA *cl = p;
-
-	assert(cl->sh->delete_flag == 0); /* we should never be called if already deleted */
-
-	/* only call this if the client wasn't closed and we have data in our buffer */
-	assert(cl != NULL);
-	assert(sh == cl->sh);
-
-	data = buffer_data(&cl->output, &len);
-	res = socketio_send(fd, data, len);
-
-	if (res < 0) {
-		sh->delete_flag = 1;
-		return; /* client write failure */
-	}
-
-	TRACE("len=%zu res=%d\n", len, res);
-	len = buffer_consume(&cl->output, (unsigned)res);
-
-	if (len > 0) {
-		/* there is still data in our buffer */
-		socketio_writeready(fd);
-	}
 }
 #endif
 

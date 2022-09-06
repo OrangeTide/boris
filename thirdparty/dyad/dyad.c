@@ -723,11 +723,15 @@ void dyad_update(void) {
     #pragma warning(pop)
   #endif
 
-  select(dyad_selectSet.maxfd + 1,
+  int e = select(dyad_selectSet.maxfd + 1,
          dyad_selectSet.fds[SELECT_READ],
          dyad_selectSet.fds[SELECT_WRITE],
          dyad_selectSet.fds[SELECT_EXCEPT],
          &tv);
+  if (e < 0) {
+	  perror("select()");
+	  return;
+  }
 
   /* Handle streams */
   stream = dyad_streams;

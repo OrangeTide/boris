@@ -78,7 +78,7 @@ void log_descriptor_printf(DESCRIPTOR_DATA *d, char *fmt, ...)
 
 	va_end(args);
 
-	printf("D%ld@%s %s\n", (long)dyad_getSocket(d->stream), d->host, buf);
+	printf("D%ld@%s %s\n", (long)dyad_getSocket(d->stream), dyad_getAddress(d->stream), buf);
 
 	return;
 }
@@ -142,7 +142,7 @@ struct telnet_type telnet_table[] =
 	{    "3270 REGIME",           0 },
 	{    "X.3 PAD",               0 },
 	{    "NAWS",                  ANNOUNCE_DO }, /* Negotiate About Window Size */
-	{    "TSPEED",                0 }, 
+	{    "TSPEED",                0 },
 	{    "LFLOW",                 0 },
 	{    "LINEMODE",              0 },
 	{    "XDISPLOC",              0 },
