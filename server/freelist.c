@@ -117,7 +117,7 @@ static int
 freelist_ll_isbridge(struct freelist_extent *prev_ext, unsigned ofs, unsigned count, struct freelist_extent *next_ext)
 {
 	/*
-	LOG_DEBUG("testing for bridge:\n"
+	LOG_DEBUG("testing for bridge:"
 			"  last:%6d+%d curr:%6d+%d ofs:%6d+%d",
 			prev_ext->offset, prev_ext->length, next_ext->offset, next_ext->length,
 			ofs, count
@@ -253,7 +253,7 @@ freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 			break;
 		} else if (last && curr->extent.offset + curr->extent.length == ofs) {
 			/* |......|XXX_|......|		grow-prev */
-			LOG_DEBUG("|......|XXX_|......|		grow-prev. curr=%u+%u new=%u+%u\n", curr->extent.offset, curr->extent.length, ofs, count);
+			LOG_DEBUG("|......|XXX_|......|		grow-prev. curr=%u+%u new=%u+%u", curr->extent.offset, curr->extent.length, ofs, count);
 			/* merge the new entry into the end of the previous entry */
 			curr->extent.length += count;
 			new = curr;
@@ -310,7 +310,7 @@ freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count)
 #endif
 
 	for (curr = LIST_TOP(fl->global); curr; curr = LIST_NEXT(curr, global)) {
-		LOG_DEBUG("checking for %u:%u in curr=%u:%u\n", ofs, count, curr->extent.offset, curr->extent.length);
+		LOG_DEBUG("checking for %u:%u in curr=%u:%u", ofs, count, curr->extent.offset, curr->extent.length);
 
 		if (curr->extent.offset <= ofs && curr->extent.offset + curr->extent.length >= ofs + count) {
 			LOG_TRACE("Found entry to thwack at %u:%u for %u:%u", curr->extent.offset, curr->extent.length, ofs, count);

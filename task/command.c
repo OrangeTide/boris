@@ -332,7 +332,7 @@ command_execute(DESCRIPTOR_DATA *cl, struct user *u, const char *line)
 	assert(e >= line);
 
 	if ((unsigned)(e - line) > sizeof cmd - 1) { /* first word is too long */
-		LOG_DEBUG("Command length %td is too long, truncating\n", e - line);
+		LOG_DEBUG("Command length %td is too long, truncating", e - line);
 		e = line + sizeof cmd - 1;
 	}
 
@@ -343,7 +343,7 @@ command_execute(DESCRIPTOR_DATA *cl, struct user *u, const char *line)
 
 	LOG_TODO("check user aliases");
 
-	LOG_DEBUG("cmd=\"%s\"\n", cmd);
+	LOG_DEBUG("cmd=\"%s\"", cmd);
 
 	return command_run(cl, u, cmd, arg);
 }
@@ -353,7 +353,7 @@ static void
 command_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 {
 	assert(cl != NULL);
-	LOG_DEBUG("%s:entered command '%s'\n", telnetclient_username(cl), line);
+	LOG_DEBUG("%s:entered command '%s'", telnetclient_username(cl), line);
 
 	/* log command input */
 	eventlog_commandinput(telnetclient_socket_name(cl), telnetclient_username(cl), line);

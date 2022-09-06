@@ -130,7 +130,7 @@ config_load(const char *filename, struct config *cfg)
 
 		if (!e) {
 			/* invalid directive */
-			LOG_ERROR("%s:%d:invalid directive\n", filename, line);
+			LOG_ERROR("%s:%d:invalid directive", filename, line);
 			goto failure;
 		}
 
@@ -152,18 +152,18 @@ config_load(const char *filename, struct config *cfg)
 
 			if (e) {
 				if (e[1]) {
-					LOG_ERROR("%s:%u:error in loading file:trailing garbage after quote\n", filename, line);
+					LOG_ERROR("%s:%u:error in loading file:trailing garbage after quote", filename, line);
 					goto failure;
 				}
 
 				*e = 0;
 			} else {
-				LOG_ERROR("%s:%u:error in loading file:missing quote\n", filename, line);
+				LOG_ERROR("%s:%u:error in loading file:missing quote", filename, line);
 				goto failure;
 			}
 		}
 
-		LOG_DEBUG("id='%s' value='%s'\n", buf, value);
+		LOG_DEBUG("id='%s' value='%s'", buf, value);
 
 		/* check the masks */
 		for (curr = LIST_TOP(cfg->watchers); curr; curr = LIST_NEXT(curr, list)) {
@@ -174,7 +174,7 @@ config_load(const char *filename, struct config *cfg)
 				if (!res) {
 					break; /* return 0 from the callback will terminate the list */
 				} else if (res < 0) {
-					LOG_ERROR("%s:%u:error in loading file\n", filename, line);
+					LOG_ERROR("%s:%u:error in loading file", filename, line);
 					goto failure;
 				}
 			}

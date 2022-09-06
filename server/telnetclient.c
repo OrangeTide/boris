@@ -93,7 +93,7 @@ telnetclient_on_data(dyad_Event *e)
 	LOG_INFO("Data received! (%d bytes)", (int)e->size);
 
 	if (!cl) {
-		LOG_ERROR("Illegal client state! [fd=%ld, %s:%u]\n",
+		LOG_ERROR("Illegal client state! [fd=%ld, %s:%u]",
 			  (long)dyad_getSocket(e->remote),
 			  dyad_getAddress(e->remote), dyad_getPort(e->remote));
 		dyad_close(e->remote);
@@ -110,7 +110,7 @@ telnetclient_on_data(dyad_Event *e)
 		return;
 	}
 
-	LOG_DEBUG("[%s] e->size=%zd outlen=%zd\n",
+	LOG_DEBUG("[%s] e->size=%zd outlen=%zd",
 		  telnetclient_socket_name(cl),
 		  e->size,
 		  outlen);
@@ -211,7 +211,7 @@ telnetclient_on_close(dyad_Event *e)
 	/* TODO: nobody is notified that we left, this is not ideal. */
 	client->channel_member.send = NULL;
 	client->channel_member.p = NULL;
-	LOG_DEBUG("client->nr_channel=%d\n", client->nr_channel);
+	LOG_DEBUG("client->nr_channel=%d", client->nr_channel);
 
 	while (client->nr_channel) {
 		telnetclient_channel_remove(client, client->channel[0]);
@@ -357,7 +357,7 @@ telnetclient_channel_remove(DESCRIPTOR_DATA *cl, struct channel *ch)
 
 	for (i = 0; i < cl->nr_channel; i++) {
 		if (cl->channel[i] == ch) {
-			LOG_DEBUG("channel_part(%p, %p)\n", (void*)cl->channel[i], (void*)&cl->channel_member);
+			LOG_DEBUG("channel_part(%p, %p)", (void*)cl->channel[i], (void*)&cl->channel_member);
 
 			channel_part(cl->channel[i], &cl->channel_member);
 

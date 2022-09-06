@@ -43,11 +43,12 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 	assert(cl->state.login.username[0] != '\0'); /* must have a valid username */
 
 	LOG_TODO("complete login process");
-	LOG_DEBUG("Login attempt: Username='%s'\n", cl->state.login.username);
+	LOG_DEBUG("Login attempt: Username='%s'", cl->state.login.username);
 
 	u = user_lookup(cl->state.login.username);
 
 	if (u) {
+		LOG_INFO("User '%s' found!", cl->state.login.username);
 		/* verify the password */
 		if (user_password_check(u, line)) {
 			telnetclient_setuser(cl, u);
@@ -59,6 +60,7 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 
 		telnetclient_puts(cl, mud_config.msgfile_badpassword);
 	} else {
+		LOG_ERROR("User '%s' not found!", cl->state.login.username);
 		telnetclient_puts(cl, mud_config.msgfile_noaccount);
 	}
 

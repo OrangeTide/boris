@@ -173,7 +173,7 @@ user_load_byname(const char *username)
 	h = fdb_read_begin("users", username);
 
 	if (!h) {
-		LOG_ERROR("Could not find user \"%s\"\n", username);
+		LOG_ERROR("Could not find user \"%s\"", username);
 		return 0; /* failure. */
 	}
 
@@ -203,28 +203,28 @@ user_load_byname(const char *username)
 	}
 
 	if (!fdb_read_end(h)) {
-		LOG_ERROR("Error loading user \"%s\"\n", username);
+		LOG_ERROR("Error loading user \"%s\"", username);
 		goto failure;
 	}
 
 	if (u->id <= 0) {
-		LOG_ERROR("User id for user '%s' was not set or set to zero.\n", username);
+		LOG_ERROR("User id for user '%s' was not set or set to zero.", username);
 		goto failure;
 	}
 
 	if (!u->username || strcasecmp(username, u->username)) {
-		LOG_ERROR("User name field for user '%s' was not set or does not math.\n", username);
+		LOG_ERROR("User name field for user '%s' was not set or does not math.", username);
 		goto failure;
 	}
 
 	/** @todo check all fields of u to verify they are correct. */
 
 	if (!freelist_thwack(user_id_freelist, u->id, 1)) {
-		LOG_ERROR("Could not use user id %d (bad id or id already used?)\n", u->id);
+		LOG_ERROR("Could not use user id %d (bad id or id already used?)", u->id);
 		goto failure;
 	}
 
-	LOG_DEBUG("Loaded user '%s'\n", username);
+	LOG_DEBUG("Loaded user '%s'", username);
 
 	return u; /* success */
 
@@ -246,7 +246,7 @@ user_write(const struct user *u)
 	h = fdb_write_begin("users", u->username);
 
 	if (!h) {
-		LOG_ERROR("Could not write user \"%s\"\n", u->username);
+		LOG_ERROR("Could not write user \"%s\"", u->username);
 		return 0;
 	}
 
@@ -262,7 +262,7 @@ user_write(const struct user *u)
 	}
 
 	if (!fdb_write_end(h)) {
-		LOG_ERROR("Could not write user \"%s\"\n", u->username);
+		LOG_ERROR("Could not write user \"%s\"", u->username);
 		return 0; /* failure. */
 	}
 
@@ -367,7 +367,7 @@ user_create(const char *username, const char *password, const char *email)
 		return NULL; /**< illegal users never exist */
 
 	if (user_exists(username)) {
-		LOG_ERROR("Username '%s' already exists.\n", username);
+		LOG_ERROR("Username '%s' already exists.", username);
 		return NULL; /* failure */
 	}
 
@@ -387,7 +387,7 @@ user_create(const char *username, const char *password, const char *email)
 	id = freelist_alloc(user_id_freelist, 1);
 
 	if (id < 0) {
-		LOG_ERROR("Could not allocate user id for username(%s)\n", username);
+		LOG_ERROR("Could not allocate user id for username(%s)", username);
 		user_free(u);
 		return NULL; /* failure */
 	}
@@ -400,7 +400,7 @@ user_create(const char *username, const char *password, const char *email)
 	u->email = strdup(email);
 
 	if (!user_write(u)) {
-		LOG_ERROR("Could not save account username(%s)\n", u->username);
+		LOG_ERROR("Could not save account username(%s)", u->username);
 		user_free(u);
 		return NULL; /* failure */
 	}
@@ -454,12 +454,12 @@ user_init(void)
 	while ((id = fdb_iterator_next(it))) {
 		struct user *u;
 
-		LOG_DEBUG("Found user record '%s'\n", id);
+		LOG_DEBUG("Found user record '%s'", id);
 		/* Load user file */
 		u = user_load_byname(id);
 
 		if (!u) {
-			LOG_ERROR("Could not load user from file '%s'\n", id);
+			LOG_ERROR("Could not load user from file '%s'", id);
 			goto failure;
 		}
 
@@ -501,6 +501,6 @@ user_get(struct user *user)
 {
 	if (user) {
 		REFCOUNT_GET(user);
-		LOG_DEBUG("user refcount=%d\n", user->REFCOUNT_NAME);
+		LOG_DEBUG("user refcount=%d", user->REFCOUNT_NAME);
 	}
 }

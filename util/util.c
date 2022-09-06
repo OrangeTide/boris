@@ -137,7 +137,7 @@ util_textfile_load(const char *filename)
 
 	ret[len] = 0; /* null terminate the string */
 
-	LOG_DEBUG("%s:loaded %ld bytes\n", filename, len);
+	LOG_DEBUG("%s:loaded %ld bytes", filename, len);
 
 	fclose(f);
 	return ret;

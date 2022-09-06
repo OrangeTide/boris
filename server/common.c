@@ -268,7 +268,7 @@ value_set(const char *value, enum value_type type, void *p)
 		*(unsigned*)p = strtoul(value, &endptr, 0);
 
 		if (*endptr != 0) {
-			LOG_ERROR("Not a number:\"%s\"\n", value);
+			LOG_ERROR("Not a number:\"%s\"", value);
 			return 0; /* error - not a number */
 		}
 
@@ -649,7 +649,7 @@ heapqueue_isvalid(void)
 
 	for (i = 1; i < heap_len; i++) {
 		if (heapqueue_greaterthan(&heap[HEAPQUEUE_PARENT(i)], &heap[i])) {
-			LOG_DEBUG("Bad heap at %d\n", i);
+			LOG_DEBUG("Bad heap at %d", i);
 			return 0; /* not a valid heap */
 		}
 	}
@@ -793,7 +793,7 @@ bitmap_resize(struct bitmap *bitmap, size_t newbits)
 	unsigned *tmp;
 
 	newbits = ROUNDUP(newbits, BITMAP_BITSIZE);
-	LOG_DEBUG("Allocating %zd bytes\n", newbits / CHAR_BIT);
+	LOG_DEBUG("Allocating %zd bytes", newbits / CHAR_BIT);
 	tmp = realloc(bitmap->bitmap, newbits / CHAR_BIT);
 
 	if (!tmp) {
@@ -805,7 +805,7 @@ bitmap_resize(struct bitmap *bitmap, size_t newbits)
 		/* clear out the new bits */
 		size_t len;
 		len = (newbits - bitmap->bitmap_allocbits) / CHAR_BIT;
-		LOG_DEBUG("Clearing %zd bytes (ofs %zd)\n", len, bitmap->bitmap_allocbits / BITMAP_BITSIZE);
+		LOG_DEBUG("Clearing %zd bytes (ofs %zd)", len, bitmap->bitmap_allocbits / BITMAP_BITSIZE);
 		memset(tmp + bitmap->bitmap_allocbits / BITMAP_BITSIZE, 0, len);
 	}
 
@@ -1135,7 +1135,7 @@ attr_add(struct attr_list *al, const char *name, const char *value)
 	for (curr = LIST_TOP(*al); curr; curr = LIST_NEXT(curr, list)) {
 		/* case sensitive. */
 		if (!strcmp(curr->name, name)) {
-			LOG_ERROR("WARNING:attribute '%s' already exists.\n", curr->name);
+			LOG_ERROR("WARNING:attribute '%s' already exists.", curr->name);
 			return 0; /**< duplicate found, refuse to add. */
 		}
 
@@ -1216,7 +1216,7 @@ do_config_prompt(struct config *cfg UNUSED, void *extra UNUSED, const char *id, 
 	} else if (!strcasecmp(id, "prompt.command")) {
 		target = &mud_config.command_prompt;
 	} else {
-		LOG_ERROR("problem with config option '%s' = '%s'\n", id, value);
+		LOG_ERROR("problem with config option '%s' = '%s'", id, value);
 		return 1; /* failure - continue looking for matches */
 	}
 
@@ -1260,7 +1260,7 @@ do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const char *id, con
 		}
 	}
 
-	LOG_ERROR("problem with config option '%s' = '%s'\n", id, value);
+	LOG_ERROR("problem with config option '%s' = '%s'", id, value);
 
 	return 1; /* failure - continue looking for matches */
 }
@@ -1297,7 +1297,7 @@ do_config_msgfile(struct config *cfg UNUSED, void *extra UNUSED, const char *id,
 		}
 	}
 
-	LOG_ERROR("problem with config option '%s' = '%s'\n", id, value);
+	LOG_ERROR("problem with config option '%s' = '%s'", id, value);
 
 	return 1; /* failure - continue looking for matches */
 }
@@ -1327,7 +1327,7 @@ do_config_port(struct config *cfg UNUSED, void *extra UNUSED, const char *id, co
 	errno = 0;
 	mud.params.port = strtoul(value, &endptr, 0);
 	if (errno || *endptr != 0) {
-		LOG_ERROR("Not a number. problem with config option '%s' = '%s'\n", id, value);
+		LOG_ERROR("Not a number. problem with config option '%s' = '%s'", id, value);
 		return -1; /* error - not a number */
 	}
 

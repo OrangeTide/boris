@@ -50,10 +50,10 @@
 #endif
 
 /** trace logs entry to a function if NTRACE is not defined. */
-#define TRACE_ENTER() LOG_TRACE("%s():%u:ENTER\n", __func__, __LINE__)
+#define TRACE_ENTER() LOG_TRACE("%s():%u:ENTER", __func__, __LINE__)
 
 /** trace logs exit of a function if NTRACE is not defined. */
-#define TRACE_EXIT() LOG_TRACE("%s():%u:EXIT\n", __func__, __LINE__)
+#define TRACE_EXIT() LOG_TRACE("%s():%u:EXIT", __func__, __LINE__)
 
 /** tests an expression, if failed prints an error message based on errno and jumps to a label. */
 #define FAILON(e, reason, label) do { if(e) { LOG_ERROR("FAILED:%s:%s", reason, strerror(errno)); goto label; } } while(0)

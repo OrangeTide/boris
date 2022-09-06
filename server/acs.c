@@ -49,7 +49,7 @@ acs_testflag(struct acs_info *ai, unsigned flag)
 	} else if (flag >= '0' && flag <= '9') {
 		i = flag - '0' + 26;
 	} else {
-		LOG_ERROR("unknown flag '%c'\n", flag);
+		LOG_ERROR("unknown flag '%c'", flag);
 		return 0;
 	}
 
@@ -100,7 +100,7 @@ did_not_pass:
 
 	return 0;
 parse_failure:
-	LOG_ERROR("acs parser failure '%s' (off=%td)\n", acsstring, s - acsstring);
+	LOG_ERROR("acs parser failure '%s' (off=%td)", acsstring, s - acsstring);
 	return 0;
 }
 
@@ -114,10 +114,10 @@ acs_test(void)
 
 	acs_init(&ai_test, 4, 0);
 
-	LOG_INFO("acs_check() %d\n", acs_check(&ai_test, "s6fA"));
-	LOG_INFO("acs_check() %d\n", acs_check(&ai_test, "s2"));
-	LOG_INFO("acs_check() %d\n", acs_check(&ai_test, "s2fA"));
-	LOG_INFO("acs_check() %d\n", acs_check(&ai_test, "s8|s2"));
+	LOG_INFO("acs_check() %d", acs_check(&ai_test, "s6fA"));
+	LOG_INFO("acs_check() %d", acs_check(&ai_test, "s2"));
+	LOG_INFO("acs_check() %d", acs_check(&ai_test, "s2fA"));
+	LOG_INFO("acs_check() %d", acs_check(&ai_test, "s8|s2"));
 }
 #endif
 

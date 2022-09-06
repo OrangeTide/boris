@@ -174,7 +174,7 @@ form_getitem(struct form *f, const char *name)
 		}
 	}
 
-	LOG_ERROR("Unknown form variable '%s'\n", name);
+	LOG_ERROR("Unknown form variable '%s'", name);
 
 	return NULL; /* not found */
 }
@@ -197,7 +197,7 @@ form_getvalue(const struct form *f, unsigned nr_value, char **value, const char 
 		}
 	}
 
-	LOG_ERROR("Unknown form variable '%s'\n", name);
+	LOG_ERROR("Unknown form variable '%s'", name);
 
 	return NULL; /* not found */
 }
@@ -249,7 +249,7 @@ form_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 	if (*line) {
 		/* check the input */
 		if (fs->curritem->form_check && !fs->curritem->form_check(cl, line)) {
-			LOG_DEBUG("%s:Invalid form input\n", telnetclient_socket_name(cl));
+			LOG_DEBUG("%s:Invalid form input", telnetclient_socket_name(cl));
 			telnetclient_puts(cl, mud_config.msg_tryagain);
 			telnetclient_setprompt(cl, fs->curritem->prompt);
 			return;
@@ -310,7 +310,7 @@ form_menu_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 			f->form_close(cl, fs);
 		} else {
 			/* fallback */
-			LOG_DEBUG("%s:ERROR:going to main menu\n", telnetclient_socket_name(cl));
+			LOG_DEBUG("%s:ERROR:going to main menu", telnetclient_socket_name(cl));
 			telnetclient_puts(cl, mud_config.msg_errormain);
 			menu_start_input(cl, &gamemenu_login);
 		}
@@ -345,7 +345,7 @@ form_state_free(DESCRIPTOR_DATA *cl)
 {
 	struct form_state *fs = cl->state.form;
 	unsigned i;
-	LOG_DEBUG("%s:freeing state\n", telnetclient_socket_name(cl));
+	LOG_DEBUG("%s:freeing state", telnetclient_socket_name(cl));
 
 	if (fs->value) {
 		for (i = 0; i < fs->nr_value; i++) {
@@ -486,7 +486,7 @@ form_createaccount_close(DESCRIPTOR_DATA *cl, struct form_state *fs)
 	password = form_getvalue(f, fs->nr_value, fs->value, "PASSWORD");
 	email = form_getvalue(f, fs->nr_value, fs->value, "EMAIL");
 
-	LOG_DEBUG("%s:create account: '%s'\n", telnetclient_socket_name(cl), username);
+	LOG_DEBUG("%s:create account: '%s'", telnetclient_socket_name(cl), username);
 
 	if (user_exists(username)) {
 		telnetclient_puts(cl, mud_config.msg_userexists);
@@ -516,6 +516,14 @@ form_start(void *p, long unused2, void *form)
 	(void)unused2;
 
 	DESCRIPTOR_DATA *cl = p;
+
+	if (!form) {
+		if (cl) {
+			LOG_ERROR("form is NULL [%s]", (long)telnetclient_socket_name(cl));
+			telnetclient_puts(cl, "Unable to load form.\n");
+		}
+		return;
+	}
 
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
 
@@ -629,9 +637,9 @@ struct form *form_load(const char *buf, void (*form_close)(DESCRIPTOR_DATA *cl, 
 		description[len] = 0;
 		h.buf = *tmp ? tmp + 1 : tmp;
 
-		LOG_DEBUG("name='%s'\n", name);
-		LOG_DEBUG("prompt='%s'\n", prompt);
-		LOG_DEBUG("description='%s'\n", description);
+		LOG_DEBUG("name='%s'", name);
+		LOG_DEBUG("prompt='%s'", prompt);
+		LOG_DEBUG("description='%s'", description);
 		form_additem(f, 0, name, prompt, description, NULL);
 		free(name);
 		name = 0;
@@ -686,14 +694,14 @@ form_module_init(void)
 	form_newuser_app = form_load_from_file(mud_config.form_newuser_filename, form_createaccount_close);
 
 	if (!form_newuser_app) {
-		LOG_ERROR("could not load %s\n", mud_config.form_newuser_filename);
+		LOG_ERROR("could not load %s", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	}
 
 	fi = form_getitem(form_newuser_app, "USERNAME");
 
 	if (!fi) {
-		LOG_ERROR("%s does not have a USERNAME field.\n", mud_config.form_newuser_filename);
+		LOG_ERROR("%s does not have a USERNAME field.", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	}
 
@@ -702,7 +710,7 @@ form_module_init(void)
 	fi = form_getitem(form_newuser_app, "PASSWORD");
 
 	if (!fi) {
-		LOG_ERROR("%s does not have a PASSWORD field.\n", mud_config.form_newuser_filename);
+		LOG_ERROR("%s does not have a PASSWORD field.", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	}
 
@@ -712,7 +720,7 @@ form_module_init(void)
 	fi = form_getitem(form_newuser_app, "PASSWORD2");
 
 	if (!fi) {
-		LOG_INFO("warning: %s does not have a PASSWORD2 field.\n", mud_config.form_newuser_filename);
+		LOG_INFO("warning: %s does not have a PASSWORD2 field.", mud_config.form_newuser_filename);
 		return 0; /* failure */
 	} else {
 		fi->flags |= FORM_FLAG_INVISIBLE; /* invisible */

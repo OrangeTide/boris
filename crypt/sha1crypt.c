@@ -157,7 +157,7 @@ void sha1crypt_test(void)
 	sha1crypt_makepass(buf, sizeof buf, "abcdef");
 	printf("buf=\"%s\"\n", buf);
 	res = sha1crypt_checkpass(buf, "abcdef");
-	LOG_DEBUG("sha1crypt_checkpass() positive:%s (res=%d)\n", !res ? "FAILED" : "PASSED", res);
+	LOG_DEBUG("sha1crypt_checkpass() positive:%s (res=%d)", !res ? "FAILED" : "PASSED", res);
 
 	if (!res) {
 		LOG_ERROR("sha1crypt_checkpass() must succeed on positive test.");
@@ -166,7 +166,7 @@ void sha1crypt_test(void)
 
 	/* checking - negative testing. */
 	res = sha1crypt_checkpass(buf, "abcdeg");
-	LOG_DEBUG("sha1crypt_checkpass() negative:%s (res=%d)\n", res ? "FAILED" : "PASSED", res);
+	LOG_DEBUG("sha1crypt_checkpass() negative:%s (res=%d)", res ? "FAILED" : "PASSED", res);
 
 	if (res) {
 		LOG_ERROR("sha1crypt_checkpass() must fail on negative test.");
@@ -176,7 +176,7 @@ void sha1crypt_test(void)
 	/* loop through all hardcoded examples. */
 	for (i = 0; i < NR(examples); i++) {
 		res = sha1crypt_checkpass(examples[i].hash, examples[i].pass);
-		LOG_DEBUG("Example %d:%s (res=%d) hash:%s\n", i + 1, !res ? "FAILED" : "PASSED", res, examples[i].hash);
+		LOG_DEBUG("Example %d:%s (res=%d) hash:%s", i + 1, !res ? "FAILED" : "PASSED", res, examples[i].hash);
 	}
 }
 #endif

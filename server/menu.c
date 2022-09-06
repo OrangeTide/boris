@@ -114,7 +114,7 @@ menu_titledraw(DESCRIPTOR_DATA *cl, const char *title, size_t len)
 	if (cl)
 		telnetclient_printf(cl, "%s\n", title);
 
-	LOG_DEBUG("%s>>%s\n", telnetclient_socket_name(cl), title);
+	LOG_DEBUG("%s>>%s", telnetclient_socket_name(cl), title);
 
 	if (cl)
 		telnetclient_puts(cl, buf);
@@ -136,12 +136,12 @@ menu_show(DESCRIPTOR_DATA *cl, const struct menuinfo *mi)
 			if (cl)
 				telnetclient_printf(cl, "%c. %s\n", curr->key, curr->name);
 
-			LOG_DEBUG("%s>>%c. %s\n", telnetclient_socket_name(cl), curr->key, curr->name);
+			LOG_DEBUG("%s>>%c. %s", telnetclient_socket_name(cl), curr->key, curr->name);
 		} else {
 			if (cl)
 				telnetclient_printf(cl, "%s\n", curr->name);
 
-			LOG_DEBUG("%s>>%s\n", telnetclient_socket_name(cl), curr->name);
+			LOG_DEBUG("%s>>%s", telnetclient_socket_name(cl), curr->name);
 		}
 	}
 }

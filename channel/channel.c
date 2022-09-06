@@ -318,7 +318,7 @@ channel_shutdown(void)
 int
 channel_join(struct channel *ch, struct channel_member *cm)
 {
-	LOG_TRACE("someone(%p) joined\n", cm ? cm->p : NULL);
+	LOG_TRACE("someone(%p) joined", cm ? cm->p : NULL);
 	return channel_add_member(ch, cm);
 }
 
@@ -328,7 +328,7 @@ channel_join(struct channel *ch, struct channel_member *cm)
 void
 channel_part(struct channel *ch, struct channel_member *cm)
 {
-	LOG_TRACE("someone(%p) parted\n", cm ? cm->p : NULL);
+	LOG_TRACE("someone(%p) parted", cm ? cm->p : NULL);
 
 	if (channel_delete_member(ch, cm) != OK) {
 		LOG_WARNING("could not find channel member %p", cm);
@@ -367,7 +367,7 @@ channel_vbroadcast(struct channel *ch, struct channel_member **exclude_list, uns
 
 	for (i = 0; i < ch->nr_member; i++) {
 		struct channel_member *cm = ch->member[i];
-		LOG_DEBUG("cm=%p p=%p\n", (void*)cm, cm ? cm->p : NULL);
+		LOG_DEBUG("cm=%p p=%p", (void*)cm, cm ? cm->p : NULL);
 
 		if (cm && cm->send && !is_on_list(cm, exclude_list, exclude_list_len)) {
 			cm->send(cm, ch, scratch);

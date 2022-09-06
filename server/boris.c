@@ -112,7 +112,7 @@ static void
 need_parameter(int ch, const char *next_arg)
 {
 	if (!next_arg) {
-		LOG_ERROR("option -%c takes a parameter\n", ch);
+		LOG_ERROR("option -%c takes a parameter", ch);
 		usage();
 	}
 }
@@ -164,7 +164,7 @@ process_flag(int ch, const char *next_arg)
 		return 0;
 
 	default:
-		LOG_ERROR("Unknown option -%c\n", ch);
+		LOG_ERROR("Unknown option -%c", ch);
 
 	/* fall through */
 	case 'h':
@@ -341,7 +341,7 @@ main(int argc, char **argv)
 
 		dyad_update();
 
-		LOG_INFO("Tick\n");
+		LOG_INFO("Tick");
 	}
 
 	eventlog_server_shutdown();
