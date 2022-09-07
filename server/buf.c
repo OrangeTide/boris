@@ -184,7 +184,7 @@ buf_read(struct buf *b, void *data, size_t maxlen)
 
 /* buf_data gets a readable buffer.
  * To function like read, use with buf_consume() to remove data from head of buffer. */
-const void *
+void *
 buf_data(struct buf *b, size_t *len_out)
 {
 	if (!b) {

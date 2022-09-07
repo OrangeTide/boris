@@ -39,6 +39,7 @@
 #include <user.h>
 #include <game.h>
 #include <mth.h>
+#include <form.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
@@ -294,14 +295,12 @@ main(int argc, char **argv)
 
 	atexit(user_shutdown);
 
-#if 0 // DISABLED
 	if (!form_module_init()) {
 		LOG_ERROR("could not initialize forms");
 		return EXIT_FAILURE;
 	}
 
 	atexit(form_module_shutdown);
-#endif
 
 #if 0 // DISABLED
 	/* start the webserver if webserver.port is defined. */
@@ -332,12 +331,10 @@ main(int argc, char **argv)
 	dyad_setUpdateTimeout(10);
 
 	while (keep_going_fl && dyad_getStreamCount() > 0) {
-		/* TODO: fix prompt refresh code
 		struct telnetserver *cur = telnetserver_first();
 		for (; cur; cur = telnetserver_next(cur)) {
 			telnetclient_prompt_refresh_all(cur);
 		}
-		*/
 
 		dyad_update();
 

@@ -120,11 +120,11 @@ telnetclient_on_data(dyad_Event *e)
 
 	// TODO: replace this simple echo code
 	size_t cmdlen;
-	const char *cmd = buf_data(cl->linebuf, &cmdlen);
+	char *cmd = buf_data(cl->linebuf, &cmdlen);
 	size_t consumed = 0;
 	while (consumed < cmdlen) {
-		const char *start = cmd + consumed;
-		const char *end = strchr(start, '\n');
+		char *start = cmd + consumed;
+		char *end = strchr(start, '\n');
 		if (!end) {
 			break; /* no more complete lines */
 		}
@@ -134,8 +134,14 @@ telnetclient_on_data(dyad_Event *e)
 		}
 
 		size_t linelen = end - start;
+		*end = 0; /* null terminate the string */
 		if (linelen > 0) {
-			telnetclient_printf(cl, "Line: \"%.*s\"\n", linelen, start);
+			if (cl->line_input) {
+				cl->line_input(cl, start);
+			} else {
+				LOG_WARNING("Missing or invalid line input handler [fd=%ld %s]", (long)dyad_getSocket(e->remote), telnetclient_socket_name(cl));
+				telnetclient_printf(cl, "ERROR, missing or invalid line input handler: \"%.*s\"\n", linelen, start);
+			}
 		}
 		consumed += linelen + 1;
 	}
@@ -153,9 +159,6 @@ telnetclient_on_accept(dyad_Event *e)
 	}
 
 	LOG_INFO("*** Connection %ld: %s", (long)dyad_getSocket(e->remote), telnetclient_socket_name(cl));
-	// TODO: telnetclient_puts(cl, mud_config.msgfile_welcome);
-
-	telnetclient_puts(cl, "## Welcome ##\r\n");
 }
 
 static void
@@ -242,9 +245,9 @@ int
 write_to_descriptor(DESCRIPTOR_DATA *d, const char *txt, int length)
 {
 	assert(d != NULL);
-	assert(d->stream != NULL);
 
-	int state = dyad_getState(d->stream);
+	/* treat as already closedif stream is NULL */
+	int state = d && d->stream ? dyad_getState(d->stream) : DYAD_STATE_CLOSED;
 
 	if (state == DYAD_STATE_CONNECTED) {
 		if (d->mth->mccp2) {
@@ -428,6 +431,8 @@ telnetclient_newclient(dyad_Stream *stream)
 	dyad_addListener(stream, DYAD_EVENT_CLOSE, telnetclient_on_close, cl);
 
 	init_mth_socket(cl);
+
+	telnetclient_puts(cl, mud_config.msgfile_welcome);
 
 	menu_start_input(cl, &gamemenu_login);
 
