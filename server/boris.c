@@ -331,8 +331,8 @@ main(int argc, char **argv)
 	dyad_setUpdateTimeout(10);
 
 	while (keep_going_fl && dyad_getStreamCount() > 0) {
-		struct telnetserver *cur = telnetserver_first();
-		for (; cur; cur = telnetserver_next(cur)) {
+		struct telnetserver *cur;
+		for (cur = telnetserver_first(); cur; cur = telnetserver_next(cur)) {
 			telnetclient_prompt_refresh_all(cur);
 		}
 
@@ -342,7 +342,7 @@ main(int argc, char **argv)
 	}
 
 	eventlog_server_shutdown();
-	fprintf(stderr, "Server shutting down.\n");
+	LOG_INFO("Server shutting down.");
 
 	return 0;
 }

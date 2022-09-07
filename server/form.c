@@ -501,8 +501,6 @@ form_createaccount_close(DESCRIPTOR_DATA *cl, struct form_state *fs)
 		return;
 	}
 
-	user_put(&u);
-
 	telnetclient_puts(cl, mud_config.msg_usercreatesuccess);
 
 	LOG_TODO("for approvable based systems, disconnect the user with a friendly message");

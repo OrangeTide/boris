@@ -60,7 +60,6 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 
 		telnetclient_puts(cl, mud_config.msgfile_badpassword);
 	} else {
-		LOG_ERROR("User '%s' not found!", cl->state.login.username);
 		telnetclient_puts(cl, mud_config.msgfile_noaccount);
 	}
 

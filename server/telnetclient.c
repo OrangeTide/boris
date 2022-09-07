@@ -64,13 +64,13 @@ static LIST_HEAD(struct server_list_head, struct telnetserver) server_list;
  * Prototypes
  ******************************************************************************/
 
-static void telnetclient_on_accept(dyad_Event *e);
-static void telnetclient_on_error(dyad_Event *e);
+static void telnetserver_on_accept(dyad_Event *e);
+static void telnetserver_on_error(dyad_Event *e);
 static int telnetclient_channel_add(DESCRIPTOR_DATA *cl, struct channel *ch);
 static int telnetclient_channel_remove(DESCRIPTOR_DATA *cl, struct channel *ch);
 static void telnetclient_on_destroy(dyad_Event *e);
 static void telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const char *msg);
-static DESCRIPTOR_DATA *telnetclient_newclient(dyad_Stream *stream);
+static DESCRIPTOR_DATA *telnetclient_newclient(struct telnetserver *server, dyad_Stream *stream);
 
 /******************************************************************************
  * Functions
@@ -118,7 +118,6 @@ telnetclient_on_data(dyad_Event *e)
 	int size = translate_telopts(cl, (unsigned char*)e->data, e->size, output, 0);
 	buf_commit(cl->linebuf, size);
 
-	// TODO: replace this simple echo code
 	size_t cmdlen;
 	char *cmd = buf_data(cl->linebuf, &cmdlen);
 	size_t consumed = 0;
@@ -128,8 +127,13 @@ telnetclient_on_data(dyad_Event *e)
 		if (!end) {
 			break; /* no more complete lines */
 		}
+
+		/* force redraw of prompt for blank lines */
 		if (end == start) {
 			end++;
+			consumed++;
+			cl->prompt_flag = 0;
+			telnetclient_prompt_refresh(cl);
 			continue; /* ignore blank lines */
 		}
 
@@ -149,9 +153,9 @@ telnetclient_on_data(dyad_Event *e)
 }
 
 static void
-telnetclient_on_accept(dyad_Event *e)
+telnetserver_on_accept(dyad_Event *e)
 {
-	DESCRIPTOR_DATA *cl = telnetclient_newclient(e->remote);
+	DESCRIPTOR_DATA *cl = telnetclient_newclient(e->udata, e->remote);
 
 	if (!cl) {
 		LOG_ERROR("Could not create new client");
@@ -162,9 +166,20 @@ telnetclient_on_accept(dyad_Event *e)
 }
 
 static void
-telnetclient_on_error(dyad_Event *e)
+telnetserver_on_error(dyad_Event *e)
 {
 	LOG_CRITICAL("telnet server error: %s", e->msg);
+}
+
+static void
+telnetclient_on_error(dyad_Event *e)
+{
+	LOG_CRITICAL("telnet client error: %s", e->msg);
+	if (e->udata) {
+		DESCRIPTOR_DATA *cl = e->udata;
+		cl->stream = NULL;
+	}
+	dyad_close(e->stream);
 }
 
 /** free a telnetclient structure. */
@@ -397,7 +412,7 @@ telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const c
 
 /** allocate a new telnetclient based on an existing valid dyad handle. */
 static DESCRIPTOR_DATA *
-telnetclient_newclient(dyad_Stream *stream)
+telnetclient_newclient(struct telnetserver *server, dyad_Stream *stream)
 {
 	DESCRIPTOR_DATA *cl = malloc(sizeof * cl);
 	FAILON(!cl, "malloc()", failed);
@@ -406,6 +421,7 @@ telnetclient_newclient(dyad_Stream *stream)
 
 	*cl = (DESCRIPTOR_DATA){
 			.stream = stream,
+			.type = CLIENT_TYPE_USER,
 		};
 
 	cl->linebuf = buf_new();
@@ -426,6 +442,7 @@ telnetclient_newclient(dyad_Stream *stream)
 
 	telnetclient_channel_add(cl, channel_public(CHANNEL_SYS));
 
+	dyad_addListener(stream, DYAD_EVENT_ERROR, telnetclient_on_error, server);
 	dyad_addListener(stream, DYAD_EVENT_DESTROY, telnetclient_on_destroy, cl);
 	dyad_addListener(stream, DYAD_EVENT_DATA, telnetclient_on_data, cl);
 	dyad_addListener(stream, DYAD_EVENT_CLOSE, telnetclient_on_close, cl);
@@ -435,6 +452,8 @@ telnetclient_newclient(dyad_Stream *stream)
 	telnetclient_puts(cl, mud_config.msgfile_welcome);
 
 	menu_start_input(cl, &gamemenu_login);
+
+	LIST_INSERT_HEAD(&server->client_list, cl, list);
 
 	return cl;
 failed:
@@ -509,14 +528,24 @@ telnetclient_linemode(DESCRIPTOR_DATA *cl, int mode)
 }
 #endif
 
+static void
+telnetclient_output_prompt(DESCRIPTOR_DATA *cl)
+{
+	if (cl && cl->prompt_string) {
+		// LOG_TRACE("Outputing prompt [user=%s]", user_username(cl->user));
+		telnetclient_puts(cl, cl->prompt_string);
+		cl->prompt_flag = 1;
+	}
+}
+
 /** configures the prompt string for telnetclient_rdev_lineinput. */
 void
 telnetclient_setprompt(DESCRIPTOR_DATA *cl, const char *prompt)
 {
-	free(cl->prompt_string);
+	char *oldprompt = cl->prompt_string;
 	cl->prompt_string = strdup(prompt ? prompt : "? ");
-	telnetclient_puts(cl, cl->prompt_string);
-	cl->prompt_flag = 1;
+	telnetclient_output_prompt(cl);
+	free(oldprompt);
 }
 
 /**
@@ -537,8 +566,9 @@ void
 telnetclient_close(DESCRIPTOR_DATA *cl)
 {
 	if (cl && cl->stream) {
-		dyad_close(cl->stream);
+		dyad_Stream *stream = cl->stream;
 		cl->stream = NULL;
+		dyad_close(stream);
 	}
 }
 
@@ -546,8 +576,9 @@ telnetclient_close(DESCRIPTOR_DATA *cl)
 void
 telnetclient_prompt_refresh(DESCRIPTOR_DATA *cl)
 {
-	if (cl && cl->prompt_string && !cl->prompt_flag) {
-		telnetclient_setprompt(cl, cl->prompt_string);
+	if (cl && cl->type == CLIENT_TYPE_USER
+	    && cl->prompt_string && !cl->prompt_flag) {
+		telnetclient_output_prompt(cl);
 	}
 }
 
@@ -558,11 +589,9 @@ telnetclient_prompt_refresh_all(struct telnetserver *server)
 	DESCRIPTOR_DATA *curr, *next;
 
 	for (curr = LIST_TOP(server->client_list); curr; curr = next) {
+		// LOG_TRACE("Refreshing prompt %p [username=%s]", curr, user_username(curr->user));
 		next = LIST_NEXT(curr, list);
-
-		if (curr->type == 1) {
-			telnetclient_prompt_refresh(curr);
-		}
+		telnetclient_prompt_refresh(curr);
 	}
 }
 
@@ -613,8 +642,8 @@ telnetserver_listen(int port)
 		return ERR;
 	}
 
-	dyad_addListener(s, DYAD_EVENT_ERROR,  telnetclient_on_error,  NULL);
-	dyad_addListener(s, DYAD_EVENT_ACCEPT, telnetclient_on_accept, NULL);
+	dyad_addListener(s, DYAD_EVENT_ERROR, telnetserver_on_error, server);
+	dyad_addListener(s, DYAD_EVENT_ACCEPT, telnetserver_on_accept, server);
 	if (dyad_listen(s, port) != 0) {
 		dyad_close(s);
 		free(server);

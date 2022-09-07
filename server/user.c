@@ -58,6 +58,7 @@ struct user {
 };
 
 struct userdb_entry {
+	char *cached_username;
 	struct user *u;
 	LIST_ENTRY(struct userdb_entry) list;
 };
@@ -84,6 +85,23 @@ int user_exists(const char *username);
  ******************************************************************************/
 
 /**
+ * searches cache for user
+ */
+static struct userdb_entry *
+userdb_lookup_cached(const char *username)
+{
+	struct userdb_entry *curr;
+
+	for (curr = LIST_TOP(user_list); curr; curr = LIST_NEXT(curr, list)) {
+		if (!strcasecmp(curr->cached_username, username)) {
+			return curr;
+		}
+	}
+
+	return NULL;
+}
+
+/**
  * only free the structure data.
  */
 static void
@@ -108,6 +126,13 @@ user_free(struct user *u)
 {
 	if (!u) return;
 
+	TRACE("username=%s\n", u->username);
+	if (u->username) {
+		struct userdb_entry *ent = userdb_lookup_cached(u->username);
+		if (ent) {
+			ent->u = NULL;
+		}
+	}
 	user_ll_free(u);
 }
 
@@ -137,38 +162,66 @@ user_defaults(void)
 }
 
 /**
- * insert a user into user_list, but only if it is not already on the list.
+ * add an empty userdb_entry to user cache
  */
-static int
-user_ll_add(struct user *u)
+static struct userdb_entry *
+userdb_entry_new(const char *username)
 {
 	struct userdb_entry *ent;
-	assert(u != NULL);
-	assert(u->username != NULL);
 
-	if (!u) return 0; /**< failure. */
-
-	if (user_exists(u->username)) {
-		return 0; /**< failure. */
+	if (!username || user_exists(username)) {
+		return NULL; /**< failure. */
 	}
 
 	ent = calloc(1, sizeof * ent);
 
 	if (!ent)
-		return 0; /**< failure. */
+		return NULL; /**< failure. */
 
-	ent->u = u;
+	*ent = (struct userdb_entry){
+			.cached_username = strdup(username),
+			.u = NULL,
+		};
 	LIST_INSERT_HEAD(&user_list, ent, list);
+
+	return ent; /**< success. */
+}
+
+/**
+ * insert a user into user_list, but only if it is not already on the list.
+ */
+static int
+user_cache_add(struct user *u)
+{
+	assert(u != NULL);
+
+	if (!u || !u->username) {
+		return 0; /**< failure. */
+	}
+
+	assert(u->username != NULL);
+	struct userdb_entry *ent = userdb_entry_new(u->username);
+	if (!ent) {
+		return 0; /**< failure. */
+	}
+	ent->u = u;
+	user_get(u);
+
 	return 1; /**< success. */
 }
 
 /** load a user by username. */
 static struct user *
-user_load_byname(const char *username)
+user_load_byname(const char *username, int id_already_exists)
 {
 	struct user *u;
 	struct fdb_read_handle *h;
 	const char *name, *value;
+
+	if (user_illegal(username)) {
+		LOG_ERROR("Refusing to load illegal user name [%s]", username);
+		return NULL;
+	}
 
 	h = fdb_read_begin("users", username);
 
@@ -219,9 +272,11 @@ user_load_byname(const char *username)
 
 	/** @todo check all fields of u to verify they are correct. */
 
-	if (!freelist_thwack(user_id_freelist, u->id, 1)) {
-		LOG_ERROR("Could not use user id %d (bad id or id already used?)", u->id);
-		goto failure;
+	if (!id_already_exists) {
+		if (!freelist_thwack(user_id_freelist, u->id, 1)) {
+			LOG_ERROR("Could not use user id %d (bad id or id already used?)", u->id);
+			goto failure;
+		}
 	}
 
 	LOG_DEBUG("Loaded user '%s'", username);
@@ -230,7 +285,7 @@ user_load_byname(const char *username)
 
 failure:
 	user_ll_free(u);
-	return 0; /* failure */
+	return NULL; /* failure */
 }
 
 /** write a user file. */
@@ -307,11 +362,7 @@ user_exists(const char *username)
 		return 0; /**< illegal users never exist */
 
 	for (curr = LIST_TOP(user_list); curr; curr = LIST_NEXT(curr, list)) {
-		const struct user *u = curr->u;
-		assert(u != NULL);
-		assert(u->username != NULL);
-
-		if (!strcasecmp(u->username, username)) {
+		if (!strcasecmp(curr->cached_username, username)) {
 			return 1; /**< user exists. */
 		}
 	}
@@ -325,27 +376,37 @@ user_exists(const char *username)
 struct user *
 user_lookup(const char *username)
 {
-	struct userdb_entry *curr;
+	struct userdb_entry *ent = userdb_lookup_cached(username);
 
-	for (curr = LIST_TOP(user_list); curr; curr = LIST_NEXT(curr, list)) {
-		struct user *u = curr->u;
+	if (ent) {
+		struct user *u = ent->u;
 
-		assert(u != NULL);
-		assert(u->username != NULL);
-
-		/*
-		 * load from disk if not loaded:
-		 * if (!strcasecmp(curr->cached_username, username)) {
-		 *   u=user_load_byname(username);
-		 *   user_ll_add(u);
-		 *   return u;
-		 * }
-		 */
-
-		if (!strcasecmp(u->username, username)) {
-			return u; /**< user exists. */
+		/* load from disk if cached entry is not loaded */
+		if (!u) {
+			LOG_DEBUG("Loading User '%s' from disk.", username);
+			/* NOTE: don't freelist_thwack the user id */
+			u = user_load_byname(username, 1);
+			if (!u) {
+				/* could not load user */
+				LOG_ERROR("Could not load user '%s'!", username);
+				return NULL;
+			}
+			ent->u = u;
 		}
+
+		return u; /* found user */
 	}
+
+	/* if not in cache, check disk */
+	LOG_DEBUG("User '%s' not in cached, checking disk.", username);
+	struct user *u = user_load_byname(username, 0);
+	if (u) {
+		LOG_DEBUG("Loaded User '%s' from disk.", username);
+		user_cache_add(u);
+		return u;
+	}
+
+	LOG_WARNING("User '%s' not found!", username);
 
 	return NULL; /* user not found. */
 }
@@ -363,8 +424,10 @@ user_create(const char *username, const char *password, const char *email)
 		return NULL; /* failure */
 	}
 
-	if (user_illegal(username))
+	if (user_illegal(username)) {
+		LOG_ERROR("Username contained illegal characters");
 		return NULL; /**< illegal users never exist */
+	}
 
 	if (user_exists(username)) {
 		LOG_ERROR("Username '%s' already exists.", username);
@@ -377,6 +440,15 @@ user_create(const char *username, const char *password, const char *email)
 		return NULL; /* failure */
 	}
 
+	id = freelist_alloc(user_id_freelist, 1);
+
+	if (id < 0) {
+		LOG_ERROR("Could not allocate user id for username(%s)", username);
+		return NULL; /* failure */
+	}
+
+	assert(id >= 0);
+
 	u = user_defaults(); /* allocate a default struct */
 
 	if (!u) {
@@ -384,28 +456,28 @@ user_create(const char *username, const char *password, const char *email)
 		return NULL; /* failure */
 	}
 
-	id = freelist_alloc(user_id_freelist, 1);
-
-	if (id < 0) {
-		LOG_ERROR("Could not allocate user id for username(%s)", username);
-		user_free(u);
-		return NULL; /* failure */
-	}
-
-	assert(id >= 0);
-
 	u->id = id;
 	u->username = strdup(username);
 	u->password_crypt = strdup(password_crypt);
 	u->email = strdup(email);
+	LOG_DEBUG("new user password: %s\n", u->password_crypt);
+
+	user_cache_add(u);
 
 	if (!user_write(u)) {
 		LOG_ERROR("Could not save account username(%s)", u->username);
-		user_free(u);
+		user_put(u);
 		return NULL; /* failure */
 	}
 
-	user_get(u);
+#ifndef NDEBUG
+	/* DEBUG: */
+	struct userdb_entry *ent = userdb_lookup_cached(u->username);
+	LOG_DEBUG("username=%s ent=%p u=%p\n", username, ent, u);
+	if (ent) {
+		LOG_DEBUG("cached_user=%p\n", ent->u);
+	}
+#endif
 
 	return u; /* success */
 }
@@ -413,6 +485,7 @@ user_create(const char *username, const char *password, const char *email)
 int
 user_password_check(struct user *u, const char *cleartext)
 {
+	// LOG_DEBUG("cleartext=\"%s\"", cleartext);
 	if (u && cleartext && sha1crypt_checkpass(u->password_crypt, cleartext)) {
 		return 1; /* success */
 	}
@@ -449,22 +522,26 @@ user_init(void)
 		return 0;
 	}
 
-	/* scan for account files */
+	/* scan for account files.
+	 * loads full user record in memory cache.
+	 * This is important to find the in-use user IDs.
+	 * And confirms that files are not corrupted.
+	 */
 
 	while ((id = fdb_iterator_next(it))) {
 		struct user *u;
 
 		LOG_DEBUG("Found user record '%s'", id);
+
 		/* Load user file */
-		u = user_load_byname(id);
+		u = user_load_byname(id, 0);
 
 		if (!u) {
 			LOG_ERROR("Could not load user from file '%s'", id);
 			goto failure;
 		}
 
-		/** add all users to a list */
-		user_ll_add(u);
+		user_cache_add(u);
 	}
 
 	fdb_iterator_end(it);
@@ -489,6 +566,7 @@ void
 user_put(struct user **user)
 {
 	if (user && *user) {
+		TRACE("username=%s\n", (*user)->username);
 		REFCOUNT_PUT(*user, user_free(*user); *user = NULL);
 	}
 }
@@ -501,6 +579,6 @@ user_get(struct user *user)
 {
 	if (user) {
 		REFCOUNT_GET(user);
-		LOG_DEBUG("user refcount=%d", user->REFCOUNT_NAME);
+		TRACE("user refcount=%d", user->REFCOUNT_NAME);
 	}
 }
