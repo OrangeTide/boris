@@ -613,7 +613,7 @@ telnetclient_socket_name(DESCRIPTOR_DATA *cl)
 {
 	static char tmp[64];
 
-	if (cl) {
+	if (cl && cl->stream) {
 		snprintf(tmp, sizeof(tmp), "%s:%u", dyad_getAddress(cl->stream), dyad_getPort(cl->stream));
 	} else {
 		snprintf(tmp, sizeof(tmp), "INVALID");
