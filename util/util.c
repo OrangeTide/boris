@@ -157,17 +157,31 @@ failure0:
 const char *
 util_getword(const char *s, char *out, size_t outlen)
 {
+	if (!s || !out || !outlen) {
+		return NULL;
+	}
+
 	const char *b, *e;
 
 	/* get word */
-	for (b = s; isspace(*b); b++) ;
+	for (b = s; isspace(*b); b++)
+		;
 
-	for (e = b; *e && !isspace(*e); e++) ;
+	for (e = b; *e && !isspace(*e); e++)
+		;
+
+	/* handle empty strings as a special case */
+	if (e == b) {
+		*out = 0;
+		return NULL;
+	}
 
 	snprintf(out, outlen, "%.*s", (int)(e - b), b);
+
 	b = e;
 
-	if (*b) b++;
+	if (*b)
+		b++;
 
 	return b;
 }

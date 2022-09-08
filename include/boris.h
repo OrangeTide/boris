@@ -243,6 +243,7 @@ struct socketio_handle;
 #define DOMAIN_USER "users"
 #define DOMAIN_ROOM "rooms"
 #define DOMAIN_CHARACTER "chars"
+#define DOMAIN_HELP "help"
 
 /** max id in any domain */
 #define ID_MAX 32767

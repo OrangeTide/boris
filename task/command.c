@@ -23,15 +23,16 @@
  */
 
 #include "command.h"
-#include "boris.h"
-#include "channel.h"
-#include "character.h"
-#include "room.h"
-#include "comutil.h"
+#include <boris.h>
+#include <channel.h>
+#include <character.h>
+#include <room.h>
+#include <comutil.h>
 #define LOG_SUBSYSTEM "command"
-#include "log.h"
-#include "util.h"
-#include "eventlog.h"
+#include <log.h>
+#include <util.h>
+#include <eventlog.h>
+#include <help.h>
 
 #include <assert.h>
 #include <stdlib.h>
@@ -132,6 +133,11 @@ command_do_roomget(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd U
 
 	r = room_get(roomnum);
 
+	if (!arg) {
+		telnetclient_printf(cl, "usage: roomget <roomnum> <attrname>\n");
+		return 0;
+	}
+
 	if (!r) {
 		telnetclient_printf(cl, "room \"%s\" not found.\n", roomnum_str);
 		return 0;
@@ -156,49 +162,70 @@ command_do_character(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd
 {
 	struct character *ch;
 	char act[64];
-	char tmp[64];
-	unsigned ch_id;
 
 	assert(arg != NULL);
 
-	arg = util_getword(arg, act, sizeof act);
+	arg = util_getword(arg, act, sizeof(act));
+	if (!arg) {
+		telnetclient_printf(cl, "usage: char [new | get | set]\n");
+		return 0;
+	}
 
 	if (!strcasecmp(act, "new")) {
 		ch = character_new();
 		telnetclient_printf(cl, "Created character %s.\n", character_attr_get(ch, "id"));
 		character_put(ch);
 	} else if (!strcasecmp(act, "get")) {
-		arg = util_getword(arg, tmp, sizeof tmp);
-		ch_id = strtoul(tmp, 0, 10); /* TODO: handle errors. */
+		char ch_id_str[64];
+		char attr_str[64];
+		unsigned ch_id;
+
+		arg = util_getword(arg, ch_id_str, sizeof(ch_id_str));
+		arg = util_getword(arg, attr_str, sizeof(attr_str));
+		if (!arg) {
+			telnetclient_printf(cl, "usage: char get <character-id> <attribute>\n");
+			return 0;
+		}
+
+		ch_id = strtoul(ch_id_str, 0, 10); /* TODO: handle errors. */
 		ch = character_get(ch_id);
 
 		if (ch) {
-			/* get attribute name. */
-			arg = util_getword(arg, tmp, sizeof tmp);
-			telnetclient_printf(cl, "Character %u \"%s\" = \"%s\"\n", ch_id, tmp, character_attr_get(ch, tmp));
+			telnetclient_printf(cl, "Character %u \"%s\" = \"%s\"\n", ch_id, attr_str, character_attr_get(ch, attr_str));
 			character_put(ch);
 		} else {
-			telnetclient_printf(cl, "Unknown character \"%s\"\n", tmp);
+			telnetclient_printf(cl, "Unknown character \"%s\"\n", ch_id_str);
 		}
 	} else if (!strcasecmp(act, "set")) {
-		arg = util_getword(arg, tmp, sizeof tmp);
-		ch_id = strtoul(tmp, 0, 10); /* TODO: handle errors. */
+		char ch_id_str[64];
+		char attr_str[64];
+		unsigned ch_id;
+
+		arg = util_getword(arg, ch_id_str, sizeof ch_id_str);
+		arg = util_getword(arg, attr_str, sizeof attr_str);
+
+		/* skip over leading space to find start of value. */
+		if (arg) {
+			while (isspace(*arg))
+				arg++;
+		}
+
+		if (!arg || !*arg) {
+			telnetclient_printf(cl, "usage: char set <character-id> <attribute> <value>\n");
+			return 0;
+		}
+
+		ch_id = strtoul(ch_id_str, 0, 10); /* TODO: handle errors. */
 		ch = character_get(ch_id);
 
 		if (ch) {
-			/* get attribute name. */
-			arg = util_getword(arg, tmp, sizeof tmp);
-
-			/* find start of value. */
-			while (*arg && isspace(*arg)) arg++;
-
-			if (!character_attr_set(ch, tmp, arg)) {
-				telnetclient_printf(cl, "Could not set \"%s\" on character %u.\n", tmp, ch_id);
+			if (!character_attr_set(ch, attr_str, arg)) {
+				telnetclient_printf(cl, "Could not set \"%s\" on character %u.\n", attr_str, ch_id);
 			}
 
 			character_put(ch);
 		} else {
-			telnetclient_printf(cl, "Unknown character \"%s\"\n", tmp);
+			telnetclient_printf(cl, "Unknown character \"%s\"\n", ch_id_str);
 		}
 	} else {
 		telnetclient_printf(cl, "unknown action \"%s\"\n", act);
@@ -212,6 +239,27 @@ int
 command_do_time(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
 	show_gametime(cl);
+
+	return 1; /* success */
+}
+
+/** action callback to do the "char" command. */
+int
+command_do_help(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+{
+	char topic[64];
+
+	assert(arg != NULL);
+
+	arg = util_getword(arg, topic, sizeof(topic));
+	if (!arg) {
+		telnetclient_printf(cl, "usage: help <topic>\n");
+		return 0; /* failure */
+	}
+
+	if (help_show(cl, topic) != HELP_OK) {
+		telnetclient_printf(cl, "unknown help topic \"%s\"\n", topic);
+	}
 
 	return 1; /* success */
 }
@@ -243,7 +291,7 @@ static const struct command_table {
 	{ "time", command_do_time },
 	{ "whisper", command_not_implemented },
 	{ "to", command_not_implemented },
-	{ "help", command_not_implemented },
+	{ "help", command_do_help },
 	{ "spoof", command_not_implemented },
 	{ "roomget", command_do_roomget },
 	{ "char", command_do_character },
@@ -315,7 +363,10 @@ command_execute(DESCRIPTOR_DATA *cl, struct user *u, const char *line)
 				arg = line + shname_len;
 
 				/* ignore leading spaces */
-				while (*arg && isspace(*arg)) arg++;
+				while (isspace(*arg))
+					arg++;
+				if (!*arg)
+					arg = NULL;
 
 				/* use the name as the cmd. */
 				return command_run(cl, u, command_short_table[i].name, arg);
@@ -327,7 +378,11 @@ command_execute(DESCRIPTOR_DATA *cl, struct user *u, const char *line)
 	e = line + strcspn(line, " \t");
 	arg = *e ? e + 1 + strspn(e + 1, " \t") : e; /* point to where the args start */
 
-	while (*arg && isspace(*arg)) arg++; /* ignore leading spaces */
+	/* ignore leading spaces */
+	while (isspace(*arg))
+		arg++;
+	if (!*arg)
+		arg = NULL;
 
 	assert(e >= line);
 
