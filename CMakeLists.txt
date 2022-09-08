@@ -21,6 +21,7 @@ add_subdirectory( thirdparty )
 add_subdirectory( scrypt )
 add_subdirectory( passwd )
 add_subdirectory( log )
+add_subdirectory( util )
 
 include_directories( include )
 
@@ -95,6 +96,7 @@ target_link_libraries( mud
 	PUBLIC mth
 	PUBLIC scrypt
 	PUBLIC log
+	PUBLIC util
 	)
 
 target_include_directories( mud

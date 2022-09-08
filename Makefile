@@ -33,6 +33,7 @@ distclean:
 	@- $(RMF) ./build/test
 	@- $(RMF) ./build/src
 	@- $(RMF) ./build/log
+	@- $(RMF) ./build/util
 	@- $(RMF) ./build/thirdparty
 	@- $(RM) ./build/passwd/cmake_install.cmake ./build/passwd/Makefile
 	@- $(RMF) ./build/passwd/CMakeFiles/
