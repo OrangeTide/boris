@@ -39,13 +39,14 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 #### Ubuntu / Debian Setup
 
 ```sh
-sudo apt-get install build-essentials cmake
+sudo apt-get update
+sudo apt-get install build-essential cmake libssl-dev zlib1g-dev
 ```
 
 ### Check-out and Build from source
 
 ```sh
-git clone git://github.com/OrangeTide/boris
+git clone http://github.com/OrangeTide/boris
 cd boris
 make
 ```
