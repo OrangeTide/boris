@@ -193,6 +193,10 @@ telnetclient_on_destroy(dyad_Event *e)
 	if (!client)
 		return;
 
+	LIST_REMOVE(client, list);
+
+	telnetclient_close(client);
+
 	telnetclient_clear_statedata(client); /* free data associated with current state */
 
 	free(client->prompt_string);
