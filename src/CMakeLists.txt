@@ -38,7 +38,18 @@ file( GLOB mud_SOURCES
 	task/comutil.c
 	util/util.c
 	worldclock/worldclock.c
-	*.c
+	acs.c
+	boris.c
+	buf.c
+	common.c
+	config.c
+	form.c
+	freelist.c
+	game.c
+	login.c
+	menu.c
+	telnetclient.c
+	user.c
 )
 
 add_library( mud ${mud_SOURCES} )
