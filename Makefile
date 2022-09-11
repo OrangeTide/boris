@@ -32,16 +32,6 @@ distclean:
 	@- $(RM) ./build/*.txt
 	@- $(RMF) ./build/test
 	@- $(RMF) ./build/src
-	@- $(RMF) ./build/log
-	@- $(RMF) ./build/util
-	@- $(RMF) ./build/help
-	@- $(RMF) ./build/thirdparty
-	@- $(RM) ./build/passwd/cmake_install.cmake ./build/passwd/Makefile
-	@- $(RMF) ./build/passwd/CMakeFiles/
-	@- $(RMDIR) ./build/passwd
-	@- $(RM) ./build/scrypt/cmake_install.cmake ./build/scrypt/Makefile
-	@- $(RMF) ./build/scrypt/CMakeFiles/
-	@- $(RMDIR) ./build/scrypt
 	@  $(RMDIR) ./build
 
 ifeq ($(findstring distclean,$(MAKECMDGOALS)),)

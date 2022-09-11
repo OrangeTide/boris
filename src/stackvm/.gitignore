@@ -6,6 +6,6 @@
 *.dll
 *.exe
 #
-*.asm
+#*.asm
 *.qvm
 !libc*.asm
