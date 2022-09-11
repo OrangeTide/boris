@@ -33,7 +33,7 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 
 ### Build requirements
 
-- CMake 3.8 (or later)
+- CMake 3.12 (or later)
 - GNU Make 4.2.1 (or later)
 
 #### Ubuntu / Debian Setup
