@@ -46,7 +46,7 @@ sudo apt-get install build-essential cmake libssl-dev zlib1g-dev
 ### Check-out and Build from source
 
 ```sh
-git clone http://github.com/OrangeTide/boris
+git clone --recurse-submodules http://github.com/OrangeTide/boris
 cd boris
 make
 ```
