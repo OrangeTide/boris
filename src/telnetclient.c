@@ -284,6 +284,27 @@ write_to_descriptor(DESCRIPTOR_DATA *d, const char *txt, int length)
 	return 0;
 }
 
+/* process regular input data and escape newline as CR/LF */
+static void
+write_escaped(DESCRIPTOR_DATA *d, const char *txt, int length)
+{
+	const char *base = txt, *next;
+	int len = length;
+	// TODO: escape IAC
+	/* search for newline, replacing with CR/LF sequence */
+	while ((next = memchr(base, '\n', len))) {
+		write_to_descriptor(d, base, next - base);
+		next++;
+		write_to_descriptor(d, "\r\n", 2);
+		len -= next - base;
+		assert(len >= 0);
+		base = next;
+	}
+	if (len > 0) {
+		write_to_descriptor(d, base, len);
+	}
+}
+
 /** write a null terminated string to a telnetclient buffer. */
 int
 telnetclient_puts(DESCRIPTOR_DATA *cl, const char *s)
@@ -292,8 +313,7 @@ telnetclient_puts(DESCRIPTOR_DATA *cl, const char *s)
 	assert(cl->stream != NULL);
 
 	size_t n = strlen(s);
-	write_to_descriptor(cl, s, n);
-	// TODO: check for error
+	write_escaped(cl, s, n);
 	cl->prompt_flag = 0;
 
 	return OK;
@@ -310,8 +330,7 @@ telnetclient_vprintf(DESCRIPTOR_DATA *cl, const char *fmt, va_list ap)
 	char buf[1024];
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 
-	write_to_descriptor(cl, buf, strlen(buf));
-	// TODO: check for error
+	write_escaped(cl, buf, strlen(buf));
 	cl->prompt_flag = 0;
 
 	return OK;
