@@ -13,7 +13,7 @@ add_library( scrypt
 	)
 target_compile_options( scrypt
 	PRIVATE -Wall -W -O2
-	PUBLIC -flto -g
+	PUBLIC -g
 	)
 target_include_directories( scrypt PUBLIC "." )
 

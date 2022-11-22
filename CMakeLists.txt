@@ -17,6 +17,12 @@ SET( CMAKE_C_ARCHIVE_FINISH true )
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
+include(CheckIPOSupported)
+check_ipo_supported(RESULT result)
+if(result)
+	set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+
 add_subdirectory( src )
 include_directories( src )
 
