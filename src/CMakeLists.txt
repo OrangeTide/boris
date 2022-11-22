@@ -18,7 +18,7 @@ add_executable( boris boris.c )
 
 target_compile_options( boris
 	PRIVATE -Wall -W -O2
-	PUBLIC -flto -g
+	PUBLIC -g
 	)
 
 target_compile_definitions( boris
@@ -66,7 +66,7 @@ add_library( mud ${mud_SOURCES} )
 
 target_compile_options( mud
 	PRIVATE -Wall -W -O2
-	PUBLIC -flto -g
+	PUBLIC -g
 	)
 
 target_compile_definitions( mud

@@ -4,7 +4,7 @@ add_library( passwd passwd.c )
 
 target_compile_options( passwd
 	PRIVATE -Wall -W -O2
-	PUBLIC -flto -g
+	PUBLIC -g
 	)
 
 target_link_libraries( passwd
@@ -22,7 +22,7 @@ add_executable( mkpass mkpass.c )
 
 target_compile_options( mkpass
 	PRIVATE -Wall -W -O2
-	PUBLIC -flto -g
+	PUBLIC -g
 	)
 
 target_compile_definitions( mkpass
