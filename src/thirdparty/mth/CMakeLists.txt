@@ -8,5 +8,5 @@ target_link_libraries( mth
 )
 target_compile_options( mth
 	PRIVATE -Wall -W -O2
-	PUBLIC -flto -g )
+	PUBLIC -g )
 target_include_directories( mth PUBLIC "." )
