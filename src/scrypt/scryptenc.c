@@ -47,7 +47,10 @@
 
 #include "crypto_scrypt.h"
 #include "memlimit.h"
-// #include "scryptenc_cpuperf.h"
+#define SCRYPT_DISABLE_CPUPERF
+#ifndef SCRYPT_DISABLE_CPUPERF
+#include "scryptenc_cpuperf.h"
+#endif
 
 #include "scryptenc.h"
 
@@ -92,10 +95,14 @@ pickparams(size_t maxmem, double maxmemfrac, double maxtime,
 	if (memtouse(maxmem, maxmemfrac, &memlimit))
 		return (1);
 
+#ifndef SCRYPT_DISABLE_CPUPERF
 	/* Figure out how fast the CPU is. */
 	if ((rc = scryptenc_cpuperf(&opps)) != 0)
 		return (rc);
 	opslimit = opps * maxtime;
+#else
+	opslimit = 32768 / 8; /* use 2^12 salsa20/8 cores */
+#endif
 
 	/* Allow a minimum of 2^15 salsa20/8 cores. */
 	if (opslimit < 32768)
@@ -157,10 +164,14 @@ checkparams(size_t maxmem, double maxmemfrac, double maxtime,
 	if (memtouse(maxmem, maxmemfrac, &memlimit))
 		return (1);
 
+#ifndef SCRYPT_DISABLE_CPUPERF
 	/* Figure out how fast the CPU is. */
 	if ((rc = scryptenc_cpuperf(&opps)) != 0)
 		return (rc);
 	opslimit = opps * maxtime;
+#else
+	opslimit = 32768 / 8; /* use 2^12 salsa20/8 cores */
+#endif
 
 	/* Sanity-check values. */
 	if ((logN < 1) || (logN > 63))
