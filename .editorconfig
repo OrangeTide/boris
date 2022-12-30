@@ -1,0 +1,20 @@
+root = true
+
+[*]
+indent_style = tab
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.md]
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = false
+
+[*.{html,txt}]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false
+
+[**/thirdparty/**]
+indent_size = unset
+indent_style = unset
