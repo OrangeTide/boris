@@ -48,14 +48,19 @@ sudo apt-get install build-essential cmake libssl-dev zlib1g-dev
 ```sh
 git clone --recurse-submodules http://github.com/OrangeTide/boris
 cd boris
-make
+make -j
 ```
 
 Build output is an executable (`boris`).
 
 Optionally to use clang instead of default CC, as above except provide `USE_CLANG=1` to make.
 ```
-make USE_CLANG=1
+make -j USE_CLANG=1
+```
+
+For fast paralell builds, set `USE_NINJA=1` to use ninja instead of make.
+```
+make -j USE_NINJA=1
 ```
 
 ## Usage
