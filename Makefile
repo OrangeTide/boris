@@ -21,21 +21,15 @@ endif
 CMAKE_OPTS += -DCMAKE_VERBOSE_MAKEFILE=ON
 
 ifneq ($(USE_CLANG),)
-CMAKE_OPTS += -D_CMAKE_TOOLCHAIN_PREFIX="llvm-"
-CMAKE_OPTS += -DCMAKE_C_COMPILER="/usr/bin/clang"
-else
-# work-around for toolchains on some linux distros
-# CMAKE_OPTS += -DCMAKE_AR="gcc-ar"
+CC := $(shell which clang)
 endif
+
+CMAKE_OPTS += -DCMAKE_C_COMPILER="$(CC)"
 
 .PHONY: all clean distclean
 
 all: ./build/Makefile
-ifneq ($(USE_NINJA),)
-	@ ninja -C build
-else
-	@ $(MAKE) -C build
-endif
+	@ $(CMAKE) --build build
 
 ./build/Makefile:
 	@  ($(MKDIR) build > /dev/null)
@@ -46,7 +40,7 @@ clean: ./build/Makefile
 ifneq ($(USE_NINJA),)
 	@- echo "Clean not supported"
 else
-	@- $(MAKE) -C build clean || true
+	$(CMAKE) --build build -t clean
 endif
 
 distclean:
