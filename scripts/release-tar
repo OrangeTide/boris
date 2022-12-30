@@ -2,7 +2,7 @@
 set -e
 TAREXT=xz
 DS="$(date +%Y%m%d)"
-VER="$(awk '/@version/ { print $3 }' *.c)"
+VER="$(awk '/@version/ { print $3 }' src/boris.c)"
 if [ -z "$VER" ]; then
   BN="$(basename "$(pwd)")-$DS"
   TARFILE="$BN.tar.$TAREXT"
