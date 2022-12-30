@@ -53,6 +53,11 @@ make
 
 Build output is an executable (`boris`).
 
+Optionally to use clang instead of default CC, as above except provide `USE_CLANG=1` to make.
+```
+make USE_CLANG=1
+```
+
 ## Usage
 
 ### Configure
