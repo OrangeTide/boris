@@ -7,6 +7,24 @@ RM    := rm -f
 RMF   := rm -rf
 MKDIR := mkdir -p
 RMDIR := rmdir
+CMAKE := cmake
+
+# detect host build system
+ifneq ($(MINGW_CHOST),)
+CMAKE_OPTS := -G "MinGW Makefiles"
+else
+CMAKE_OPTS := -G "Unix Makefiles"
+endif
+
+CMAKE_OPTS += -DCMAKE_VERBOSE_MAKEFILE=ON
+
+ifneq ($(USE_CLANG),)
+CMAKE_OPTS += -D_CMAKE_TOOLCHAIN_PREFIX="llvm-"
+CMAKE_OPTS += -DCMAKE_C_COMPILER="/usr/bin/clang"
+else
+# work-around for toolchains on some linux distros
+# CMAKE_OPTS += -DCMAKE_AR="gcc-ar"
+endif
 
 .PHONY: all clean distclean
 
@@ -15,7 +33,8 @@ all: ./build/Makefile
 
 ./build/Makefile:
 	@  ($(MKDIR) build > /dev/null)
-	@  (cd build > /dev/null 2>&1 && cmake .. -DCMAKE_VERBOSE_MAKEFILE=TRUE)
+	@  (cd build > /dev/null 2>&1 && $(CMAKE) .. $(CMAKE_OPTS))
+
 
 clean: ./build/Makefile
 	@- $(MAKE) -C build clean || true
@@ -23,8 +42,7 @@ clean: ./build/Makefile
 distclean:
 	@  echo Removing build/
 	@  ($(MKDIR) build > /dev/null)
-	@  (cd build > /dev/null 2>&1 && cmake .. > /dev/null 2>&1)
-	@- $(MAKE) --silent -C build clean || true
+	@- $(MAKE) --silent -C build clean > /dev/null 2>&1 || true
 	@- $(RM) ./build/Makefile
 	@- $(RMF) ./build/CMake*
 	@- $(RM) ./build/cmake.*
