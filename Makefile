@@ -12,6 +12,8 @@ CMAKE := cmake
 # detect host build system
 ifneq ($(MINGW_CHOST),)
 CMAKE_OPTS := -G "MinGW Makefiles"
+else ifneq ($(USE_NINJA),)
+CMAKE_OPTS := -G "Ninja"
 else
 CMAKE_OPTS := -G "Unix Makefiles"
 endif
@@ -29,7 +31,11 @@ endif
 .PHONY: all clean distclean install
 
 all: ./build/Makefile
+ifneq ($(USE_NINJA),)
+	@ ninja -C build
+else
 	@ $(MAKE) -C build
+endif
 
 install:
 	@ $(MAKE) -C build install
@@ -39,13 +45,19 @@ install:
 	@  (cd build > /dev/null 2>&1 && $(CMAKE) .. $(CMAKE_OPTS))
 
 clean: ./build/Makefile
+ifneq ($(USE_NINJA),)
+	@- echo "Clean not supported"
+else
 	@- $(MAKE) -C build clean || true
+endif
 
 distclean:
 	@  echo Removing build/
 	@  ($(MKDIR) build > /dev/null)
 	@- $(MAKE) --silent -C build clean > /dev/null 2>&1 || true
 	@- $(RM) ./build/Makefile
+	@- $(RM) ./build/.ninja*
+	@- $(RM) ./build/build.ninja
 	@- $(RMF) ./build/CMake*
 	@- $(RM) ./build/cmake.*
 	@- $(RM) ./build/*.cmake
@@ -58,5 +70,9 @@ distclean:
 
 ifeq ($(findstring distclean,$(MAKECMDGOALS)),)
 	$(MAKECMDGOALS): ./build/Makefile
+	ifneq ($(USE_NINJA),)
+	@ ninja -C build $(MAKECMDGOALS)
+	else
 	@ $(MAKE) -C build $(MAKECMDGOALS)
+	endif
 endif
