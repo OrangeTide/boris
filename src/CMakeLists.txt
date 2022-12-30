@@ -13,6 +13,7 @@ add_subdirectory( log )
 add_subdirectory( util )
 add_subdirectory( help )
 add_subdirectory( tests )
+add_subdirectory( web )
 
 add_executable( boris boris.c )
 

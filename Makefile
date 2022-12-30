@@ -26,15 +26,17 @@ else
 # CMAKE_OPTS += -DCMAKE_AR="gcc-ar"
 endif
 
-.PHONY: all clean distclean
+.PHONY: all clean distclean install
 
 all: ./build/Makefile
 	@ $(MAKE) -C build
 
+install:
+	@ $(MAKE) -C build install
+
 ./build/Makefile:
 	@  ($(MKDIR) build > /dev/null)
 	@  (cd build > /dev/null 2>&1 && $(CMAKE) .. $(CMAKE_OPTS))
-
 
 clean: ./build/Makefile
 	@- $(MAKE) -C build clean || true
@@ -50,6 +52,8 @@ distclean:
 	@- $(RM) ./build/*.txt
 	@- $(RMF) ./build/test
 	@- $(RMF) ./build/src
+	@- $(RMF) ./build/include
+	@- $(RMF) ./build/lib
 	@  $(RMDIR) ./build
 
 ifeq ($(findstring distclean,$(MAKECMDGOALS)),)
