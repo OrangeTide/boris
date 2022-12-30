@@ -10,10 +10,10 @@ RMDIR := rmdir
 CMAKE := cmake
 
 # detect host build system
-ifneq ($(MINGW_CHOST),)
-CMAKE_OPTS := -G "MinGW Makefiles"
-else ifneq ($(USE_NINJA),)
+ifneq ($(USE_NINJA),)
 CMAKE_OPTS := -G "Ninja"
+else ifneq ($(MINGW_CHOST),)
+CMAKE_OPTS := -G "MinGW Makefiles"
 else
 CMAKE_OPTS := -G "Unix Makefiles"
 endif
