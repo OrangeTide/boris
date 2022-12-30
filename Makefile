@@ -24,13 +24,9 @@ ifneq ($(USE_CLANG),)
 CC := $(shell which clang)
 endif
 
-<<<<<<< HEAD
-.PHONY: all clean distclean install
-=======
 CMAKE_OPTS += -DCMAKE_C_COMPILER="$(CC)"
 
 .PHONY: all clean distclean
->>>>>>> origin/master
 
 all: ./build/Makefile
 	@ $(CMAKE) --build build
