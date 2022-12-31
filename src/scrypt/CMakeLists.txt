@@ -1,4 +1,4 @@
-cmake_minimum_required( VERSION 3.19 )
+cmake_minimum_required( VERSION 3.12 )
 
 add_library( scrypt
 	crypto_aes.c
