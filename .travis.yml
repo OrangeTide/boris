@@ -1,13 +1,10 @@
 language: c
-dist: xenial
+dist: jammy
 addons:
   apt:
     packages:
-      - libtelnet-dev
-      - libevent-dev
-      - libssh-dev
-      - libmicrohttpd-dev
-      - liblmdb-dev
+      - cmake
 script:
   - make -v | head -n1
-  - make all
+  - cmake --version | head -n1
+  - make -j all
