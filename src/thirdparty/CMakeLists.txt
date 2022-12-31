@@ -1,4 +1,4 @@
-cmake_minimum_required( VERSION 3.12 )
+cmake_minimum_required( VERSION 3.19 )
 
 add_subdirectory( dyad )
 add_subdirectory( lmdb )
@@ -11,3 +11,6 @@ set(LWS_WITHOUT_TESTAPPS ON CACHE BOOL "Disable testapps build" FORCE)
 set(LWS_WITHOUT_TEST_SERVER ON CACHE BOOL "Disable test server build" FORCE)
 
 add_subdirectory( libwebsockets )
+
+add_library( jsmn INTERFACE jsmn/jsmn.h )
+target_include_directories( jsmn INTERFACE jsmn/ )

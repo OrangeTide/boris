@@ -83,6 +83,7 @@ target_link_libraries( mud
 	PUBLIC log
 	PUBLIC util
 	PUBLIC helplib
+	PUBLIC jsmn
 	)
 
 target_include_directories( mud
