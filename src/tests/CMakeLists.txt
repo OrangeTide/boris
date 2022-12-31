@@ -1,4 +1,4 @@
-cmake_minimum_required( VERSION 3.12 )
+cmake_minimum_required( VERSION 3.19 )
 
 add_executable( test_lws test_lws.c )
 
