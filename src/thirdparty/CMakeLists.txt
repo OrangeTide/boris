@@ -12,5 +12,8 @@ set(LWS_WITHOUT_TEST_SERVER ON CACHE BOOL "Disable test server build" FORCE)
 
 add_subdirectory( libwebsockets )
 
-add_library( jsmn INTERFACE jsmn/jsmn.h )
+# This will build but Visual Studio won't see the header files
+add_library( jsmn INTERFACE )
+# This fix to the above is to use the trick below with cmake 3.19 or later
+# add_library( jsmn INTERFACE jsmn/jsmn.h )
 target_include_directories( jsmn INTERFACE jsmn/ )
