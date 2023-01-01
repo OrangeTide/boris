@@ -47,16 +47,40 @@
     main>section {
       flex-grow: 10;
       border: 2px solid white;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #game-canvas {
+      flex: 1;
+    }
+
+    .input-prompt::before {
+      content: '>';
+      color: var(--secondary);
+      position: absolute;
+      margin-left: 3px;
+    }
+
+    #game-input input {
+      padding-left: 15px;
+      background-color: var(--primary);
+      color: var(--secondary);
+      width: 100%;
     }
 
     main>aside {
-      flex-grow: 2;
+      width: 200px;
       border: 2px solid white;
     }
 
-    footer {
-      flex-grow: 1;
+    @media only screen and (max-width: 640px) {
+      main>aside {
+        display: none;
+      }
     }
+
+    
 
     ul[role="menu-bar"] > [class="padded-menu-item"] {
       padding-left: 40px;
@@ -74,8 +98,9 @@
           <li role="menu-item" tabindex="0" aria-haspopup="true" class="padded-menu-item">
             <strong style="font-size:18px;">BorisMUD</strong>
             <ul role="menu">
-              <li role="menu-item" class="divider"><a href="#menu">About</a></li>
-              <li role="menu-item"><a href="http://orangetide.com/boris_mud/">Website</a></li>
+              <li role="menu-item"><a href="#menu">Connect (127.0.0.1)</a></li>
+              <li role="menu-item" class="divider"><a href="#menu">Connect to...</a></li>
+              <li role="menu-item"><a href="http://orangetide.com/boris_mud/">About</a></li>
             </ul>
           </li>
         </ul>
@@ -106,7 +131,9 @@
 
       </div>
       <div id="game-input">
-
+        <span for="input-box" class="input-prompt">
+          <input type="text" id="input-box"/>
+        </span>
       </div>
     </section>
     <aside id="game-sidepanel">
