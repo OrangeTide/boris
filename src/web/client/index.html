@@ -3,91 +3,7 @@
 <head>
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
   <link rel="stylesheet" href="assets/system.css" />
-  <style>
-    body {
-      margin: auto auto;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      min-height: 100vh;
-      max-width: 1200px;
-    }
-
-    header {}
-
-    header #header-content {
-      display: flex;
-      flex-direction: row;
-      align-items: center;
-      height: 35px;
-      width: 100%;
-      box-shadow: inset 0px 0px 0px 2px var(--secondary);
-      border: 1px solid white;
-    }
-
-    header #header-content div {
-      display: flex;
-      flex: 1;
-    }
-
-    #left-header-items {
-      justify-content: left;
-    }
-
-    #right-header-items {
-      justify-content: right;
-    }
-
-    main {
-      flex-grow: 6;
-      display: flex;
-      flex-direction: row;
-    }
-
-    main>section {
-      flex-grow: 10;
-      border: 2px solid white;
-      display: flex;
-      flex-direction: column;
-    }
-
-    #game-canvas {
-      flex: 1;
-    }
-
-    .input-prompt::before {
-      content: '>';
-      color: var(--secondary);
-      position: absolute;
-      margin-left: 3px;
-    }
-
-    #game-input input {
-      padding-left: 15px;
-      background-color: var(--primary);
-      color: var(--secondary);
-      width: 100%;
-    }
-
-    main>aside {
-      width: 200px;
-      border: 2px solid white;
-    }
-
-    @media only screen and (max-width: 640px) {
-      main>aside {
-        display: none;
-      }
-    }
-
-    
-
-    ul[role="menu-bar"] > [class="padded-menu-item"] {
-      padding-left: 40px;
-      padding-right: 40px;
-    }
-  </style>
-
+  <link rel="stylesheet" href="assets/layout.css" />
 </head>
 
 <body>
@@ -120,9 +36,7 @@
             </li>
           </ul>
         </ul>
-        
       </div>
-
     </div>
   </header>
   <main id="main-container">
@@ -130,9 +44,9 @@
       <div id="game-canvas">
 
       </div>
-      <div id="game-input">
-        <span for="input-box" class="input-prompt">
-          <input type="text" id="input-box"/>
+      <div id="game-input-container">
+        <span for="game-input" class="input-prompt">
+          <input type="text" id="game-input" />
         </span>
       </div>
     </section>
@@ -145,11 +59,6 @@
       </div>
     </aside>
   </main>
-  <!-- <footer>
-    <div id="footer-content">
-
-    </div>
-  </footer> -->
 </body>
 
 </html>
