@@ -41,10 +41,16 @@ body {
 	border: 2px solid white;
 	display: flex;
 	flex-direction: column;
+	overflow: hidden;
+	max-height: calc(100vh - 41px);
   }
 
-  #game-canvas {
+  #game-view {
 	flex: 1;
+	overflow-y: scroll;
+	overflow-x: visible;
+	overflow-wrap: normal;
+
   }
 
   .input-prompt::before {
@@ -55,7 +61,7 @@ body {
   }
 
   #game-input {
-	padding-left: 15px;
+	padding-left: 18px;
 	background-color: var(--primary);
 	color: var(--secondary);
 	width: 100%;

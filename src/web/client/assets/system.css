@@ -169,6 +169,13 @@ h2 {
   font-size: 2em;
 }
 
+p {
+	font-family:  monospace;
+	font-size: 16px;
+	color: var(--secondary);
+	margin: 10px 8px;
+}
+
 /* buttons */
 .standard-button {
   display: block;
