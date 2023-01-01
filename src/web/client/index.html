@@ -1,10 +1,40 @@
+<!DOCTYPE html>
 <html>
 
 <head>
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
   <link rel="stylesheet" href="assets/system.css" />
   <link rel="stylesheet" href="assets/layout.css" />
-  <script src="js/main.js" type="module"></script>
+  <!-- src="./js/main.js" -->
+  <script type="module">
+    let socket;
+
+    async function connect(host, port) {
+      return new Promise((resolve, reject) => {
+        socket = new WebSocket(`ws://${host}:${port}`);
+        setTimeout(() => { reject("Timed out") }, 2000);
+        socket.addEventListener('open', () => {
+          resolve(socket);
+        })
+      });
+    };
+
+    (function main() {
+      const game_input = document.getElementById("game-input");
+
+      game_input.addEventListener('keydown', (event) => {
+        const game_input_value = game_input.value.trim();
+        if (event.key === "Enter" && game_input_value !== "") {
+          const p_elem = document.createElement("p");
+          const input_text_node = document.createTextNode(">" + game_input_value);
+          p_elem.appendChild(input_text_node);
+          document.getElementById("game-view").appendChild(p_elem);
+          p_elem.scrollIntoView();
+          game_input.value = "";
+        }
+      });
+    })();
+  </script>
 </head>
 
 <body>
