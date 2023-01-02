@@ -9,7 +9,7 @@
   <script type="module">
     let socket;
 
-    async function connect(host, port) {
+    function connect(host, port) {
       return new Promise((resolve, reject) => {
         socket = new WebSocket(`ws://${host}:${port}`);
         setTimeout(() => { reject("Timed out") }, 2000);
@@ -19,20 +19,55 @@
       });
     };
 
+    function sendToSocket(data) {
+      if(socket && socket.readyState === 1) {
+        socket.send(data);
+      }
+      else {
+        postToGameView("Error: not connected");
+      }
+    }
+
+    function postToGameView(data) {
+      if(data && data !== ""){
+          const p_elem = document.createElement("p");
+          const input_text_node = document.createTextNode(data);
+          p_elem.appendChild(input_text_node);
+          document.getElementById("game-view").appendChild(p_elem);
+          p_elem.scrollIntoView();
+          return true;
+      }
+      return false;
+    };
+
+    function onClickConnectLast(event) {
+      event.target.blur();
+      const wsUrl = 'wss://ws.postman-echo.com/raw';
+      socket = new WebSocket(wsUrl);
+
+      socket.addEventListener('open', (event) => {
+        postToGameView(`Connected to ${wsUrl}`)
+      })
+
+      socket.addEventListener('message', (event) => {
+        postToGameView(event.data);
+      });
+    };
+
     (function main() {
       const game_input = document.getElementById("game-input");
 
       game_input.addEventListener('keydown', (event) => {
         const game_input_value = game_input.value.trim();
         if (event.key === "Enter" && game_input_value !== "") {
-          const p_elem = document.createElement("p");
-          const input_text_node = document.createTextNode(">" + game_input_value);
-          p_elem.appendChild(input_text_node);
-          document.getElementById("game-view").appendChild(p_elem);
-          p_elem.scrollIntoView();
+          postToGameView(">" + game_input_value);
+          sendToSocket(game_input_value);
           game_input.value = "";
         }
       });
+
+      const connect_last = document.getElementById("connect-last");
+      connect_last.addEventListener("click", onClickConnectLast);
     })();
   </script>
 </head>
@@ -45,7 +80,7 @@
           <li role="menu-item" tabindex="0" aria-haspopup="true" class="padded-menu-item" id="system-menu">
             <strong style="font-size:16px;">BorisMUD</strong>
             <ul role="menu" >
-              <li role="menu-item" ><a href="#" onclick="this.blur()">Connect (127.0.0.1)</a></li>
+              <li role="menu-item" ><a id="connect-last" href="#">Connect (127.0.0.1)</a></li>
               <li role="menu-item" class="divider"><a href="#" onclick="this.blur()">Connect to...</a></li>
               <li role="menu-item"><a href="http://orangetide.com/boris_mud/">About</a></li>
             </ul>
