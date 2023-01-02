@@ -38,13 +38,12 @@ body {
   }
 
   main>section {
-	flex:1;
+	flex: 1;
 	border: 2px solid white;
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
-	max-height: 100%;
-	width: calc(100%-250px);
+	height: calc(100vh - 37px);
   }
 
   #game-view {
@@ -70,6 +69,7 @@ body {
   }
 
   main>aside {
+	flex-shrink: 0;
 	width: 250px;
 	border: 2px solid var(--secondary);
   }
