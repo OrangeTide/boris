@@ -31,7 +31,7 @@ body {
   }
 
   main {
-	flex-grow: 6;
+	flex: 1;
 	display: flex;
 	flex-direction: row;
   }
@@ -42,7 +42,7 @@ body {
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
-	max-height: calc(100vh - 41px);
+	max-height: 100%;
 	width: calc(100%-250px);
   }
 
