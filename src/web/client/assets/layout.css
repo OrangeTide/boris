@@ -11,7 +11,7 @@ body {
 	display: flex;
 	flex-direction: row;
 	align-items: center;
-	height: 30px;
+	height: 29px;
 	width: 100%;
 	border: 1px solid white;
   }
@@ -83,4 +83,5 @@ body {
   ul[role="menu-bar"]>[class="padded-menu-item"] {
 	padding-left: 40px;
 	padding-right: 40px;
+	border-right: 1px solid var(--secondary);
   }
