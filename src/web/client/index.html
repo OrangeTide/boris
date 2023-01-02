@@ -9,15 +9,62 @@
   <script type="module">
     let socket;
 
-    function connect(host, port) {
-      return new Promise((resolve, reject) => {
-        socket = new WebSocket(`ws://${host}:${port}`);
-        setTimeout(() => { reject("Timed out") }, 2000);
-        socket.addEventListener('open', () => {
-          resolve(socket);
-        })
+    let slashCommands = {
+      "connect": {cmd:connect, usage:"/connect <host> <port> [secure=true]"},
+      "disconnect": {cmd:disconnect, usage:"/disconnect"},
+      "help": {cmd:help, usage:"/help"},
+    };
+
+    function notImpl() {
+      return;
+    }
+
+    function help() {
+      postToGameView(">help");
+      postToGameView("Slash Commands");
+      for(let cmd in slashCommands) {
+        if(slashCommands[cmd].usage) {
+          postToGameView(`${cmd} - ${slashCommands[cmd].usage}`);
+        }
+      }
+    }
+
+    function connect(host, port, secure=true) {
+      if(isSocketOpen(socket)) {
+        postToGameView(`Closing connection to ${socket.url}`);
+        socket.close();
+      }
+      
+      try {
+        socket = new WebSocket(`${secure?"wss":"ws"}://${host}${port?":"+port:""}`);
+      }
+      catch(e) {
+        postToGameView('Error: Incorrect server address (must be a ws(s):// url)', "red");
+        return;
+      }
+      
+
+      socket.addEventListener('open', (event) => {
+        postToGameView(`Connected to ${socket.url}`, "green");
+      })
+
+      socket.addEventListener('message', (event) => {
+        let color;
+        if(event.data?.charAt(0) != 0o33) {
+          color = "#FFFF99";
+        }
+        postToGameView(event.data, color);        
       });
     };
+
+    function disconnect() {
+      if(isSocketOpen(socket)) {
+        postToGameView(`Closing connection to ${socket.url}`);
+        socket.close();
+      } else {
+        postToGameView("Not connected");
+      }
+    }
 
     function isSocketOpen(socket) {
       if(socket && socket.readyState === 1) {
@@ -53,32 +100,7 @@
     function onClickConnectLast(event) {
       event.target.blur();
 
-      if(isSocketOpen(socket)) {
-        postToGameView(`Closing connection to ${socket.url}`);
-        socket.close();
-      }
-      
-      const wsUrl = 'wss://ws.postman-echo.com/raw';
-      try {
-        socket = new WebSocket(wsUrl);
-      }
-      catch(e) {
-        postToGameView('Error: Incorrect server address (must be a ws(s):// url)', "red");
-        return;
-      }
-      
-
-      socket.addEventListener('open', (event) => {
-        postToGameView(`Connected to ${wsUrl}`, "green");
-      })
-
-      socket.addEventListener('message', (event) => {
-        let color;
-        if(event.data[0] != 0o33) {
-          color = "yellow";
-        }
-        postToGameView(event.data, color);        
-      });
+      connect("ws.postman-echo.com/raw", "");
     };
 
     (function main() {
@@ -95,6 +117,9 @@
 
       const connect_last = document.getElementById("connect-last");
       connect_last.addEventListener("click", onClickConnectLast);
+
+      const help_link = document.getElementById("help-link");
+      help_link.addEventListener("click", help);
     })();
   </script>
 </head>
@@ -108,7 +133,8 @@
             <strong style="font-size:16px;">BorisMUD</strong>
             <ul role="menu" >
               <li role="menu-item" ><a id="connect-last" href="#">Connect (echo server)</a></li>
-              <li role="menu-item" class="divider"><a href="#" onclick="this.blur()">Connect to...</a></li>
+              <li role="menu-item"><a href="#" onclick="this.blur()">Connect to...</a></li>
+              <li role="menu-item" class="divider"><a id="help-link" href="#" onclick="this.blur()">Help</a></li>
               <li role="menu-item"><a href="http://orangetide.com/boris_mud/">About</a></li>
             </ul>
           </li>
