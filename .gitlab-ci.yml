@@ -27,6 +27,6 @@ publish-client:
     - make WEB_INSTALL_DIR="public/client" install
   artifacts:
     paths:
-     - public/client
+      - public/client
   rules:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
