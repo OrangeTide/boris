@@ -19,19 +19,29 @@
       });
     };
 
-    function sendToSocket(data) {
+    function isSocketOpen(socket) {
       if(socket && socket.readyState === 1) {
+        return true;
+      }
+      return false;
+    };
+
+    function sendToSocket(data) {
+      if(isSocketOpen(socket)) {
         socket.send(data);
       }
       else {
-        postToGameView("Error: not connected");
+        postToGameView("Error: not connected", "red");
       }
-    }
+    };
 
-    function postToGameView(data) {
+    function postToGameView(data, color="") {
       if(data && data !== ""){
           const p_elem = document.createElement("p");
           const input_text_node = document.createTextNode(data);
+          if(color) {
+            p_elem.style.color=color;
+          }
           p_elem.appendChild(input_text_node);
           document.getElementById("game-view").appendChild(p_elem);
           p_elem.scrollIntoView();
@@ -42,15 +52,32 @@
 
     function onClickConnectLast(event) {
       event.target.blur();
+
+      if(isSocketOpen(socket)) {
+        postToGameView(`Closing connection to ${socket.url}`);
+        socket.close();
+      }
+      
       const wsUrl = 'wss://ws.postman-echo.com/raw';
-      socket = new WebSocket(wsUrl);
+      try {
+        socket = new WebSocket(wsUrl);
+      }
+      catch(e) {
+        postToGameView('Error: Incorrect server address (must be a ws(s):// url)', "red");
+        return;
+      }
+      
 
       socket.addEventListener('open', (event) => {
-        postToGameView(`Connected to ${wsUrl}`)
+        postToGameView(`Connected to ${wsUrl}`, "green");
       })
 
       socket.addEventListener('message', (event) => {
-        postToGameView(event.data);
+        let color;
+        if(event.data[0] != 0o33) {
+          color = "yellow";
+        }
+        postToGameView(event.data, color);        
       });
     };
 
@@ -80,7 +107,7 @@
           <li role="menu-item" tabindex="0" aria-haspopup="true" class="padded-menu-item" id="system-menu">
             <strong style="font-size:16px;">BorisMUD</strong>
             <ul role="menu" >
-              <li role="menu-item" ><a id="connect-last" href="#">Connect (127.0.0.1)</a></li>
+              <li role="menu-item" ><a id="connect-last" href="#">Connect (echo server)</a></li>
               <li role="menu-item" class="divider"><a href="#" onclick="this.blur()">Connect to...</a></li>
               <li role="menu-item"><a href="http://orangetide.com/boris_mud/">About</a></li>
             </ul>
