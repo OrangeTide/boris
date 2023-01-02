@@ -37,19 +37,19 @@ body {
   }
 
   main>section {
-	flex-grow: 10;
+	flex:1;
 	border: 2px solid white;
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
 	max-height: calc(100vh - 41px);
+	width: calc(100%-250px);
   }
 
   #game-view {
 	flex: 1;
 	overflow-y: scroll;
-	overflow-x: visible;
-	overflow-wrap: normal;
+	overflow-wrap: break-word;
 
   }
 
@@ -68,7 +68,7 @@ body {
   }
 
   main>aside {
-	width: 200px;
+	width: 250px;
 	border: 2px solid white;
   }
 
