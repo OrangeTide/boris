@@ -10,7 +10,7 @@
     let socket;
 
     let slashCommands = {
-      "connect": {cmd:connect, usage:"/connect <host> <port> [secure=true]"},
+      "connect": {cmd:connect, usage:"/connect <host> [port] [secure=true]"},
       "disconnect": {cmd:disconnect, usage:"/disconnect"},
       "help": {cmd:help, usage:"/help"},
     };
@@ -20,11 +20,10 @@
     }
 
     function help() {
-      postToGameView(">help");
-      postToGameView("Slash Commands");
+      postToGameView("Slash Commands", "yellow");
       for(let cmd in slashCommands) {
         if(slashCommands[cmd].usage) {
-          postToGameView(`${cmd} - ${slashCommands[cmd].usage}`);
+          postToGameView(`${cmd} - ${slashCommands[cmd].usage}`, "lightblue");
         }
       }
     }
@@ -103,15 +102,43 @@
       connect("ws.postman-echo.com/raw", "");
     };
 
+    function onClickHelp(event) {
+      event.target.blur();
+
+      postToGameView(">help");
+      help();
+    }
+
+    function handleGameInput(event) {
+      const input_elem = event.target;
+      const input = event.target.value.trim();
+
+      if(input !== ""){
+        input_elem.value = "";
+        postToGameView(">" + input);
+        if(input.charAt(0) == '/') {
+          const commandInput = input.slice(1);
+          let commandArgv = commandInput.split(/\s+/);
+          let command = commandArgv.shift();
+          console.log(command, commandArgv);
+          if (command in slashCommands) {
+            slashCommands[command].cmd(...commandArgv);
+          }
+        } else if (input == "help") {
+          help();
+        } else {
+          sendToSocket(input);
+        }
+      }
+    }
+
     (function main() {
       const game_input = document.getElementById("game-input");
 
       game_input.addEventListener('keydown', (event) => {
         const game_input_value = game_input.value.trim();
         if (event.key === "Enter" && game_input_value !== "") {
-          postToGameView(">" + game_input_value);
-          sendToSocket(game_input_value);
-          game_input.value = "";
+          handleGameInput(event);
         }
       });
 
@@ -134,7 +161,7 @@
             <ul role="menu" >
               <li role="menu-item" ><a id="connect-last" href="#">Connect (echo server)</a></li>
               <li role="menu-item"><a href="#" onclick="this.blur()">Connect to...</a></li>
-              <li role="menu-item" class="divider"><a id="help-link" href="#" onclick="this.blur()">Help</a></li>
+              <li role="menu-item" class="divider"><a id="help-link" href="#">Help</a></li>
               <li role="menu-item"><a href="http://orangetide.com/boris_mud/">About</a></li>
             </ul>
           </li>
