@@ -21,3 +21,12 @@ publish-docs:
       - public
   rules:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
+build-and-publish:
+	script:
+		- make WEB_INSTALL_DIR="public/client" install
+	artifacts:
+		paths:
+		 - public/client
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
