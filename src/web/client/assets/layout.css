@@ -50,7 +50,8 @@ body {
 	flex: 1;
 	overflow-y: scroll;
 	overflow-wrap: break-word;
-
+	width: 100%;
+	align-self: start;
   }
 
   .input-prompt::before {
@@ -61,7 +62,7 @@ body {
   }
 
   #game-input {
-	padding-left: 18px;
+	padding-left: 16px;
 	background-color: var(--primary);
 	color: var(--secondary);
 	width: 100%;
