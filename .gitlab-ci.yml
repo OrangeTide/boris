@@ -34,7 +34,7 @@ publish:pages:
   stage: publish
   dependencies:
     - publish:dev-docs
-    - public:client
+    - publish:client
   script:
     # TODO: - cp -r homepage public
     - mkdir -p public
