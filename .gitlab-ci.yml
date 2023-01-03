@@ -11,9 +11,9 @@ stages:
 
 before_script:
   - apk update
-  - apk add build-base linux-headers make cmake git bash \
-        zlib-dev openssl-libs-static openssl-dev openssl \
-        doxygen ttf-freefont graphviz
+  - "apk add build-base linux-headers make cmake git bash \
+    zlib-dev openssl-libs-static openssl-dev openssl \
+    doxygen ttf-freefont graphviz"
 
 build:mud:
   stage: build
