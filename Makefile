@@ -8,6 +8,7 @@ RMF   := rm -rf
 MKDIR := mkdir -p
 RMDIR := rmdir
 CMAKE := cmake
+WEB_INSTALL_DIR ?= bin/www/
 
 # detect host build system
 ifneq ($(USE_NINJA),)
@@ -31,10 +32,16 @@ CMAKE_OPTS += -DCMAKE_C_COMPILER="$(CC)"
 all: ./build/Makefile
 	@ $(CMAKE) --build build
 
+install: all
+ifneq ($(USE_NINJA),)
+	@ ninja -C build install
+else
+	@ $(MAKE) -C build install
+endif
+
 ./build/Makefile:
 	@  ($(MKDIR) build > /dev/null)
 	@  (cd build > /dev/null 2>&1 && $(CMAKE) .. $(CMAKE_OPTS))
-
 
 clean: ./build/Makefile
 ifneq ($(USE_NINJA),)
@@ -56,6 +63,8 @@ distclean:
 	@- $(RM) ./build/*.txt
 	@- $(RMF) ./build/test
 	@- $(RMF) ./build/src
+	@- $(RMF) ./build/include
+	@- $(RMF) ./build/lib
 	@  $(RMDIR) ./build
 
 ifeq ($(findstring distclean,$(MAKECMDGOALS)),)

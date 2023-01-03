@@ -1,3 +1,6 @@
+.DS_Store
+.vscode
+
 *~
 gmon.out
 .*.swp
@@ -13,3 +16,5 @@ junk*/
 /data/users/
 /build
 /bin
+
+boris.log

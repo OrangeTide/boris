@@ -4,18 +4,32 @@ before_script:
   - apk update
   - apk add doxygen
   - apk add ttf-freefont graphviz
+  - apk add build-base cmake
 
-##DISABLED
-# preview-docs:
-#  script:
-#    - doxygen Doxyfile
-#  rules:
-#    - if: $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH
-
-publish-docs:
+publish:dev-docs:
   script:
     - doxygen Doxyfile
-    - mv documentation/html public/
+  artifacts:
+    paths:
+      - documentation/html
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
+publish:client:
+  script:
+    - make WEB_INSTALL_DIR="client-pages" install
+  artifacts:
+    paths:
+      - client-pages
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
+publish:pages:
+  script:
+    # TODO: - cp -r homepage public
+    - mkdir -p public
+    - cp -r documentation/html public/dev-docs
+    - cp -r client-pages public/client
   artifacts:
     paths:
       - public
