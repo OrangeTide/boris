@@ -10,7 +10,7 @@ static const struct lws_http_mount mounts[] = {
 		.mountpoint = "/",
 		.mountpoint_len = 1,
 		.def = "index.html",
-		.origin = "./files/",
+		.origin = "./bin/www/",
 		.origin_protocol = LWSMPRO_FILE,
 	},
 };
@@ -38,17 +38,16 @@ main(int argc, char *argv[])
 
 	signal(SIGINT, sigint_handler);
 
-
 	lws_set_log_level(LLL_USER | LLL_ERR | LLL_WARN | LLL_NOTICE, NULL);
 
-	lwsl_user("static http server http://localhost:%d\n",  config_server_port);
+	lwsl_user("static http server http://localhost:%d\n", config_server_port);
 
 	struct lws_context_creation_info info = {
 		.port = config_server_port,
 		.mounts = mounts,
-		.error_document_404 = "/404.html",
+		//.error_document_404 = "/404.html",
 		// .options = LWS_SERVER_OPTION_HTTP_HEADERS_SECURITY_BEST_PRACTICES_ENFORCE,
-		};
+	};
 
 	struct lws_context *context = lws_create_context(&info);
 	if (!context) {
