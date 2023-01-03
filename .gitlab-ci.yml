@@ -28,7 +28,7 @@ publish:client:
   script:
     - cp -r src/web/client/ client-pages/
     - mv client-pages/assets/default/* client-pages/assets/
-    - rm client-pages/assets/default/
+    - rm -rf client-pages/assets/default/
   artifacts:
     paths:
       - client-pages
