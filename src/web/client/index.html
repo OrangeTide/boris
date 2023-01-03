@@ -127,11 +127,12 @@
     function postToGameView(data, color = "") {
       if (data && data !== "") {
         const p_elem = document.createElement("p");
-        const input_text_node = document.createTextNode(data);
+        const replaced_data = data.replace(/\s*\r?\n\s*/g, "<br>")
+                                  .replace(/<(?!br\s*\/?)[^>]+>/g,"");
+        p_elem.innerHTML = replaced_data;
         if (color) {
           p_elem.style.color = color;
         }
-        p_elem.appendChild(input_text_node);
         document.getElementById("game-view").appendChild(p_elem);
         p_elem.scrollIntoView();
         return true;
