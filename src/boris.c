@@ -41,6 +41,7 @@
 #include <mth.h>
 #include <form.h>
 #include <libwebsockets.h>
+#include <webserver.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
@@ -303,7 +304,6 @@ main(int argc, char **argv)
 
 	atexit(form_module_shutdown);
 
-#if 0 // DISABLED
 	/* start the webserver if webserver.port is defined. */
 	if (mud_config.webserver_port > 0) {
 		if (!webserver_init(mud_config.default_family, mud_config.webserver_port)) {
@@ -313,7 +313,6 @@ main(int argc, char **argv)
 
 		atexit(webserver_shutdown);
 	}
-#endif
 
 	if (!game_init()) {
 		LOG_ERROR("could not start game");

@@ -329,7 +329,4 @@ const char *socketio_strerror(void);
 int socketio_wouldblock(void);
 int socketio_eintr(void);
 struct socketio_handle *socketio_listen(int family, int socktype, const char *host, const char *port, void (*newclient)(struct socketio_handle *sh));
-
-int webserver_init(int family, unsigned port);
-void webserver_shutdown(void);
 #endif
