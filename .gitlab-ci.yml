@@ -5,16 +5,27 @@ variables:
 
 stages:
   - build
+  - test
+  - docs
   - publish
 
 before_script:
   - apk update
-  - apk add doxygen
-  - apk add ttf-freefont graphviz
-  - apk add build-base cmake bash
+  - "apk add build-base linux-headers make cmake git bash \
+    zlib-dev openssl-libs-static openssl-dev openssl \
+    doxygen ttf-freefont graphviz"
+
+build:mud:
+  stage: build
+  script:
+    - make -j
+  artifacts:
+    paths:
+      - bin
+      - build
 
 publish:dev-docs:
-  stage: build
+  stage: docs
   script:
     - doxygen Doxyfile
   artifacts:
