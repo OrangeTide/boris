@@ -87,74 +87,6 @@
   font-family: Geneva_9;
   src: url("fonts/FindersKeepers.ttf")
 }
-::-webkit-scrollbar {
-  width: 22px;
-  background-color: var(--primary);
-}
-
-::-webkit-scrollbar-track {
-  background: linear-gradient(45deg, var(--secondary) 25%, transparent 25%, transparent 75%, var(--secondary) 75%, var(--secondary)), linear-gradient(45deg, var(--secondary) 25%, transparent 25%, transparent 75%, var(--secondary) 75%, var(--secondary));
-  background-color: var(--primary);
-  background-size: 4px 4px;
-  background-position: 0 0, 2px 2px;
-  width: 10px;
-  border-left: 3px solid var(--secondary);
-}
-
-::-webkit-scrollbar-thumb {
-  width: 20px;
-  box-sizing: content-box;
-  background-color: var(--primary);
-  border: 2px solid var(--secondary);
-  border-right: none;
-}
-
-::-webkit-scrollbar-button:horizontal:start:decrement,
-::-webkit-scrollbar-button:horizontal:end:increment,
-::-webkit-scrollbar-button:vertical:start:decrement,
-::-webkit-scrollbar-button:vertical:end:increment {
-  display: block;
-}
-
-::-webkit-scrollbar-button:vertical:start {
-  background-repeat: no-repeat;
-  height: 23.38px;
-  background-image: svg-load("./icon/scrollbar-up.svg");
-}
-::-webkit-scrollbar-button:vertical:start:active {
-  background-repeat: no-repeat;
-  height: 23.38px;
-  background-image: svg-load("./icon/scrollbar-up-active.svg");
-}
-::-webkit-scrollbar-button:vertical:end {
-  height: 23.38px;
-  background-image: svg-load("./icon/scrollbar-down.svg");
-}
-::-webkit-scrollbar-button:vertical:end:active {
-  background-repeat: no-repeat;
-  height: 23.38px;
-  background-image: svg-load("./icon/scrollbar-down-active.svg");
-}
-
-::-webkit-scrollbar-button:horizontal:start {
-  background-repeat: no-repeat;
-  height: 23.38px;
-  background-image: svg-load("./icon/scrollbar-left.svg");
-}
-::-webkit-scrollbar-button:horizontal:start:active {
-  background-repeat: no-repeat;
-  height: 23.38px;
-  background-image: svg-load("./icon/scrollbar-left-active.svg");
-}
-::-webkit-scrollbar-button:horizontal:end {
-  height: 23.38px;
-  background-image: svg-load("./icon/scrollbar-right.svg");
-}
-::-webkit-scrollbar-button:horizontal:end:active {
-  background-repeat: no-repeat;
-  height: 23.38px;
-  background-image: svg-load("./icon/scrollbar-right-active.svg");
-}
 
 body {
   /* background: linear-gradient(90deg, var(--primary) 21px, transparent 1%) center, linear-gradient(var(--primary) 21px, transparent 1%) center, var(--secondary); */
@@ -410,10 +342,9 @@ p {
   text-align:center;
   background: var(--primary);
   border-style: solid;
-  border-width: 5.5px;
+  border-width: 2px;
   border-color: var(--secondary);
-  border-radius: 25px;
-  border-image: url("./icon/button.svg") 30 stretch;
+  border-radius: 10% / 30%;
   color: var(--secondary);
   text-align: center;
   text-decoration: none;
@@ -424,7 +355,7 @@ p {
 
 .btn:active {
   background: var(--secondary);
-  border-radius:6px;
+  border-width: 2px;
   color: var(--primary);
   font-family: Chicago_12;
 }
@@ -434,9 +365,8 @@ p {
   min-width: 59px;
   text-align:center;
   background: var(--primary);
-  border-style: solid;
-  border-width: 5.5px;
-  border-image: url("./icon/button.svg") 30 stretch;
+  border-width: 2px;
+  border-radius: 10% / 30%;
   color: var(--disabled);
   text-align: center;
   text-decoration: none;
@@ -445,8 +375,7 @@ p {
 }
 
 .btn-default {
-  border-image: url("./icon/button-default.svg") 60 stretch;
-  border-width: 0.5em;
+  border-width: 2px;
 }
 
 .btn-default:active {
