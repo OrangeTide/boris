@@ -42,8 +42,13 @@
         return;
       }
 
+      let socketAttemptUrl = socket.url;
+      let timeoutHandle = setTimeout(() => {
+        postToGameView(`Connection to ${socketAttemptUrl} timed out`, "red");
+      }, 2000);
 
       socket.addEventListener('open', (event) => {
+        clearTimeout(timeoutHandle);
         postToGameView(`Connected to ${socket.url}`, "green");
       })
 
