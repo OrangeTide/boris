@@ -43,6 +43,14 @@ sudo apt-get update
 sudo apt-get install build-essential cmake libssl-dev zlib1g-dev
 ```
 
+#### Alpine Linux
+
+```sh
+sudo apk update
+sudo apk add build-base linux-headers make cmake git bash \
+    zlib-dev openssl-libs-static openssl-dev openssl \
+```
+
 ### Check-out and Build from source
 
 ```sh
