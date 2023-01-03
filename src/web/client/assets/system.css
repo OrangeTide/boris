@@ -191,10 +191,10 @@ h2 {
 }
 
 p {
-	font-family: Chicago_12, monospace;
-	font-size: 16px;
-	color: var(--secondary);
-	margin: 10px 8px;
+  font-family: Chicago_12, monospace;
+  font-size: 16px;
+  color: var(--secondary);
+  margin: 10px 8px;
 }
 
 /* buttons */
@@ -455,8 +455,8 @@ p {
 
 /* text input */
 input  {
-	color: var(--secondary);
-	background-color: var(--primary);
+  color: var(--secondary);
+  background-color: var(--primary);
   border: 1.5px solid var(--tertiary);
   font-family: Chicago_12;
   font-size: 18px;
@@ -483,7 +483,7 @@ input[type="color"]:focus-visible,
 textarea:focus {
   background: var(--secondary);
   color: var(--primary);
-	border: 1.5px solid var(--secondary);
+  border: 1.5px solid var(--secondary);
 }
 
 input[type="radio"] + label::before {
@@ -641,8 +641,8 @@ select {
   position: relative;
   padding-left: 20px;
   -webkit-box-shadow: 2px 8px 0 0px var(--secondary);
-	   -moz-box-shadow: 2px 8px 0 0px var(--secondary);
-	        box-shadow: 2px 2px 0 -1px var(--secondary);
+     -moz-box-shadow: 2px 8px 0 0px var(--secondary);
+          box-shadow: 2px 2px 0 -1px var(--secondary);
 }
 
 /* menu-bar */
@@ -657,7 +657,7 @@ ul[role] {
 ul[role="menu-bar"] {
   display: flex;
   background: var(--primary);
-	color: var(--secondary);
+  color: var(--secondary);
 }
 ul[role="menu-bar"] > [role="menu-item"] {
   position: relative;
@@ -669,13 +669,13 @@ ul[role="menu-bar"] > [role="menu-item"]:focus, ul[role="menu-bar"] > [role="men
   outline: none;
 }
 ul[role="menu-bar"] > [role="menu-item"]:focus > a, ul[role="menu-bar"] > [role="menu-item"]:hover > a {
-	color: var(--primary);
+  color: var(--primary);
 }
 ul[role="menu"] {
   position: relative;
   min-width: 200px;
   background: var(--primary);
-	color: var(--secondary);
+  color: var(--secondary);
   border: 1px solid;
   box-shadow: var(--box-shadow);
 }
