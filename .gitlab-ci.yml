@@ -35,14 +35,13 @@ publish:client:
   rules:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 
-publish:pages:
+pages:
   stage: publish
   dependencies:
     - publish:dev-docs
     - publish:client
   script:
-    # TODO: - cp -r homepage public
-    - mkdir -p public
+    - cp -r homepage public
     - cp -r documentation/html public/dev-docs
     - cp -r client-pages public/client
   artifacts:
