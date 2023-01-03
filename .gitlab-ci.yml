@@ -1,12 +1,17 @@
 image: alpine
 
+stages:
+  build
+  publish
+
 before_script:
   - apk update
   - apk add doxygen
   - apk add ttf-freefont graphviz
-  - apk add build-base cmake
+  - apk add build-base cmake bash
 
 publish:dev-docs:
+  stage: build
   script:
     - doxygen Doxyfile
   artifacts:
@@ -16,6 +21,7 @@ publish:dev-docs:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 
 publish:client:
+  stage: build
   script:
     - make WEB_INSTALL_DIR="client-pages" install
   artifacts:
@@ -25,6 +31,10 @@ publish:client:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 
 publish:pages:
+  stage: publish
+  dependencies:
+    - publish:dev-docs
+    - public:client
   script:
     # TODO: - cp -r homepage public
     - mkdir -p public
