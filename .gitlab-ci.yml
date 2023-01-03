@@ -26,7 +26,9 @@ publish:dev-docs:
 publish:client:
   stage: build
   script:
-    - make WEB_INSTALL_DIR="client-pages" install
+    - cp -r src/web/client/ client-pages/
+    - mv client-pages/assets/default/* client-pages/assets/
+    - rm client-pages/assets/default/
   artifacts:
     paths:
       - client-pages
