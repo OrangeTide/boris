@@ -61,6 +61,7 @@ file( GLOB mud_SOURCES
 	menu.c
 	telnetclient.c
 	user.c
+  web/server/webserver.c
 )
 
 add_library( mud ${mud_SOURCES} )
@@ -97,4 +98,5 @@ target_include_directories( mud
 	PUBLIC task
 	PUBLIC util
 	PUBLIC worldclock
+  PUBLIC web/server
 	)
