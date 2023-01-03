@@ -48,11 +48,9 @@
       })
 
       socket.addEventListener('message', (event) => {
-        let color;
-        if (event.data?.charAt(0) != 0o33) {
-          color = "#FFFF99";
+        if (event.data) {
+          handleSocketRx(event.data);
         }
-        postToGameView(event.data, color);
       });
     };
 
@@ -70,6 +68,38 @@
         return true;
       }
       return false;
+    };
+
+    function handleSocketRx(data) {
+      if(data.charAt(0) == '{') {
+        handleJsonRx(data);
+      }
+      else {
+        handleTextRx(data)
+      }
+    };
+
+    function handleJsonRx(data) {
+      const json_data = JSON.parse(data);
+      const json_type = json_data?.type;
+      if ("Error" in json_data) {
+        postToGameView("Error: "+json_data["Error"], "red");
+      } else if (json_type === "error") {
+        postToGameView("Error: "+json_data["error"], "red");
+      } else if (json_type === "message") {
+        handleTextRx(json_data["message"]);
+      } else if (json_type === "data") {
+        postToGameView("JSON: "+data, "lightblue");
+      }
+      console.log(`JSON message from ${socket.url}:\n` + JSON.stringify(json_data, null, 2));
+    };
+
+    function handleTextRx(text) {
+      let color;
+      if (text.charAt(0) != 0o33) {
+          color = "#FFFF99";
+      }
+      postToGameView(text, color);
     };
 
     function sendToSocket(data) {
