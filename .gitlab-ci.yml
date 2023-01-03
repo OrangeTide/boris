@@ -1,8 +1,8 @@
 image: alpine
 
 stages:
-  build
-  publish
+  - build
+  - publish
 
 before_script:
   - apk update
