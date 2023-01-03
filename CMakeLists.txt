@@ -7,6 +7,11 @@ endif()
 
 set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin )
 set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin )
+if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
+  # Redirect libwebsocket install to build/ folder
+  set( CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}" CACHE PATH "install dir" FORCE )
+endif()
+set( WEB_ASSET_FOLDER "default" )
 
 set( CMAKE_BUILD_TYPE Debug )
 
@@ -24,5 +29,3 @@ endif()
 
 add_subdirectory( src )
 include_directories( src )
-
-

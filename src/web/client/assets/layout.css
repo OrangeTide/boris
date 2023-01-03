@@ -1,0 +1,91 @@
+body {
+	margin: auto auto;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	min-height: 100vh;
+	max-width: 1200px;
+  }
+
+  header #header-content {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	height: 29px;
+	width: 100%;
+	border: 1px solid white;
+  }
+
+  header #header-content div {
+	display: flex;
+	flex: 1;
+  }
+
+  #left-header-items {
+	justify-content: left;
+  }
+
+  #right-header-items {
+	justify-content: right;
+  }
+
+  main {
+	flex: 1;
+	display: flex;
+	flex-direction: row;
+	border: 1px solid var(--secondary);
+	width: 100%;
+  }
+
+  main>section {
+	flex: 1;
+	border: 2px solid white;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	height: calc(100vh - 37px);
+	align-items: flex-start;
+  }
+
+  #game-view {
+	flex: 1;
+	overflow-y: scroll;
+	overflow-wrap: break-word;
+	width: 100%;
+  }
+
+  #game-input-container {
+	width: 100%;
+  }
+
+  .input-prompt::before {
+	content: '>';
+	color: var(--secondary);
+	position: absolute;
+	margin-left: 3px;
+  }
+
+  #game-input {
+	padding-left: 16px;
+	background-color: var(--primary);
+	color: var(--secondary);
+	width: calc(100% - 21px);
+  }
+
+  main>aside {
+	flex-shrink: 0;
+	width: 250px;
+	border: 2px solid var(--secondary);
+  }
+
+  @media only screen and (max-width: 640px) {
+	main>aside {
+	  display: none;
+	}
+  }
+
+  ul[role="menu-bar"]>[class="padded-menu-item"] {
+	padding-left: 40px;
+	padding-right: 40px;
+	border-right: 1px solid var(--secondary);
+  }
