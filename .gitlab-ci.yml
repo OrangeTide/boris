@@ -4,6 +4,7 @@ before_script:
   - apk update
   - apk add doxygen
   - apk add ttf-freefont graphviz
+  - apk add build-base cmake
 
 ##DISABLED
 # preview-docs:
