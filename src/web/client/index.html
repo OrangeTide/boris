@@ -35,7 +35,7 @@
       }
 
       try {
-        socket = new WebSocket(`${secure ? "wss" : "ws"}://${host}${port ? ":" + port : ""}`);
+        socket = new WebSocket(`${secure != "false" ? "wss" : "ws"}://${host}${port ? ":" + port : ""}`);
       }
       catch (e) {
         postToGameView('Error: Incorrect server address (must be a ws(s):// url)', "red");
@@ -124,7 +124,7 @@
           if (command in slashCommands) {
             slashCommands[command].cmd(...commandArgv);
           }
-        } else if (input == "help") {
+        } else if (input == "help" && !isSocketOpen(socket)) {
           help();
         } else {
           sendToSocket(input);
