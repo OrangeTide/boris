@@ -109,6 +109,30 @@
       help();
     }
 
+    function hideConnectToDialog() {
+      const connect_to_dialog = document.getElementById("connect-to-dialog");
+      connect_to_dialog.style.display = "none";
+    }
+
+    function onClickConnectTo(event) {
+      const connect_to_dialog = document.getElementById("connect-to-dialog");
+      connect_to_dialog.focus();
+      connect_to_dialog.style.display = "flex";
+    }
+
+    function onClickConnectToCancel(event) {
+      hideConnectToDialog();
+    }
+
+    function onClickConnectToAccept(event) {
+      const connect_to_dialog = document.getElementById("connect-to-dialog");
+      const connect_to_host = document.getElementById("connect-to-host").value.trim();
+      const connect_to_port = document.getElementById("connect-to-port").value.trim();
+      const connect_to_ssl = document.getElementById("connect-to-ssl").checked;
+      connect(connect_to_host, +connect_to_port, connect_to_ssl);
+      hideConnectToDialog();
+    }
+
     function handleGameInput(event) {
       const input_elem = event.target;
       const input = event.target.value.trim();
@@ -146,7 +170,17 @@
       connect_last.addEventListener("click", onClickConnectLast);
 
       const help_link = document.getElementById("help-link");
-      help_link.addEventListener("click", help);
+      help_link.addEventListener("click", onClickHelp);
+
+      const connect_to_dialog = document.getElementById("connect-to-dialog");
+      connect_to_dialog.addEventListener("blur", hideConnectToDialog);
+      const connect_to = document.getElementById("connect-to");
+      const connect_to_cancel = document.getElementById("connect-to-cancel");
+      const connect_to_accept = document.getElementById("connect-to-accept");
+      connect_to.addEventListener("click", onClickConnectTo);
+      connect_to_cancel.addEventListener("click", onClickConnectToCancel);
+      connect_to_accept.addEventListener("click", onClickConnectToAccept);
+
     })();
   </script>
 </head>
@@ -160,7 +194,7 @@
             <strong style="font-size:16px;">BorisMUD</strong>
             <ul role="menu">
               <li role="menu-item"><a id="connect-last" href="#" onclick="this.blur()">Connect (echo server)</a></li>
-              <li role="menu-item"><a href="#" onclick="this.blur()">Connect to...</a></li>
+              <li role="menu-item"><a id="connect-to" href="#" onclick="this.blur()">Connect to...</a></li>
               <li role="menu-item" class="divider"><a id="help-link" href="#" onclick="this.blur()">Help</a></li>
               <li role="menu-item"><a href="https://orangetide.gitlab.io/boris/">About</a></li>
             </ul>
@@ -204,6 +238,35 @@
 
       </div>
     </aside>
+    <div id="connect-to-dialog" class="window modeless-float-320" onblur="console.log('blur')">
+      <div class="title-bar">
+        <button aria-label="Close" disabled class="hidden"></button>
+        <h1 class="title">Connect To...</h1>
+        <button aria-label="Resize" disabled class="hidden"></button>
+      </div>
+      <div class="separator"></div>
+    
+      <div class="modeless-dialog">
+        <section class="field-row" style="justify-content: flex-start">
+          <label for="connect-to-host" class="modeless-text">Host</label>
+          <input id="connect-to-host" type="text" placeholder="" style="width:80%;">
+        </section>
+        <section class="field-row" style="justify-content: flex-start">
+          <label for="connect-to-port" class="modeless-text">Port</label>
+          <input id="connect-to-port" type="text" placeholder="" style="width:90px">
+        </section>
+        <section class="field-row" style="justify-content: flex-start">
+          <label for="connect-to-ssl" class="modeless-text">SSL</label>
+          <input id="connect-to-ssl" type="checkbox" name="ssl-checkbox" checked="true" />
+          <label for="connect-to-ssl" class="modeless-text" style="top:-8px;margin-left:calc(15px + var(--checkbox-total-width));"></label>
+          
+        </section>
+        <section class="field-row" style="justify-content: flex-end">
+          <button class="btn" id="connect-to-cancel">Cancel</button>
+          <button class="btn" id="connect-to-accept">Connect</button>
+        </section>
+      </div>
+    </div>
   </main>
 </body>
 

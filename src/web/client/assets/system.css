@@ -158,7 +158,8 @@
 
 body {
   /* background: linear-gradient(90deg, var(--primary) 21px, transparent 1%) center, linear-gradient(var(--primary) 21px, transparent 1%) center, var(--secondary); */
-	background: var(--primary);
+  background: var(--primary);
+  color: var(--secondary);
   background-size: 22px 22px;
   background-attachment: fixed;
 }
@@ -410,6 +411,8 @@ p {
   background: var(--primary);
   border-style: solid;
   border-width: 5.5px;
+  border-color: var(--secondary);
+  border-radius: 25px;
   border-image: url("./icon/button.svg") 30 stretch;
   color: var(--secondary);
   text-align: center;
@@ -578,7 +581,7 @@ input[type="checkbox"]:checked + label::after {
   left: calc(
     -1 * (var(--checkbox-total-width-precalc)) + var(--checkmark-left)
   );
-  background: svg-load("./icon/checkmark.svg");
+  background: var(--secondary);
   background-repeat: no-repeat;
 }
 
