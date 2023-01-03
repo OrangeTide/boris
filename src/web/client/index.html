@@ -71,7 +71,7 @@
     };
 
     function handleSocketRx(data) {
-      if(data.charAt(0) == '{') {
+      if (data.charAt(0) == '{') {
         handleJsonRx(data);
       }
       else {
@@ -80,16 +80,24 @@
     };
 
     function handleJsonRx(data) {
-      const json_data = JSON.parse(data);
+      let json_data;
+      try {
+        json_data = JSON.parse(data);
+      }
+      catch (e) {
+        console.error("Error in message from socket:", e.name, e.message);
+        console.log(data);
+        return;
+      }
       const json_type = json_data?.type;
       if ("Error" in json_data) {
-        postToGameView("Error: "+json_data["Error"], "red");
+        postToGameView("Error: " + json_data["Error"], "red");
       } else if (json_type === "error") {
-        postToGameView("Error: "+json_data["error"], "red");
+        postToGameView("Error: " + json_data["error"], "red");
       } else if (json_type === "message") {
         handleTextRx(json_data["message"]);
-      } else if (json_type === "data") {
-        postToGameView("JSON: "+data, "lightblue");
+      } else {
+        postToGameView("JSON: " + data, "lightblue");
       }
       console.log(`JSON message from ${socket.url}:\n` + JSON.stringify(json_data, null, 2));
     };
@@ -97,7 +105,7 @@
     function handleTextRx(text) {
       let color;
       if (text.charAt(0) != 0o33) {
-          color = "#FFFF99";
+        color = "#FFFF99";
       }
       postToGameView(text, color);
     };
@@ -275,7 +283,7 @@
         <button aria-label="Resize" disabled class="hidden"></button>
       </div>
       <div class="separator"></div>
-    
+
       <div class="modeless-dialog">
         <section class="field-row" style="justify-content: flex-start">
           <label for="connect-to-host" class="modeless-text">Host</label>
@@ -288,8 +296,9 @@
         <section class="field-row" style="justify-content: flex-start">
           <label for="connect-to-ssl" class="modeless-text">SSL</label>
           <input id="connect-to-ssl" type="checkbox" name="ssl-checkbox" checked="true" />
-          <label for="connect-to-ssl" class="modeless-text" style="top:-8px;margin-left:calc(15px + var(--checkbox-total-width));"></label>
-          
+          <label for="connect-to-ssl" class="modeless-text"
+            style="top:-8px;margin-left:calc(15px + var(--checkbox-total-width));"></label>
+
         </section>
         <section class="field-row" style="justify-content: flex-end">
           <button class="btn" id="connect-to-cancel">Cancel</button>
