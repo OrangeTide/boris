@@ -42,7 +42,9 @@ publish:dev-docs:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 
 publish:client:
-  stage: build
+  stage: docs
+  dependencies:
+    - build:mud
   script:
     - cp -r bin/www/ client-pages
   artifacts:
