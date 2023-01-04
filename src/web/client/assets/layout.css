@@ -70,6 +70,8 @@ main>section {
   color: var(--secondary);
   position: absolute;
   margin-left: 3px;
+  padding-top: 7px;
+  padding-bottom: 7px;
 }
 
 #game-input {
@@ -77,6 +79,8 @@ main>section {
   background-color: var(--primary);
   color: var(--secondary);
   width: calc(100% - 21px);
+  padding-top: 7px;
+  padding-bottom: 7px;
 }
 
 main>aside {
