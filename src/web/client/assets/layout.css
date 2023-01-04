@@ -76,6 +76,7 @@ main>aside {
   flex-shrink: 0;
   width: 250px;
   border: 2px solid var(--secondary);
+  height: calc(100vh - 37px);
 }
 
 @media only screen and (max-width: 640px) {

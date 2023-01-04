@@ -23,6 +23,9 @@ build:mud:
     paths:
       - bin
       - build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_REF_PROTECTED
 
 publish:dev-docs:
   stage: docs
