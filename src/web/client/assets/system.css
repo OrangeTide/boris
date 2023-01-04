@@ -1,5 +1,5 @@
 /**
- * system.css
+ * system.css (modified)
  * Copyright (c) 2022 Sakun Acharige
  * https://github.com/sakofchit/system.css
  *
@@ -85,7 +85,6 @@
 }
 
 body {
-  /* background: linear-gradient(90deg, var(--primary) 21px, transparent 1%) center, linear-gradient(var(--primary) 21px, transparent 1%) center, var(--secondary); */
   background: var(--primary);
   color: var(--secondary);
   background-size: 22px 22px;
@@ -101,12 +100,6 @@ hr {
   border-top: 0.15em solid var(--secondary);
 }
 
-/*.container {
-  width: 50%;
-  margin: 0 auto;
-  display: block;
-}
-*/
 h1,
 .heading {
   font-family: Chicago_12, monospace;
@@ -125,14 +118,12 @@ p {
   margin: 10px 8px;
 }
 
-/* buttons */
 .standard-button {
   display: block;
   min-width: 59px;
   min-height: 20px;
 }
 
-/* dialogs & modals */
 .standard-dialog {
   border: 2px solid;
   padding: 10px;
@@ -164,13 +155,13 @@ p {
   border-left: 5px solid;
   border-right: 5px solid;
 }
+
 .outer-border {
   border-color: var(--secondary);
   border: 2px solid;
   padding: 3px;
 }
 
-/* title bar */
 .title-bar {
   flex: none;
   display: flex;
@@ -182,6 +173,7 @@ p {
   background-size: 6.6666666667% 13.3333333333%;
   background-clip: content-box;
 }
+
 .title-bar .title {
   padding: 0 0.5em;
   margin: 0 auto;
@@ -284,7 +276,6 @@ p {
   padding: 1rem 2rem;
   font-size: 18px;
   letter-spacing: -0.025em;
-  /*margin-bottom: 1rem;*/
 }
 .window-pane::-webkit-scrollbar {
   width: 22px;
@@ -311,7 +302,6 @@ p {
   display: flex;
   flex-direction: row;
   justify-content: space-between;
-  /*padding: 0.4rem 0.8rem;*/
   border-top: 0.1rem solid var(--secondary);
   border-width: 0.1rem 0;
   font-size: 1rem;
@@ -329,8 +319,6 @@ p {
   font-weight: 100;
 }
 
-
-/* buttons */
 .btn, .btn-default {
   min-height: 20px;
   min-width: 59px;
@@ -348,14 +336,12 @@ p {
   font-family: Chicago_12;
   cursor: pointer;
 }
-
 .btn:active {
   background: var(--secondary);
   border-width: 2px;
   color: var(--primary);
   font-family: Chicago_12;
 }
-
 .btn:disabled {
   min-height: 20px;
   min-width: 59px;
@@ -369,16 +355,13 @@ p {
   font-size: 18px;
   font-family: Chicago_12;
 }
-
 .btn-default {
   border-width: 2px;
 }
-
 .btn-default:active {
   border-radius: 12px;
 }
 
-/* text input */
 input  {
   color: var(--secondary);
   background-color: var(--primary);
@@ -387,11 +370,9 @@ input  {
   font-size: 18px;
   padding-left: 5px;
 }
-
 input:focus  {
   outline:none;
 }
-
 input[type="text"]:focus-visible,
 input[type="email"]:focus-visible,
 input[type="password"]:focus-visible,
@@ -534,13 +515,11 @@ input[type="checkbox"][disabled]:checked + label::after {
   margin-left: var(--grouped-element-spacing);
 }
 
-/* Form */
 form {
   font-family: "Inconsolata", Menlo, Chicago, Geneva;
   font-size:14px;
 }
 
-/* select menu */
 select {
   border: 1.5px solid;
   height: auto;
@@ -560,7 +539,6 @@ select {
           box-shadow: 2px 2px 0 -1px var(--secondary);
 }
 
-/* menu-bar */
 ul[role] {
   margin: 0;
   padding: 0;
@@ -616,7 +594,6 @@ ul[role="menu"] > [role="menu-item"] > a, ul[role="menu"] > [role="menu-item"] >
   display: block;
   width: 100%;
   box-sizing: border-box;
-
 }
 ul[role="menu"] > [role="menu-item"] > a:hover, ul[role="menu"] > [role="menu-item"] > button:hover, ul[role="menu"] > [role="menu-item"][aria-haspopup="true"]:hover, ul[role="menu"] > [role="menu-item"] > a:focus, ul[role="menu"] > [role="menu-item"] > button:focus, ul[role="menu"] > [role="menu-item"][aria-haspopup="true"]:focus {
   background: var(--secondary);
@@ -634,9 +611,4 @@ ul [role="menu-item"].divider::after {
   display: block;
   padding: 0;
   border-top: 1.5px dotted var(--secondary);
-}
-
-/* styles specific to demo page */
-.menu-items > li {
-  margin-bottom: 1rem;
 }
