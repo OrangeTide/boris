@@ -24,8 +24,8 @@ build:mud:
       - bin
       - build
   rules: # build for merge requests and commits to protected branches
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-    - if: $CI_COMMIT_REF_PROTECTED
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_REF_PROTECTED && $CI_PIPELINE_SOURCE == "push"
 
 publish:dev-docs:
   stage: docs
