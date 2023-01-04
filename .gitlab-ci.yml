@@ -1,5 +1,12 @@
 image: alpine
 
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_REF_PROTECTED
+
 variables:
     GIT_SUBMODULE_STRATEGY: recursive
 
@@ -18,7 +25,7 @@ before_script:
 build:mud:
   stage: build
   script:
-    - make -j
+    - make -j install # build and install (copies web files to bin/www/ and libs to build/)
   artifacts:
     paths:
       - bin
@@ -37,9 +44,7 @@ publish:dev-docs:
 publish:client:
   stage: build
   script:
-    - cp -r src/web/client/ client-pages/
-    - mv client-pages/assets/default/* client-pages/assets/
-    - rm -rf client-pages/assets/default/
+    - cp -r bin/www/ client-pages
   artifacts:
     paths:
       - client-pages
@@ -58,5 +63,5 @@ pages:
   artifacts:
     paths:
       - public
-  rules:
+  rules: # publish only on default branch
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
