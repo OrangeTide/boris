@@ -8,6 +8,12 @@ body {
   overflow: hidden;
 }
 
+@media only screen and (max-width: 1204px) {
+  body {
+    max-width: calc(100vw - 4px)
+  }
+}
+
 header #header-content {
   display: flex;
   flex-direction: row;
