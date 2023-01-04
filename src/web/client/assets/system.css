@@ -69,23 +69,10 @@
   --disabled: var(--sys-color-darkgrey);
 }
 
-@font-face {
-  font-family: Chicago;
-  src: url("fonts/ChicagoFLF.ttf");
-}
-@font-face {
-  font-family: Monaco;
-  src: url("fonts/monaco.ttf")
-}
-
 /* Fonts below are recreations by Giles Booth */
 @font-face {
   font-family: Chicago_12;
   src: url("fonts/ChiKareGo2.ttf");
-}
-@font-face {
-  font-family: Geneva_9;
-  src: url("fonts/FindersKeepers.ttf")
 }
 
 ::-webkit-scrollbar {
@@ -122,12 +109,12 @@ hr {
 */
 h1,
 .heading {
-  font-family: Chicago;
+  font-family: Chicago_12, monospace;
   font-size: 1em;
 }
 
 h2 {
-  font-family: Chicago;
+  font-family: Chicago_12, monospace;
   font-size: 2em;
 }
 
@@ -289,7 +276,7 @@ p {
   overflow: hidden;
   background-color: var(--primary);
   border: 0.1em solid var(--secondary);
-  font-family: "Inconsolata", Menlo, Chicago, Geneva;
+  font-family: "Inconsolata", Menlo, Chicago_12, Geneva;
 }
 .window-pane {
   overflow-y: scroll;
