@@ -88,6 +88,15 @@
   src: url("fonts/FindersKeepers.ttf")
 }
 
+::-webkit-scrollbar {
+  width: 8px;
+  background-color: var(--primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--secondary);
+}
+
 body {
   /* background: linear-gradient(90deg, var(--primary) 21px, transparent 1%) center, linear-gradient(var(--primary) 21px, transparent 1%) center, var(--secondary); */
   background: var(--primary);
