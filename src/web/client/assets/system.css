@@ -534,16 +534,6 @@ input[type="checkbox"][disabled]:checked + label::after {
   margin-left: var(--grouped-element-spacing);
 }
 
-.apple {
-  background: svg-load("./icon/apple.svg");
-  height: 22px;
-  width: 18px;
-  background-repeat: no-repeat;
-  border: none;
-  display: inline-block;
-  margin-right: 2px;
-}
-
 /* Form */
 form {
   font-family: "Inconsolata", Menlo, Chicago, Geneva;
@@ -577,7 +567,7 @@ ul[role] {
   list-style: none;
   cursor: pointer;
   font-family: Chicago_12;
-  font-size: 1em;
+  font-size: 1.1em;
 }
 ul[role="menu-bar"] {
   display: flex;
@@ -598,7 +588,7 @@ ul[role="menu-bar"] > [role="menu-item"]:focus > a, ul[role="menu-bar"] > [role=
 }
 ul[role="menu"] {
   position: relative;
-  min-width: 200px;
+  min-width: 230px;
   background: var(--primary);
   color: var(--secondary);
   border: 1px solid;
