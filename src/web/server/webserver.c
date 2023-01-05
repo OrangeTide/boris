@@ -21,11 +21,11 @@ void webserver_log_emit(int level, const char *line)
 	case LLL_INFO:
 		emit_level = LOG_LEVEL_INFO;
 		break;
-	case LLL_USER:
-		emit_level = LOG_LEVEL_INFO;
-		break;
 	case LLL_DEBUG:
 		emit_level = LOG_LEVEL_DEBUG;
+		break;
+	case LLL_USER:
+		emit_level = LOG_LEVEL_INFO;
 		break;
 	default:
 		emit_level = LOG_LEVEL_WARN;
@@ -38,12 +38,12 @@ int webserver_init(int family, unsigned port)
 {
 	lws_set_log_level(LLL_USER | LLL_ERR | LLL_WARN | LLL_NOTICE, webserver_log_emit);
 
-	lwsl_user("Webserver NOT IMPLEMENTED, port = %d\n", port);
+	lwsl_user("listening on port %d\n", port);
 	return 1;
 };
 
 void webserver_shutdown(void)
 {
-	lwsl_user("Webserver shutting down\n");
+	lwsl_user("shutting down\n");
 	return;
 };
