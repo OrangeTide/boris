@@ -66,9 +66,9 @@ Optionally to use clang instead of default CC, as above except provide `USE_CLAN
 make -j USE_CLANG=1
 ```
 
-For fast paralell builds, set `USE_NINJA=1` to use ninja instead of make.
+For fast parallel builds, set `USE_NINJA=1` to use ninja instead of make.
 ```
-make -j USE_NINJA=1
+make USE_NINJA=1
 ```
 
 ## Usage
