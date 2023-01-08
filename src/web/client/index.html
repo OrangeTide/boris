@@ -145,7 +145,7 @@
     function onClickConnectLast(event) {
       event.target.blur();
 
-      connect("ws.postman-echo.com/raw", "");
+      connect("localhost", "8080", false);
     };
 
     function onClickHelp(event) {
@@ -239,7 +239,7 @@
           <li role="menu-item" tabindex="0" aria-haspopup="true" class="padded-menu-item" id="system-menu">
             <strong>BorisMUD</strong>
             <ul role="menu">
-              <li role="menu-item"><a id="connect-last" href="#" onclick="this.blur()">Connect (echo server)</a></li>
+              <li role="menu-item"><a id="connect-last" href="#" onclick="this.blur()">Connect (localhost:8080)</a></li>
               <li role="menu-item"><a id="connect-to" href="#" onclick="this.blur()">Connect to...</a></li>
               <li role="menu-item" class="divider"><a id="help-link" href="#" onclick="this.blur()">Help</a></li>
               <li role="menu-item"><a href="https://orangetide.gitlab.io/boris/">About</a></li>
