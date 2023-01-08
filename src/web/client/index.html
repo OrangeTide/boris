@@ -29,13 +29,15 @@
     }
 
     function connect(host, port, secure = true) {
+      if (secure == "false") { secure = false };
+
       if (isSocketOpen(socket)) {
         postToGameView(`Closing connection to ${socket.url}`);
         socket.close();
       }
 
       try {
-        socket = new WebSocket(`${secure != "false" ? "wss" : "ws"}://${host}${port ? ":" + port : ""}`);
+        socket = new WebSocket(`${secure ? "wss" : "ws"}://${host}${port ? ":" + port : ""}`);
       }
       catch (e) {
         postToGameView('Error: Incorrect server address (must be a ws(s):// url)', "red");
