@@ -67,6 +67,7 @@ distclean:
 	@- $(RMF) ./build/include
 	@- $(RMF) ./build/lib
 	@- $(RM)  ./build/compile_commands.json
+	@- ${RMF} ./build/.cache
 	@  $(RMDIR) ./build
 
 ifeq ($(findstring distclean,$(MAKECMDGOALS)),)
