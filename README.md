@@ -71,6 +71,13 @@ For fast parallel builds, set `USE_NINJA=1` to use ninja instead of make.
 make USE_NINJA=1
 ```
 
+To install the client (to bin/www/ by default)
+```
+make install
+```
+
+When running the server the client will be hosted at `http://localhost:<webserver.port>`
+
 ## Usage
 
 ### Configure
@@ -80,7 +87,7 @@ Edit configuration file (`boris.cfg`) with your preferred MUD port (`server.port
 ### Starting for the first time
 
 ```sh
-$ ./boris
+$ ./bin/boris
 ```
 Login and create your account.
 
