@@ -4,6 +4,9 @@
 #include <libwebsockets.h>
 #include <webserver.h>
 
+#define OK  (0)
+#define ERR (-1)
+
 void
 webserver_log_emit(int level, const char *line)
 {
@@ -26,7 +29,7 @@ webserver_init(int family, unsigned port)
 	lws_set_log_level(LLL_USER | LLL_ERR | LLL_WARN | LLL_NOTICE, webserver_log_emit);
 
 	lwsl_user("listening on port %d\n", port);
-	return 1;
+	return ERR;
 };
 
 void
