@@ -24,6 +24,11 @@ before_script:
 
 build:mud:
   stage: build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
   script:
     - make -j install # build and install (copies web files to bin/www/ and libs to build/)
   artifacts:
