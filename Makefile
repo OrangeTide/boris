@@ -26,6 +26,7 @@ CC := $(shell which clang)
 endif
 
 CMAKE_OPTS += -DCMAKE_C_COMPILER="$(CC)"
+CMAKE_OPTS += -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 .PHONY: all clean distclean
 
@@ -65,6 +66,8 @@ distclean:
 	@- $(RMF) ./build/src
 	@- $(RMF) ./build/include
 	@- $(RMF) ./build/lib
+	@- $(RM)  ./build/compile_commands.json
+	@- ${RMF} ./build/.cache
 	@  $(RMDIR) ./build
 
 ifeq ($(findstring distclean,$(MAKECMDGOALS)),)
