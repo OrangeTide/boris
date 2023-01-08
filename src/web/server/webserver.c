@@ -29,7 +29,7 @@ webserver_init(int family, unsigned port)
 	lws_set_log_level(LLL_USER | LLL_ERR | LLL_WARN | LLL_NOTICE, webserver_log_emit);
 
 	lwsl_user("listening on port %d\n", port);
-	return ERR;
+	return OK;
 };
 
 void
