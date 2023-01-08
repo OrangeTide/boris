@@ -72,7 +72,7 @@ webserver_init(int family, unsigned port)
 		lwsl_err("failed to start webserver service\n");
 		return ERR;
 	}
-	lwsl_user("listening on port %d\n", port);
+	lwsl_user("static http/ws server http://localhost:%d\n", port);
 
 	thrd_detach(webserver_thread);
 
