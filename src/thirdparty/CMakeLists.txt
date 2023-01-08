@@ -5,10 +5,11 @@ add_subdirectory( lmdb )
 add_subdirectory( mth )
 
 # Set LWS options
-# set(LWS_WITH_STATIC OFF CACHE BOOL "Disable static build" FORCE)
+set(LWS_WITH_SHARED OFF CACHE BOOL "Disable shared build" FORCE)
 set(LWS_WITHOUT_CLIENT ON CACHE BOOL "Disable client build" FORCE)
 set(LWS_WITHOUT_TESTAPPS ON CACHE BOOL "Disable testapps build" FORCE)
 set(LWS_WITHOUT_TEST_SERVER ON CACHE BOOL "Disable test server build" FORCE)
+set(LWS_LOGS_TIMESTAMP OFF CACHE BOOL "Disable log timestamps" FORCE)
 
 add_subdirectory( libwebsockets )
 

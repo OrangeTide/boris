@@ -41,6 +41,7 @@
 #include <mth.h>
 #include <form.h>
 #include <libwebsockets.h>
+#include <webserver.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
@@ -64,6 +65,9 @@
 /** macro used to wrap mkdir() function from UNIX and Windows */
 #define MKDIR(d) mkdir(d, 0777)
 #endif
+
+#define OK (0)
+#define ERR (-1)
 
 /******************************************************************************
  * Main - Option parsing and initialization
@@ -303,17 +307,15 @@ main(int argc, char **argv)
 
 	atexit(form_module_shutdown);
 
-#if 0 // DISABLED
 	/* start the webserver if webserver.port is defined. */
 	if (mud_config.webserver_port > 0) {
-		if (!webserver_init(mud_config.default_family, mud_config.webserver_port)) {
+		if (webserver_init(mud_config.default_family, mud_config.webserver_port) != OK) {
 			LOG_ERROR("could not initialize webserver");
 			return EXIT_FAILURE;
 		}
 
 		atexit(webserver_shutdown);
 	}
-#endif
 
 	if (!game_init()) {
 		LOG_ERROR("could not start game");
