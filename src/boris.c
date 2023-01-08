@@ -66,6 +66,9 @@
 #define MKDIR(d) mkdir(d, 0777)
 #endif
 
+#define OK (0)
+#define ERR (-1)
+
 /******************************************************************************
  * Main - Option parsing and initialization
  ******************************************************************************/
@@ -306,7 +309,7 @@ main(int argc, char **argv)
 
 	/* start the webserver if webserver.port is defined. */
 	if (mud_config.webserver_port > 0) {
-		if (!webserver_init(mud_config.default_family, mud_config.webserver_port)) {
+		if (webserver_init(mud_config.default_family, mud_config.webserver_port) != OK) {
 			LOG_ERROR("could not initialize webserver");
 			return EXIT_FAILURE;
 		}
