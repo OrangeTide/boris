@@ -3,15 +3,15 @@
 
 #include <libwebsockets.h>
 #include <webserver.h>
-#include <threads.h>
+#include <pthread.h>
 #include <signal.h>
 
 #define OK  (0)
 #define ERR (-1)
 
 static struct lws_context *webserver_context;
-static sig_atomic_t interrupted;
-static thrd_t webserver_thread;
+static sig_atomic_t interrupted = 0;
+static pthread_t webserver_thread;
 
 static const struct lws_http_mount mounts[] = {
 	{
@@ -40,7 +40,7 @@ webserver_log_emit(int level, const char *line)
 	log_logf(emit_level, LOG_SUBSYSTEM, "%s", line);
 };
 
-int
+void *
 webserver_service(void *arg){
 	int res = -1;
 	while (!interrupted) {
@@ -49,7 +49,6 @@ webserver_service(void *arg){
 			break;
 		}
 	}
-	return res;
 }
 
 int
@@ -67,14 +66,12 @@ webserver_init(int family, unsigned port)
 
 	webserver_context = lws_create_context(&info);
 
-	int err = thrd_create(&webserver_thread, webserver_service, NULL);
+	int err = pthread_create(&webserver_thread, NULL, webserver_service, NULL);
 	if (err) {
 		lwsl_err("failed to start webserver service\n");
 		return ERR;
 	}
 	lwsl_user("static http/ws server http://localhost:%d\n", port);
-
-	thrd_detach(webserver_thread);
 
 	return OK;
 };
@@ -83,6 +80,10 @@ void
 webserver_shutdown(void)
 {
 	lwsl_user("shutting down\n");
+	interrupted = 1;
+	lws_cancel_service(webserver_context);
+	pthread_join(webserver_thread, NULL);
+	lwsl_user("done\n");
 	lws_context_destroy(webserver_context);
 	return;
 };
