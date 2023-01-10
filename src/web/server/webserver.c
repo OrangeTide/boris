@@ -49,6 +49,7 @@ webserver_service(void *arg){
 			break;
 		}
 	}
+	return NULL;
 }
 
 int
@@ -79,11 +80,11 @@ webserver_init(int family, unsigned port)
 void
 webserver_shutdown(void)
 {
-	lwsl_user("shutting down\n");
+	lwsl_user("webserver shutting down...\n");
 	interrupted = 1;
 	lws_cancel_service(webserver_context);
 	pthread_join(webserver_thread, NULL);
-	lwsl_user("done\n");
 	lws_context_destroy(webserver_context);
+	lwsl_user("webserver ended\n");
 	return;
 };
