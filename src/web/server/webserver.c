@@ -9,7 +9,8 @@
 #define OK  (0)
 #define ERR (-1)
 
-static struct lws_context *webserver_context;
+static struct lws_context *webserver_lws_context;
+static webserver_context_t webserver_context;
 static sig_atomic_t interrupted = 0;
 static pthread_t webserver_thread;
 
@@ -44,7 +45,7 @@ void *
 webserver_service(void *arg){
 	int res = -1;
 	while (!interrupted) {
-		res = lws_service(webserver_context, 0);
+		res = lws_service(webserver_lws_context, 0);
 		if (res < 0) {
 			break;
 		}
@@ -53,10 +54,11 @@ webserver_service(void *arg){
 }
 
 int
-webserver_init(int family, unsigned port)
+webserver_init(webserver_context_t ctx, unsigned port)
 {
 	lws_set_log_level(LLL_USER | LLL_ERR | LLL_WARN | LLL_NOTICE, webserver_log_emit);
 
+	webserver_context = ctx;
 
 	struct lws_context_creation_info info = {
 		.port = port,
@@ -65,7 +67,7 @@ webserver_init(int family, unsigned port)
 		//.options = LWS_SERVER_OPTION_HTTP_HEADERS_SECURITY_BEST_PRACTICES_ENFORCE,
 	};
 
-	webserver_context = lws_create_context(&info);
+	webserver_lws_context = lws_create_context(&info);
 
 	int err = pthread_create(&webserver_thread, NULL, webserver_service, NULL);
 	if (err) {
@@ -82,9 +84,12 @@ webserver_shutdown(void)
 {
 	lwsl_user("webserver shutting down...\n");
 	interrupted = 1;
-	lws_cancel_service(webserver_context);
-	pthread_join(webserver_thread, NULL);
-	lws_context_destroy(webserver_context);
+	lws_cancel_service(webserver_lws_context);
+	int err = pthread_join(webserver_thread, NULL);
+	if (err) {
+		lwsl_err("failed to join webserver thread\n");
+	}
+	lws_context_destroy(webserver_lws_context);
 	lwsl_user("webserver ended\n");
 	return;
 };

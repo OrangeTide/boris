@@ -309,7 +309,23 @@ main(int argc, char **argv)
 
 	/* start the webserver if webserver.port is defined. */
 	if (mud_config.webserver_port > 0) {
-		if (webserver_init(mud_config.default_family, mud_config.webserver_port) != OK) {
+		dyad_Stream *webserver_downstream = dyad_newStream();
+		if (dyad_listen(webserver_downstream, 4445)) {
+			LOG_ERROR("error creating webserver downstream socket");
+			return EXIT_FAILURE;
+		}
+		dyad_Stream *webserver_upstream = dyad_newStream();
+		if (dyad_connect(webserver_upstream, "localhost", 4445)) {
+			LOG_ERROR("error creating webserver upstream socket");
+			return EXIT_FAILURE;
+		}
+
+		webserver_context_t web_ctx = {
+			.webserver_upstream = webserver_upstream,
+			.family = mud_config.default_family
+		};
+
+		if (webserver_init(web_ctx, mud_config.webserver_port) != OK) {
 			LOG_ERROR("could not initialize webserver");
 			return EXIT_FAILURE;
 		}
