@@ -320,7 +320,7 @@ main(int argc, char **argv)
 			return EXIT_FAILURE;
 		}
 
-		webserver_context_t web_ctx = {
+		struct webserver_context web_ctx = {
 			.webserver_upstream = webserver_upstream,
 			.family = mud_config.default_family
 		};

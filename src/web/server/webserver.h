@@ -2,12 +2,12 @@
 #define WEBSERVER_H_
 
 #include "dyad.h"
-typedef struct {
+struct webserver_context {
     dyad_Stream *webserver_upstream;
     int family;
-} webserver_context_t;
+};
 
-int webserver_init(webserver_context_t ctx, unsigned port);
+int webserver_init(struct webserver_context ctx, unsigned port);
 void webserver_shutdown(void);
 
 #endif /* WEBSERVER_H_ */
