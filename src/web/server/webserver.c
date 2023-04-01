@@ -10,7 +10,7 @@
 #define ERR (-1)
 
 static struct lws_context *webserver_lws_context;
-static webserver_context_t webserver_context;
+static struct webserver_context web_context;
 static sig_atomic_t interrupted = 0;
 static pthread_t webserver_thread;
 
@@ -54,11 +54,11 @@ webserver_service(void *arg){
 }
 
 int
-webserver_init(webserver_context_t ctx, unsigned port)
+webserver_init(struct webserver_context ctx, unsigned port)
 {
 	lws_set_log_level(LLL_USER | LLL_ERR | LLL_WARN | LLL_NOTICE, webserver_log_emit);
 
-	webserver_context = ctx;
+	web_context = ctx;
 
 	struct lws_context_creation_info info = {
 		.port = port,
