@@ -1,11 +1,3 @@
-include_directories( AFTER
-	${CMAKE_CURRENT_BINARY_DIR}/thirdparty/libwebsockets/
-	thirdparty/libwebsockets/include/
-	)
-link_directories( AFTER
-	${CMAKE_CURRENT_BINARY_DIR}/thirdparty/libwebsockets/lib/
-	)
-
 add_subdirectory( thirdparty )
 add_subdirectory( scrypt )
 add_subdirectory( passwd )
@@ -29,7 +21,6 @@ target_compile_definitions( boris
 
 target_link_libraries( boris
 	PRIVATE mud
-	PRIVATE websockets
 	)
 
 target_include_directories( boris
@@ -86,6 +77,7 @@ target_link_libraries( mud
 	PUBLIC util
 	PUBLIC helplib
 	PUBLIC jsmn
+	PUBLIC mongoose
 	)
 
 target_include_directories( mud

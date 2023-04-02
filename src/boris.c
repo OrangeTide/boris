@@ -40,7 +40,6 @@
 #include <game.h>
 #include <mth.h>
 #include <form.h>
-#include <libwebsockets.h>
 #include <webserver.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
