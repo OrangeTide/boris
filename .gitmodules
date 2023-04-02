@@ -1,10 +1,6 @@
 [submodule "stackvm-tools"]
 	path = stackvm-tools
 	url = https://github.com/OrangeTide/stackvm-tools.git
-[submodule "src/thirdparty/libwebsockets"]
-	path = src/thirdparty/libwebsockets
-	url = https://github.com/warmcat/libwebsockets.git
-	branch = v4.3-stable
 [submodule "src/thirdparty/jsmn"]
 	path = src/thirdparty/jsmn
 	url = https://github.com/zserge/jsmn.git
