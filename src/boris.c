@@ -309,6 +309,7 @@ main(int argc, char **argv)
 	/* start the webserver if webserver.port is defined. */
 	if (mud_config.webserver_port > 0) {
 		dyad_Stream *webserver_downstream = dyad_newStream();
+		dyad_addListener(webserver_downstream, DYAD_EVENT_DATA, webserver_test_callback, NULL);
 		if (dyad_listen(webserver_downstream, 4445)) {
 			LOG_ERROR("error creating webserver downstream socket");
 			return EXIT_FAILURE;
