@@ -11,30 +11,36 @@
 #define ERR (-1)
 
 static struct webserver_context web_context;
+static struct mg_connection *upstream;
 static sig_atomic_t interrupted = 0;
 static pthread_t webserver_thread;
 
 static const char *web_root = "./bin/www";
 static struct mg_mgr webserver_mgr;
 
-void 
+void
 webserver_test_callback(dyad_Event* ev)
 {
 	char buf[48] = {0};
 
 	snprintf(buf, 47, "Webserver Event: %s", ev->data);
-	LOG_INFO("%s", buf);
+	log_logf(LOG_LEVEL_INFO, "server", "%s", buf);
+}
+
+void
+webserver_accept_callback(dyad_Event* ev)
+{
+	dyad_addListener(ev->remote, DYAD_EVENT_DATA, webserver_test_callback, NULL);
 }
 
 static void 
 webserver_handler(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 {
-	dyad_Stream *upstream = web_context.webserver_upstream;
 
 	if (ev == MG_EV_WS_OPEN)
 	{
+		mg_send(upstream, "@NEWCLIENT@", 12);
 		LOG_INFO("websocket client connected");
-		dyad_write(upstream, (const void *)"@NEW_CLIENT@", 13);
 	}
 	else if (ev == MG_EV_HTTP_MSG) 
 	{
@@ -62,8 +68,25 @@ webserver_handler(struct mg_connection *c, int ev, void *ev_data, void *fn_data)
 		// Got websocket frame. Received data is wm->data. Echo it back!
 		struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
 		mg_ws_send(c, wm->data.ptr, wm->data.len, WEBSOCKET_OP_TEXT);
+		mg_send(upstream, "@MESSAGE@", 10);
+	}
+	(void) fn_data;
+}
 
-		dyad_write(upstream, (const void *)"@MESSAGE@", 9);
+static void 
+webserver_upstream_handler(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
+{
+	if (ev == MG_EV_CONNECT)
+	{
+		LOG_INFO("Connected to main thread");
+	}
+	else if (ev == MG_EV_CLOSE)
+	{
+		LOG_INFO("Disconnected from main thread");
+	}
+	else if (ev == MG_EV_POLL)
+	{
+		// Nothing yet
 	}
 	(void) fn_data;
 }
@@ -71,6 +94,8 @@ webserver_handler(struct mg_connection *c, int ev, void *ev_data, void *fn_data)
 void *
 webserver_service(void *arg)
 {
+	upstream = mg_connect(&webserver_mgr, "tcp://localhost:4445", 
+		webserver_upstream_handler, NULL);
 	while (!interrupted) {
 		mg_mgr_poll(&webserver_mgr, 1000);
 	}
@@ -87,7 +112,7 @@ webserver_init(struct webserver_context ctx, unsigned port)
 	snprintf(webserver_addr, 31, "http://localhost:%d", port);
 	mg_http_listen(&webserver_mgr, webserver_addr, webserver_handler, NULL);
 
-	LOG_INFO("Starting webserver on port %d", port);
+	LOG_INFO("Starting webserver..");
 
 	int err = pthread_create(&webserver_thread, NULL, webserver_service, NULL);
 	if (err) {
@@ -97,7 +122,7 @@ webserver_init(struct webserver_context ctx, unsigned port)
 	LOG_INFO("static http/ws server http://localhost:%d", port);
 
 	return OK;
-};
+}
 
 void
 webserver_shutdown(void)
@@ -112,4 +137,4 @@ webserver_shutdown(void)
 	mg_mgr_free(&webserver_mgr);
 	LOG_INFO("webserver ended");
 	return;
-};
+}
