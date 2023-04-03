@@ -309,19 +309,14 @@ main(int argc, char **argv)
 	/* start the webserver if webserver.port is defined. */
 	if (mud_config.webserver_port > 0) {
 		dyad_Stream *webserver_downstream = dyad_newStream();
-		dyad_addListener(webserver_downstream, DYAD_EVENT_DATA, webserver_test_callback, NULL);
+		dyad_addListener(webserver_downstream, DYAD_EVENT_ACCEPT, webserver_accept_callback, NULL);
 		if (dyad_listen(webserver_downstream, 4445)) {
 			LOG_ERROR("error creating webserver downstream socket");
 			return EXIT_FAILURE;
 		}
-		dyad_Stream *webserver_upstream = dyad_newStream();
-		if (dyad_connect(webserver_upstream, "localhost", 4445)) {
-			LOG_ERROR("error creating webserver upstream socket");
-			return EXIT_FAILURE;
-		}
 
 		struct webserver_context web_ctx = {
-			.webserver_upstream = webserver_upstream,
+			.upstream_port = 4445,
 			.family = mud_config.default_family
 		};
 
