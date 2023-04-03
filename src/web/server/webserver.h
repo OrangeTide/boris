@@ -10,4 +10,6 @@ struct webserver_context {
 int webserver_init(struct webserver_context ctx, unsigned port);
 void webserver_shutdown(void);
 
+void webserver_test_callback(dyad_Event* ev);
+
 #endif /* WEBSERVER_H_ */
