@@ -42,7 +42,9 @@ webserver_handler(struct mg_connection *c, int ev, void *ev_data, void *fn_data)
 	if (ev == MG_EV_WS_OPEN) {
 		mg_send(upstream, "@NEWCLIENT@", 12);
 		LOG_INFO("websocket client connected");
-		mg_ws_send(c, mud_config.msgfile_welcome, strlen(mud_config.msgfile_welcome)+1, WEBSOCKET_OP_TEXT);
+		mg_ws_send(c, mud_config.msgfile_welcome, strlen(mud_config.msgfile_welcome), WEBSOCKET_OP_TEXT);
+		char json_sample[] = "{\"data\": {\"motd\": \"Welcome to BorisMUD\"}}\n";
+		mg_ws_send(c, json_sample, strlen(json_sample), WEBSOCKET_OP_TEXT);
 	} else if (ev == MG_EV_HTTP_MSG) {
 		struct mg_http_message *hm = (struct mg_http_message *)ev_data;
 		if (mg_http_match_uri(hm, "/ws")) {

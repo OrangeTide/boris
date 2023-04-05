@@ -130,7 +130,7 @@
     function postToGameView(data, color = "") {
       if (data && data !== "") {
         const p_elem = document.createElement("p");
-        const replaced_data = data.replace(/\s*\r?\n\s*/g, "<br>")
+        const replaced_data = data.replace(/\r?\n/g, "<br>")
                                   .replace(/<(?!br\s*\/?)[^>]+>/g,"");
         p_elem.innerHTML = replaced_data;
         if (color) {
