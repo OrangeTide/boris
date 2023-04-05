@@ -114,6 +114,7 @@
       if (text.charAt(0) != 0o33) {
         color = "#FFFF99";
       }
+      text = text.replace(/ /g,'\xA0');
       postToGameView(text, color);
     };
 
