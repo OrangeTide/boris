@@ -40,7 +40,6 @@
 #include <game.h>
 #include <mth.h>
 #include <form.h>
-#include <libwebsockets.h>
 #include <webserver.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
@@ -309,7 +308,19 @@ main(int argc, char **argv)
 
 	/* start the webserver if webserver.port is defined. */
 	if (mud_config.webserver_port > 0) {
-		if (webserver_init(mud_config.default_family, mud_config.webserver_port) != OK) {
+		dyad_Stream *webserver_downstream = dyad_newStream();
+		dyad_addListener(webserver_downstream, DYAD_EVENT_ACCEPT, webserver_accept_callback, NULL);
+		if (dyad_listen(webserver_downstream, 4445)) {
+			LOG_ERROR("error creating webserver downstream socket");
+			return EXIT_FAILURE;
+		}
+
+		struct webserver_context web_ctx = {
+			.upstream_port = 4445,
+			.family = mud_config.default_family
+		};
+
+		if (webserver_init(web_ctx, mud_config.webserver_port) != OK) {
 			LOG_ERROR("could not initialize webserver");
 			return EXIT_FAILURE;
 		}
