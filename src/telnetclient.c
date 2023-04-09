@@ -212,6 +212,7 @@ telnetclient_on_destroy(dyad_Event *e)
 #ifndef NDEBUG
 	memset(client, 0xBB, sizeof * client); /* fill with fake data before freeing */
 #endif
+	user_put(&client->user);
 
 	free(client);
 }
@@ -493,7 +494,9 @@ telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u)
 	assert(cl != NULL);
 	old_user = cl->user;
 	cl->user = u;
-	user_get(u);
+	if (u) {
+		user_get(u);
+	}
 	user_put(&old_user);
 }
 
