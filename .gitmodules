@@ -1,6 +1,4 @@
-[submodule "stackvm-tools"]
-	path = stackvm-tools
-	url = https://github.com/OrangeTide/stackvm-tools.git
 [submodule "src/thirdparty/jsmn"]
 	path = src/thirdparty/jsmn
 	url = https://github.com/zserge/jsmn.git
+	branch = master
