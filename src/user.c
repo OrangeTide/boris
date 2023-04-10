@@ -466,7 +466,7 @@ user_create(const char *username, const char *password, const char *email)
 
 	if (!user_write(u)) {
 		LOG_ERROR("Could not save account username(%s)", u->username);
-		user_put(u);
+		user_put(&u);
 		return NULL; /* failure */
 	}
 
