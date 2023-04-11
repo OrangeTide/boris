@@ -30,6 +30,10 @@
 #define BORIS_VERSION_MIN 7
 #define BORIS_VERSION_PAT 0
 
+/* return values for most simple functions */
+#define OK (0)
+#define ERR (-1)
+
 /******************************************************************************
  * Forward declarations
  ******************************************************************************/
@@ -314,4 +318,6 @@ void heapqueue_test(void);
 void mud_config_init(void);
 void mud_config_shutdown(void);
 int mud_config_process(void);
+
+int fds_init(void);
 #endif
