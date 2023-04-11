@@ -65,9 +65,6 @@
 #define MKDIR(d) mkdir(d, 0777)
 #endif
 
-#define OK (0)
-#define ERR (-1)
-
 /******************************************************************************
  * Main - Option parsing and initialization
  ******************************************************************************/
@@ -246,6 +243,7 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	fds_init();
 	dyad_init();
 	atexit(dyad_shutdown);
 

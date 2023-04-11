@@ -45,6 +45,7 @@ file( GLOB mud_SOURCES
 	buf.c
 	common.c
 	config.c
+	fds.c
 	form.c
 	freelist.c
 	game.c
