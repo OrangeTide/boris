@@ -30,6 +30,10 @@
 #define BORIS_VERSION_MIN 7
 #define BORIS_VERSION_PAT 0
 
+/* return values for most simple functions */
+#define OK (0)
+#define ERR (-1)
+
 /******************************************************************************
  * Forward declarations
  ******************************************************************************/
@@ -315,18 +319,5 @@ void mud_config_init(void);
 void mud_config_shutdown(void);
 int mud_config_process(void);
 
-int socketio_init(void);
-void socketio_shutdown(void);
-int socketio_check_count(SOCKET fd);
-void socketio_readready(SOCKET fd);
-void socketio_writeready(SOCKET fd);
-int socketio_sockname(struct sockaddr *sa, socklen_t salen, char *name, size_t name_len);
-int socketio_getpeername(SOCKET fd, char *name, size_t name_len);
-int socketio_send(SOCKET fd, const void *data, size_t len);
-int socketio_recv(SOCKET fd, void *data, size_t len);
-int socketio_dispatch(long msec);
-const char *socketio_strerror(void);
-int socketio_wouldblock(void);
-int socketio_eintr(void);
-struct socketio_handle *socketio_listen(int family, int socktype, const char *host, const char *port, void (*newclient)(struct socketio_handle *sh));
+int fds_init(void);
 #endif
