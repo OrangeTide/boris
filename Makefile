@@ -2,6 +2,10 @@
 # Boris MUD - GNU Makefile
 # ============================================================================
 
+# --- Optional .env for local configuration ----------------------------------
+# Variables like DEPLOY_DEST, RELEASE_ARCH, etc.  See env.example.
+-include .env
+
 ifdef USE_CLANG
   CC := clang
 else
@@ -14,8 +18,15 @@ CPPFLAGS := -DNTEST -DNDEBUG
 LDLIBS   := -pthread
 
 # --- Directories ------------------------------------------------------------
-BUILDDIR := build
-BINDIR   := bin
+# Object files go under build/<triplet>/ so cross-compiles don't clobber
+# each other.  Binaries go to bin/ (flat) -- this is what you run and ship.
+TARGET_TRIPLET := $(shell $(CC) -dumpmachine 2>/dev/null)
+ifdef TARGET_TRIPLET
+  BUILDDIR := build/$(TARGET_TRIPLET)
+else
+  BUILDDIR := build
+endif
+BINDIR := bin
 
 # --- Source collection (populated by module.mk includes) --------------------
 BORIS_SRCS  :=
@@ -84,6 +95,23 @@ $(BUILDDIR)/%.o: %.c
 $(BINDIR):
 	@mkdir -p $@
 
+# --- Release and deploy -----------------------------------------------------
+RELEASE_ARCH ?= $(if $(findstring x86_64,$(TARGET_TRIPLET)),linux-x86_64,\
+	$(if $(findstring aarch64,$(TARGET_TRIPLET)),linux-arm64,\
+	$(if $(findstring arm,$(TARGET_TRIPLET)),linux-arm32,\
+	linux-unknown)))
+
+.PHONY: release deploy
+
+release: install
+	./scripts/build-release $(RELEASE_ARCH)
+
+deploy: release
+ifndef DEPLOY_DEST
+	$(error DEPLOY_DEST is not set. Set it in .env or on the command line)
+endif
+	./scripts/deploy.sh $(DEPLOY_DEST)
+
 # --- Clean ------------------------------------------------------------------
 clean:
 	$(RM) $(ALL_OBJS) $(DEPS)
@@ -91,11 +119,8 @@ clean:
 
 distclean: clean
 	$(RM) $(BINDIR)/boris $(BINDIR)/mkpass $(TEST_BINS)
-	$(RM) $(BINDIR)/www/index.html
-	$(RM) $(BINDIR)/www/assets/layout.css $(BINDIR)/www/assets/system.css
-	$(RM) $(BINDIR)/www/assets/favicon.ico
 	-find $(BINDIR)/www -type f -delete 2>/dev/null
-	-find $(BINDIR)/www -type d -empty -delete 2>/dev/null
+	-find $(BINDIR) -type d -empty -delete 2>/dev/null
 	-rmdir $(BINDIR) 2>/dev/null
 
 # --- Auto-generated dependencies --------------------------------------------
