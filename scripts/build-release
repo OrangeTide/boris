@@ -1,0 +1,59 @@
+#!/bin/sh
+set -e
+
+ARCH="${1:?Usage: $0 <arch> (e.g. linux-x86_64, linux-aarch64)}"
+
+VER="$(awk '/@version/ { print $3 }' src/boris.c)"
+if [ -z "$VER" ]; then
+	echo "Error: could not extract version from src/boris.c" >&2
+	exit 1
+fi
+
+RELEASE_NAME="boris-${VER}-${ARCH}"
+TARFILE="${RELEASE_NAME}.tar.xz"
+
+echo "Building release: ${RELEASE_NAME}"
+
+# verify binaries exist
+for f in bin/boris bin/mkpass; do
+	if [ ! -f "$f" ]; then
+		echo "Error: $f not found. Run 'make -j install' first." >&2
+		exit 1
+	fi
+done
+
+# stage release
+rm -rf "$RELEASE_NAME"
+mkdir -p "$RELEASE_NAME"/bin
+mkdir -p "$RELEASE_NAME"/data/chars
+mkdir -p "$RELEASE_NAME"/data/users
+
+# binaries
+cp bin/boris bin/mkpass "$RELEASE_NAME"/bin/
+strip "$RELEASE_NAME"/bin/boris "$RELEASE_NAME"/bin/mkpass
+
+# web client
+if [ -d bin/www ]; then
+	cp -r bin/www "$RELEASE_NAME"/bin/www
+fi
+
+# sample config
+if [ -f boris.cfg ]; then
+	cp boris.cfg "$RELEASE_NAME"/boris.cfg
+fi
+
+# static game data
+for d in forms help rooms text; do
+	if [ -d "data/$d" ]; then
+		cp -r "data/$d" "$RELEASE_NAME/data/$d"
+	fi
+done
+
+# create tarball
+tar cJf "$TARFILE" "$RELEASE_NAME"
+rm -rf "$RELEASE_NAME"
+
+echo "Filename: $TARFILE"
+echo "Version: $VER"
+SIZE="$(stat -c '%s' "$TARFILE" 2>/dev/null || stat -f '%z' "$TARFILE")"
+echo "Size: $SIZE"

@@ -33,6 +33,7 @@ include src/thirdparty/dyad/module.mk
 include src/thirdparty/lmdb/module.mk
 include src/thirdparty/mth/module.mk
 include src/thirdparty/mongoose/module.mk
+include src/thirdparty/tiny-aes/module.mk
 include src/scrypt/module.mk
 include src/passwd/module.mk
 include src/log/module.mk
@@ -69,7 +70,7 @@ tests: $(TEST_BINS)
 	@for t in $(TEST_BINS); do echo "--- Running $$t ---"; ./$$t || exit 1; done
 
 $(BINDIR)/boris: $(BORIS_OBJS) | $(BINDIR)
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) -lz -lcrypto
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) -lz
 
 $(BINDIR)/mkpass: $(MKPASS_OBJS) | $(BINDIR)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)

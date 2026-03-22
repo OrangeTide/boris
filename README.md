@@ -39,14 +39,13 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 - GNU Make 4.2.1 (or later)
 - GCC or Clang
 - zlib development headers
-- OpenSSL development headers (for scrypt)
 
 ### Linux
 
 Debian / Ubuntu:
 ```sh
 sudo apt-get update
-sudo apt-get install build-essential libssl-dev zlib1g-dev
+sudo apt-get install build-essential zlib1g-dev
 ```
 
 ## Building
@@ -158,6 +157,17 @@ Please [open an issue](https://github.com/OrangeTide/boris/issues/new) for suppo
 ## Contributing
 
 Please contribute using [Github Flow](https://docs.github.com/en/get-started/using-github/github-flow). Create a branch, add commits, and [open a pull request](https://github.com/OrangeTide/boris/compare/).
+
+## Third-Party Libraries
+
+Boris includes the following third-party libraries:
+
+- [tiny-AES-c](https://github.com/kokke/tiny-AES-c) -- Small portable AES128/192/256 in C. Public domain (Unlicense). Used for scrypt password encryption.
+- [dyad](https://github.com/rxi/dyad) -- Asynchronous networking library.
+- [LMDB](https://www.symas.com/lmdb) -- Lightning Memory-Mapped Database.
+- [Mongoose](https://github.com/cesanta/mongoose) -- Embedded web server library.
+- [jsmn](https://github.com/zserge/jsmn) -- Minimalistic JSON parser.
+- [MTH](https://tintin.mudhalla.net/protocols/mth/) -- MUD Telopt Handler.
 
 ## License
 
