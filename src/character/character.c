@@ -25,7 +25,8 @@
 #include "character.h"
 #include "boris.h"
 #include "freelist.h"
-#include "fdb.h"
+#include "muddb.h"
+#include "obj.h"
 
 #define LOG_SUBSYSTEM "character"
 #include "log.h"
@@ -182,22 +183,24 @@ character_attr_get(struct character *ch, const char *name)
 }
 
 /**
- * load a character from fdb.
+ * load a character from the database.
  */
 static struct character *
 character_load(unsigned character_id)
 {
 	struct character *ch;
-	struct fdb_read_handle *h;
-	const char *name, *value;
+	char numbuf[22];
+	OBJ *obj;
 
 	assert(character_id > 0);
 
 	if (character_id <= 0) return NULL;
 
-	h = fdb_read_begin_uint(DOMAIN_CHARACTER, character_id);
+	snprintf(numbuf, sizeof numbuf, "%u", character_id);
 
-	if (!h) {
+	obj = muddb_get(mud_db, DOMAIN_CHARACTER, numbuf);
+
+	if (!obj) {
 		LOG_ERROR("could not load character \"%u\"", character_id);
 		return NULL;
 	}
@@ -205,20 +208,28 @@ character_load(unsigned character_id)
 	ch = character_ll_alloc();
 
 	if (!ch) {
-		fdb_read_end(h);
+		obj_free(obj);
 		return NULL;
 	}
 
-	while (fdb_read_next(h, &name, &value)) {
-		if (!character_attr_set(ch, name, value)) {
-			LOG_ERROR("could not load character \"%u\"", character_id);
-			character_ll_free(ch);
-			fdb_read_end(h);
-			return NULL;
+	/* load all properties via character_attr_set */
+	{
+		OBJ_ITER *it = obj_iter_begin(obj);
+		const char *key, *value;
+
+		while (obj_iter_next(it, &key, &value)) {
+			if (!character_attr_set(ch, key, value)) {
+				LOG_ERROR("could not load character \"%u\"", character_id);
+				obj_iter_end(it);
+				character_ll_free(ch);
+				obj_free(obj);
+				return NULL;
+			}
 		}
+		obj_iter_end(it);
 	}
 
-	fdb_read_end(h);
+	obj_free(obj);
 
 	if (character_id != ch->id) {
 		LOG_ERROR("could not load character \"%u\" (bad, missing or mismatched id)", character_id);
@@ -236,16 +247,19 @@ int
 character_save(struct character *ch)
 {
 	struct attr_entry *curr;
-	struct fdb_write_handle *h;
+	OBJ *obj;
+	char numbuf[22];
 	unsigned i;
 
 	assert(ch != NULL);
 
 	if (!ch->dirty_fl) return 1; /* already saved - don't do it again. */
 
-	h = fdb_write_begin_uint(DOMAIN_CHARACTER, ch->id);
+	snprintf(numbuf, sizeof numbuf, "%u", ch->id);
 
-	if (!h) {
+	obj = obj_new(numbuf);
+
+	if (!obj) {
 		LOG_ERROR("could not save character \"%u\"", ch->id);
 		return 0; /* failure */
 	}
@@ -253,28 +267,30 @@ character_save(struct character *ch)
 	for (i = 0; i < NR(attrinfo); i++) {
 		void *base = ((char*)ch + attrinfo[i].ofs);
 
-		switch(attrinfo[i].type) {
+		switch (attrinfo[i].type) {
 		case VALUE_TYPE_UINT:
-			fdb_write_format(h, attrinfo[i].name, "%u", *(unsigned*)base);
+			snprintf(numbuf, sizeof numbuf, "%u", *(unsigned*)base);
+			obj_prop_set(obj, attrinfo[i].name, numbuf);
 			break;
 
 		case VALUE_TYPE_STRING:
 			if (*(char**)base)
-				fdb_write_pair(h, attrinfo[i].name, *(char**)base);
-
+				obj_prop_set(obj, attrinfo[i].name, *(char**)base);
 			break;
 		}
 	}
 
 	for (curr = LIST_TOP(ch->extra_values); curr; curr = LIST_NEXT(curr, list)) {
-		fdb_write_pair(h, curr->name, curr->value);
+		obj_prop_set(obj, curr->name, curr->value);
 	}
 
-	if (!fdb_write_end(h)) {
+	if (muddb_put(mud_db, DOMAIN_CHARACTER, numbuf, obj) != MUDDB_OK) {
 		LOG_ERROR("could not save character \"%u\"", ch->id);
+		obj_free(obj);
 		return 0; /* failure */
 	}
 
+	obj_free(obj);
 	ch->dirty_fl = 0;
 	LOG_INFO("saved character \"%u\"", ch->id);
 
@@ -366,17 +382,17 @@ struct character *character_new(void)
 static int
 character_preflight(void)
 {
-	struct fdb_iterator *it;
+	MUDDB_ITER *it;
 	const char *id;
 
-	it = fdb_iterator_begin(DOMAIN_CHARACTER);
+	it = muddb_iter_begin(mud_db, DOMAIN_CHARACTER);
 
 	if (!it) {
-		LOG_CRITICAL("could not load characters!");
-		return 0; /* could not load. */
+		/* no characters domain yet -- not an error on first run */
+		return 1;
 	}
 
-	while ((id = fdb_iterator_next(it))) {
+	while ((id = muddb_iter_next(it))) {
 		struct character *ch;
 		unsigned character_id;
 		char *endptr;
@@ -385,7 +401,7 @@ character_preflight(void)
 
 		if (*endptr) {
 			LOG_CRITICAL("character id \"%s\" is invalid!", id);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return 0; /* could not load */
 		}
 
@@ -393,7 +409,7 @@ character_preflight(void)
 
 		if (!ch) {
 			LOG_CRITICAL("could not load character id \"%u\"", character_id);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return 0; /* could not load */
 		}
 
@@ -401,27 +417,26 @@ character_preflight(void)
 		if (ch->id != character_id) {
 			LOG_CRITICAL("bad or non-matching character id \"%u\"", character_id);
 			character_ll_free(ch);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
+			return 0; /* could not load */
 		}
 
 		/* allocate id from the pool */
 		if (!freelist_thwack(character_id_freelist, ch->id, 1)) {
 			LOG_CRITICAL("bad or duplicate character id \"%u\"", character_id);
 			character_ll_free(ch);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return 0; /* could not load */
 		}
 
 		character_ll_free(ch);
 	}
 
-	fdb_iterator_end(it);
+	muddb_iter_end(it);
 
 	return 1; /* success */
 }
-/**
- *
- */
+
 int
 character_initialize(void)
 {
@@ -429,11 +444,6 @@ character_initialize(void)
 	character_id_freelist = freelist_new(1, ID_MAX);
 	if (!character_id_freelist) {
 		LOG_CRITICAL("could not allocate IDs!");
-		return -1;
-	}
-
-	if (!fdb_domain_init(DOMAIN_CHARACTER)) {
-		LOG_CRITICAL("could not access database!");
 		return -1;
 	}
 
