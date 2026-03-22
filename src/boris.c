@@ -32,6 +32,7 @@
 #include <eventlog.h>
 #include <muddb.h>
 #include <room.h>
+#include <help.h>
 #define LOG_SUBSYSTEM "server"
 #include <log.h>
 #include <debug.h>
@@ -80,6 +81,9 @@ show_version(void)
  */
 static sig_atomic_t keep_going_fl = 1;
 
+/** set by SIGHUP handler, checked in main loop to flush caches. */
+static volatile sig_atomic_t sighup_fl;
+
 MUDDB *mud_db;
 
 static void
@@ -98,6 +102,13 @@ static void
 sh_quit(int s UNUSED)
 {
 	keep_going_fl = 0;
+}
+
+/** signal handler for SIGHUP -- sets a flag for the main loop. */
+static void
+sh_hup(int s UNUSED)
+{
+	sighup_fl = 1;
 }
 
 /**
@@ -223,6 +234,9 @@ main(int argc, char **argv)
 
 	signal(SIGINT, sh_quit);
 	signal(SIGTERM, sh_quit);
+#ifndef WIN32
+	signal(SIGHUP, sh_hup);
+#endif
 
 #ifndef NTEST
 	acs_test();
@@ -274,6 +288,13 @@ main(int argc, char **argv)
 	atexit(muddb_shutdown);
 
 	init_mth();
+
+	if (help_init()) {
+		LOG_ERROR("could not load help sub-system");
+		return EXIT_FAILURE;
+	}
+
+	atexit(help_shutdown);
 
 	if (channel_initialize()) {
 		LOG_ERROR("could not load channels");
@@ -356,6 +377,13 @@ main(int argc, char **argv)
 
 	while (keep_going_fl && dyad_getStreamCount() > 0) {
 		struct telnetserver *cur;
+
+		if (sighup_fl) {
+			sighup_fl = 0;
+			LOG_INFO("SIGHUP received -- invalidating caches");
+			help_cache_invalidate();
+		}
+
 		for (cur = telnetserver_first(); cur; cur = telnetserver_next(cur)) {
 			telnetclient_prompt_refresh_all(cur);
 		}

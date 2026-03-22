@@ -30,6 +30,8 @@ struct mud_config {
 	unsigned webserver_port;
 	char *form_newuser_filename;
 	int default_family; /* IPv4 or IPv6 */
+	unsigned room_cache_size; /* max unreferenced rooms in LRU cache */
+	unsigned character_cache_size; /* max unreferenced characters in LRU cache */
 };
 
 typedef struct mud_config MUD_CONFIG;

@@ -1392,6 +1392,8 @@ mud_config_init(void)
 	mud_config.webserver_port = 0; /* default is to disable. */
 	mud_config.form_newuser_filename = strdup("data/forms/newuser.form");
 	mud_config.default_family = 0;
+	mud_config.room_cache_size = 128;
+	mud_config.character_cache_size = 128;
 }
 
 /**
@@ -1465,6 +1467,8 @@ mud_config_process(void)
 	config_watch(&cfg, "channels.default", do_config_string, &mud_config.default_channels);
 	config_watch(&cfg, "webserver.port", do_config_uint, &mud_config.webserver_port);
 	config_watch(&cfg, "form.newuser.filename", do_config_string, &mud_config.form_newuser_filename);
+	config_watch(&cfg, "cache.room.size", do_config_uint, &mud_config.room_cache_size);
+	config_watch(&cfg, "cache.character.size", do_config_uint, &mud_config.character_cache_size);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", mud_config_show, 0);
 #endif

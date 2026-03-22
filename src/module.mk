@@ -18,6 +18,7 @@ BORIS_SRCS += \
 	src/form.c \
 	src/freelist.c \
 	src/game.c \
+	src/hashtable.c \
 	src/login.c \
 	src/menu.c \
 	src/telnetclient.c \
@@ -33,3 +34,11 @@ INCLUDES += \
 	-Isrc/task \
 	-Isrc/worldclock \
 	-Isrc/web/server
+
+# --- Test targets ---
+TEST_SRCS += src/test_hashtable.c
+TEST_BINS += $(BINDIR)/test_hashtable
+TEST_HT_OBJS := $(BUILDDIR)/src/test_hashtable.o $(BUILDDIR)/src/log/log.o
+
+$(BINDIR)/test_hashtable: $(TEST_HT_OBJS) | $(BINDIR)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
