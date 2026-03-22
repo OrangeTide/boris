@@ -25,6 +25,7 @@
 #include "character.h"
 #include "boris.h"
 #include "freelist.h"
+#include "hashtable.h"
 #include "muddb.h"
 #include "obj.h"
 
@@ -77,8 +78,14 @@ static const struct {
 	{"room.home", VALUE_TYPE_UINT, offsetof(struct character, room_home), },
 };
 
-/** list of all loaded characters. */
-static struct character_cache character_cache;
+/** all loaded characters, keyed by id for O(1) lookup. */
+static struct ht_uint character_ht;
+
+/** LRU list of unreferenced characters (refcount == 0). head is most recent. */
+static struct character_cache character_lru;
+
+/** number of unreferenced characters sitting in the LRU. */
+static unsigned character_lru_count;
 
 static struct freelist *character_id_freelist;
 /******************************************************************************
@@ -87,6 +94,7 @@ static struct freelist *character_id_freelist;
 
 /**
  * deallocate a character structure immediately.
+ * removes from hash table and LRU list.
  */
 static void
 character_ll_free(struct character *ch)
@@ -97,8 +105,11 @@ character_ll_free(struct character *ch)
 
 	if (!ch) return;
 
+	ht_uint_del(&character_ht, ch->id);
 	LIST_REMOVE(ch, character_cache);
 	LIST_ENTRY_INIT(ch, character_cache);
+	if (ch->refcount <= 0 && character_lru_count > 0)
+		character_lru_count--;
 
 	for (i = 0; i < NR(attrinfo); i++) {
 		if (attrinfo[i].type == VALUE_TYPE_STRING) {
@@ -297,27 +308,50 @@ character_save(struct character *ch)
 	return 1;
 }
 
+/** evict the oldest unreferenced character from the LRU tail. */
+static void
+character_lru_evict_one(void)
+{
+	struct character *tail;
+
+	for (tail = LIST_TOP(character_lru); tail; tail = LIST_NEXT(tail, character_cache)) {
+		if (!LIST_NEXT(tail, character_cache))
+			break;
+	}
+
+	if (tail) {
+		character_save(tail);
+		character_ll_free(tail);
+	}
+}
+
 /**
- * load character into active list, if not already loaded, then increase
+ * load character into cache, if not already loaded, then increase
  * reference count of character.
  */
-struct character *character_get(unsigned character_id)
+struct character *
+character_get(unsigned character_id)
 {
 	struct character *curr;
 
-	/* look for character in the cache. */
-	for (curr = LIST_TOP(character_cache); curr; curr = LIST_NEXT(curr, character_cache)) {
-		if (curr->id == character_id) break;
-	}
+	/* O(1) hash table lookup. */
+	curr = ht_uint_get(&character_ht, character_id);
 
 	if (!curr) {
-		/* not in the cache? load the character. */
+		/* not in the cache -- load from database. */
 		curr = character_load(character_id);
+		if (curr) {
+			ht_uint_set(&character_ht, character_id, curr);
+		}
 	}
 
 	if (curr) {
-		/* place entry at the top of the cache. */
-		LIST_INSERT_HEAD(&character_cache, curr, character_cache);
+		if (curr->refcount == 0 && character_lru_count > 0) {
+			/* moving from LRU to active -- remove from LRU list */
+			LIST_REMOVE(curr, character_cache);
+			LIST_ENTRY_INIT(curr, character_cache);
+			character_lru_count--;
+		}
 		curr->refcount++;
 	}
 
@@ -330,6 +364,8 @@ struct character *character_get(unsigned character_id)
 
 /**
  * reduce reference count of character.
+ * when refcount hits zero the character moves to the LRU list instead of
+ * being freed immediately. the LRU is capped by cache.character.size.
  */
 void
 character_put(struct character *ch)
@@ -338,14 +374,20 @@ character_put(struct character *ch)
 
 	ch->refcount--;
 
-	/* TODO: hold onto the character longer to support caching. */
 	if (ch->refcount <= 0) {
 		character_save(ch);
-		character_ll_free(ch);
+		/* move to head of LRU (most recently used) */
+		LIST_INSERT_HEAD(&character_lru, ch, character_cache);
+		character_lru_count++;
+
+		/* evict oldest if over the cap */
+		while (character_lru_count > mud_config.character_cache_size)
+			character_lru_evict_one();
 	}
 }
 
-struct character *character_new(void)
+struct character *
+character_new(void)
 {
 	struct character *ret;
 	long id;
@@ -359,7 +401,7 @@ struct character *character_new(void)
 
 	if (id < 0) {
 		LOG_CRITICAL("could not allocate new character id.");
-		character_ll_free(ret);
+		free(ret);
 		return NULL;
 	}
 
@@ -369,8 +411,8 @@ struct character *character_new(void)
 	ret->dirty_fl = 1;
 	character_save(ret);
 
-	/* place entry at the top of the cache. */
-	LIST_INSERT_HEAD(&character_cache, ret, character_cache);
+	/* insert into hash table and bump refcount. */
+	ht_uint_set(&character_ht, ret->id, ret);
 	ret->refcount++;
 
 	return ret;
@@ -441,6 +483,9 @@ int
 character_initialize(void)
 {
 	LOG_INFO("Character sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	LIST_INIT(&character_lru);
+	ht_uint_init(&character_ht, 64);
+
 	character_id_freelist = freelist_new(1, ID_MAX);
 	if (!character_id_freelist) {
 		LOG_CRITICAL("could not allocate IDs!");
@@ -456,12 +501,33 @@ character_initialize(void)
 	return 0;
 }
 
-/**
- *
- */
 void
 character_shutdown(void)
 {
+	struct character *curr;
+	unsigned i;
+
 	LOG_INFO("Character sub-system shutting down...");
+
+	/* flush LRU list -- all unreferenced characters */
+	while ((curr = LIST_TOP(character_lru))) {
+		character_save(curr);
+		character_ll_free(curr);
+	}
+
+	/* scan hash table for any characters still held by reference */
+	for (i = 0; i < character_ht.capacity; i++) {
+		struct ht_uint_entry *e = &character_ht.buckets[i];
+		if (e->occupied) {
+			curr = e->value;
+			LOG_ERROR("character \"%u\" still in use at shutdown (refcount %d)",
+				curr->id, curr->refcount);
+			character_save(curr);
+		}
+	}
+
+	ht_uint_free(&character_ht);
+	character_lru_count = 0;
+
 	LOG_INFO("Character sub-system ended.");
 }

@@ -24,6 +24,7 @@
 
 #include "room.h"
 #include "boris.h"
+#include "hashtable.h"
 #include "list.h"
 #include "muddb.h"
 #include "obj.h"
@@ -64,8 +65,14 @@ LIST_HEAD(struct room_cache, struct room);
  * Globals
  ******************************************************************************/
 
-/** list of all loaded rooms. */
-static struct room_cache room_cache;
+/** all loaded rooms, keyed by id for O(1) lookup. */
+static struct ht_uint room_ht;
+
+/** LRU list of unreferenced rooms (refcount == 0). head is most recent. */
+static struct room_cache room_lru;
+
+/** number of unreferenced rooms sitting in the LRU. */
+static unsigned room_lru_count;
 
 /******************************************************************************
  * Functions
@@ -73,14 +80,18 @@ static struct room_cache room_cache;
 
 /**
  * deallocate a room structure immediately.
+ * removes from hash table and LRU list.
  */
 static void
 room_ll_free(struct room *r)
 {
 	assert(r != NULL);
 
+	ht_uint_del(&room_ht, r->id);
 	LIST_REMOVE(r, room_cache);
 	LIST_ENTRY_INIT(r, room_cache);
+	if (r->refcount <= 0 && room_lru_count > 0)
+		room_lru_count--;
 
 	free(r->name.short_str);
 	r->name.short_str = NULL;
@@ -300,11 +311,30 @@ room_save(struct room *r)
 	return 1;
 }
 
+/** evict the oldest unreferenced room from the LRU tail. */
+static void
+room_lru_evict_one(void)
+{
+	struct room *tail;
+
+	/* walk backward from head to find the tail (oldest entry) */
+	for (tail = LIST_TOP(room_lru); tail; tail = LIST_NEXT(tail, room_cache)) {
+		if (!LIST_NEXT(tail, room_cache))
+			break;
+	}
+
+	if (tail) {
+		room_save(tail);
+		room_ll_free(tail);
+	}
+}
+
 /**
  * load room into cache, if not already loaded, then increase reference count
  * of room.
  */
-struct room *room_get(unsigned room_id)
+struct room *
+room_get(unsigned room_id)
 {
 	struct room *curr;
 
@@ -312,19 +342,24 @@ struct room *room_get(unsigned room_id)
 	if (!room_id)
 		return NULL;
 
-	/* look for room in the cache. */
-	for (curr = LIST_TOP(room_cache); curr; curr = LIST_NEXT(curr, room_cache)) {
-		if (curr->id == room_id) break;
-	}
+	/* O(1) hash table lookup. */
+	curr = ht_uint_get(&room_ht, room_id);
 
 	if (!curr) {
-		/* not in the cache? load the room. */
+		/* not in the cache -- load from database. */
 		curr = room_load(room_id);
+		if (curr) {
+			ht_uint_set(&room_ht, room_id, curr);
+		}
 	}
 
 	if (curr) {
-		/* place entry at the top of the cache. */
-		LIST_INSERT_HEAD(&room_cache, curr, room_cache);
+		if (curr->refcount == 0 && room_lru_count > 0) {
+			/* moving from LRU to active -- remove from LRU list */
+			LIST_REMOVE(curr, room_cache);
+			LIST_ENTRY_INIT(curr, room_cache);
+			room_lru_count--;
+		}
 		curr->refcount++;
 	}
 
@@ -337,6 +372,8 @@ struct room *room_get(unsigned room_id)
 
 /**
  * reduce reference count of room.
+ * when refcount hits zero the room moves to the LRU list instead of
+ * being freed immediately. the LRU is capped by cache.room.size.
  */
 void
 room_put(struct room *r)
@@ -345,10 +382,15 @@ room_put(struct room *r)
 
 	r->refcount--;
 
-	/* TODO: hold onto the room longer to support caching. */
 	if (r->refcount <= 0) {
 		room_save(r);
-		room_ll_free(r);
+		/* move to head of LRU (most recently used) */
+		LIST_INSERT_HEAD(&room_lru, r, room_cache);
+		room_lru_count++;
+
+		/* evict oldest if over the cap */
+		while (room_lru_count > mud_config.room_cache_size)
+			room_lru_evict_one();
 	}
 }
 
@@ -359,7 +401,8 @@ room_initialize(void)
 	const char *id;
 
 	LOG_INFO("Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
-	LIST_INIT(&room_cache);
+	LIST_INIT(&room_lru);
+	ht_uint_init(&room_ht, 64);
 
 	it = muddb_iter_begin(mud_db, DOMAIN_ROOM);
 
@@ -390,7 +433,21 @@ room_initialize(void)
 			return -1; /* could not load */
 		}
 
-		room_ll_free(r);
+		/* preflight only -- don't keep in cache */
+		free(r->name.short_str);
+		r->name.short_str = NULL;
+		free(r->name.long_str);
+		r->name.long_str = NULL;
+		free(r->desc.short_str);
+		r->desc.short_str = NULL;
+		free(r->desc.long_str);
+		r->desc.long_str = NULL;
+		free(r->owner);
+		r->owner = NULL;
+		free(r->creator);
+		r->creator = NULL;
+		attr_list_free(&r->extra_values);
+		free(r);
 	}
 
 	muddb_iter_end(it);
@@ -402,30 +459,29 @@ void
 room_shutdown(void)
 {
 	struct room *curr;
-	struct room_cache blocked_cache;
+	unsigned i;
 
 	LOG_INFO("Room system shutting down..");
 
-	/* save all dirty objects and free all data. */
-	LIST_INIT(&blocked_cache); /* keep a temporary list of unfreed rooms */
-
-	while ((curr = LIST_TOP(room_cache))) {
-		LIST_REMOVE(curr, room_cache);
+	/* flush LRU list -- all unreferenced rooms */
+	while ((curr = LIST_TOP(room_lru))) {
 		room_save(curr);
+		room_ll_free(curr);
+	}
 
-		/* check to make sure no rooms are still in use. */
-		if (curr->refcount > 0) {
-			LOG_ERROR("cannot shut down, room \"%u\" still in use.", curr->id);
-			LIST_INSERT_HEAD(&blocked_cache, curr, room_cache);
-		} else {
-			room_ll_free(curr);
+	/* scan hash table for any rooms still held by reference */
+	for (i = 0; i < room_ht.capacity; i++) {
+		struct ht_uint_entry *e = &room_ht.buckets[i];
+		if (e->occupied) {
+			curr = e->value;
+			LOG_ERROR("room \"%u\" still in use at shutdown (refcount %d)",
+				curr->id, curr->refcount);
+			room_save(curr);
 		}
 	}
 
-	if (LIST_TOP(blocked_cache)) {
-		/* we could not free these rooms, sorry! */
-		room_cache = blocked_cache;
-	}
+	ht_uint_free(&room_ht);
+	room_lru_count = 0;
 
 	LOG_INFO("Room system ended.");
 }

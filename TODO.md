@@ -27,27 +27,20 @@ testing, caching, and longer-term features.
  * stackvm/kernel/prioq_test.c exists but is incomplete.
 
 
-## P3 -- caching
+## P3 -- caching (done)
 
-   Room and character caches use a linked list with refcount.
-   Objects are freed immediately at refcount 0. All three items
-   below should be designed with eventual multithreading in mind
-   (shared caches will need a mutex or rwlock).
+   Room and character caches use an open-addressing hash table
+   (hashtable.c) for O(1) lookup by ID, with an LRU list for
+   unreferenced objects. Configurable via cache.room.size and
+   cache.character.size in boris.cfg (default 128). Help topics
+   are cached in a string-keyed hash table on first access,
+   invalidated by SIGHUP. The hash table is the single point
+   of locking when multithreading is added later.
 
- * room.c / character.c: hold objects in cache after refcount
-   hits 0 instead of freeing immediately. use an LRU eviction
-   policy with a configurable cap. avoids repeated muddb reads
-   for frequently accessed rooms/characters.
+   character_shutdown now properly drains its cache and saves
+   dirty objects (was a no-op before).
 
- * room.c / character.c: replace linear list scan in _get()
-   with a hash table keyed by id. O(1) lookup instead of O(n).
-   the hash table becomes the single point of locking when
-   multithreaded.
-
- * help.c: loads from disk on every help_show() call. cache
-   file contents in a hash table on first access (topics are
-   small, few dozen files). invalidate on SIGHUP or similar
-   for live editing.
+   Covered by test_hashtable (58 tests).
 
 
 ## P4 -- longer term
