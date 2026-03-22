@@ -34,7 +34,8 @@
 #include <sha1crypt.h>
 #include <acs.h>
 #include <freelist.h>
-#include <fdb.h>
+#include <muddb.h>
+#include <obj.h>
 #include <user.h>
 
 /** default level for new users. */
@@ -215,50 +216,73 @@ static struct user *
 user_load_byname(const char *username, int id_already_exists)
 {
 	struct user *u;
-	struct fdb_read_handle *h;
-	const char *name, *value;
+	OBJ *obj;
+	const char *val;
 
 	if (user_illegal(username)) {
 		LOG_ERROR("Refusing to load illegal user name [%s]", username);
 		return NULL;
 	}
 
-	h = fdb_read_begin("users", username);
+	obj = muddb_get(mud_db, "users", username);
 
-	if (!h) {
+	if (!obj) {
 		LOG_ERROR("Could not find user \"%s\"", username);
-		return 0; /* failure. */
+		return NULL;
 	}
 
-	u = user_defaults(); /* allocate a default struct */
+	u = user_defaults();
 
 	if (!u) {
 		LOG_ERROR("Could not allocate user structure");
-		fdb_read_end(h);
-		return 0; /* failure */
+		obj_free(obj);
+		return NULL;
 	}
 
-	while (fdb_read_next(h, &name, &value)) {
-		if (!strcasecmp("id", name))
-			parse_uint(name, value, &u->id);
-		else if (!strcasecmp("username", name))
-			parse_str(name, value, &u->username);
-		else if (!strcasecmp("pwcrypt", name))
-			parse_str(name, value, &u->password_crypt);
-		else if (!strcasecmp("email", name))
-			parse_str(name, value, &u->email);
-		else if (!strcasecmp("acs.level", name))
-			sscanf(value, "%hhu", &u->acs.level); /* TODO: add error checking. */
-		else if (!strcasecmp("acs.flags", name))
-			parse_uint(name, value, &u->acs.flags);
-		else
-			parse_attr(name, value, &u->extra_values);
+	/* extract known fields */
+	val = obj_prop_get(obj, "id");
+	if (val)
+		parse_uint("id", val, &u->id);
+
+	val = obj_prop_get(obj, "username");
+	if (val)
+		parse_str("username", val, &u->username);
+
+	val = obj_prop_get(obj, "pwcrypt");
+	if (val)
+		parse_str("pwcrypt", val, &u->password_crypt);
+
+	val = obj_prop_get(obj, "email");
+	if (val)
+		parse_str("email", val, &u->email);
+
+	val = obj_prop_get(obj, "acs.level");
+	if (val)
+		sscanf(val, "%hhu", &u->acs.level);
+
+	val = obj_prop_get(obj, "acs.flags");
+	if (val)
+		parse_uint("acs.flags", val, &u->acs.flags);
+
+	/* collect unknown fields into extra_values */
+	{
+		OBJ_ITER *it = obj_iter_begin(obj);
+		const char *key, *v;
+
+		while (obj_iter_next(it, &key, &v)) {
+			if (!strcasecmp(key, "id") ||
+			    !strcasecmp(key, "username") ||
+			    !strcasecmp(key, "pwcrypt") ||
+			    !strcasecmp(key, "email") ||
+			    !strcasecmp(key, "acs.level") ||
+			    !strcasecmp(key, "acs.flags"))
+				continue;
+			parse_attr(key, v, &u->extra_values);
+		}
+		obj_iter_end(it);
 	}
 
-	if (!fdb_read_end(h)) {
-		LOG_ERROR("Error loading user \"%s\"", username);
-		goto failure;
-	}
+	obj_free(obj);
 
 	if (u->id <= 0) {
 		LOG_ERROR("User id for user '%s' was not set or set to zero.", username);
@@ -266,11 +290,9 @@ user_load_byname(const char *username, int id_already_exists)
 	}
 
 	if (!u->username || strcasecmp(username, u->username)) {
-		LOG_ERROR("User name field for user '%s' was not set or does not math.", username);
+		LOG_ERROR("User name field for user '%s' was not set or does not match.", username);
 		goto failure;
 	}
-
-	/** @todo check all fields of u to verify they are correct. */
 
 	if (!id_already_exists) {
 		if (!freelist_thwack(user_id_freelist, u->id, 1)) {
@@ -288,39 +310,47 @@ failure:
 	return NULL; /* failure */
 }
 
-/** write a user file. */
+/** write a user record. */
 static int
 user_write(const struct user *u)
 {
-	struct fdb_write_handle *h;
+	OBJ *obj;
 	struct attr_entry *curr;
+	char buf[32];
 
 	assert(u != NULL);
 	assert(u->username != NULL);
 
-	h = fdb_write_begin("users", u->username);
+	obj = obj_new(u->username);
 
-	if (!h) {
+	if (!obj) {
 		LOG_ERROR("Could not write user \"%s\"", u->username);
 		return 0;
 	}
 
-	fdb_write_format(h, "id", "%u", u->id);
-	fdb_write_pair(h, "username", u->username);
-	fdb_write_pair(h, "pwcrypt", u->password_crypt);
-	fdb_write_pair(h, "email", u->email);
-	fdb_write_format(h, "acs.level", "%u", u->acs.level);
-	fdb_write_format(h, "acs.flags", "0x%08x", u->acs.flags);
+	snprintf(buf, sizeof(buf), "%u", u->id);
+	obj_prop_set(obj, "id", buf);
+	obj_prop_set(obj, "username", u->username);
+	if (u->password_crypt)
+		obj_prop_set(obj, "pwcrypt", u->password_crypt);
+	if (u->email)
+		obj_prop_set(obj, "email", u->email);
+	snprintf(buf, sizeof(buf), "%u", (unsigned)u->acs.level);
+	obj_prop_set(obj, "acs.level", buf);
+	snprintf(buf, sizeof(buf), "0x%08x", u->acs.flags);
+	obj_prop_set(obj, "acs.flags", buf);
 
 	for (curr = LIST_TOP(u->extra_values); curr; curr = LIST_NEXT(curr, list)) {
-		fdb_write_pair(h, curr->name, curr->value);
+		obj_prop_set(obj, curr->name, curr->value);
 	}
 
-	if (!fdb_write_end(h)) {
+	if (muddb_put(mud_db, "users", u->username, obj) != MUDDB_OK) {
 		LOG_ERROR("Could not write user \"%s\"", u->username);
-		return 0; /* failure. */
+		obj_free(obj);
+		return 0; /* failure */
 	}
 
+	obj_free(obj);
 	return 1; /* success */
 }
 
@@ -503,7 +533,7 @@ user_username(struct user *u)
 int
 user_init(void)
 {
-	struct fdb_iterator *it;
+	MUDDB_ITER *it;
 	const char *id;
 
 	LIST_INIT(&user_list);
@@ -514,40 +544,38 @@ user_init(void)
 		return 0;
 	}
 
-	fdb_domain_init("users");
-
-	it = fdb_iterator_begin("users");
+	it = muddb_iter_begin(mud_db, "users");
 
 	if (!it) {
-		return 0;
+		/* no users domain yet -- not an error on first run */
+		return 1;
 	}
 
-	/* scan for account files.
+	/* scan for account records.
 	 * loads full user record in memory cache.
 	 * This is important to find the in-use user IDs.
-	 * And confirms that files are not corrupted.
+	 * And confirms that records are not corrupted.
 	 */
 
-	while ((id = fdb_iterator_next(it))) {
+	while ((id = muddb_iter_next(it))) {
 		struct user *u;
 
 		LOG_DEBUG("Found user record '%s'", id);
 
-		/* Load user file */
 		u = user_load_byname(id, 0);
 
 		if (!u) {
-			LOG_ERROR("Could not load user from file '%s'", id);
+			LOG_ERROR("Could not load user from record '%s'", id);
 			goto failure;
 		}
 
 		user_cache_add(u);
 	}
 
-	fdb_iterator_end(it);
+	muddb_iter_end(it);
 	return 1; /* success */
 failure:
-	fdb_iterator_end(it);
+	muddb_iter_end(it);
 	return 0; /* failure */
 }
 
