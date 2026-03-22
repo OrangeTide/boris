@@ -40,6 +40,9 @@
 
 #define DYAD_VERSION "0.2.1"
 
+#define DYAD_MAX_LINEBUFFER   (64 * 1024)
+#define DYAD_MAX_WRITEBUFFER  (1024 * 1024)
+
 
 #ifdef _WIN32
   #define close(a) closesocket(a)
@@ -306,7 +309,7 @@ static double dyad_lastTick = 0;
 static void panic(const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
-  vsprintf(dyad_panicMsgBuffer, fmt, args);
+  vsnprintf(dyad_panicMsgBuffer, sizeof(dyad_panicMsgBuffer), fmt, args);
   va_end(args);
   if (panicCallback) {
     panicCallback(dyad_panicMsgBuffer);
@@ -355,8 +358,9 @@ static void updateTickTimer(void) {
     e.msg = "a tick has occured";
     stream = dyad_streams;
     while (stream) {
+      dyad_Stream *next = stream->next;
       stream_emitEvent(stream, &e);
-      stream = stream->next;
+      stream = next;
     }
     dyad_lastTick += dyad_tickInterval;
   }
@@ -370,13 +374,14 @@ static void updateStreamTimeouts(void) {
   e.msg = "stream timed out";
   stream = dyad_streams;
   while (stream) {
+    dyad_Stream *next = stream->next;
     if (stream->timeout) {
       if (currentTime - stream->lastActivity > stream->timeout) {
         stream_emitEvent(stream, &e);
         dyad_close(stream);
       }
     }
-    stream = stream->next;
+    stream = next;
   }
 }
 
@@ -435,7 +440,7 @@ static void stream_error(dyad_Stream *stream, const char *msg, int err) {
   char buf[256];
   dyad_Event e = createEvent(DYAD_EVENT_ERROR);
   if (err) {
-    sprintf(buf, "%.160s (%.80s)", msg, strerror(err));
+    snprintf(buf, sizeof(buf), "%.160s (%.80s)", msg, strerror(err));
     e.msg = buf;
   } else {
     e.msg = msg;
@@ -551,6 +556,10 @@ static void stream_handleReceivedData(dyad_Stream *stream) {
     if (stream_hasListenerForEvent(stream, DYAD_EVENT_LINE)) {
       int i, start;
       char *buf;
+      if (stream->lineBuffer.length + size > DYAD_MAX_LINEBUFFER) {
+        stream_error(stream, "line buffer overflow", 0);
+        return;
+      }
       for (i = 0; i < size; i++) {
         vec_push(&stream->lineBuffer, data[i]);
       }
@@ -736,6 +745,7 @@ void dyad_update(void) {
   /* Handle streams */
   stream = dyad_streams;
   while (stream) {
+    dyad_Stream *next = stream->next;
     switch (stream->state) {
 
       case DYAD_STATE_CONNECTED:
@@ -761,7 +771,7 @@ void dyad_update(void) {
           dyad_Event e;
           getsockopt(stream->sockfd, SOL_SOCKET, SO_ERROR, &optval, &optlen);
           if (optval != 0) goto connectFailed;
-          /* Handle succeselful connection */
+          /* Handle successful connection */
           stream->state = DYAD_STATE_CONNECTED;
           stream->lastActivity = dyad_getTime();
           stream_initAddress(stream);
@@ -794,7 +804,7 @@ connectFailed:
       stream_flushWriteBuffer(stream);
     }
 
-    stream = stream->next;
+    stream = next;
   }
 }
 
@@ -923,6 +933,14 @@ void dyad_removeAllListeners(dyad_Stream *stream, int event) {
 }
 
 
+/* Two-phase stream lifecycle:
+ * 1. dyad_close() marks the stream CLOSED, closes the socket, and emits the
+ *    CLOSE event -- but the stream remains in the linked list. This is safe
+ *    to call from any callback (e.g. an admin force-closing another player).
+ * 2. destroyClosedStreams(), called at the top of dyad_update(), reaps all
+ *    CLOSED streams: removes them from the list and frees their memory.
+ * Because close never unlinks, saved next-pointers stay valid for the rest
+ * of the current dyad_update() pass. */
 void dyad_close(dyad_Stream *stream) {
   dyad_Event e;
   if (stream->state == DYAD_STATE_CLOSED) return;
@@ -1042,6 +1060,10 @@ fail:
 
 void dyad_write(dyad_Stream *stream, const void *data, int size) {
   const char *p = data;
+  if (stream->writeBuffer.length + size > DYAD_MAX_WRITEBUFFER) {
+    stream_error(stream, "write buffer overflow", 0);
+    return;
+  }
   while (size--) {
     vec_push(&stream->writeBuffer, *p++);
   }
