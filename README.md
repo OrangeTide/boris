@@ -149,9 +149,7 @@ Either stop the other process or change `server.port` in `boris.cfg` to an unuse
 
 ## Development
 
-To run tests:
-
-***TODO***: add `make tests` to the build.
+See [DEV.md](DEV.md) for architecture, build system internals, code patterns, and contributor information.
 
 ## Support
 
