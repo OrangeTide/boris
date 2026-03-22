@@ -30,7 +30,6 @@
 #include <channel.h>
 #include <character.h>
 #include <eventlog.h>
-#include <fdb.h>
 #include <muddb.h>
 #include <room.h>
 #define LOG_SUBSYSTEM "server"
@@ -265,13 +264,6 @@ main(int argc, char **argv)
 	}
 
 	atexit(log_done);
-
-	if (fdb_initialize()) {
-		LOG_ERROR("could not load database");
-		return EXIT_FAILURE;
-	}
-
-	atexit(fdb_shutdown);
 
 	mud_db = muddb_open("data/muddb", 0);
 	if (!mud_db) {

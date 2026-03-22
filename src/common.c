@@ -129,7 +129,6 @@
 #include <log.h>
 #include "debug.h"
 #include "eventlog.h"
-#include "fdb.h"
 #include "freelist.h"
 #include "list.h"
 #include "sha1.h"
