@@ -24,6 +24,9 @@ TEST_SRCS   :=
 TEST_BINS   :=
 INCLUDES    := -Isrc/thirdparty/jsmn
 
+# --- Default target (must precede module.mk includes that define rules) -----
+.DEFAULT_GOAL := all
+
 # --- Include all modules ----------------------------------------------------
 include src/module.mk
 include src/thirdparty/dyad/module.mk
@@ -66,7 +69,7 @@ tests: $(TEST_BINS)
 	@for t in $(TEST_BINS); do echo "--- Running $$t ---"; ./$$t || exit 1; done
 
 $(BINDIR)/boris: $(BORIS_OBJS) | $(BINDIR)
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) -lz
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) -lz -lcrypto
 
 $(BINDIR)/mkpass: $(MKPASS_OBJS) | $(BINDIR)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
