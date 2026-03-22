@@ -60,7 +60,7 @@ use `#include "source.c"` for internal access and print
 
 Current test suites:
 - `bin/test_obj` -- OBJ mutable JSON objects (77 tests)
-- `bin/test_muddb` -- LMDB persistence layer (29 tests)
+- `bin/test_muddb` -- LMDB persistence layer (39 tests)
 
 `make smoke` starts the server in a temporary directory and exercises telnet
 login flows via expect. Requires `expect` (`apt install expect` on

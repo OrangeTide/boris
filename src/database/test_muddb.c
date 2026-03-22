@@ -197,6 +197,79 @@ test_iteration(void)
 }
 
 static void
+test_missing_domain(void)
+{
+	MUDDB *db = muddb_open(tmpdir, 0);
+	check("missing_dom: open", db != NULL);
+	if (!db) return;
+
+	/* get on nonexistent domain returns NULL */
+	OBJ *got = muddb_get(db, "no_such_domain", "key1");
+	check("missing_dom: get returns null", got == NULL);
+
+	/* iter on nonexistent domain returns NULL */
+	MUDDB_ITER *it = muddb_iter_begin(db, "no_such_domain");
+	check("missing_dom: iter returns null", it == NULL);
+
+	muddb_close(db);
+}
+
+static void
+test_delete_missing_key(void)
+{
+	MUDDB *db = muddb_open(tmpdir, 0);
+	check("del_missing: open", db != NULL);
+	if (!db) return;
+
+	/* put one key so the domain exists */
+	OBJ *obj = obj_new_from_json("x", "{\"v\":\"1\"}");
+	muddb_put(db, "del_test", "exists", obj);
+	obj_free(obj);
+
+	/* delete a key that was never written */
+	int rc = muddb_del(db, "del_test", "ghost");
+	check("del_missing: returns ok", rc == MUDDB_OK);
+
+	/* original key still intact */
+	OBJ *got = muddb_get(db, "del_test", "exists");
+	check("del_missing: other key intact", got != NULL);
+	obj_free(got);
+
+	muddb_close(db);
+}
+
+static void
+test_reopen(void)
+{
+	MUDDB *db = muddb_open(tmpdir, 0);
+	check("reopen: open first", db != NULL);
+	if (!db) return;
+
+	OBJ *obj = obj_new_from_json("r1",
+		"{\"name\":\"Persistent\"}");
+	muddb_put(db, "reopen_test", "r1", obj);
+	obj_free(obj);
+
+	muddb_close(db);
+
+	/* reopen and verify data survived */
+	db = muddb_open(tmpdir, 0);
+	check("reopen: open second", db != NULL);
+	if (!db) return;
+
+	OBJ *got = muddb_get(db, "reopen_test", "r1");
+	check("reopen: data persisted", got != NULL);
+	if (got) {
+		char *name = obj_prop_get(got, "name");
+		check("reopen: value intact",
+			name != NULL && strcmp(name, "Persistent") == 0);
+		obj_free(got);
+	}
+
+	muddb_close(db);
+}
+
+static void
 test_multiple_domains(void)
 {
 	MUDDB *db = muddb_open(tmpdir, 0);
@@ -257,6 +330,9 @@ main(void)
 	test_overwrite();
 	test_delete();
 	test_missing_key();
+	test_missing_domain();
+	test_delete_missing_key();
+	test_reopen();
 	test_iteration();
 	test_multiple_domains();
 
