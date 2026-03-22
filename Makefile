@@ -38,6 +38,7 @@ include src/help/module.mk
 include src/web/module.mk
 include src/obj/module.mk
 include src/database/module.mk
+include src/tests/module.mk
 
 # --- Derive object lists ----------------------------------------------------
 BORIS_OBJS  := $(patsubst %.c,$(BUILDDIR)/%.o,$(BORIS_SRCS))

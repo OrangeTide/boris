@@ -53,6 +53,8 @@ Current test suites:
 - `bin/test_obj` -- OBJ copy-on-write JSON objects (78 tests)
 - `bin/test_muddb` -- LMDB persistence layer (29 tests)
 
+`make smoke` starts the server in a temporary directory and exercises telnet login flows via expect. Requires `expect` (`apt install expect` on Debian/Ubuntu, `apk add expect` on Alpine). Test cases: connect and quit, bad credentials rejection, new user creation and login.
+
 ## Architecture
 
 Boris MUD is a C99 multi-user dungeon server supporting both TELNET and WebSocket clients simultaneously.
