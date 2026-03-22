@@ -25,7 +25,9 @@
 #include "character.h"
 #include "boris.h"
 #include "freelist.h"
-#include "fdb.h"
+#include "hashtable.h"
+#include "muddb.h"
+#include "obj.h"
 
 #define LOG_SUBSYSTEM "character"
 #include "log.h"
@@ -76,8 +78,14 @@ static const struct {
 	{"room.home", VALUE_TYPE_UINT, offsetof(struct character, room_home), },
 };
 
-/** list of all loaded characters. */
-static struct character_cache character_cache;
+/** all loaded characters, keyed by id for O(1) lookup. */
+static struct ht_uint character_ht;
+
+/** LRU list of unreferenced characters (refcount == 0). head is most recent. */
+static struct character_cache character_lru;
+
+/** number of unreferenced characters sitting in the LRU. */
+static unsigned character_lru_count;
 
 static struct freelist *character_id_freelist;
 /******************************************************************************
@@ -86,6 +94,7 @@ static struct freelist *character_id_freelist;
 
 /**
  * deallocate a character structure immediately.
+ * removes from hash table and LRU list.
  */
 static void
 character_ll_free(struct character *ch)
@@ -96,8 +105,11 @@ character_ll_free(struct character *ch)
 
 	if (!ch) return;
 
+	ht_uint_del(&character_ht, ch->id);
 	LIST_REMOVE(ch, character_cache);
 	LIST_ENTRY_INIT(ch, character_cache);
+	if (ch->refcount <= 0 && character_lru_count > 0)
+		character_lru_count--;
 
 	for (i = 0; i < NR(attrinfo); i++) {
 		if (attrinfo[i].type == VALUE_TYPE_STRING) {
@@ -182,22 +194,24 @@ character_attr_get(struct character *ch, const char *name)
 }
 
 /**
- * load a character from fdb.
+ * load a character from the database.
  */
 static struct character *
 character_load(unsigned character_id)
 {
 	struct character *ch;
-	struct fdb_read_handle *h;
-	const char *name, *value;
+	char numbuf[22];
+	OBJ *obj;
 
 	assert(character_id > 0);
 
 	if (character_id <= 0) return NULL;
 
-	h = fdb_read_begin_uint(DOMAIN_CHARACTER, character_id);
+	snprintf(numbuf, sizeof numbuf, "%u", character_id);
 
-	if (!h) {
+	obj = muddb_get(mud_db, DOMAIN_CHARACTER, numbuf);
+
+	if (!obj) {
 		LOG_ERROR("could not load character \"%u\"", character_id);
 		return NULL;
 	}
@@ -205,20 +219,28 @@ character_load(unsigned character_id)
 	ch = character_ll_alloc();
 
 	if (!ch) {
-		fdb_read_end(h);
+		obj_free(obj);
 		return NULL;
 	}
 
-	while (fdb_read_next(h, &name, &value)) {
-		if (!character_attr_set(ch, name, value)) {
-			LOG_ERROR("could not load character \"%u\"", character_id);
-			character_ll_free(ch);
-			fdb_read_end(h);
-			return NULL;
+	/* load all properties via character_attr_set */
+	{
+		OBJ_ITER *it = obj_iter_begin(obj);
+		const char *key, *value;
+
+		while (obj_iter_next(it, &key, &value)) {
+			if (!character_attr_set(ch, key, value)) {
+				LOG_ERROR("could not load character \"%u\"", character_id);
+				obj_iter_end(it);
+				character_ll_free(ch);
+				obj_free(obj);
+				return NULL;
+			}
 		}
+		obj_iter_end(it);
 	}
 
-	fdb_read_end(h);
+	obj_free(obj);
 
 	if (character_id != ch->id) {
 		LOG_ERROR("could not load character \"%u\" (bad, missing or mismatched id)", character_id);
@@ -236,16 +258,19 @@ int
 character_save(struct character *ch)
 {
 	struct attr_entry *curr;
-	struct fdb_write_handle *h;
+	OBJ *obj;
+	char numbuf[22];
 	unsigned i;
 
 	assert(ch != NULL);
 
 	if (!ch->dirty_fl) return 1; /* already saved - don't do it again. */
 
-	h = fdb_write_begin_uint(DOMAIN_CHARACTER, ch->id);
+	snprintf(numbuf, sizeof numbuf, "%u", ch->id);
 
-	if (!h) {
+	obj = obj_new(numbuf);
+
+	if (!obj) {
 		LOG_ERROR("could not save character \"%u\"", ch->id);
 		return 0; /* failure */
 	}
@@ -253,55 +278,80 @@ character_save(struct character *ch)
 	for (i = 0; i < NR(attrinfo); i++) {
 		void *base = ((char*)ch + attrinfo[i].ofs);
 
-		switch(attrinfo[i].type) {
+		switch (attrinfo[i].type) {
 		case VALUE_TYPE_UINT:
-			fdb_write_format(h, attrinfo[i].name, "%u", *(unsigned*)base);
+			snprintf(numbuf, sizeof numbuf, "%u", *(unsigned*)base);
+			obj_prop_set(obj, attrinfo[i].name, numbuf);
 			break;
 
 		case VALUE_TYPE_STRING:
 			if (*(char**)base)
-				fdb_write_pair(h, attrinfo[i].name, *(char**)base);
-
+				obj_prop_set(obj, attrinfo[i].name, *(char**)base);
 			break;
 		}
 	}
 
 	for (curr = LIST_TOP(ch->extra_values); curr; curr = LIST_NEXT(curr, list)) {
-		fdb_write_pair(h, curr->name, curr->value);
+		obj_prop_set(obj, curr->name, curr->value);
 	}
 
-	if (!fdb_write_end(h)) {
+	if (muddb_put(mud_db, DOMAIN_CHARACTER, numbuf, obj) != MUDDB_OK) {
 		LOG_ERROR("could not save character \"%u\"", ch->id);
+		obj_free(obj);
 		return 0; /* failure */
 	}
 
+	obj_free(obj);
 	ch->dirty_fl = 0;
 	LOG_INFO("saved character \"%u\"", ch->id);
 
 	return 1;
 }
 
+/** evict the oldest unreferenced character from the LRU tail. */
+static void
+character_lru_evict_one(void)
+{
+	struct character *tail;
+
+	for (tail = LIST_TOP(character_lru); tail; tail = LIST_NEXT(tail, character_cache)) {
+		if (!LIST_NEXT(tail, character_cache))
+			break;
+	}
+
+	if (tail) {
+		character_save(tail);
+		character_ll_free(tail);
+	}
+}
+
 /**
- * load character into active list, if not already loaded, then increase
+ * load character into cache, if not already loaded, then increase
  * reference count of character.
  */
-struct character *character_get(unsigned character_id)
+struct character *
+character_get(unsigned character_id)
 {
 	struct character *curr;
 
-	/* look for character in the cache. */
-	for (curr = LIST_TOP(character_cache); curr; curr = LIST_NEXT(curr, character_cache)) {
-		if (curr->id == character_id) break;
-	}
+	/* O(1) hash table lookup. */
+	curr = ht_uint_get(&character_ht, character_id);
 
 	if (!curr) {
-		/* not in the cache? load the character. */
+		/* not in the cache -- load from database. */
 		curr = character_load(character_id);
+		if (curr) {
+			ht_uint_set(&character_ht, character_id, curr);
+		}
 	}
 
 	if (curr) {
-		/* place entry at the top of the cache. */
-		LIST_INSERT_HEAD(&character_cache, curr, character_cache);
+		if (curr->refcount == 0 && character_lru_count > 0) {
+			/* moving from LRU to active -- remove from LRU list */
+			LIST_REMOVE(curr, character_cache);
+			LIST_ENTRY_INIT(curr, character_cache);
+			character_lru_count--;
+		}
 		curr->refcount++;
 	}
 
@@ -314,6 +364,8 @@ struct character *character_get(unsigned character_id)
 
 /**
  * reduce reference count of character.
+ * when refcount hits zero the character moves to the LRU list instead of
+ * being freed immediately. the LRU is capped by cache.character.size.
  */
 void
 character_put(struct character *ch)
@@ -322,14 +374,20 @@ character_put(struct character *ch)
 
 	ch->refcount--;
 
-	/* TODO: hold onto the character longer to support caching. */
 	if (ch->refcount <= 0) {
 		character_save(ch);
-		character_ll_free(ch);
+		/* move to head of LRU (most recently used) */
+		LIST_INSERT_HEAD(&character_lru, ch, character_cache);
+		character_lru_count++;
+
+		/* evict oldest if over the cap */
+		while (character_lru_count > mud_config.character_cache_size)
+			character_lru_evict_one();
 	}
 }
 
-struct character *character_new(void)
+struct character *
+character_new(void)
 {
 	struct character *ret;
 	long id;
@@ -343,7 +401,7 @@ struct character *character_new(void)
 
 	if (id < 0) {
 		LOG_CRITICAL("could not allocate new character id.");
-		character_ll_free(ret);
+		free(ret);
 		return NULL;
 	}
 
@@ -353,8 +411,8 @@ struct character *character_new(void)
 	ret->dirty_fl = 1;
 	character_save(ret);
 
-	/* place entry at the top of the cache. */
-	LIST_INSERT_HEAD(&character_cache, ret, character_cache);
+	/* insert into hash table and bump refcount. */
+	ht_uint_set(&character_ht, ret->id, ret);
 	ret->refcount++;
 
 	return ret;
@@ -366,17 +424,17 @@ struct character *character_new(void)
 static int
 character_preflight(void)
 {
-	struct fdb_iterator *it;
+	MUDDB_ITER *it;
 	const char *id;
 
-	it = fdb_iterator_begin(DOMAIN_CHARACTER);
+	it = muddb_iter_begin(mud_db, DOMAIN_CHARACTER);
 
 	if (!it) {
-		LOG_CRITICAL("could not load characters!");
-		return 0; /* could not load. */
+		/* no characters domain yet -- not an error on first run */
+		return 1;
 	}
 
-	while ((id = fdb_iterator_next(it))) {
+	while ((id = muddb_iter_next(it))) {
 		struct character *ch;
 		unsigned character_id;
 		char *endptr;
@@ -385,7 +443,7 @@ character_preflight(void)
 
 		if (*endptr) {
 			LOG_CRITICAL("character id \"%s\" is invalid!", id);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return 0; /* could not load */
 		}
 
@@ -393,7 +451,7 @@ character_preflight(void)
 
 		if (!ch) {
 			LOG_CRITICAL("could not load character id \"%u\"", character_id);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return 0; /* could not load */
 		}
 
@@ -401,39 +459,36 @@ character_preflight(void)
 		if (ch->id != character_id) {
 			LOG_CRITICAL("bad or non-matching character id \"%u\"", character_id);
 			character_ll_free(ch);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
+			return 0; /* could not load */
 		}
 
 		/* allocate id from the pool */
 		if (!freelist_thwack(character_id_freelist, ch->id, 1)) {
 			LOG_CRITICAL("bad or duplicate character id \"%u\"", character_id);
 			character_ll_free(ch);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return 0; /* could not load */
 		}
 
 		character_ll_free(ch);
 	}
 
-	fdb_iterator_end(it);
+	muddb_iter_end(it);
 
 	return 1; /* success */
 }
-/**
- *
- */
+
 int
 character_initialize(void)
 {
 	LOG_INFO("Character sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
+	LIST_INIT(&character_lru);
+	ht_uint_init(&character_ht, 64);
+
 	character_id_freelist = freelist_new(1, ID_MAX);
 	if (!character_id_freelist) {
 		LOG_CRITICAL("could not allocate IDs!");
-		return -1;
-	}
-
-	if (!fdb_domain_init(DOMAIN_CHARACTER)) {
-		LOG_CRITICAL("could not access database!");
 		return -1;
 	}
 
@@ -446,12 +501,33 @@ character_initialize(void)
 	return 0;
 }
 
-/**
- *
- */
 void
 character_shutdown(void)
 {
+	struct character *curr;
+	unsigned i;
+
 	LOG_INFO("Character sub-system shutting down...");
+
+	/* flush LRU list -- all unreferenced characters */
+	while ((curr = LIST_TOP(character_lru))) {
+		character_save(curr);
+		character_ll_free(curr);
+	}
+
+	/* scan hash table for any characters still held by reference */
+	for (i = 0; i < character_ht.capacity; i++) {
+		struct ht_uint_entry *e = &character_ht.buckets[i];
+		if (e->occupied) {
+			curr = e->value;
+			LOG_ERROR("character \"%u\" still in use at shutdown (refcount %d)",
+				curr->id, curr->refcount);
+			character_save(curr);
+		}
+	}
+
+	ht_uint_free(&character_ht);
+	character_lru_count = 0;
+
 	LOG_INFO("Character sub-system ended.");
 }
