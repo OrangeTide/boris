@@ -19,6 +19,7 @@ Information for developers working on Boris MUD.
 | src/crypt/             | SHA1 hash and base-64 encoding                           |
 | src/scrypt/            | scrypt key derivation for password hashing               |
 | src/passwd/            | Password crypt utility (mkpass)                          |
+| src/muddb-tool/        | muddb import/export CLI tool                             |
 | src/util/              | Miscellaneous utility functions                          |
 | src/worldclock/        | In-game time tracking                                    |
 | src/thirdparty/        | Third-party libraries (separate licenses)                |
@@ -28,6 +29,7 @@ Information for developers working on Boris MUD.
 | src/thirdparty/mth/    | MUD Telopt Handler (TELNET protocol)                     |
 | src/thirdparty/mongoose/| HTTP/WebSocket server                                   |
 | src/thirdparty/tiny-aes/| AES-256 block cipher (public domain, Unlicense)         |
+| sample/                | Starter database for new MUDs (import with muddb-tool)   |
 
 ## Build System
 

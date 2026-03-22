@@ -25,6 +25,7 @@ int muddb_del(MUDDB *db, const char *domain, const char *key);
 /* iteration -- returns keys within a domain */
 MUDDB_ITER *muddb_iter_begin(MUDDB *db, const char *domain);
 const char *muddb_iter_next(MUDDB_ITER *it);
+OBJ *muddb_iter_value(MUDDB_ITER *it);
 void muddb_iter_end(MUDDB_ITER *it);
 
 #endif
