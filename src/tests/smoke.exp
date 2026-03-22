@@ -1,0 +1,153 @@
+#!/usr/bin/expect -f
+# smoke.exp : expect script for boris telnet smoke tests
+#
+# Usage: smoke.exp <port> <test-name>
+#
+# Tests:
+#   menu_quit    - connect, see login menu, quit with Q
+#   bad_login    - connect, attempt login with bad creds, see error
+#   new_user     - create account, login, reach main menu
+
+set timeout 10
+set port [lindex $argv 0]
+set test [lindex $argv 1]
+
+log_user 0
+
+proc fail {msg} {
+	puts "FAIL: $msg"
+	exit 1
+}
+
+proc pass {msg} {
+	puts "PASS: $msg"
+}
+
+# connect to server
+spawn -noecho telnet 127.0.0.1 $port
+
+# every test starts by seeing the login menu
+expect {
+	"Login Menu" {}
+	timeout { fail "$test: no login menu" }
+	eof { fail "$test: connection closed before login menu" }
+}
+expect {
+	"Choose:" {}
+	timeout { fail "$test: no menu prompt" }
+}
+
+switch -- $test {
+	menu_quit {
+		send "Q\r"
+		expect {
+			eof { pass "menu_quit: connected and quit cleanly" }
+			timeout { fail "menu_quit: no disconnect after Q" }
+		}
+	}
+
+	bad_login {
+		send "L\r"
+		expect {
+			"Username:" {}
+			timeout { fail "bad_login: no username prompt" }
+		}
+		send "nosuchuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "bad_login: no password prompt" }
+		}
+		send "wrongpass\r"
+		expect {
+			-re "Invalid|invalid|Login Menu" {}
+			timeout { fail "bad_login: no invalid login response" }
+		}
+		# should return to login menu
+		expect {
+			"Choose:" {}
+			timeout { fail "bad_login: no menu prompt after failure" }
+		}
+		send "Q\r"
+		expect {
+			eof { pass "bad_login: rejected bad credentials" }
+			timeout { fail "bad_login: no disconnect after Q" }
+		}
+	}
+
+	new_user {
+		send "N\r"
+		expect {
+			"Username:" {}
+			timeout { fail "new_user: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "new_user: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"password again:" {}
+			timeout { fail "new_user: no confirm password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Email:" {}
+			timeout { fail "new_user: no email prompt" }
+		}
+		send "test@test.com\r"
+		# form shows a review screen, accept it
+		expect {
+			"accept" {}
+			timeout { fail "new_user: no review screen after form" }
+		}
+		expect {
+			"Pick:" {}
+			timeout { fail "new_user: no form prompt" }
+		}
+		send "A\r"
+		# after acceptance, expect account creation + login menu
+		expect {
+			-re "success|Login Menu" {}
+			timeout { fail "new_user: no response after accept" }
+		}
+		expect {
+			"Choose:" {}
+			timeout {}
+		}
+		send "L\r"
+		expect {
+			"Username:" {}
+			timeout { fail "new_user: no username prompt for login" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "new_user: no password prompt for login" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {
+				pass "new_user: created account and logged in"
+			}
+			-re "Invalid|invalid" {
+				fail "new_user: login rejected after account creation"
+			}
+			timeout { fail "new_user: no main menu after login" }
+		}
+		# quit from main menu
+		expect {
+			"Choose:" {}
+			timeout {}
+		}
+		send "Q\r"
+		expect {
+			eof {}
+			timeout {}
+		}
+	}
+
+	default {
+		fail "unknown test: $test"
+	}
+}

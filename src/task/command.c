@@ -253,8 +253,10 @@ command_do_help(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUS
 
 	arg = util_getword(arg, topic, sizeof(topic));
 	if (!arg) {
-		telnetclient_printf(cl, "usage: help <topic>\n");
-		return 0; /* failure */
+		telnetclient_puts(cl, "usage: help <topic>\n");
+		telnetclient_puts(cl, "See 'help commands' for a list of commands.\n");
+		telnetclient_puts(cl, "See 'help topics' for a list of help topics.\n");
+		return 1;
 	}
 
 	if (help_show(cl, topic) != HELP_OK) {

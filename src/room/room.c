@@ -24,8 +24,10 @@
 
 #include "room.h"
 #include "boris.h"
+#include "hashtable.h"
 #include "list.h"
-#include "fdb.h"
+#include "muddb.h"
+#include "obj.h"
 
 #define LOG_SUBSYSTEM "room"
 #include <log.h>
@@ -63,8 +65,14 @@ LIST_HEAD(struct room_cache, struct room);
  * Globals
  ******************************************************************************/
 
-/** list of all loaded rooms. */
-static struct room_cache room_cache;
+/** all loaded rooms, keyed by id for O(1) lookup. */
+static struct ht_uint room_ht;
+
+/** LRU list of unreferenced rooms (refcount == 0). head is most recent. */
+static struct room_cache room_lru;
+
+/** number of unreferenced rooms sitting in the LRU. */
+static unsigned room_lru_count;
 
 /******************************************************************************
  * Functions
@@ -72,14 +80,18 @@ static struct room_cache room_cache;
 
 /**
  * deallocate a room structure immediately.
+ * removes from hash table and LRU list.
  */
 static void
 room_ll_free(struct room *r)
 {
 	assert(r != NULL);
 
+	ht_uint_del(&room_ht, r->id);
 	LIST_REMOVE(r, room_cache);
 	LIST_ENTRY_INIT(r, room_cache);
+	if (r->refcount <= 0 && room_lru_count > 0)
+		room_lru_count--;
 
 	free(r->name.short_str);
 	r->name.short_str = NULL;
@@ -174,9 +186,8 @@ static struct room *
 room_load(unsigned room_id)
 {
 	struct room *r;
-	char numbuf[22]; /* big enough for a signed 64-bit decimal */
-	struct fdb_read_handle *h;
-	const char *name, *value;
+	char numbuf[22];
+	OBJ *obj;
 
 	assert(room_id > 0);
 
@@ -185,41 +196,46 @@ room_load(unsigned room_id)
 
 	snprintf(numbuf, sizeof numbuf, "%u", room_id);
 
-	h = fdb_read_begin(DOMAIN_ROOM, numbuf);
+	obj = muddb_get(mud_db, DOMAIN_ROOM, numbuf);
 
-	if (!h) {
+	if (!obj) {
 		LOG_ERROR("could not load room \"%s\"", numbuf);
 		return NULL;
 	}
 
-	r = calloc(1, sizeof * r);
+	r = calloc(1, sizeof *r);
 
 	if (!r) {
-		/* TODO: do perror? */
-		LOG_ERROR("not allocate room \"%s\"", numbuf);
-		fdb_read_end(h);
+		LOG_ERROR("could not allocate room \"%s\"", numbuf);
+		obj_free(obj);
 		return NULL;
 	}
 
-	while (fdb_read_next(h, &name, &value)) {
-		if (!room_attr_set(r, name, value)) {
-			LOG_ERROR("could not load room \"%s\"", numbuf);
-			room_ll_free(r);
-			fdb_read_end(h);
-			return NULL;
+	/* load all properties via room_attr_set */
+	{
+		OBJ_ITER *it = obj_iter_begin(obj);
+		const char *key, *value;
+
+		while (obj_iter_next(it, &key, &value)) {
+			if (!room_attr_set(r, key, value)) {
+				LOG_ERROR("could not load room \"%s\"", numbuf);
+				obj_iter_end(it);
+				room_ll_free(r);
+				obj_free(obj);
+				return NULL;
+			}
 		}
+		obj_iter_end(it);
 	}
 
-	fdb_read_end(h);
+	obj_free(obj);
 
-	/* r->id wasn't set, this is a problem. */
 	if (!r->id) {
 		LOG_ERROR("id not set for room \"%u\"", room_id);
 		room_ll_free(r);
 		return NULL;
 	}
 
-	/* r->id doesn't match the file the room is stored under. */
 	if (r->id != room_id) {
 		LOG_ERROR("id was set to \"%u\" but should be \"%u\"", r->id, room_id);
 		room_ll_free(r);
@@ -230,14 +246,14 @@ room_load(unsigned room_id)
 }
 
 /**
- * write a room structure to disk, if it is not dirty (dirty_fl).
+ * write a room structure to the database, if it is dirty (dirty_fl).
  */
 int
 room_save(struct room *r)
 {
 	struct attr_entry *curr;
-	struct fdb_write_handle *h;
-	char numbuf[22]; /* big enough for a signed 64-bit decimal */
+	OBJ *obj;
+	char numbuf[22];
 
 	assert(r != NULL);
 
@@ -252,52 +268,73 @@ room_save(struct room *r)
 
 	snprintf(numbuf, sizeof numbuf, "%u", r->id);
 
-	h = fdb_write_begin(DOMAIN_ROOM, numbuf);
+	obj = obj_new(numbuf);
 
-	if (!h) {
+	if (!obj) {
 		LOG_ERROR("could not save room \"%s\"", numbuf);
-		return 0; /* failure */
+		return 0;
 	}
 
-	fdb_write_format(h, "id", "%u", r->id);
+	obj_prop_set(obj, "id", numbuf);
 
 	if (r->name.short_str)
-		fdb_write_pair(h, "name.short", r->name.short_str);
+		obj_prop_set(obj, "name.short", r->name.short_str);
 
 	if (r->name.long_str)
-		fdb_write_pair(h, "name.long", r->name.long_str);
+		obj_prop_set(obj, "name.long", r->name.long_str);
 
 	if (r->desc.short_str)
-		fdb_write_pair(h, "desc.short", r->desc.short_str);
+		obj_prop_set(obj, "desc.short", r->desc.short_str);
 
 	if (r->desc.long_str)
-		fdb_write_pair(h, "desc.long", r->desc.long_str);
+		obj_prop_set(obj, "desc.long", r->desc.long_str);
 
 	if (r->owner)
-		fdb_write_pair(h, "owner", r->owner);
+		obj_prop_set(obj, "owner", r->owner);
 
 	if (r->creator)
-		fdb_write_pair(h, "creator", r->creator);
+		obj_prop_set(obj, "creator", r->creator);
 
 	for (curr = LIST_TOP(r->extra_values); curr; curr = LIST_NEXT(curr, list)) {
-		fdb_write_pair(h, curr->name, curr->value);
+		obj_prop_set(obj, curr->name, curr->value);
 	}
 
-	if (!fdb_write_end(h)) {
+	if (muddb_put(mud_db, DOMAIN_ROOM, numbuf, obj) != MUDDB_OK) {
 		LOG_ERROR("could not save room \"%s\"", numbuf);
+		obj_free(obj);
 		return 0; /* failure */
 	}
 
+	obj_free(obj);
 	r->dirty_fl = 0;
 	LOG_INFO("saved room \"%s\"", numbuf);
 	return 1;
+}
+
+/** evict the oldest unreferenced room from the LRU tail. */
+static void
+room_lru_evict_one(void)
+{
+	struct room *tail;
+
+	/* walk backward from head to find the tail (oldest entry) */
+	for (tail = LIST_TOP(room_lru); tail; tail = LIST_NEXT(tail, room_cache)) {
+		if (!LIST_NEXT(tail, room_cache))
+			break;
+	}
+
+	if (tail) {
+		room_save(tail);
+		room_ll_free(tail);
+	}
 }
 
 /**
  * load room into cache, if not already loaded, then increase reference count
  * of room.
  */
-struct room *room_get(unsigned room_id)
+struct room *
+room_get(unsigned room_id)
 {
 	struct room *curr;
 
@@ -305,19 +342,24 @@ struct room *room_get(unsigned room_id)
 	if (!room_id)
 		return NULL;
 
-	/* look for room in the cache. */
-	for (curr = LIST_TOP(room_cache); curr; curr = LIST_NEXT(curr, room_cache)) {
-		if (curr->id == room_id) break;
-	}
+	/* O(1) hash table lookup. */
+	curr = ht_uint_get(&room_ht, room_id);
 
 	if (!curr) {
-		/* not in the cache? load the room. */
+		/* not in the cache -- load from database. */
 		curr = room_load(room_id);
+		if (curr) {
+			ht_uint_set(&room_ht, room_id, curr);
+		}
 	}
 
 	if (curr) {
-		/* place entry at the top of the cache. */
-		LIST_INSERT_HEAD(&room_cache, curr, room_cache);
+		if (curr->refcount == 0 && room_lru_count > 0) {
+			/* moving from LRU to active -- remove from LRU list */
+			LIST_REMOVE(curr, room_cache);
+			LIST_ENTRY_INIT(curr, room_cache);
+			room_lru_count--;
+		}
 		curr->refcount++;
 	}
 
@@ -330,6 +372,8 @@ struct room *room_get(unsigned room_id)
 
 /**
  * reduce reference count of room.
+ * when refcount hits zero the room moves to the LRU list instead of
+ * being freed immediately. the LRU is capped by cache.room.size.
  */
 void
 room_put(struct room *r)
@@ -338,36 +382,37 @@ room_put(struct room *r)
 
 	r->refcount--;
 
-	/* TODO: hold onto the room longer to support caching. */
 	if (r->refcount <= 0) {
 		room_save(r);
-		room_ll_free(r);
+		/* move to head of LRU (most recently used) */
+		LIST_INSERT_HEAD(&room_lru, r, room_cache);
+		room_lru_count++;
+
+		/* evict oldest if over the cap */
+		while (room_lru_count > mud_config.room_cache_size)
+			room_lru_evict_one();
 	}
 }
 
 int
 room_initialize(void)
 {
-	struct fdb_iterator *it;
+	MUDDB_ITER *it;
 	const char *id;
 
 	LOG_INFO("Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
-	LIST_INIT(&room_cache);
+	LIST_INIT(&room_lru);
+	ht_uint_init(&room_ht, 64);
 
-	if (!fdb_domain_init(DOMAIN_ROOM)) {
-		LOG_CRITICAL("could not load rooms!");
-		return -1; /* could not load. */
-	}
-
-	it = fdb_iterator_begin(DOMAIN_ROOM);
+	it = muddb_iter_begin(mud_db, DOMAIN_ROOM);
 
 	if (!it) {
-		LOG_CRITICAL("could not load rooms!");
-		return -1; /* could not load. */
+		/* no rooms domain yet -- not an error on first run */
+		return 0;
 	}
 
 	/* preflight all of the rooms. */
-	while ((id = fdb_iterator_next(it))) {
+	while ((id = muddb_iter_next(it))) {
 		struct room *r;
 		unsigned room_id;
 		char *endptr;
@@ -376,7 +421,7 @@ room_initialize(void)
 
 		if (*endptr) {
 			LOG_CRITICAL("room id \"%s\" is invalid!", id);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return -1; /* could not load */
 		}
 
@@ -384,14 +429,28 @@ room_initialize(void)
 
 		if (!r) {
 			LOG_CRITICAL("could not load rooms!");
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return -1; /* could not load */
 		}
 
-		room_ll_free(r);
+		/* preflight only -- don't keep in cache */
+		free(r->name.short_str);
+		r->name.short_str = NULL;
+		free(r->name.long_str);
+		r->name.long_str = NULL;
+		free(r->desc.short_str);
+		r->desc.short_str = NULL;
+		free(r->desc.long_str);
+		r->desc.long_str = NULL;
+		free(r->owner);
+		r->owner = NULL;
+		free(r->creator);
+		r->creator = NULL;
+		attr_list_free(&r->extra_values);
+		free(r);
 	}
 
-	fdb_iterator_end(it);
+	muddb_iter_end(it);
 
 	return 0; /* success */
 }
@@ -400,30 +459,29 @@ void
 room_shutdown(void)
 {
 	struct room *curr;
-	struct room_cache blocked_cache;
+	unsigned i;
 
 	LOG_INFO("Room system shutting down..");
 
-	/* save all dirty objects and free all data. */
-	LIST_INIT(&blocked_cache); /* keep a temporary list of unfreed rooms */
-
-	while ((curr = LIST_TOP(room_cache))) {
-		LIST_REMOVE(curr, room_cache);
+	/* flush LRU list -- all unreferenced rooms */
+	while ((curr = LIST_TOP(room_lru))) {
 		room_save(curr);
+		room_ll_free(curr);
+	}
 
-		/* check to make sure no rooms are still in use. */
-		if (curr->refcount > 0) {
-			LOG_ERROR("cannot shut down, room \"%u\" still in use.", curr->id);
-			LIST_INSERT_HEAD(&blocked_cache, curr, room_cache);
-		} else {
-			room_ll_free(curr);
+	/* scan hash table for any rooms still held by reference */
+	for (i = 0; i < room_ht.capacity; i++) {
+		struct ht_uint_entry *e = &room_ht.buckets[i];
+		if (e->occupied) {
+			curr = e->value;
+			LOG_ERROR("room \"%u\" still in use at shutdown (refcount %d)",
+				curr->id, curr->refcount);
+			room_save(curr);
 		}
 	}
 
-	if (LIST_TOP(blocked_cache)) {
-		/* we could not free these rooms, sorry! */
-		room_cache = blocked_cache;
-	}
+	ht_uint_free(&room_ht);
+	room_lru_count = 0;
 
 	LOG_INFO("Room system ended.");
 }

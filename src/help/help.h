@@ -5,5 +5,6 @@
 #define HELP_ERR (-1)
 int help_init(void);
 void help_shutdown(void);
+void help_cache_invalidate(void);
 int help_show(DESCRIPTOR_DATA *d, const char *topic);
 #endif
