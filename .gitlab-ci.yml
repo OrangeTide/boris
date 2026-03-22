@@ -20,7 +20,7 @@ before_script:
   - apk update
   - "apk add build-base linux-headers make cmake git bash \
     zlib-dev openssl-libs-static openssl-dev openssl \
-    doxygen ttf-freefont graphviz"
+    doxygen ttf-freefont graphviz expect"
 
 build:mud:
   stage: build
@@ -35,6 +35,30 @@ build:mud:
     paths:
       - bin
       - build
+
+test:unit:
+  stage: test
+  dependencies:
+    - build:mud
+  script:
+    - make tests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
+test:smoke:
+  stage: test
+  dependencies:
+    - build:mud
+  script:
+    - make smoke
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 
 publish:dev-docs:
   stage: docs
