@@ -1,7 +1,8 @@
 #!/bin/sh
 set -e
 
-ARCH="${1:?Usage: $0 <arch> (e.g. linux-x86_64, linux-aarch64)}"
+# NOTE: this script does not verify that bin/ contains the architecture you claim.
+ARCH="${1:?Usage: $0 <arch> (e.g. linux-x86_64, linux-arm64, linux-arm32)}"
 
 VER="$(awk '/@version/ { print $3 }' src/boris.c)"
 if [ -z "$VER" ]; then
@@ -27,6 +28,7 @@ rm -rf "$RELEASE_NAME"
 mkdir -p "$RELEASE_NAME"/bin
 mkdir -p "$RELEASE_NAME"/data/chars
 mkdir -p "$RELEASE_NAME"/data/users
+mkdir -p "$RELEASE_NAME"/data/muddb
 
 # binaries
 cp bin/boris bin/mkpass "$RELEASE_NAME"/bin/
