@@ -25,7 +25,8 @@
 #include "room.h"
 #include "boris.h"
 #include "list.h"
-#include "fdb.h"
+#include "muddb.h"
+#include "obj.h"
 
 #define LOG_SUBSYSTEM "room"
 #include <log.h>
@@ -174,9 +175,8 @@ static struct room *
 room_load(unsigned room_id)
 {
 	struct room *r;
-	char numbuf[22]; /* big enough for a signed 64-bit decimal */
-	struct fdb_read_handle *h;
-	const char *name, *value;
+	char numbuf[22];
+	OBJ *obj;
 
 	assert(room_id > 0);
 
@@ -185,41 +185,46 @@ room_load(unsigned room_id)
 
 	snprintf(numbuf, sizeof numbuf, "%u", room_id);
 
-	h = fdb_read_begin(DOMAIN_ROOM, numbuf);
+	obj = muddb_get(mud_db, DOMAIN_ROOM, numbuf);
 
-	if (!h) {
+	if (!obj) {
 		LOG_ERROR("could not load room \"%s\"", numbuf);
 		return NULL;
 	}
 
-	r = calloc(1, sizeof * r);
+	r = calloc(1, sizeof *r);
 
 	if (!r) {
-		/* TODO: do perror? */
-		LOG_ERROR("not allocate room \"%s\"", numbuf);
-		fdb_read_end(h);
+		LOG_ERROR("could not allocate room \"%s\"", numbuf);
+		obj_free(obj);
 		return NULL;
 	}
 
-	while (fdb_read_next(h, &name, &value)) {
-		if (!room_attr_set(r, name, value)) {
-			LOG_ERROR("could not load room \"%s\"", numbuf);
-			room_ll_free(r);
-			fdb_read_end(h);
-			return NULL;
+	/* load all properties via room_attr_set */
+	{
+		OBJ_ITER *it = obj_iter_begin(obj);
+		const char *key, *value;
+
+		while (obj_iter_next(it, &key, &value)) {
+			if (!room_attr_set(r, key, value)) {
+				LOG_ERROR("could not load room \"%s\"", numbuf);
+				obj_iter_end(it);
+				room_ll_free(r);
+				obj_free(obj);
+				return NULL;
+			}
 		}
+		obj_iter_end(it);
 	}
 
-	fdb_read_end(h);
+	obj_free(obj);
 
-	/* r->id wasn't set, this is a problem. */
 	if (!r->id) {
 		LOG_ERROR("id not set for room \"%u\"", room_id);
 		room_ll_free(r);
 		return NULL;
 	}
 
-	/* r->id doesn't match the file the room is stored under. */
 	if (r->id != room_id) {
 		LOG_ERROR("id was set to \"%u\" but should be \"%u\"", r->id, room_id);
 		room_ll_free(r);
@@ -230,14 +235,14 @@ room_load(unsigned room_id)
 }
 
 /**
- * write a room structure to disk, if it is not dirty (dirty_fl).
+ * write a room structure to the database, if it is dirty (dirty_fl).
  */
 int
 room_save(struct room *r)
 {
 	struct attr_entry *curr;
-	struct fdb_write_handle *h;
-	char numbuf[22]; /* big enough for a signed 64-bit decimal */
+	OBJ *obj;
+	char numbuf[22];
 
 	assert(r != NULL);
 
@@ -252,42 +257,44 @@ room_save(struct room *r)
 
 	snprintf(numbuf, sizeof numbuf, "%u", r->id);
 
-	h = fdb_write_begin(DOMAIN_ROOM, numbuf);
+	obj = obj_new(numbuf);
 
-	if (!h) {
+	if (!obj) {
 		LOG_ERROR("could not save room \"%s\"", numbuf);
-		return 0; /* failure */
+		return 0;
 	}
 
-	fdb_write_format(h, "id", "%u", r->id);
+	obj_prop_set(obj, "id", numbuf);
 
 	if (r->name.short_str)
-		fdb_write_pair(h, "name.short", r->name.short_str);
+		obj_prop_set(obj, "name.short", r->name.short_str);
 
 	if (r->name.long_str)
-		fdb_write_pair(h, "name.long", r->name.long_str);
+		obj_prop_set(obj, "name.long", r->name.long_str);
 
 	if (r->desc.short_str)
-		fdb_write_pair(h, "desc.short", r->desc.short_str);
+		obj_prop_set(obj, "desc.short", r->desc.short_str);
 
 	if (r->desc.long_str)
-		fdb_write_pair(h, "desc.long", r->desc.long_str);
+		obj_prop_set(obj, "desc.long", r->desc.long_str);
 
 	if (r->owner)
-		fdb_write_pair(h, "owner", r->owner);
+		obj_prop_set(obj, "owner", r->owner);
 
 	if (r->creator)
-		fdb_write_pair(h, "creator", r->creator);
+		obj_prop_set(obj, "creator", r->creator);
 
 	for (curr = LIST_TOP(r->extra_values); curr; curr = LIST_NEXT(curr, list)) {
-		fdb_write_pair(h, curr->name, curr->value);
+		obj_prop_set(obj, curr->name, curr->value);
 	}
 
-	if (!fdb_write_end(h)) {
+	if (muddb_put(mud_db, DOMAIN_ROOM, numbuf, obj) != MUDDB_OK) {
 		LOG_ERROR("could not save room \"%s\"", numbuf);
+		obj_free(obj);
 		return 0; /* failure */
 	}
 
+	obj_free(obj);
 	r->dirty_fl = 0;
 	LOG_INFO("saved room \"%s\"", numbuf);
 	return 1;
@@ -348,26 +355,21 @@ room_put(struct room *r)
 int
 room_initialize(void)
 {
-	struct fdb_iterator *it;
+	MUDDB_ITER *it;
 	const char *id;
 
 	LOG_INFO("Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	LIST_INIT(&room_cache);
 
-	if (!fdb_domain_init(DOMAIN_ROOM)) {
-		LOG_CRITICAL("could not load rooms!");
-		return -1; /* could not load. */
-	}
-
-	it = fdb_iterator_begin(DOMAIN_ROOM);
+	it = muddb_iter_begin(mud_db, DOMAIN_ROOM);
 
 	if (!it) {
-		LOG_CRITICAL("could not load rooms!");
-		return -1; /* could not load. */
+		/* no rooms domain yet -- not an error on first run */
+		return 0;
 	}
 
 	/* preflight all of the rooms. */
-	while ((id = fdb_iterator_next(it))) {
+	while ((id = muddb_iter_next(it))) {
 		struct room *r;
 		unsigned room_id;
 		char *endptr;
@@ -376,7 +378,7 @@ room_initialize(void)
 
 		if (*endptr) {
 			LOG_CRITICAL("room id \"%s\" is invalid!", id);
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return -1; /* could not load */
 		}
 
@@ -384,14 +386,14 @@ room_initialize(void)
 
 		if (!r) {
 			LOG_CRITICAL("could not load rooms!");
-			fdb_iterator_end(it);
+			muddb_iter_end(it);
 			return -1; /* could not load */
 		}
 
 		room_ll_free(r);
 	}
 
-	fdb_iterator_end(it);
+	muddb_iter_end(it);
 
 	return 0; /* success */
 }
