@@ -31,6 +31,7 @@
 #include <character.h>
 #include <eventlog.h>
 #include <fdb.h>
+#include <muddb.h>
 #include <room.h>
 #define LOG_SUBSYSTEM "server"
 #include <log.h>
@@ -79,6 +80,17 @@ show_version(void)
  * flag used for the main loop, zero to terminated.
  */
 static sig_atomic_t keep_going_fl = 1;
+
+MUDDB *mud_db;
+
+static void
+muddb_shutdown(void)
+{
+	if (mud_db) {
+		muddb_close(mud_db);
+		mud_db = NULL;
+	}
+}
 
 /**
  * signal handler to cause the main loop to terminated by clearing keep_going_fl.
@@ -260,6 +272,14 @@ main(int argc, char **argv)
 	}
 
 	atexit(fdb_shutdown);
+
+	mud_db = muddb_open("data/muddb", 0);
+	if (!mud_db) {
+		LOG_ERROR("could not open LMDB database");
+		return EXIT_FAILURE;
+	}
+
+	atexit(muddb_shutdown);
 
 	init_mth();
 

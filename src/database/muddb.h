@@ -10,6 +10,9 @@
 typedef struct muddb MUDDB;
 typedef struct muddb_iter MUDDB_ITER;
 
+/* global instance -- opened in boris.c */
+extern MUDDB *mud_db;
+
 /* lifecycle */
 MUDDB *muddb_open(const char *path, unsigned flags);
 void muddb_close(MUDDB *db);
