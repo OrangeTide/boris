@@ -20,6 +20,8 @@ BINDIR   := bin
 # --- Source collection (populated by module.mk includes) --------------------
 BORIS_SRCS  :=
 MKPASS_SRCS :=
+TEST_SRCS   :=
+TEST_BINS   :=
 INCLUDES    := -Isrc/thirdparty/jsmn
 
 # --- Include all modules ----------------------------------------------------
@@ -34,11 +36,13 @@ include src/log/module.mk
 include src/util/module.mk
 include src/help/module.mk
 include src/web/module.mk
+include src/obj/module.mk
 
 # --- Derive object lists ----------------------------------------------------
 BORIS_OBJS  := $(patsubst %.c,$(BUILDDIR)/%.o,$(BORIS_SRCS))
 MKPASS_OBJS := $(patsubst %.c,$(BUILDDIR)/%.o,$(MKPASS_SRCS))
-ALL_OBJS    := $(sort $(BORIS_OBJS) $(MKPASS_OBJS))
+TEST_OBJS   := $(patsubst %.c,$(BUILDDIR)/%.o,$(TEST_SRCS))
+ALL_OBJS    := $(sort $(BORIS_OBJS) $(MKPASS_OBJS) $(TEST_OBJS))
 DEPS        := $(ALL_OBJS:.o=.d)
 
 CFLAGS += $(INCLUDES)
@@ -52,9 +56,12 @@ ifeq ($(LTO_SUPPORTED),yes)
 endif
 
 # --- Targets ----------------------------------------------------------------
-.PHONY: all clean distclean
+.PHONY: all clean distclean tests
 
 all: $(BINDIR)/boris $(BINDIR)/mkpass
+
+tests: $(TEST_BINS)
+	@for t in $(TEST_BINS); do echo "--- Running $$t ---"; ./$$t || exit 1; done
 
 $(BINDIR)/boris: $(BORIS_OBJS) | $(BINDIR)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS) -lz
@@ -77,7 +84,7 @@ clean:
 	-find $(BUILDDIR) -type d -empty -delete 2>/dev/null
 
 distclean: clean
-	$(RM) $(BINDIR)/boris $(BINDIR)/mkpass
+	$(RM) $(BINDIR)/boris $(BINDIR)/mkpass $(TEST_BINS)
 	$(RM) $(BINDIR)/www/index.html
 	$(RM) $(BINDIR)/www/assets/layout.css $(BINDIR)/www/assets/system.css
 	$(RM) $(BINDIR)/www/assets/favicon.ico
