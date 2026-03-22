@@ -403,6 +403,45 @@ muddb_iter_next(MUDDB_ITER *it)
 	}
 }
 
+OBJ *
+muddb_iter_value(MUDDB_ITER *it)
+{
+	MDB_val mkey, mdata;
+	MDB_cursor_op op;
+	char *json;
+	char keybuf[256];
+	size_t len;
+	OBJ *obj;
+	int rc;
+
+	if (!it)
+		return NULL;
+
+	/* re-fetch the current position */
+	op = MDB_GET_CURRENT;
+	rc = mdb_cursor_get(it->cursor, &mkey, &mdata, op);
+	if (rc != 0)
+		return NULL;
+
+	/* null-terminate the key */
+	len = mkey.mv_size;
+	if (len >= sizeof(keybuf))
+		len = sizeof(keybuf) - 1;
+	memcpy(keybuf, mkey.mv_data, len);
+	keybuf[len] = '\0';
+
+	/* null-terminate the value */
+	json = malloc(mdata.mv_size + 1);
+	if (!json)
+		return NULL;
+	memcpy(json, mdata.mv_data, mdata.mv_size);
+	json[mdata.mv_size] = '\0';
+
+	obj = obj_new_from_json(keybuf, json);
+	free(json);
+	return obj;
+}
+
 void
 muddb_iter_end(MUDDB_ITER *it)
 {

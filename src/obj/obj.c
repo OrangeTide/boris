@@ -368,6 +368,11 @@ obj_new_from_json(const char *key, const char *json)
 		return NULL;
 	}
 
+	/* trim json_len to the actual JSON extent (root token end),
+	 * so trailing whitespace from file I/O is not preserved. */
+	if (obj->tokens_used > 0 && obj->tokens[0].end > 0)
+		obj->json_len = (size_t)obj->tokens[0].end;
+
 	return obj;
 }
 
@@ -521,7 +526,8 @@ obj_get_json(OBJ *obj, char *buf, size_t len)
 		if (obj->json_len >= len) {
 			return OBJ_ERR_NOMEM;
 		}
-		memcpy(buf, obj->data, obj->json_len + 1);
+		memcpy(buf, obj->data, obj->json_len);
+		buf[obj->json_len] = '\0';
 		return OBJ_OK;
 	}
 
