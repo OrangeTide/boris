@@ -315,6 +315,110 @@ test_buffer_too_small(void)
 	obj_free(obj);
 }
 
+static void
+test_iter_basic(void)
+{
+	OBJ *obj = obj_new_from_json("test", house_json);
+	check("iter: create obj", obj != NULL);
+
+	OBJ_ITER *it = obj_iter_begin(obj);
+	check("iter: begin", it != NULL);
+
+	const char *key, *value;
+	int count = 0;
+	int found_name = 0, found_color = 0;
+
+	while (obj_iter_next(it, &key, &value)) {
+		if (strcmp(key, "name") == 0) {
+			check("iter: name value",
+				strcmp(value, "A white house") == 0);
+			found_name = 1;
+		} else if (strcmp(key, "color") == 0) {
+			check("iter: color value",
+				strcmp(value, "white") == 0);
+			found_color = 1;
+		}
+		count++;
+	}
+	obj_iter_end(it);
+
+	check("iter: count == 2", count == 2);
+	check("iter: found name", found_name == 1);
+	check("iter: found color", found_color == 1);
+
+	obj_free(obj);
+}
+
+static void
+test_iter_with_overrides(void)
+{
+	OBJ *obj = obj_new_from_json("test", house_json);
+	check("iter_ov: create obj", obj != NULL);
+
+	obj_prop_set(obj, "color", "blue");
+	obj_prop_set(obj, "size", "large");
+	obj_prop_delete(obj, "name");
+
+	OBJ_ITER *it = obj_iter_begin(obj);
+	check("iter_ov: begin", it != NULL);
+
+	const char *key, *value;
+	int count = 0;
+	int found_color = 0, found_size = 0, found_name = 0;
+
+	while (obj_iter_next(it, &key, &value)) {
+		if (strcmp(key, "color") == 0) {
+			check("iter_ov: color overridden",
+				strcmp(value, "blue") == 0);
+			found_color = 1;
+		} else if (strcmp(key, "size") == 0) {
+			check("iter_ov: size new prop",
+				strcmp(value, "large") == 0);
+			found_size = 1;
+		} else if (strcmp(key, "name") == 0) {
+			found_name = 1; /* should not happen */
+		}
+		count++;
+	}
+	obj_iter_end(it);
+
+	check("iter_ov: count == 2", count == 2);
+	check("iter_ov: found color", found_color == 1);
+	check("iter_ov: found size", found_size == 1);
+	check("iter_ov: name deleted", found_name == 0);
+
+	obj_free(obj);
+}
+
+static void
+test_iter_empty(void)
+{
+	OBJ *obj = obj_new("empty");
+	check("iter_empty: create", obj != NULL);
+
+	OBJ_ITER *it = obj_iter_begin(obj);
+	check("iter_empty: begin", it != NULL);
+
+	const char *key, *value;
+	check("iter_empty: no props", obj_iter_next(it, &key, &value) == 0);
+	obj_iter_end(it);
+
+	/* add a prop and iterate */
+	obj_prop_set(obj, "hello", "world");
+
+	it = obj_iter_begin(obj);
+	int count = 0;
+	while (obj_iter_next(it, &key, &value)) {
+		check("iter_empty: key is hello", strcmp(key, "hello") == 0);
+		check("iter_empty: value is world", strcmp(value, "world") == 0);
+		count++;
+	}
+	obj_iter_end(it);
+	check("iter_empty: count == 1", count == 1);
+
+	obj_free(obj);
+}
+
 int
 main(void)
 {
@@ -330,6 +434,9 @@ main(void)
 	test_empty_object();
 	test_debug_dump();
 	test_buffer_too_small();
+	test_iter_basic();
+	test_iter_with_overrides();
+	test_iter_empty();
 
 	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
 		pass_count, fail_count);
