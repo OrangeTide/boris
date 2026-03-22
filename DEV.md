@@ -9,11 +9,10 @@ Information for developers working on Boris MUD.
 | src/                   | Main source and miscellaneous modules                    |
 | src/obj/               | OBJ -- mutable JSON objects with property iteration      |
 | src/database/          | muddb -- LMDB persistence layer (OBJ-centric API)       |
-| src/fdb/               | FDB -- legacy flat-file database (only used by help.c)   |
 | src/room/              | Room subsystem (load/save/cache with refcount)           |
 | src/character/         | Character subsystem (load/save/cache with refcount + freelist) |
 | src/channel/           | Chat channel pub/sub system                              |
-| src/help/              | Online help system (reads flat files via FDB)            |
+| src/help/              | Online help system (reads plain text from data/help/)    |
 | src/log/               | Subsystem-tagged logging and event log                   |
 | src/task/              | Command dispatch and processing                          |
 | src/web/server/        | WebSocket server (mongoose)                              |
@@ -274,8 +273,7 @@ WebSocket clients simultaneously.
 - **User management**: `src/user.c` -- accounts, password auth (scrypt/SHA1),
   ref-counted user objects
 - **Database**: `src/obj/` (OBJ JSON objects) + `src/database/` (muddb LMDB
-  wrapper). Global `mud_db` opened in boris.c. FDB in `src/fdb/` is legacy,
-  only used by help.c
+  wrapper). Global `mud_db` opened in boris.c
 - **Game world**: `src/room/` (rooms), `src/character/` (player characters),
   `src/channel/` (communication channels)
 - **Commands**: `src/task/command.c` -- command dispatch and processing

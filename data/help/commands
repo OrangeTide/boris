@@ -1,0 +1,16 @@
+Commands:
+
+  say <message>       Say something to the room. Short form: '
+  yell <message>      Yell something to the area.
+  emote <action>      Perform an action.
+  pose <action>       Same as emote. Short form: :
+  chsay <ch> <msg>    Say something on a channel.
+  tell <user> <msg>   Send a private message. (not yet implemented)
+  whisper <user> <msg> Whisper to someone. (not yet implemented)
+  page <user> <msg>   Page a user. (not yet implemented)
+  who                 List connected users. (not yet implemented)
+  time                Show the current in-game time.
+  roomget <attr>      Get a room attribute.
+  char <id> [attr]    Get character information.
+  help <topic>        Show help on a topic.
+  quit                Disconnect from the server.

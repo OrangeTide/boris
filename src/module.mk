@@ -4,7 +4,6 @@ BORIS_SRCS += \
 	src/crypt/base64.c \
 	src/crypt/sha1.c \
 	src/crypt/sha1crypt.c \
-	src/fdb/fdbfile.c \
 	src/room/room.c \
 	src/stackvm/stackvm.c \
 	src/task/command.c \
@@ -30,7 +29,6 @@ INCLUDES += \
 	-Isrc/channel \
 	-Isrc/character \
 	-Isrc/crypt \
-	-Isrc/fdb \
 	-Isrc/room \
 	-Isrc/task \
 	-Isrc/worldclock \
