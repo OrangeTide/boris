@@ -48,7 +48,7 @@ struct room {
 	LIST_ENTRY(struct room) room_cache; /**< currently loaded rooms. */
 	int refcount; /* reference count. */
 	int dirty_fl;
-	unsigned id;
+	char *id;
 	struct {
 		char *short_str, *long_str;
 	} name;
@@ -66,7 +66,7 @@ LIST_HEAD(struct room_cache, struct room);
  ******************************************************************************/
 
 /** all loaded rooms, keyed by id for O(1) lookup. */
-static struct ht_uint room_ht;
+static struct ht_str room_ht;
 
 /** LRU list of unreferenced rooms (refcount == 0). head is most recent. */
 static struct room_cache room_lru;
@@ -87,12 +87,15 @@ room_ll_free(struct room *r)
 {
 	assert(r != NULL);
 
-	ht_uint_del(&room_ht, r->id);
+	if (r->id)
+		ht_str_del(&room_ht, r->id);
 	LIST_REMOVE(r, room_cache);
 	LIST_ENTRY_INIT(r, room_cache);
 	if (r->refcount <= 0 && room_lru_count > 0)
 		room_lru_count--;
 
+	free(r->id);
+	r->id = NULL;
 	free(r->name.short_str);
 	r->name.short_str = NULL;
 	free(r->name.long_str);
@@ -129,7 +132,7 @@ room_attr_set(struct room *r, const char *name, const char *value)
 		return 0;
 
 	if (!strcasecmp("id", name))
-		res = parse_uint(name, value, &r->id);
+		res = parse_str(name, value, &r->id);
 	else if (!strcasecmp("name.short", name))
 		res = parse_str(name, value, &r->name.short_str);
 	else if (!strcasecmp("name.long", name))
@@ -154,12 +157,9 @@ room_attr_set(struct room *r, const char *name, const char *value)
 const char *
 room_attr_get(struct room *r, const char *name)
 {
-	static char numbuf[22]; /* big enough for a signed 64-bit decimal */
-
-	if (!strcasecmp("id", name)) {
-		snprintf(numbuf, sizeof numbuf, "%u", r->id);
-		return numbuf;
-	} else if (!strcasecmp("name.short", name))
+	if (!strcasecmp("id", name))
+		return r->id;
+	else if (!strcasecmp("name.short", name))
 		return r->name.short_str;
 	else if (!strcasecmp("name.long", name))
 		return r->name.long_str;
@@ -183,30 +183,28 @@ room_attr_get(struct room *r, const char *name)
 }
 
 static struct room *
-room_load(unsigned room_id)
+room_load(const char *room_id)
 {
 	struct room *r;
-	char numbuf[22];
 	OBJ *obj;
 
-	assert(room_id > 0);
+	assert(room_id != NULL);
+	assert(room_id[0] != '\0');
 
-	if (room_id <= 0)
+	if (!room_id || !room_id[0])
 		return NULL;
 
-	snprintf(numbuf, sizeof numbuf, "%u", room_id);
-
-	obj = muddb_get(mud_db, DOMAIN_ROOM, numbuf);
+	obj = muddb_get(mud_db, DOMAIN_ROOM, room_id);
 
 	if (!obj) {
-		LOG_ERROR("could not load room \"%s\"", numbuf);
+		LOG_ERROR("could not load room \"%s\"", room_id);
 		return NULL;
 	}
 
 	r = calloc(1, sizeof *r);
 
 	if (!r) {
-		LOG_ERROR("could not allocate room \"%s\"", numbuf);
+		LOG_ERROR("could not allocate room \"%s\"", room_id);
 		obj_free(obj);
 		return NULL;
 	}
@@ -218,7 +216,7 @@ room_load(unsigned room_id)
 
 		while (obj_iter_next(it, &key, &value)) {
 			if (!room_attr_set(r, key, value)) {
-				LOG_ERROR("could not load room \"%s\"", numbuf);
+				LOG_ERROR("could not load room \"%s\"", room_id);
 				obj_iter_end(it);
 				room_ll_free(r);
 				obj_free(obj);
@@ -231,13 +229,13 @@ room_load(unsigned room_id)
 	obj_free(obj);
 
 	if (!r->id) {
-		LOG_ERROR("id not set for room \"%u\"", room_id);
+		LOG_ERROR("id not set for room \"%s\"", room_id);
 		room_ll_free(r);
 		return NULL;
 	}
 
-	if (r->id != room_id) {
-		LOG_ERROR("id was set to \"%u\" but should be \"%u\"", r->id, room_id);
+	if (strcmp(r->id, room_id)) {
+		LOG_ERROR("id was set to \"%s\" but should be \"%s\"", r->id, room_id);
 		room_ll_free(r);
 		return NULL;
 	}
@@ -253,29 +251,25 @@ room_save(struct room *r)
 {
 	struct attr_entry *curr;
 	OBJ *obj;
-	char numbuf[22];
 
 	assert(r != NULL);
 
 	if (!r->dirty_fl)
 		return 1; /* already saved - don't do it again. */
 
-	/* refuse to save room 0. */
 	if (!r->id) {
-		LOG_ERROR("attempted to save room \"%u\", but it is reserved", r->id);
+		LOG_ERROR("attempted to save room with no id");
 		return 0;
 	}
 
-	snprintf(numbuf, sizeof numbuf, "%u", r->id);
-
-	obj = obj_new(numbuf);
+	obj = obj_new(r->id);
 
 	if (!obj) {
-		LOG_ERROR("could not save room \"%s\"", numbuf);
+		LOG_ERROR("could not save room \"%s\"", r->id);
 		return 0;
 	}
 
-	obj_prop_set(obj, "id", numbuf);
+	obj_prop_set(obj, "id", r->id);
 
 	if (r->name.short_str)
 		obj_prop_set(obj, "name.short", r->name.short_str);
@@ -299,15 +293,15 @@ room_save(struct room *r)
 		obj_prop_set(obj, curr->name, curr->value);
 	}
 
-	if (muddb_put(mud_db, DOMAIN_ROOM, numbuf, obj) != MUDDB_OK) {
-		LOG_ERROR("could not save room \"%s\"", numbuf);
+	if (muddb_put(mud_db, DOMAIN_ROOM, r->id, obj) != MUDDB_OK) {
+		LOG_ERROR("could not save room \"%s\"", r->id);
 		obj_free(obj);
 		return 0; /* failure */
 	}
 
 	obj_free(obj);
 	r->dirty_fl = 0;
-	LOG_INFO("saved room \"%s\"", numbuf);
+	LOG_INFO("saved room \"%s\"", r->id);
 	return 1;
 }
 
@@ -334,22 +328,21 @@ room_lru_evict_one(void)
  * of room.
  */
 struct room *
-room_get(unsigned room_id)
+room_get(const char *room_id)
 {
 	struct room *curr;
 
-	/* refuse to open room 0. */
-	if (!room_id)
+	if (!room_id || !room_id[0])
 		return NULL;
 
 	/* O(1) hash table lookup. */
-	curr = ht_uint_get(&room_ht, room_id);
+	curr = ht_str_get(&room_ht, room_id);
 
 	if (!curr) {
 		/* not in the cache -- load from database. */
 		curr = room_load(room_id);
 		if (curr) {
-			ht_uint_set(&room_ht, room_id, curr);
+			ht_str_set(&room_ht, room_id, curr);
 		}
 	}
 
@@ -364,7 +357,7 @@ room_get(unsigned room_id)
 	}
 
 	if (!curr) {
-		LOG_WARNING("could not access room \"%u\"", room_id);
+		LOG_WARNING("could not access room \"%s\"", room_id);
 	}
 
 	return curr;
@@ -402,7 +395,7 @@ room_initialize(void)
 
 	LOG_INFO("Room system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
 	LIST_INIT(&room_lru);
-	ht_uint_init(&room_ht, 64);
+	ht_str_init(&room_ht, 64);
 
 	it = muddb_iter_begin(mud_db, DOMAIN_ROOM);
 
@@ -411,43 +404,20 @@ room_initialize(void)
 		return 0;
 	}
 
-	/* preflight all of the rooms. */
+	/* preflight all of the rooms using the iterator's transaction. */
 	while ((id = muddb_iter_next(it))) {
-		struct room *r;
-		unsigned room_id;
-		char *endptr;
+		OBJ *obj;
 		LOG_DEBUG("Found room: \"%s\"", id);
-		room_id = strtoul(id, &endptr, 10);
 
-		if (*endptr) {
-			LOG_CRITICAL("room id \"%s\" is invalid!", id);
+		obj = muddb_iter_value(it);
+
+		if (!obj) {
+			LOG_CRITICAL("could not load room \"%s\"!", id);
 			muddb_iter_end(it);
 			return -1; /* could not load */
 		}
 
-		r = room_load(room_id);
-
-		if (!r) {
-			LOG_CRITICAL("could not load rooms!");
-			muddb_iter_end(it);
-			return -1; /* could not load */
-		}
-
-		/* preflight only -- don't keep in cache */
-		free(r->name.short_str);
-		r->name.short_str = NULL;
-		free(r->name.long_str);
-		r->name.long_str = NULL;
-		free(r->desc.short_str);
-		r->desc.short_str = NULL;
-		free(r->desc.long_str);
-		r->desc.long_str = NULL;
-		free(r->owner);
-		r->owner = NULL;
-		free(r->creator);
-		r->creator = NULL;
-		attr_list_free(&r->extra_values);
-		free(r);
+		obj_free(obj);
 	}
 
 	muddb_iter_end(it);
@@ -471,16 +441,16 @@ room_shutdown(void)
 
 	/* scan hash table for any rooms still held by reference */
 	for (i = 0; i < room_ht.capacity; i++) {
-		struct ht_uint_entry *e = &room_ht.buckets[i];
+		struct ht_str_entry *e = &room_ht.buckets[i];
 		if (e->occupied) {
 			curr = e->value;
-			LOG_ERROR("room \"%u\" still in use at shutdown (refcount %d)",
+			LOG_ERROR("room \"%s\" still in use at shutdown (refcount %d)",
 				curr->id, curr->refcount);
 			room_save(curr);
 		}
 	}
 
-	ht_uint_free(&room_ht);
+	ht_str_free(&room_ht, NULL);
 	room_lru_count = 0;
 
 	LOG_INFO("Room system ended.");

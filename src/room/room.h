@@ -6,7 +6,7 @@ void room_shutdown(void);
 /** find a room by id and return it.
  * increases reference count on a room.
  */
-struct room *room_get(unsigned room_id);
+struct room *room_get(const char *room_id);
 /** reduce reference count on a room */
 void room_put(struct room *r);
 /**
