@@ -34,6 +34,7 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 
 - MTH (Mud Telopt Handler) - standardized handling of TELNET protocol.
 - LMDB back-end database for objects and user accounts.
+- Room navigation: look, go, enter, and direction aliases (north/n, south/s, etc.).
 - ***WIP*** Support for Web-based client(s).
 - ***TODO*** ability to host multiple independent worlds from a single server.
 - ***TODO*** On-Line Creation: interactive wizard provides menu-based building.

@@ -266,7 +266,9 @@ WebSocket clients simultaneously.
 3. Login state machine: username -> password -> account creation (if new)
    -> main menu
 4. Menu/form system drives UI via callback-based state machines
-5. Command processing dispatches to handlers; broadcast via channel pub/sub
+5. Main menu "Enter the game" creates a character, places it in the starting
+   room, and enters command mode
+6. Command processing dispatches to handlers; broadcast via channel pub/sub
 
 ### Key Subsystems
 
@@ -282,7 +284,9 @@ WebSocket clients simultaneously.
   wrapper). Global `mud_db` opened in boris.c
 - **Game world**: `src/room/` (rooms), `src/character/` (player characters),
   `src/channel/` (communication channels)
-- **Commands**: `src/task/command.c` -- command dispatch and processing
+- **Commands**: `src/task/command.c` -- command dispatch (look, go, enter,
+  direction aliases, say, pose, etc.). Characters are associated with
+  descriptors via `telnetclient_setcharacter()`
 - **Login/Menu/Forms**: `src/login.c`, `src/menu.c`, `src/form.c` --
   state-machine-driven UI layers
 - **StackVM**: `src/stackvm/` -- 32-bit word-addressable VM (Quake 3 bytecode
@@ -299,7 +303,9 @@ WebSocket clients simultaneously.
   with state data unions for transitions
 - **Attribute lists**: game objects (rooms, characters, users) store
   properties as OBJ JSON objects via muddb; unknown fields preserved in
-  extra_values via obj_iter
+  extra_values via obj_iter. Room exits use `exit.<dir>` attributes
+  (e.g. `exit.n`, `exit.enter`); multiple exits can alias to the same
+  destination
 - **Channel pub/sub**: in-game communication uses named channels (`@system`,
   `@wiz`, `OOC`, `chat`, etc.) with subscribe/publish
 
@@ -331,3 +337,4 @@ Server configuration is in `boris.cfg`. Key settings:
 | `channels.default`   | `@system,@wiz,OOC,auction,chat,newbie`   | Default communication channels |
 | `eventlog.filename`  | `boris.log`                              | Event log output file          |
 | `newuser.allowed`    | 1                                        | Allow new account creation     |
+| `newuser.room`       | `tower-entrance`                         | Starting room for new characters |
