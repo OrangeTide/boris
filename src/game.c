@@ -65,3 +65,11 @@ game_init(void)
 	return 1;
 }
 
+/** free game state. */
+void
+game_shutdown(void)
+{
+	menu_free(&gamemenu_login);
+	menu_free(&gamemenu_main);
+}
+

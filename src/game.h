@@ -5,4 +5,5 @@
 extern struct menuinfo gamemenu_login, gamemenu_main;
 
 int game_init(void);
+void game_shutdown(void);
 #endif

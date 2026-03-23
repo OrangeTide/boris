@@ -288,6 +288,7 @@ main(int argc, char **argv)
 	atexit(muddb_shutdown);
 
 	init_mth();
+	atexit(uninit_mth);
 
 	if (help_init()) {
 		LOG_ERROR("could not load help sub-system");
@@ -364,12 +365,16 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	atexit(game_shutdown);
+
 	eventlog_server_startup();
 
 	if (telnetserver_listen(mud.params.port)) {
 		LOG_ERROR("could not listen to port %u", mud.params.port);
 		return EXIT_FAILURE;
 	}
+
+	atexit(telnetserver_shutdown);
 
 	LOG_TODO("use the next event for the timer");
 

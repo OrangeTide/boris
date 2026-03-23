@@ -23,6 +23,7 @@ struct menuinfo {
 };
 
 void menu_create(struct menuinfo *mi, const char *title);
+void menu_free(struct menuinfo *mi);
 void menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func )(void *,long,void *), long extra2, void *extra3);
 void menu_titledraw(DESCRIPTOR_DATA *cl, const char *title, size_t len);
 void menu_show(DESCRIPTOR_DATA *cl, const struct menuinfo *mi);

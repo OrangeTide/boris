@@ -529,5 +529,8 @@ character_shutdown(void)
 	ht_uint_free(&character_ht);
 	character_lru_count = 0;
 
+	freelist_free(character_id_freelist);
+	character_id_freelist = NULL;
+
 	LOG_INFO("Character sub-system ended.");
 }
