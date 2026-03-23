@@ -750,6 +750,17 @@ telnetserver_listen(int port)
 	return OK;
 }
 
+void
+telnetserver_shutdown(void)
+{
+	struct telnetserver *server;
+
+	while ((server = LIST_TOP(server_list))) {
+		LIST_REMOVE(server, list);
+		free(server);
+	}
+}
+
 struct telnetserver *
 telnetserver_first(void)
 {

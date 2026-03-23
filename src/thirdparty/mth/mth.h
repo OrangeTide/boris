@@ -129,6 +129,7 @@ void        send_echo_off            ( DESCRIPTOR_DATA *d );
 	mth.c
 */
 void        init_mth                 (void);
+void        uninit_mth               (void);
 void        init_mth_socket          ( DESCRIPTOR_DATA *d );
 void        uninit_mth_socket        ( DESCRIPTOR_DATA *d );
 void        arachnos_devel           ( char *fmt, ... );

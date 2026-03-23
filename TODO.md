@@ -31,9 +31,11 @@ testing, caching, and longer-term features.
      before freeing the struct.
    - (done) form.c:372 (form_createaccount_start) -- form_state_free()
      was not freeing the form_state struct itself. now calls free(fs).
-   26 still-reachable blocks are global state not freed at shutdown
-   (menus, user cache, mth, base64 table). not urgent but worth
-   adding cleanup routines for cleaner valgrind runs.
+   (done) added shutdown routines for global state: menu_free() and
+   game_shutdown() for menus, user_shutdown() now frees cached users,
+   character_shutdown() now frees its freelist, base64.c hard-codes its
+   decode table, uninit_mth() frees mccp buffer, telnetserver_shutdown()
+   frees server structs. all registered via atexit().
 
 
 ## P3 -- caching (done)
