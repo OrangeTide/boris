@@ -254,6 +254,7 @@ channel_public_close(struct channel_public *cp)
 		return ERR;
 	}
 
+	free(cp->name);
 	free(cp);
 
 	return OK;

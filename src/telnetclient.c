@@ -234,8 +234,20 @@ telnetclient_on_close(dyad_Event *e)
 
 	LOG_TODO("Determine if connection was logged in first");
 	eventlog_signoff(telnetclient_username(client), telnetclient_socket_name(client));
+
+	/* notify all joined channels before departing */
+	{
+		unsigned i;
+		struct channel_member *exclude_list[] = { &client->channel_member };
+		const char *name = telnetclient_username(client);
+
+		for (i = 0; i < client->nr_channel; i++) {
+			channel_broadcast(client->channel[i], exclude_list, 1,
+				"%s has left the channel.\n", name);
+		}
+	}
+
 	/* forcefully leave all channels */
-	/* TODO: nobody is notified that we left, this is not ideal. */
 	client->channel_member.send = NULL;
 	client->channel_member.p = NULL;
 	LOG_DEBUG("client->nr_channel=%d", client->nr_channel);
@@ -289,24 +301,44 @@ write_to_descriptor(DESCRIPTOR_DATA *d, const char *txt, int length)
 	return 0;
 }
 
-/* process regular input data and escape newline as CR/LF */
+/* process regular input data, escape newline as CR/LF and IAC as IAC IAC */
 static void
 write_escaped(DESCRIPTOR_DATA *d, const char *txt, int length)
 {
-	const char *base = txt, *next;
+	const char *base = txt;
 	int len = length;
-	// TODO: escape IAC
-	/* search for newline, replacing with CR/LF sequence */
-	while ((next = memchr(base, '\n', len))) {
-		write_to_descriptor(d, base, next - base);
+
+	while (len > 0) {
+		const char *nl = memchr(base, '\n', len);
+		const char *iac = memchr(base, '\xff', len);
+
+		/* find whichever special byte comes first */
+		const char *next = NULL;
+		if (nl && (!iac || nl <= iac))
+			next = nl;
+		else if (iac)
+			next = iac;
+
+		if (!next) {
+			write_to_descriptor(d, base, len);
+			break;
+		}
+
+		/* write data before the special byte */
+		if (next > base)
+			write_to_descriptor(d, base, next - base);
+
+		if (*next == '\n') {
+			write_to_descriptor(d, "\r\n", 2);
+		} else {
+			/* escape IAC (0xFF) by doubling it */
+			write_to_descriptor(d, "\xff\xff", 2);
+		}
+
 		next++;
-		write_to_descriptor(d, "\r\n", 2);
 		len -= next - base;
 		assert(len >= 0);
 		base = next;
-	}
-	if (len > 0) {
-		write_to_descriptor(d, base, len);
 	}
 }
 
