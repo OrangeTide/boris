@@ -25,12 +25,15 @@ testing, caching, and longer-term features.
 
  * stackvm/kernel/prioq_test.c exists but is incomplete.
 
- * valgrind (make smoke-valgrind) reports 8 definitely-lost blocks:
-   - channel.c:226 (channel_public_add) -- 7 strdup leaks, one per
-     default channel. channels_done() does not free the public
-     channel list.
-   - form.c:372 (form_createaccount_start) -- 40-byte form state
-     allocation not freed when account creation completes.
+ * valgrind (make smoke-valgrind) reports definitely-lost blocks:
+   - channel.c: channel_public_close() frees the channel struct but
+     not the strdup'd name field. one-line fix: add free(cp->name)
+     before free(cp) in channel_public_close(). 7 leaks, one per
+     default channel.
+   - form.c:372 (form_createaccount_start) -- likely fixed.
+     form_state_free() is now set as the state_free callback and
+     properly frees the form state allocation. needs re-verification
+     with valgrind.
    26 still-reachable blocks are global state not freed at shutdown
    (menus, user cache, mth, base64 table). not urgent but worth
    adding cleanup routines for cleaner valgrind runs.
@@ -55,10 +58,14 @@ testing, caching, and longer-term features.
 ## P4 -- longer term
 
  * redo the version number policy in boris. Remove per-file version numbers, except in boris.c
-   A global version number is tracked in boris.c (and extracted in  Makefile). 
-   Use semver for our version numbers. We will start at 0.7.1 
-   Any major merge request should increment at least the patch number. The maintainer will handle trivial conflicts, but the general policy will be to combine multiple MRs that were in-flight into the same version number. 
-   For example, if 3 MRs showed up tomorrow. I would bump to version 0.7.2 and not 0.7.4
+   A global version number is tracked in boris.h (BORIS_VERSION_MAJ/MIN/PAT,
+   currently 0.7.0). ~30 source files still have per-file version headers
+   that need removal. Use semver for our version numbers. We will start
+   at 0.7.1. Any major merge request should increment at least the patch
+   number. The maintainer will handle trivial conflicts, but the general
+   policy will be to combine multiple MRs that were in-flight into the
+   same version number. For example, if 3 MRs showed up tomorrow. I would
+   bump to version 0.7.2 and not 0.7.4
 
  * object versioning system for the online object editor.
    wikipedia-like history where each save creates a new version.
@@ -78,9 +85,12 @@ testing, caching, and longer-term features.
 
  * create a docs/ directory for quarterly mud reports.
 
- * consolidate text file caching in help.c with other areas that reach into
-   data/text for settings (like welcome.txt). A textfile API that can refresh
-   cache on SIGHUP so that on-disk files can be edited and updated in the mud
-   would be good. The way the welcome message works would have to be re-wired to
-   instead reference the file path. we could eliminate the hardcoded default value
-   since we will provide data/text as part of the sample data in the distribution.
+ * consolidate text file caching with other areas that reach into
+   data/text for settings (like welcome.txt). help.c already has a
+   complete caching system (string-keyed hash table, SIGHUP
+   invalidation via help_cache_invalidate). the remaining work is
+   wiring welcome.txt and other data/text consumers to use the same
+   pattern. the way the welcome message works would have to be
+   re-wired to instead reference the file path. we could eliminate
+   the hardcoded default value since we will provide data/text as
+   part of the sample data in the distribution.
