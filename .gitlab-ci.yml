@@ -20,7 +20,7 @@ stages:
 .build-deps: &build-deps
   - apk update
   - apk add build-base linux-headers make git
-    zlib-dev zlib-static rsync
+    zlib-dev zlib-static rsync xz
 
 before_script:
   - *build-deps
