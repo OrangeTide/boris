@@ -27,6 +27,7 @@ Information for developers working on Boris MUD.
 | src/thirdparty/jsmn/   | Minimal JSON parser (zero-copy)                          |
 | src/thirdparty/mth/    | MUD Telopt Handler (TELNET protocol)                     |
 | src/thirdparty/mongoose/| HTTP/WebSocket server                                   |
+| src/thirdparty/tiny-aes/| AES-256 block cipher (public domain, Unlicense)         |
 
 ## Build System
 
@@ -41,9 +42,11 @@ The top-level Makefile includes all `module.mk` files and compiles everything
 with a single pattern rule. There are no intermediate static archives -- all
 `.o` files link flat, which avoids circular dependency issues between modules.
 
-Object files go to `build/`, mirroring the source tree. Auto-dependency
-tracking uses `-MMD -MP`. LTO is enabled automatically if the compiler
-supports it.
+Object files go to `build/<triplet>/`, mirroring the source tree. The triplet
+is derived from `$(CC) -dumpmachine` (e.g. `build/x86_64-linux-gnu/`), so
+cross-compiled object files don't clobber native ones. Binaries go to `bin/`.
+Auto-dependency tracking uses `-MMD -MP`. LTO is enabled automatically if the
+compiler supports it.
 
 ### Adding a new source file
 
@@ -306,6 +309,7 @@ All in `src/thirdparty/`:
 - mongoose (HTTP/WebSocket)
 - mth (TELNET)
 - jsmn (JSON parser)
+- tiny-AES-c (AES-256 block cipher)
 - scrypt (password hashing)
 
 ### Entry Point
