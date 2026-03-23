@@ -97,6 +97,9 @@ ln -sfn "releases/${RELEASE_NAME}" current
 echo ""
 echo "Deployed to ~/${DEPLOY_DIR}/current/"
 echo ""
+echo "To initialize a new MUD with sample data:"
+echo "  cd ~/${DEPLOY_DIR}/current && ./bin/muddb-tool import data/muddb sample/"
+echo ""
 echo "To run:"
 echo "  cd ~/${DEPLOY_DIR}/current && ./bin/boris"
 REMOTE_SCRIPT

@@ -7,18 +7,16 @@ testing, caching, and longer-term features.
 ## P1 -- missing functionality
 
  * telnetclient.c: client disconnect does not notify other users
-   or clean up channel membership properly (lines 210, 231, 234).
+   or clean up channel membership properly (lines 235, 238).
 
  * telnetclient.c: IAC escape not implemented in output path
-   (line 294). will corrupt binary data sent to telnet clients.
+   (line 298). will corrupt binary data sent to telnet clients.
 
  * crypt/sha1crypt.c: random salt generation is weak (line 37).
    should use /dev/urandom or getrandom().
 
- * task/command.c: multiple strtoul calls with no error checking
-   (lines 130, 190, 218).
-
- * support import/export of muddb (LMDB). Use a flat file hierarchy. to store plain-text files (.json for objects). each "domain" is a top-level directory in the export. Import command takes one or more "domains" to import in the same layout. in boris's top-level create a sample/ directory with a starting database that new MUDs can use to initialize themselves to a working state. include instructions on importing to initialize a new mud. and include the sample directory and necessary tools in the binary releases.
+ * task/command.c: strtoul calls with no error checking in
+   roomget/char debug commands (lines 187, 215).
 
 ## P2 -- testing
 
@@ -26,6 +24,16 @@ testing, caching, and longer-term features.
    through muddb.
 
  * stackvm/kernel/prioq_test.c exists but is incomplete.
+
+ * valgrind (make smoke-valgrind) reports 8 definitely-lost blocks:
+   - channel.c:226 (channel_public_add) -- 7 strdup leaks, one per
+     default channel. channels_done() does not free the public
+     channel list.
+   - form.c:372 (form_createaccount_start) -- 40-byte form state
+     allocation not freed when account creation completes.
+   26 still-reachable blocks are global state not freed at shutdown
+   (menus, user cache, mth, base64 table). not urgent but worth
+   adding cleanup routines for cleaner valgrind runs.
 
 
 ## P3 -- caching (done)
@@ -69,3 +77,10 @@ testing, caching, and longer-term features.
    but no real game UI or interaction logic.
 
  * create a docs/ directory for quarterly mud reports.
+
+ * consolidate text file caching in help.c with other areas that reach into
+   data/text for settings (like welcome.txt). A textfile API that can refresh
+   cache on SIGHUP so that on-disk files can be edited and updated in the mud
+   would be good. The way the welcome message works would have to be re-wired to
+   instead reference the file path. we could eliminate the hardcoded default value
+   since we will provide data/text as part of the sample data in the distribution.

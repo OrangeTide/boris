@@ -11,6 +11,7 @@ A MUD code base in the style of the last millennium, written in the new millenni
 - [Releases](#releases)
 - [Deploying](#deploying)
 - [Local Configuration (.env)](#local-configuration-env)
+- [Database Tools](#database-tools)
 - [Running the Server](#running-the-server)
 - [Development](#development)
 - [Support](#support)
@@ -33,6 +34,7 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 
 - MTH (Mud Telopt Handler) - standardized handling of TELNET protocol.
 - LMDB back-end database for objects and user accounts.
+- Room navigation: look, go, enter, and direction aliases (north/n, south/s, etc.).
 - ***WIP*** Support for Web-based client(s).
 - ***TODO*** ability to host multiple independent worlds from a single server.
 - ***TODO*** On-Line Creation: interactive wizard provides menu-based building.
@@ -220,6 +222,69 @@ Available settings:
 | `CC`           | C compiler (useful for cross-compilation)          | `arm-linux-gnueabihf-gcc`       |
 | `LDFLAGS`      | Linker flags                                       | `-static`                        |
 
+## Database Tools
+
+Boris stores game objects (rooms, characters, users) in an LMDB database
+(`data/muddb/`). The `muddb-tool` utility exports and imports this data as
+plain-text JSON files organized by domain.
+
+### Export
+
+Dump the entire database to a directory tree:
+
+```sh
+./bin/muddb-tool export data/muddb dump/
+```
+
+This creates `dump/<domain>/<key>.json` for every object. To export a
+single domain:
+
+```sh
+./bin/muddb-tool export data/muddb dump/ rooms
+```
+
+### Import
+
+Load JSON files into the database:
+
+```sh
+./bin/muddb-tool import data/muddb dump/
+```
+
+To import only specific domains:
+
+```sh
+./bin/muddb-tool import data/muddb dump/ rooms chars
+```
+
+### Initializing a New MUD
+
+A `sample/` directory ships with the source (and binary releases) containing
+a starter world with a handful of connected rooms. To set up a fresh
+database:
+
+```sh
+mkdir -p data/muddb
+./bin/muddb-tool import data/muddb sample/
+```
+
+Then start the server normally with `./bin/boris`.
+
+### File Layout
+
+The export/import format is a flat directory hierarchy:
+
+```
+sample/
+  rooms/
+    town-square.json    # {"id":"town-square","name.short":"Town Square", ...}
+    east-gates.json
+    ...
+```
+
+Each `.json` file contains a single JSON object. The filename (minus `.json`)
+is the database key.
+
 ## Running the Server
 
 ### Configure
@@ -227,6 +292,13 @@ Available settings:
 Edit configuration file (`boris.cfg`) with your preferred MUD port (`server.port`, default 4444) and web port (`webserver.port`, default 8080).
 
 ### Starting for the first time
+
+Initialize the database with the sample world (optional but recommended):
+
+```sh
+mkdir -p data/muddb
+./bin/muddb-tool import data/muddb sample/
+```
 
 Start the server:
 

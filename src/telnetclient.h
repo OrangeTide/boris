@@ -22,4 +22,6 @@ void telnetclient_prompt_refresh_all(struct telnetserver *);
 struct telnetserver *telnetserver_first(void);
 struct telnetserver *telnetserver_next(struct telnetserver *server);
 void telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u);
+void telnetclient_setcharacter(DESCRIPTOR_DATA *cl, struct character *ch);
+struct character *telnetclient_character(DESCRIPTOR_DATA *cl);
 #endif

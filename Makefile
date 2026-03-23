@@ -29,11 +29,12 @@ endif
 BINDIR := bin
 
 # --- Source collection (populated by module.mk includes) --------------------
-BORIS_SRCS  :=
-MKPASS_SRCS :=
-TEST_SRCS   :=
-TEST_BINS   :=
-INCLUDES    := -Isrc/thirdparty/jsmn
+BORIS_SRCS    :=
+MKPASS_SRCS   :=
+ALL_TOOL_SRCS :=
+TEST_SRCS     :=
+TEST_BINS     :=
+INCLUDES      := -Isrc/thirdparty/jsmn
 
 # --- Default target (must precede module.mk includes that define rules) -----
 .DEFAULT_GOAL := all
@@ -53,13 +54,15 @@ include src/help/module.mk
 include src/web/module.mk
 include src/obj/module.mk
 include src/database/module.mk
+include src/muddb-tool/module.mk
 include src/tests/module.mk
 
 # --- Derive object lists ----------------------------------------------------
 BORIS_OBJS  := $(patsubst %.c,$(BUILDDIR)/%.o,$(BORIS_SRCS))
 MKPASS_OBJS := $(patsubst %.c,$(BUILDDIR)/%.o,$(MKPASS_SRCS))
+TOOL_OBJS   := $(patsubst %.c,$(BUILDDIR)/%.o,$(ALL_TOOL_SRCS))
 TEST_OBJS   := $(patsubst %.c,$(BUILDDIR)/%.o,$(TEST_SRCS))
-ALL_OBJS    := $(sort $(BORIS_OBJS) $(MKPASS_OBJS) $(TEST_OBJS))
+ALL_OBJS    := $(sort $(BORIS_OBJS) $(MKPASS_OBJS) $(TOOL_OBJS) $(TEST_OBJS))
 DEPS        := $(ALL_OBJS:.o=.d)
 
 CFLAGS += $(INCLUDES)
@@ -75,7 +78,7 @@ endif
 # --- Targets ----------------------------------------------------------------
 .PHONY: all clean distclean tests
 
-all: $(BINDIR)/boris $(BINDIR)/mkpass
+all: $(BINDIR)/boris $(BINDIR)/mkpass $(BINDIR)/muddb-tool
 
 tests: $(TEST_BINS)
 	@for t in $(TEST_BINS); do echo "--- Running $$t ---"; ./$$t || exit 1; done
@@ -118,7 +121,7 @@ clean:
 	-find $(BUILDDIR) -type d -empty -delete 2>/dev/null
 
 distclean: clean
-	$(RM) $(BINDIR)/boris $(BINDIR)/mkpass $(TEST_BINS)
+	$(RM) $(BINDIR)/boris $(BINDIR)/mkpass $(BINDIR)/muddb-tool $(TEST_BINS)
 	-find $(BINDIR)/www -type f -delete 2>/dev/null
 	-find $(BINDIR) -type d -empty -delete 2>/dev/null
 	-rmdir $(BINDIR) 2>/dev/null

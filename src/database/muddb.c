@@ -107,6 +107,37 @@ muddb_dbi_open(MUDDB *db, MDB_txn *txn, const char *domain, int create,
 	return MUDDB_OK;
 }
 
+/* pre-open all known domains in a single write transaction so DBI
+ * handles are valid for the lifetime of the environment. LMDB
+ * requires that named database open operations be serialized. */
+static int
+muddb_preopen_domains(MUDDB *db)
+{
+	static const char *known_domains[] = {
+		"users", "rooms", "chars", NULL
+	};
+	MDB_txn *txn;
+	MDB_dbi dbi;
+	int i, rc;
+
+	rc = mdb_txn_begin(db->env, NULL, 0, &txn);
+	if (rc != 0) {
+		LOG_ERROR("mdb_txn_begin(init): %s", mdb_strerror(rc));
+		return MUDDB_ERR;
+	}
+
+	for (i = 0; known_domains[i]; i++) {
+		if (muddb_dbi_open(db, txn, known_domains[i], 1, &dbi) != MUDDB_OK) {
+			LOG_ERROR("could not open domain \"%s\"", known_domains[i]);
+			mdb_txn_abort(txn);
+			return MUDDB_ERR;
+		}
+	}
+
+	mdb_txn_commit(txn);
+	return MUDDB_OK;
+}
+
 MUDDB *
 muddb_open(const char *path, unsigned flags)
 {
@@ -135,6 +166,11 @@ muddb_open(const char *path, unsigned flags)
 	rc = mdb_env_open(db->env, path, 0, 0664);
 	if (rc != 0) {
 		LOG_ERROR("mdb_env_open(%s): %s", path, mdb_strerror(rc));
+		mdb_env_close(db->env);
+		goto fail;
+	}
+
+	if (muddb_preopen_domains(db) != MUDDB_OK) {
 		mdb_env_close(db->env);
 		goto fail;
 	}
@@ -178,7 +214,9 @@ muddb_get(MUDDB *db, const char *domain, const char *key)
 		return NULL;
 	}
 
-	if (muddb_dbi_open(db, txn, domain, 0, &dbi) != MUDDB_OK) {
+	rc = muddb_dbi_open(db, txn, domain, 0, &dbi);
+	if (rc != MUDDB_OK) {
+		LOG_DEBUG("muddb_get: dbi_open(%s) failed rc=%d", domain, rc);
 		mdb_txn_abort(txn);
 		return NULL;
 	}
@@ -188,6 +226,7 @@ muddb_get(MUDDB *db, const char *domain, const char *key)
 
 	rc = mdb_get(txn, dbi, &mkey, &mdata);
 	if (rc == MDB_NOTFOUND) {
+		LOG_DEBUG("muddb_get: key \"%s\" not found in domain \"%s\"", key, domain);
 		mdb_txn_abort(txn);
 		return NULL;
 	}
@@ -401,6 +440,45 @@ muddb_iter_next(MUDDB_ITER *it)
 		keybuf[len] = '\0';
 		return keybuf;
 	}
+}
+
+OBJ *
+muddb_iter_value(MUDDB_ITER *it)
+{
+	MDB_val mkey, mdata;
+	MDB_cursor_op op;
+	char *json;
+	char keybuf[256];
+	size_t len;
+	OBJ *obj;
+	int rc;
+
+	if (!it)
+		return NULL;
+
+	/* re-fetch the current position */
+	op = MDB_GET_CURRENT;
+	rc = mdb_cursor_get(it->cursor, &mkey, &mdata, op);
+	if (rc != 0)
+		return NULL;
+
+	/* null-terminate the key */
+	len = mkey.mv_size;
+	if (len >= sizeof(keybuf))
+		len = sizeof(keybuf) - 1;
+	memcpy(keybuf, mkey.mv_data, len);
+	keybuf[len] = '\0';
+
+	/* null-terminate the value */
+	json = malloc(mdata.mv_size + 1);
+	if (!json)
+		return NULL;
+	memcpy(json, mdata.mv_data, mdata.mv_size);
+	json[mdata.mv_size] = '\0';
+
+	obj = obj_new_from_json(keybuf, json);
+	free(json);
+	return obj;
 }
 
 void

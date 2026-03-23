@@ -9,6 +9,7 @@
 struct form_state;
 struct menuinfo;
 struct user;
+struct character;
 struct buf;
 
 typedef struct descriptor_data DESCRIPTOR_DATA;
@@ -21,6 +22,7 @@ struct descriptor_data {
 	char *name;
 	struct buf *linebuf; /**< command input buffer */
 	struct user *user;
+	struct character *character;
 	struct acs_info acs;
 	struct terminal terminal;
 	void (*state_free)(DESCRIPTOR_DATA *); /**< callback to free state_data */
