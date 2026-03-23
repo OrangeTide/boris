@@ -276,8 +276,8 @@ The export/import format is a flat directory hierarchy:
 ```
 sample/
   rooms/
-    1.json          # {"id":"1","name.short":"Town Square", ...}
-    2.json
+    town-square.json    # {"id":"town-square","name.short":"Town Square", ...}
+    east-gates.json
     ...
 ```
 

@@ -211,7 +211,7 @@ its own domain:
 | Domain     | Constant           | Consumer     | Key                        |
 |------------|--------------------|--------------|----------------------------|
 | `"users"`  | `DOMAIN_USER`      | user.c       | username                   |
-| `"rooms"`  | `DOMAIN_ROOM`      | room.c       | room id (decimal string)   |
+| `"rooms"`  | `DOMAIN_ROOM`      | room.c       | room id (string)           |
 | `"chars"`  | `DOMAIN_CHARACTER` | character.c  | character id (decimal string) |
 
 Domain constants are defined in boris.h. Domains are created on first write

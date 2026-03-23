@@ -122,16 +122,13 @@ command_do_roomget(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd U
 {
 	struct room *r;
 	char roomnum_str[64];
-	unsigned roomnum;
 	char attrname[64];
 	const char *attrvalue;
 
 	arg = util_getword(arg, roomnum_str, sizeof roomnum_str);
-	roomnum = strtoul(roomnum_str, 0, 10); /* TODO: handle errors. */
-
 	arg = util_getword(arg, attrname, sizeof attrname);
 
-	r = room_get(roomnum);
+	r = room_get(roomnum_str);
 
 	if (!arg) {
 		telnetclient_printf(cl, "usage: roomget <roomnum> <attrname>\n");
