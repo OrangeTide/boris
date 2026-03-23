@@ -292,8 +292,6 @@ WebSocket clients simultaneously.
   descriptors via `telnetclient_setcharacter()`
 - **Login/Menu/Forms**: `src/login.c`, `src/menu.c`, `src/form.c` --
   state-machine-driven UI layers
-- **StackVM**: `src/stackvm/` -- 32-bit word-addressable VM (Quake 3 bytecode
-  style) for game scripting
 - **Logging**: `src/log/eventlog.c` -- subsystem-tagged event logging to
   boris.log
 - **Crypto**: `src/crypt/` (SHA1, base64), `src/scrypt/` (key derivation)
