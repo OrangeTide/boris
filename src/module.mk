@@ -5,7 +5,6 @@ BORIS_SRCS += \
 	src/crypt/sha1.c \
 	src/crypt/sha1crypt.c \
 	src/room/room.c \
-	src/stackvm/stackvm.c \
 	src/task/command.c \
 	src/task/comutil.c \
 	src/worldclock/worldclock.c \
