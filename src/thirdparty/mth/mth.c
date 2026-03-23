@@ -24,6 +24,13 @@ void init_mth_socket(DESCRIPTOR_DATA *d)
 	announce_support(d);
 }
 
+void uninit_mth(void)
+{
+	free(mud.mccp_buf);
+	mud.mccp_buf = NULL;
+	mud.mccp_len = 0;
+}
+
 void uninit_mth_socket(DESCRIPTOR_DATA *d)
 {
 	unannounce_support(d);
