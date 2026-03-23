@@ -7,6 +7,7 @@
 #   menu_quit    - connect, see login menu, quit with Q
 #   bad_login    - connect, attempt login with bad creds, see error
 #   new_user     - create account, login, reach main menu
+#   enter_game   - login, enter game world, run help, quit
 
 set timeout 10
 set port [lindex $argv 0]
@@ -144,6 +145,50 @@ switch -- $test {
 		expect {
 			eof {}
 			timeout {}
+		}
+	}
+
+	enter_game {
+		# login with the account created by new_user
+		send "L\r"
+		expect {
+			"Username:" {}
+			timeout { fail "enter_game: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "enter_game: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {}
+			-re "Invalid|invalid" {
+				fail "enter_game: login rejected"
+			}
+			timeout { fail "enter_game: no main menu after login" }
+		}
+		expect {
+			"Choose:" {}
+			timeout { fail "enter_game: no menu prompt" }
+		}
+		# enter the game
+		send "E\r"
+		expect {
+			"> " {}
+			timeout { fail "enter_game: no command prompt" }
+		}
+		# run help command
+		send "help\r"
+		expect {
+			"> " {}
+			timeout { fail "enter_game: no prompt after help" }
+		}
+		# quit from game
+		send "quit\r"
+		expect {
+			eof { pass "enter_game: entered game, ran help, quit" }
+			timeout { fail "enter_game: no disconnect after quit" }
 		}
 	}
 

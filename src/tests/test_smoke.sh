@@ -9,6 +9,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BORIS="$PROJECT_DIR/bin/boris"
+MUDDB_TOOL="$PROJECT_DIR/bin/muddb-tool"
 SMOKE_EXP="$SCRIPT_DIR/smoke.exp"
 
 PORT=4445
@@ -64,6 +65,10 @@ check_prereqs()
 		die "server binary not found at $BORIS -- run 'make' first"
 	fi
 
+	if [ ! -x "$MUDDB_TOOL" ]; then
+		die "muddb-tool not found at $MUDDB_TOOL -- run 'make' first"
+	fi
+
 	if [ ! -f "$SMOKE_EXP" ]; then
 		die "expect script not found at $SMOKE_EXP"
 	fi
@@ -80,8 +85,9 @@ setup_testenv()
 	# copy data files the server needs
 	cp -a "$PROJECT_DIR/data" "$TMPDIR/data"
 
-	# create muddb directory for LMDB
+	# initialize muddb with sample world data
 	mkdir -p "$TMPDIR/data/muddb"
+	"$MUDDB_TOOL" import "$TMPDIR/data/muddb" "$PROJECT_DIR/sample/" >/dev/null 2>&1
 
 	# write a test config with our port
 	cat > "$TMPDIR/boris.cfg" <<-EOF
@@ -176,6 +182,7 @@ start_server
 run_test menu_quit
 run_test bad_login
 run_test new_user
+run_test enter_game
 
 echo "%%%%%%%%%%%% END-TEST : $PASS passed, $FAIL failed (of $TOTAL)"
 
