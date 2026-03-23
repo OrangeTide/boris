@@ -15,8 +15,8 @@ testing, caching, and longer-term features.
  * crypt/sha1crypt.c: random salt generation is weak (line 37).
    should use /dev/urandom or getrandom().
 
- * task/command.c: multiple strtoul calls with no error checking
-   (lines 130, 190, 218).
+ * task/command.c: strtoul calls with no error checking
+   (lines 190, 218).
 
 ## P2 -- testing
 
