@@ -176,6 +176,7 @@ command_do_character(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd
 		char ch_id_str[64];
 		char attr_str[64];
 		unsigned ch_id;
+		char *endptr;
 
 		arg = util_getword(arg, ch_id_str, sizeof(ch_id_str));
 		arg = util_getword(arg, attr_str, sizeof(attr_str));
@@ -184,7 +185,11 @@ command_do_character(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd
 			return 0;
 		}
 
-		ch_id = strtoul(ch_id_str, 0, 10); /* TODO: handle errors. */
+		ch_id = strtoul(ch_id_str, &endptr, 10);
+		if (*endptr != '\0') {
+			telnetclient_printf(cl, "Invalid character id \"%s\"\n", ch_id_str);
+			return 0;
+		}
 		ch = character_get(ch_id);
 
 		if (ch) {
@@ -197,6 +202,7 @@ command_do_character(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd
 		char ch_id_str[64];
 		char attr_str[64];
 		unsigned ch_id;
+		char *endptr;
 
 		arg = util_getword(arg, ch_id_str, sizeof ch_id_str);
 		arg = util_getword(arg, attr_str, sizeof attr_str);
@@ -212,7 +218,11 @@ command_do_character(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd
 			return 0;
 		}
 
-		ch_id = strtoul(ch_id_str, 0, 10); /* TODO: handle errors. */
+		ch_id = strtoul(ch_id_str, &endptr, 10);
+		if (*endptr != '\0') {
+			telnetclient_printf(cl, "Invalid character id \"%s\"\n", ch_id_str);
+			return 0;
+		}
 		ch = character_get(ch_id);
 
 		if (ch) {
