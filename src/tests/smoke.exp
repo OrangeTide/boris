@@ -175,19 +175,51 @@ switch -- $test {
 		# enter the game
 		send "E\r"
 		expect {
+			"Tower Entrance" {}
+			timeout { fail "enter_game: no room description on entry" }
+		}
+		expect {
 			"> " {}
 			timeout { fail "enter_game: no command prompt" }
 		}
-		# run help command
-		send "help\r"
+		# test look command
+		send "look\r"
+		expect {
+			"Tower Entrance" {}
+			timeout { fail "enter_game: look did not show room" }
+		}
+		expect {
+			"Exits:" {}
+			timeout { fail "enter_game: look did not show exits" }
+		}
 		expect {
 			"> " {}
-			timeout { fail "enter_game: no prompt after help" }
+			timeout { fail "enter_game: no prompt after look" }
+		}
+		# test movement -- go north
+		send "n\r"
+		expect {
+			"Thieves District" {}
+			timeout { fail "enter_game: go north did not work" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "enter_game: no prompt after go north" }
+		}
+		# go back south
+		send "south\r"
+		expect {
+			"Tower Entrance" {}
+			timeout { fail "enter_game: go south did not work" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "enter_game: no prompt after go south" }
 		}
 		# quit from game
 		send "quit\r"
 		expect {
-			eof { pass "enter_game: entered game, ran help, quit" }
+			eof { pass "enter_game: entered game, look and movement work" }
 			timeout { fail "enter_game: no disconnect after quit" }
 		}
 	}

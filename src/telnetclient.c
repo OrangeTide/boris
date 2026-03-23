@@ -37,6 +37,7 @@
 #include <game.h>
 #include <mudconfig.h>
 #include <user.h>
+#include <character.h>
 #include <menu.h>
 #include <mth.h>
 #include <buf.h>
@@ -207,7 +208,10 @@ telnetclient_on_destroy(dyad_Event *e)
 	buf_free(client->linebuf);
 	client->linebuf = NULL;
 
-	LOG_TODO("free any other data structures associated with client"); /* TODO: be vigilant about memory leaks! */
+	if (client->character) {
+		character_put(client->character);
+		client->character = NULL;
+	}
 
 #ifndef NDEBUG
 	memset(client, 0xBB, sizeof * client); /* fill with fake data before freeing */
@@ -498,6 +502,34 @@ telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u)
 		user_get(u);
 	}
 	user_put(&old_user);
+}
+
+/**
+ * replaces the current character with a different one and updates reference counts.
+ */
+void
+telnetclient_setcharacter(DESCRIPTOR_DATA *cl, struct character *ch)
+{
+	struct character *old;
+	assert(cl != NULL);
+	old = cl->character;
+	cl->character = ch;
+	if (ch) {
+		/* caller already holds a reference -- we take ownership */
+	}
+	if (old) {
+		character_put(old);
+	}
+}
+
+/**
+ * return the character associated with this descriptor.
+ */
+struct character *
+telnetclient_character(DESCRIPTOR_DATA *cl)
+{
+	assert(cl != NULL);
+	return cl->character;
 }
 
 #if 0 // TODO: use MTH to change ECHO mode
