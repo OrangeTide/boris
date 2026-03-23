@@ -7,16 +7,16 @@ testing, caching, and longer-term features.
 ## P1 -- missing functionality
 
  * telnetclient.c: client disconnect does not notify other users
-   or clean up channel membership properly (lines 210, 231, 234).
+   or clean up channel membership properly (lines 235, 238).
 
  * telnetclient.c: IAC escape not implemented in output path
-   (line 294). will corrupt binary data sent to telnet clients.
+   (line 298). will corrupt binary data sent to telnet clients.
 
  * crypt/sha1crypt.c: random salt generation is weak (line 37).
    should use /dev/urandom or getrandom().
 
- * task/command.c: strtoul calls with no error checking
-   (lines 190, 218).
+ * task/command.c: strtoul calls with no error checking in
+   roomget/char debug commands (lines 187, 215).
 
 ## P2 -- testing
 
