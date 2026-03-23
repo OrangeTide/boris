@@ -29,10 +29,8 @@ testing, caching, and longer-term features.
  * valgrind (make smoke-valgrind) reports definitely-lost blocks:
    - (done) channel.c: channel_public_close() now frees cp->name
      before freeing the struct.
-   - form.c:372 (form_createaccount_start) -- likely fixed.
-     form_state_free() is now set as the state_free callback and
-     properly frees the form state allocation. needs re-verification
-     with valgrind.
+   - (done) form.c:372 (form_createaccount_start) -- form_state_free()
+     was not freeing the form_state struct itself. now calls free(fs).
    26 still-reachable blocks are global state not freed at shutdown
    (menus, user cache, mth, base64 table). not urgent but worth
    adding cleanup routines for cleaner valgrind runs.
