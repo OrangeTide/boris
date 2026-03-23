@@ -18,6 +18,7 @@ testing, caching, and longer-term features.
  * task/command.c: multiple strtoul calls with no error checking
    (lines 130, 190, 218).
 
+ * support import/export of muddb (LMDB). Use a flat file hierarchy. to store plain-text files (.json for objects). each "domain" is a top-level directory in the export. Import command takes one or more "domains" to import in the same layout. in boris's top-level create a sample/ directory with a starting database that new MUDs can use to initialize themselves to a working state. include instructions on importing to initialize a new mud. and include the sample directory and necessary tools in the binary releases.
 
 ## P2 -- testing
 
@@ -44,6 +45,12 @@ testing, caching, and longer-term features.
 
 
 ## P4 -- longer term
+
+ * redo the version number policy in boris. Remove per-file version numbers, except in boris.c
+   A global version number is tracked in boris.c (and extracted in  Makefile). 
+   Use semver for our version numbers. We will start at 0.7.1 
+   Any major merge request should increment at least the patch number. The maintainer will handle trivial conflicts, but the general policy will be to combine multiple MRs that were in-flight into the same version number. 
+   For example, if 3 MRs showed up tomorrow. I would bump to version 0.7.2 and not 0.7.4
 
  * object versioning system for the online object editor.
    wikipedia-like history where each save creates a new version.
