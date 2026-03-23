@@ -341,4 +341,46 @@ Server configuration is in `boris.cfg`. Key settings:
 | `newuser.room`       | `tower-entrance`                         | Starting room for new characters |
 
 
+## GitLab Merge Request Process
+
+Development happens on feature branches merged via GitLab merge requests (MRs).
+
+### Workflow
+
+1. Create a branch from `master` for your work.
+2. Make commits on the branch. Reference GitLab work items or issues in commit
+   messages using `#<number>` (e.g. `Add room save tests (#12)`). GitLab
+   automatically links the commit to the referenced item.
+3. Push the branch and open a merge request on GitLab.
+4. The MR title should be concise. The description should explain what changed
+   and why, and list any work items it addresses.
+5. After review, merge into `master`. Use "Delete source branch" to keep the
+   branch list clean.
+
+### Commit messages
+
+- Start with a short summary line (imperative mood, under 72 characters).
+- Reference the GitLab work item or issue number with `#<number>` so the
+  commit appears in the item's activity feed.
+- If a commit fully resolves an item, use `Closes #<number>` or
+  `Fixes #<number>` in the commit body -- GitLab will close the item
+  automatically when the MR merges.
+
+Example:
+
+```
+Add room/character load/save round-trip tests (#12)
+
+Unit tests verifying that muddb_put + muddb_get produces identical OBJ
+output for rooms and characters.
+
+Closes #12
+```
+
+### Version bumps
+
+See work item #13 for the version policy. Any major MR should increment at
+least the patch number in `boris.h` (`BORIS_VERSION_PAT`). Multiple MRs
+merged in the same cycle share a single bump.
+
 [1] https://valgrind.org Valgrind
