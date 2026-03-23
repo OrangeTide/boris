@@ -8,9 +8,6 @@ A MUD code base in the style of the last millennium, written in the new millenni
 - [Features](#features)
 - [Build Requirements](#build-requirements)
 - [Building](#building)
-- [Releases](#releases)
-- [Deploying](#deploying)
-- [Local Configuration (.env)](#local-configuration-env)
 - [Running the Server](#running-the-server)
 - [Development](#development)
 - [Support](#support)
@@ -42,13 +39,14 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 - GNU Make 4.2.1 (or later)
 - GCC or Clang
 - zlib development headers
+- OpenSSL development headers (for scrypt)
 
 ### Linux
 
 Debian / Ubuntu:
 ```sh
-sudo apt update
-sudo apt install build-essential zlib1g-dev
+sudo apt-get update
+sudo apt-get install build-essential libssl-dev zlib1g-dev
 ```
 
 ## Building
@@ -80,9 +78,7 @@ To specify a cross-compiler directly:
 make -j$(nproc) CC=arm-linux-gnueabihf-gcc
 ```
 
-Build output is `bin/boris` and `bin/mkpass`. Object files go to
-`build/<triplet>/` (e.g. `build/x86_64-linux-gnu/`) so cross-compiled
-object files don't clobber native ones.
+Build output is `bin/boris` and `bin/mkpass`.
 
 ### Install Web Client
 
@@ -94,59 +90,19 @@ make install
 
 ### Cross-Compiling for Raspberry Pi
 
-#### 64-bit (aarch64)
-
-Enable the arm64 architecture and install the cross toolchain with libraries:
+Install the cross-compilation toolchain:
 
 ```sh
-sudo dpkg --add-architecture arm64
-sudo apt update
-sudo apt install gcc-aarch64-linux-gnu zlib1g-dev:arm64
+sudo apt-get install gcc-arm-linux-gnueabihf
 ```
-
-**Note:** On Ubuntu and derivatives, the default apt mirrors only carry amd64/i386
-packages. arm64 and armhf packages are served from `ports.ubuntu.com`. If `apt update`
-fails with 404 errors for arm64, you need to add a ports source and pin
-your existing sources to amd64 only. Create
-`/etc/apt/sources.list.d/arm64-cross.list`:
-
-```
-deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main universe
-deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main universe
-```
-
-Then add `[arch=amd64,i386]` to each `deb` line in your existing
-`/etc/apt/sources.list` (or files under `sources.list.d/`) so they stop
-trying to fetch arm64 from the wrong mirror. Then run `sudo apt update` again.
 
 Build with the cross-compiler:
-
-```sh
-make -j$(nproc) CC=aarch64-linux-gnu-gcc
-```
-
-For a fully static binary (no runtime dependencies on the Pi):
-
-```sh
-make -j$(nproc) CC=aarch64-linux-gnu-gcc LDFLAGS="-static"
-```
-
-#### 32-bit (armhf)
-
-Follow the same ports.ubuntu.com setup as above (substituting `[arch=armhf]`
-for `[arch=arm64]`, or `[arch=arm64,armhf]` if you want both) if needed, then:
-
-```sh
-sudo dpkg --add-architecture armhf
-sudo apt update
-sudo apt install gcc-arm-linux-gnueabihf zlib1g-dev:armhf
-```
 
 ```sh
 make -j$(nproc) CC=arm-linux-gnueabihf-gcc
 ```
 
-Copy `bin/boris`, `bin/mkpass`, `boris.cfg`, and the `data/` directory to the Raspberry Pi to run.
+Copy `bin/boris`, `boris.cfg`, and the `data/` directory to the Raspberry Pi to run.
 
 ### Cleaning
 
@@ -154,71 +110,6 @@ Copy `bin/boris`, `bin/mkpass`, `boris.cfg`, and the `data/` directory to the Ra
 make clean                 # Remove object files and dependency files
 make distclean             # Remove objects, binaries, and installed web assets
 ```
-
-### Releases
-
-Build a release tarball containing stripped binaries, web client, sample
-config, and game data. Pass all build flags in the same command -- `release`
-chains through the full build so `CC`, `LDFLAGS`, and `RELEASE_ARCH` must
-all be present:
-
-```sh
-make -j$(nproc) release                         # native x86-64
-make -j$(nproc) release CC=aarch64-linux-gnu-gcc LDFLAGS="-static" RELEASE_ARCH=linux-arm64
-make -j$(nproc) release CC=arm-linux-gnueabihf-gcc LDFLAGS="-static" RELEASE_ARCH=linux-arm32
-```
-
-Output is a file like `boris-0.7-linux-arm64.tar.xz` in the project root.
-
-### Deploying
-
-Deploy a release to a remote server via SSH. Include the same build flags
-as you would for `make release`:
-
-```sh
-make -j$(nproc) deploy DEPLOY_DEST=jon@myserver.com:mud
-make -j$(nproc) deploy CC=arm-linux-gnueabihf-gcc LDFLAGS="-static" RELEASE_ARCH=linux-arm32 DEPLOY_DEST=jon@myserver.com:mud
-```
-
-This builds a release tarball and uploads it to the remote host. The deploy
-script uses versioned releases with symlinks:
-
-```
-~/mud/
-  releases/boris-0.7-linux-arm64/   # each release unpacked here
-  shared/boris.cfg                  # persistent config (survives upgrades)
-  shared/data/chars/                # persistent game data
-  shared/data/users/
-  current -> releases/...           # symlink to active release
-```
-
-On first deploy, `boris.cfg` is copied to `shared/` for editing. Game data
-directories (`chars/`, `users/`) are symlinked from each release into
-`shared/` so they persist across upgrades.
-
-You can also deploy directly without the Makefile:
-
-```sh
-./scripts/deploy.sh jon@myserver.com:mud [tarball]
-```
-
-### Local Configuration (.env)
-
-Per-checkout settings go in a `.env` file (not committed to git). The
-Makefile reads it automatically. Copy the example to get started:
-
-```sh
-cp env.example .env
-```
-
-Available settings:
-
-| Variable       | Description                                        | Example                          |
-|----------------|----------------------------------------------------|----------------------------------|
-| `DEPLOY_DEST`  | Deploy target for `make deploy` (user@host[:dir])  | `jon@myserver.com:mud`           |
-| `RELEASE_ARCH` | Override release architecture label                | `linux-arm32`                    |
-| `CC`           | C compiler (useful for cross-compilation)          | `arm-linux-gnueabihf-gcc`       |
-| `LDFLAGS`      | Linker flags                                       | `-static`                        |
 
 ## Running the Server
 
@@ -256,26 +147,6 @@ lsof -i tcp:4444
 
 Either stop the other process or change `server.port` in `boris.cfg` to an unused port.
 
-**`ERROR:muddb:mdb_env_open(data/muddb): No such file or directory`**
-
-The LMDB database directory does not exist. Create it:
-
-```sh
-mkdir -p data/muddb
-```
-
-**Clients cannot connect (firewall blocking ports)**
-
-If `ufw` is active on the server, open the telnet and web ports:
-
-```sh
-sudo ufw allow 4444/tcp
-sudo ufw allow 8080/tcp
-```
-
-Replace the port numbers if you changed `server.port` or `webserver.port` in
-`boris.cfg`. Check status with `sudo ufw status`.
-
 ## Development
 
 See [DEV.md](DEV.md) for architecture, build system internals, code patterns, and contributor information.
@@ -287,17 +158,6 @@ Please [open an issue](https://github.com/OrangeTide/boris/issues/new) for suppo
 ## Contributing
 
 Please contribute using [Github Flow](https://docs.github.com/en/get-started/using-github/github-flow). Create a branch, add commits, and [open a pull request](https://github.com/OrangeTide/boris/compare/).
-
-## Third-Party Libraries
-
-Boris includes the following third-party libraries:
-
-- [tiny-AES-c](https://github.com/kokke/tiny-AES-c) -- Small portable AES128/192/256 in C. Public domain (Unlicense). Used for scrypt password encryption.
-- [dyad](https://github.com/rxi/dyad) -- Asynchronous networking library.
-- [LMDB](https://www.symas.com/lmdb) -- Lightning Memory-Mapped Database.
-- [Mongoose](https://github.com/cesanta/mongoose) -- Embedded web server library.
-- [jsmn](https://github.com/zserge/jsmn) -- Minimalistic JSON parser.
-- [MTH](https://tintin.mudhalla.net/protocols/mth/) -- MUD Telopt Handler.
 
 ## License
 
