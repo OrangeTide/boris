@@ -583,8 +583,17 @@ failure:
 void
 user_shutdown(void)
 {
-	/** @todo free all loaded users. */
+	struct userdb_entry *ent;
+
+	while ((ent = LIST_TOP(user_list))) {
+		LIST_REMOVE(ent, list);
+		user_ll_free(ent->u);
+		free(ent->cached_username);
+		free(ent);
+	}
+
 	freelist_free(user_id_freelist);
+	user_id_freelist = NULL;
 }
 
 /**

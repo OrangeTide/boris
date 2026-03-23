@@ -19,6 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <sys/random.h>
+#endif
 #include "base64.h"
 #define LOG_SUBSYSTEM "crypt"
 #include "log.h"
@@ -31,11 +34,30 @@
  */
 static void sha1crypt_gensalt(size_t salt_len, void *salt)
 {
-	size_t i;
+#ifdef __linux__
+	/* try getrandom() first */
+	if (getrandom(salt, salt_len, 0) == (ssize_t)salt_len)
+		return;
+#endif
+	/* fall back to /dev/urandom */
+	{
+		FILE *f = fopen("/dev/urandom", "rb");
 
-	for (i = 0; i < salt_len; i++) {
-		/* TODO: use better random salt */
-		((unsigned char*)salt)[i] = (rand() % 96) + ' ';
+		if (f) {
+			size_t n = fread(salt, 1, salt_len, f);
+
+			fclose(f);
+			if (n == salt_len)
+				return;
+		}
+	}
+	/* last resort: weak PRNG */
+	LOG_WARNING("using weak rand() for salt generation");
+	{
+		size_t i;
+
+		for (i = 0; i < salt_len; i++)
+			((unsigned char *)salt)[i] = rand();
 	}
 }
 

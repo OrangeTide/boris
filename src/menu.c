@@ -87,6 +87,23 @@ menu_additem(struct menuinfo *mi, int ch, const char *name, void (*func)(void*, 
 	mi->tail = newitem;
 }
 
+/** free all items and the title of a menuinfo. */
+void
+menu_free(struct menuinfo *mi)
+{
+	struct menuitem *item;
+
+	while ((item = LIST_TOP(mi->items))) {
+		LIST_REMOVE(item, item);
+		free(item->name);
+		free(item);
+	}
+
+	free(mi->title);
+	mi->title = NULL;
+	mi->tail = NULL;
+}
+
 /**
  * draw a little box around the string.
  */

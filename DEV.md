@@ -73,6 +73,9 @@ login flows via expect. Requires `expect` (`apt install expect` on
 Debian/Ubuntu, `apk add expect` on Alpine). Test cases: connect and quit,
 bad credentials rejection, new user creation and login.
 
+For memory checking, `make smoke-valgrind` is as above and wrapped in
+[Valgrind][1].
+
 ## OBJ -- Mutable JSON Objects
 
 OBJ (`src/obj/obj.c`) is the in-memory representation for all game objects.
@@ -338,3 +341,6 @@ Server configuration is in `boris.cfg`. Key settings:
 | `eventlog.filename`  | `boris.log`                              | Event log output file          |
 | `newuser.allowed`    | 1                                        | Allow new account creation     |
 | `newuser.room`       | `tower-entrance`                         | Starting room for new characters |
+
+
+[1] https://valgrind.org Valgrind

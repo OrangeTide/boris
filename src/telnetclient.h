@@ -17,6 +17,7 @@ dyad_Stream *telnetclient_socket_handle(DESCRIPTOR_DATA *cl);
 const char *telnetclient_socket_name(DESCRIPTOR_DATA *cl);
 const struct terminal *telnetclient_get_terminal(DESCRIPTOR_DATA *cl);
 int telnetserver_listen(int port);
+void telnetserver_shutdown(void);
 void telnetclient_prompt_refresh(DESCRIPTOR_DATA *cl);
 void telnetclient_prompt_refresh_all(struct telnetserver *);
 struct telnetserver *telnetserver_first(void);

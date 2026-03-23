@@ -4,19 +4,20 @@ Prioritized by: bugs first, then missing functionality,
 testing, caching, and longer-term features.
 
 
-## P1 -- missing functionality
+## P1 -- missing functionality (done)
 
- * telnetclient.c: client disconnect does not notify other users
-   or clean up channel membership properly (lines 235, 238).
+ * (done) telnetclient.c: disconnect now broadcasts departure
+   message to all joined channels before cleanup.
 
- * telnetclient.c: IAC escape not implemented in output path
-   (line 298). will corrupt binary data sent to telnet clients.
+ * (done) telnetclient.c: write_escaped() now doubles IAC (0xFF)
+   bytes in the output path.
 
- * crypt/sha1crypt.c: random salt generation is weak (line 37).
-   should use /dev/urandom or getrandom().
+ * (done) crypt/sha1crypt.c: salt generation uses getrandom()
+   with /dev/urandom fallback. full byte range, not just printable
+   ASCII.
 
- * task/command.c: strtoul calls with no error checking in
-   roomget/char debug commands (lines 187, 215).
+ * (done) task/command.c: strtoul calls now validate with endptr
+   and report invalid character IDs to the user.
 
 ## P2 -- testing
 
@@ -26,17 +27,15 @@ testing, caching, and longer-term features.
  * stackvm/kernel/prioq_test.c exists but is incomplete.
 
  * valgrind (make smoke-valgrind) reports definitely-lost blocks:
-   - channel.c: channel_public_close() frees the channel struct but
-     not the strdup'd name field. one-line fix: add free(cp->name)
-     before free(cp) in channel_public_close(). 7 leaks, one per
-     default channel.
-   - form.c:372 (form_createaccount_start) -- likely fixed.
-     form_state_free() is now set as the state_free callback and
-     properly frees the form state allocation. needs re-verification
-     with valgrind.
-   26 still-reachable blocks are global state not freed at shutdown
-   (menus, user cache, mth, base64 table). not urgent but worth
-   adding cleanup routines for cleaner valgrind runs.
+   - (done) channel.c: channel_public_close() now frees cp->name
+     before freeing the struct.
+   - (done) form.c:372 (form_createaccount_start) -- form_state_free()
+     was not freeing the form_state struct itself. now calls free(fs).
+   (done) added shutdown routines for global state: menu_free() and
+   game_shutdown() for menus, user_shutdown() now frees cached users,
+   character_shutdown() now frees its freelist, base64.c hard-codes its
+   decode table, uninit_mth() frees mccp buffer, telnetserver_shutdown()
+   frees server structs. all registered via atexit().
 
 
 ## P3 -- caching (done)

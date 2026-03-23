@@ -363,6 +363,8 @@ form_state_free(DESCRIPTOR_DATA *cl)
 
 	fs->value = 0;
 	fs->nr_value = 0;
+	free(fs);
+	cl->state.form = NULL;
 }
 
 /** undocumented - please add documentation. */
