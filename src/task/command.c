@@ -263,6 +263,235 @@ command_do_help(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUS
 	return 1; /* success */
 }
 
+/** display the current room to the player. */
+static void
+show_room(DESCRIPTOR_DATA *cl, struct room *r)
+{
+	const char *name, *desc;
+
+	name = room_attr_get(r, "name.short");
+	if (name)
+		telnetclient_printf(cl, "%s\n", name);
+
+	desc = room_attr_get(r, "desc.long");
+	if (!desc)
+		desc = room_attr_get(r, "desc.short");
+	if (desc)
+		telnetclient_printf(cl, "%s\n", desc);
+
+	/* list exits */
+	telnetclient_puts(cl, "Exits:");
+	{
+		const char *dirs[] = {
+			"n", "north", "s", "south", "e", "east",
+			"w", "west", "u", "up", "d", "down",
+			"ne", "northeast", "nw", "northwest",
+			"se", "southeast", "sw", "southwest",
+			"enter", NULL
+		};
+		char exitname[64];
+		int found = 0;
+		unsigned i;
+
+		for (i = 0; dirs[i]; i++) {
+			snprintf(exitname, sizeof exitname, "exit.%s", dirs[i]);
+			if (room_attr_get(r, exitname)) {
+				telnetclient_printf(cl, " %s", dirs[i]);
+				found = 1;
+			}
+		}
+
+		if (!found)
+			telnetclient_puts(cl, " none");
+		telnetclient_puts(cl, "\n");
+	}
+}
+
+/** action callback to do the "look" command. */
+int
+command_do_look(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
+{
+	struct character *ch;
+	struct room *r;
+	const char *room_id;
+
+	ch = telnetclient_character(cl);
+	if (!ch) {
+		telnetclient_puts(cl, "You have no character.\n");
+		return 0;
+	}
+
+	room_id = character_attr_get(ch, "room.current");
+	if (!room_id) {
+		telnetclient_puts(cl, "You are nowhere.\n");
+		return 0;
+	}
+
+	r = room_get(room_id);
+	if (!r) {
+		telnetclient_printf(cl, "You are in an invalid room \"%s\".\n", room_id);
+		return 0;
+	}
+
+	show_room(cl, r);
+	room_put(r);
+	return 1;
+}
+
+/** direction aliases mapping full names to short exit keys. */
+static const struct {
+	const char *name;
+	const char *exit_key;
+} direction_aliases[] = {
+	{ "north", "n" },
+	{ "south", "s" },
+	{ "east", "e" },
+	{ "west", "w" },
+	{ "up", "u" },
+	{ "down", "d" },
+	{ "northeast", "ne" },
+	{ "northwest", "nw" },
+	{ "southeast", "se" },
+	{ "southwest", "sw" },
+	{ "n", "n" },
+	{ "s", "s" },
+	{ "e", "e" },
+	{ "w", "w" },
+	{ "u", "u" },
+	{ "d", "d" },
+	{ "ne", "ne" },
+	{ "nw", "nw" },
+	{ "se", "se" },
+	{ "sw", "sw" },
+};
+
+/**
+ * move the player through an exit.
+ * exit_name is the exit to look for (e.g. "n", "enter").
+ * returns 1 on success, 0 on failure.
+ */
+static int
+do_move(DESCRIPTOR_DATA *cl, const char *exit_name)
+{
+	struct character *ch;
+	struct room *r;
+	const char *room_id, *dest;
+	char exitkey[64];
+	unsigned i;
+
+	ch = telnetclient_character(cl);
+	if (!ch) {
+		telnetclient_puts(cl, "You have no character.\n");
+		return 0;
+	}
+
+	room_id = character_attr_get(ch, "room.current");
+	if (!room_id) {
+		telnetclient_puts(cl, "You are nowhere.\n");
+		return 0;
+	}
+
+	r = room_get(room_id);
+	if (!r) {
+		telnetclient_printf(cl, "You are in an invalid room \"%s\".\n", room_id);
+		return 0;
+	}
+
+	/* resolve direction aliases to short exit keys */
+	for (i = 0; i < NR(direction_aliases); i++) {
+		if (!strcasecmp(exit_name, direction_aliases[i].name)) {
+			exit_name = direction_aliases[i].exit_key;
+			break;
+		}
+	}
+
+	snprintf(exitkey, sizeof exitkey, "exit.%s", exit_name);
+	dest = room_attr_get(r, exitkey);
+	room_put(r);
+
+	if (!dest) {
+		telnetclient_puts(cl, "You can't go that way.\n");
+		return 0;
+	}
+
+	/* verify destination exists */
+	r = room_get(dest);
+	if (!r) {
+		telnetclient_printf(cl, "That exit leads nowhere (\"%s\").\n", dest);
+		return 0;
+	}
+
+	/* move the character */
+	character_attr_set(ch, "room.current", dest);
+	show_room(cl, r);
+	room_put(r);
+	return 1;
+}
+
+/** action callback to do the "go" command. */
+int
+command_do_go(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+{
+	char dir[64];
+
+	arg = util_getword(arg, dir, sizeof dir);
+	if (!arg) {
+		telnetclient_puts(cl, "Go where?\n");
+		return 0;
+	}
+
+	return do_move(cl, dir);
+}
+
+/**
+ * action callback for direction commands (north, south, etc.).
+ * the command name itself is the direction.
+ */
+int
+command_do_direction(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd, const char *arg UNUSED)
+{
+	return do_move(cl, cmd);
+}
+
+/** action callback to do the "enter" command. */
+int
+command_do_enter(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
+{
+	char dir[64];
+
+	arg = util_getword(arg, dir, sizeof dir);
+	if (!arg) {
+		/* no argument -- check if an "enter" exit exists */
+		struct character *ch = telnetclient_character(cl);
+		const char *room_id;
+		struct room *r;
+
+		if (!ch) {
+			telnetclient_puts(cl, "You have no character.\n");
+			return 0;
+		}
+
+		room_id = character_attr_get(ch, "room.current");
+		if (!room_id) {
+			telnetclient_puts(cl, "You are nowhere.\n");
+			return 0;
+		}
+
+		r = room_get(room_id);
+		if (r) {
+			const char *dest = room_attr_get(r, "exit.enter");
+			room_put(r);
+			if (dest)
+				return do_move(cl, "enter");
+		}
+
+		telnetclient_puts(cl, "Enter where?\n");
+		return 0;
+	}
+
+	return do_move(cl, dir);
+}
+
 /** action callback to remote that a command is not implemented. */
 static int
 command_not_implemented(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
@@ -292,6 +521,20 @@ static const struct command_table {
 	{ "to", command_not_implemented },
 	{ "help", command_do_help },
 	{ "spoof", command_not_implemented },
+	{ "look", command_do_look },
+	{ "l", command_do_look },
+	{ "go", command_do_go },
+	{ "enter", command_do_enter },
+	{ "north", command_do_direction },
+	{ "n", command_do_direction },
+	{ "south", command_do_direction },
+	{ "s", command_do_direction },
+	{ "east", command_do_direction },
+	{ "e", command_do_direction },
+	{ "west", command_do_direction },
+	{ "w", command_do_direction },
+	{ "up", command_do_direction },
+	{ "down", command_do_direction },
 	{ "roomget", command_do_roomget },
 	{ "char", command_do_character },
 };
@@ -425,12 +668,36 @@ command_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 static void
 command_start_lineinput(DESCRIPTOR_DATA *cl)
 {
+	struct character *ch;
 	const struct terminal *term = telnetclient_get_terminal(cl);
 
 	telnetclient_printf(cl, "Terminal type: %s\n", term->name);
 	telnetclient_printf(cl, "display size is: %ux%u\n", term->width, term->height);
 
 	show_gametime(cl);
+
+	/* create a character for this session if we don't have one */
+	ch = telnetclient_character(cl);
+	if (!ch) {
+		ch = character_new();
+		if (ch) {
+			character_attr_set(ch, "name.short", telnetclient_username(cl));
+			character_attr_set(ch, "room.current", mud_config.newuser_room);
+			telnetclient_setcharacter(cl, ch);
+		}
+	}
+
+	/* show the starting room */
+	if (ch) {
+		const char *room_id = character_attr_get(ch, "room.current");
+		if (room_id) {
+			struct room *r = room_get(room_id);
+			if (r) {
+				show_room(cl, r);
+				room_put(r);
+			}
+		}
+	}
 
 	telnetclient_start_lineinput(cl, command_lineinput, mud_config.command_prompt);
 }
