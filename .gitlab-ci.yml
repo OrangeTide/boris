@@ -13,14 +13,18 @@ variables:
 stages:
   - build
   - test
+  - release
   - docs
   - publish
 
-before_script:
+.build-deps: &build-deps
   - apk update
-  - "apk add build-base linux-headers make git bash \
-    zlib-dev openssl-libs-static openssl-dev openssl \
-    doxygen ttf-freefont graphviz expect rsync busybox-extras"
+  - apk add build-base linux-headers make git
+    zlib-dev zlib-static rsync
+
+before_script:
+  - *build-deps
+  - apk add bash doxygen ttf-freefont graphviz expect busybox-extras xz
 
 build:mud:
   stage: build
@@ -52,6 +56,33 @@ test:smoke:
     - make smoke
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
+release:source:
+  stage: release
+  before_script:
+    - apk update
+    - apk add git xz
+  script:
+    - ./scripts/release-tar
+  artifacts:
+    paths:
+      - boris-*.tar.xz
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
+release:linux-x86_64:
+  stage: release
+  before_script:
+    - *build-deps
+  script:
+    - make distclean || true
+    - make -j LDFLAGS="-static" install
+    - ./scripts/build-release linux-x86_64
+  artifacts:
+    paths:
+      - boris-*-linux-x86_64.tar.xz
+  rules:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 
 publish:dev-docs:
