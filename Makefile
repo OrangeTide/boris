@@ -13,7 +13,7 @@ else
 endif
 
 # --- Flags ------------------------------------------------------------------
-CFLAGS   := -Wall -W -O2 -g -pthread
+CFLAGS   := -Wall -W -Werror=implicit -O2 -g -pthread
 CPPFLAGS := -DNTEST -DNDEBUG
 LDLIBS   := -pthread
 
