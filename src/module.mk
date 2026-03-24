@@ -7,6 +7,18 @@ BORIS_SRCS += \
 	src/room/room.c \
 	src/task/command.c \
 	src/task/comutil.c \
+	src/task/command/character.c \
+	src/task/command/chsay.c \
+	src/task/command/emote.c \
+	src/task/command/help.c \
+	src/task/command/look.c \
+	src/task/command/move.c \
+	src/task/command/pose.c \
+	src/task/command/quit.c \
+	src/task/command/roomget.c \
+	src/task/command/say.c \
+	src/task/command/time.c \
+	src/task/command/yell.c \
 	src/worldclock/worldclock.c \
 	src/acs.c \
 	src/boris.c \
