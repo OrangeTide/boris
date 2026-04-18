@@ -39,6 +39,9 @@ enum rpg_attr rpg_action_attr(enum rpg_action a);
 /** look up an action by case-insensitive name; -1 if unknown. */
 int rpg_action_from_name(const char *name);
 
+/** look up an attribute by case-insensitive name; -1 if unknown. */
+int rpg_attr_from_name(const char *name);
+
 /** get a skill rank (0 if unset). */
 int rpg_skill_get(struct character *ch, enum rpg_action a);
 
@@ -47,9 +50,5 @@ int rpg_skill_set(struct character *ch, enum rpg_action a, int rank);
 
 /** derived attribute score = sum of its four action ranks. */
 int rpg_attr_score(struct character *ch, enum rpg_attr at);
-
-/** stress (0..9). */
-int rpg_stress_get(struct character *ch);
-int rpg_stress_set(struct character *ch, int s);
 
 #endif

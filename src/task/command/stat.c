@@ -9,6 +9,7 @@
 #include <boris.h>
 #include "character.h"
 #include "rpg_char.h"
+#include "stress.h"
 #include "util.h"
 
 #include <stdlib.h>
@@ -53,7 +54,13 @@ command_do_stat(DESCRIPTOR_DATA *cl, struct user *u UNUSED,
 	for (at = 0; at < RPG_ATTR_COUNT; at++)
 		show_attribute(cl, ch, at);
 
-	telnetclient_printf(cl, "Stress: %d/9\n", rpg_stress_get(ch));
+	telnetclient_printf(cl, "Stress:     %d/%d    Conditions: %d/%d\n",
+		rpg_stress_get(ch), RPG_STRESS_MAX,
+		rpg_conditions_get(ch), RPG_CONDITIONS_MAX);
+	telnetclient_printf(cl, "Harm:       minor %d/%d  moderate %d/%d  severe %d/%d\n",
+		rpg_harm_get(ch, 1), rpg_harm_level_cap(1),
+		rpg_harm_get(ch, 2), rpg_harm_level_cap(2),
+		rpg_harm_get(ch, 3), rpg_harm_level_cap(3));
 
 	return 1;
 }
