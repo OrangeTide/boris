@@ -399,7 +399,7 @@ obj_prop_get(OBJ *obj, const char *propname)
 }
 
 int
-obj_prop_set(OBJ *obj, const char *propname, const char *value)
+obj_prop_set_internal(OBJ *obj, const char *propname, const char *value)
 {
 	unsigned val_off, val_len;
 	int key_idx;
@@ -481,6 +481,53 @@ obj_prop_set(OBJ *obj, const char *propname, const char *value)
 	return OBJ_OK;
 }
 
+/* build "!propname" into out. Returns a heap pointer if propname is long
+ * enough that stack_buf can't hold it; NULL on allocation failure. Caller
+ * frees the returned pointer only if it differs from stack_buf. */
+static char *
+tombstone_name(const char *propname, char *stack_buf, size_t stack_len)
+{
+	size_t n = strlen(propname);
+
+	if (n + 2 <= stack_len) {
+		stack_buf[0] = '!';
+		memcpy(stack_buf + 1, propname, n + 1);
+		return stack_buf;
+	}
+	char *buf = malloc(n + 2);
+	if (!buf)
+		return NULL;
+	buf[0] = '!';
+	memcpy(buf + 1, propname, n + 1);
+	return buf;
+}
+
+int
+obj_prop_set(OBJ *obj, const char *propname, const char *value)
+{
+	char stack_buf[128];
+	char *tomb;
+	int rc;
+
+	if (propname && propname[0] == '%')
+		return OBJ_ERR_PROTECTED;
+	/* Prevent callers from directly manipulating tombstones; they must
+	 * use obj_prop_delete/obj_prop_set to drive the mechanism. */
+	if (propname && propname[0] == '!')
+		return OBJ_ERR_PROTECTED;
+	rc = obj_prop_set_internal(obj, propname, value);
+	if (rc != OBJ_OK)
+		return rc;
+	/* Setting a value clears any prior tombstone for this key. */
+	tomb = tombstone_name(propname, stack_buf, sizeof(stack_buf));
+	if (!tomb)
+		return OBJ_ERR_NOMEM;
+	obj_prop_delete_internal(obj, tomb);
+	if (tomb != stack_buf)
+		free(tomb);
+	return OBJ_OK;
+}
+
 int
 obj_prop_set_int(OBJ *obj, const char *propname, int value)
 {
@@ -491,7 +538,7 @@ obj_prop_set_int(OBJ *obj, const char *propname, int value)
 }
 
 int
-obj_prop_delete(OBJ *obj, const char *propname)
+obj_prop_delete_internal(OBJ *obj, const char *propname)
 {
 	int key_idx = find_prop(obj, propname);
 	int val_span, total, remaining;
@@ -513,6 +560,54 @@ obj_prop_delete(OBJ *obj, const char *propname)
 	obj->tokens[0].size -= 1;
 	obj->dirty = true;
 	return OBJ_OK;
+}
+
+int
+obj_prop_delete(OBJ *obj, const char *propname)
+{
+	char stack_buf[128];
+	char *tomb;
+	int rc;
+
+	if (propname && propname[0] == '%')
+		return OBJ_ERR_PROTECTED;
+	if (propname && propname[0] == '!')
+		return OBJ_ERR_PROTECTED;
+
+	/* If this object has no prototype parent, a delete is a plain
+	 * delete -- no tombstone needed because nothing would be inherited
+	 * anyway. */
+	if (find_prop(obj, "%parent") < 0)
+		return obj_prop_delete_internal(obj, propname);
+
+	/* Prototype-aware delete: insert a tombstone so prototype-chain
+	 * walking stops here, and hard-delete any local value. */
+	obj_prop_delete_internal(obj, propname);
+	tomb = tombstone_name(propname, stack_buf, sizeof(stack_buf));
+	if (!tomb)
+		return OBJ_ERR_NOMEM;
+	rc = obj_prop_set_internal(obj, tomb, "1");
+	if (tomb != stack_buf)
+		free(tomb);
+	return rc;
+}
+
+int
+obj_prop_is_tombstoned(OBJ *obj, const char *propname)
+{
+	char stack_buf[128];
+	char *tomb;
+	int present;
+
+	if (!propname || propname[0] == '!' || propname[0] == '%')
+		return 0;
+	tomb = tombstone_name(propname, stack_buf, sizeof(stack_buf));
+	if (!tomb)
+		return 0;
+	present = find_prop(obj, tomb) >= 0;
+	if (tomb != stack_buf)
+		free(tomb);
+	return present;
 }
 
 int

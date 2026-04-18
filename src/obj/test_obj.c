@@ -419,6 +419,101 @@ test_iter_empty(void)
 	obj_free(obj);
 }
 
+static void
+test_prop_protected_prefix(void)
+{
+	OBJ *obj = obj_new_from_json("proto-test", house_json);
+	int rc;
+
+	check("protected: create", obj != NULL);
+
+	rc = obj_prop_set(obj, "%parent", "999");
+	check("protected: set %parent rejected",
+		rc == OBJ_ERR_PROTECTED);
+	check("protected: no %parent leaked",
+		obj_prop_get(obj, "%parent") == NULL);
+
+	rc = obj_prop_set_internal(obj, "%parent", "999");
+	check("protected: set_internal %parent ok", rc == OBJ_OK);
+	check("protected: %parent readable",
+		strcmp(obj_prop_get(obj, "%parent"), "999") == 0);
+
+	rc = obj_prop_delete(obj, "%parent");
+	check("protected: delete %parent rejected",
+		rc == OBJ_ERR_PROTECTED);
+	check("protected: %parent still present",
+		obj_prop_get(obj, "%parent") != NULL);
+
+	rc = obj_prop_delete_internal(obj, "%parent");
+	check("protected: delete_internal ok", rc == OBJ_OK);
+	check("protected: %parent cleared",
+		obj_prop_get(obj, "%parent") == NULL);
+
+	obj_free(obj);
+}
+
+static void
+test_tombstone_no_parent(void)
+{
+	OBJ *obj = obj_new_from_json("tomb1", house_json);
+	int rc;
+
+	check("tomb_no_parent: create", obj != NULL);
+
+	rc = obj_prop_delete(obj, "color");
+	check("tomb_no_parent: delete ok", rc == OBJ_OK);
+	check("tomb_no_parent: color gone",
+		obj_prop_get(obj, "color") == NULL);
+	check("tomb_no_parent: no tombstone inserted",
+		obj_prop_is_tombstoned(obj, "color") == 0);
+
+	obj_free(obj);
+}
+
+static void
+test_tombstone_with_parent(void)
+{
+	OBJ *obj = obj_new_from_json("tomb2", house_json);
+	int rc;
+
+	check("tomb_parent: create", obj != NULL);
+	rc = obj_prop_set_internal(obj, "%parent", "proto-house");
+	check("tomb_parent: set %parent", rc == OBJ_OK);
+
+	rc = obj_prop_delete(obj, "color");
+	check("tomb_parent: delete ok", rc == OBJ_OK);
+	check("tomb_parent: local color gone",
+		obj_prop_get(obj, "color") == NULL);
+	check("tomb_parent: tombstone present",
+		obj_prop_is_tombstoned(obj, "color") == 1);
+
+	/* setting color again must clear the tombstone */
+	rc = obj_prop_set(obj, "color", "red");
+	check("tomb_parent: re-set ok", rc == OBJ_OK);
+	check("tomb_parent: color back",
+		strcmp(obj_prop_get(obj, "color"), "red") == 0);
+	check("tomb_parent: tombstone cleared",
+		obj_prop_is_tombstoned(obj, "color") == 0);
+
+	obj_free(obj);
+}
+
+static void
+test_tombstone_protected(void)
+{
+	OBJ *obj = obj_new("tomb3");
+	int rc;
+
+	rc = obj_prop_set(obj, "!body", "1");
+	check("tomb_prot: set !key rejected",
+		rc == OBJ_ERR_PROTECTED);
+	rc = obj_prop_delete(obj, "!body");
+	check("tomb_prot: delete !key rejected",
+		rc == OBJ_ERR_PROTECTED);
+
+	obj_free(obj);
+}
+
 int
 main(void)
 {
@@ -437,6 +532,10 @@ main(void)
 	test_iter_basic();
 	test_iter_with_overrides();
 	test_iter_empty();
+	test_prop_protected_prefix();
+	test_tombstone_no_parent();
+	test_tombstone_with_parent();
+	test_tombstone_protected();
 
 	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
 		pass_count, fail_count);
