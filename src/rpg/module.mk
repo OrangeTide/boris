@@ -1,6 +1,8 @@
 BORIS_SRCS += \
 	src/rpg/dice.c \
-	src/rpg/rpg_char.c
+	src/rpg/position.c \
+	src/rpg/rpg_char.c \
+	src/rpg/tag.c
 
 INCLUDES += -Isrc/rpg
 
@@ -10,4 +12,11 @@ TEST_BINS += $(BINDIR)/test_dice
 TEST_DICE_OBJS := $(BUILDDIR)/src/rpg/test_dice.o $(BUILDDIR)/src/log/log.o
 
 $(BINDIR)/test_dice: $(TEST_DICE_OBJS) | $(BINDIR)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+TEST_SRCS += src/rpg/test_tag.c
+TEST_BINS += $(BINDIR)/test_tag
+TEST_TAG_OBJS := $(BUILDDIR)/src/rpg/test_tag.o $(BUILDDIR)/src/log/log.o
+
+$(BINDIR)/test_tag: $(TEST_TAG_OBJS) | $(BINDIR)
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
