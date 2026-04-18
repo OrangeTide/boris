@@ -33,6 +33,7 @@ struct mud_config {
 	char *newuser_room; /* starting room for new characters */
 	unsigned room_cache_size; /* max unreferenced rooms in LRU cache */
 	unsigned character_cache_size; /* max unreferenced characters in LRU cache */
+	unsigned rpg_enabled; /* feature gate for RPG subsystem commands */
 };
 
 typedef struct mud_config MUD_CONFIG;
