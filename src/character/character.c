@@ -193,6 +193,13 @@ character_attr_get(struct character *ch, const char *name)
 	return at ? at->value : NULL;
 }
 
+struct attr_list *
+character_attrs_extras(struct character *ch)
+{
+	if (!ch) return NULL;
+	return &ch->extra_values;
+}
+
 /**
  * load a character from the database.
  */
