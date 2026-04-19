@@ -25,9 +25,11 @@ testing, caching, and longer-term features.
 
 ## P1 -- in-flight utilities
 
-  * src/util/variables.c is a stub -- finish $0-$9, $#, $@/$*,
-    and decide whether $(cmd) substitution is in scope. Wire into
-    COMMAND.COM once expand_string is complete.
+  * src/util/variables.c :: expand_string() done -- named vars via
+    caller-supplied lookup, $0-$9, $#, $*/$@, $?, $$, quoting, and
+    unit tests (bin/test_variables). $(cmd) is out of scope (emits
+    literal). Still to do: wire into the command interpreter so
+    aliases and room/character descriptions run through it.
 
   * wordwrap utility landed; audit callers of printf/telnetclient
     output that should flow through it (help text, room desc,
