@@ -14,6 +14,28 @@
 #include <string.h>
 #include <unistd.h>
 
+struct fbuf {
+	char		data[128];
+	unsigned	len;
+};
+
+static int
+fbuf_sink(void *user, const char *d, unsigned n)
+{
+	struct fbuf *f = user;
+	if (f->len + n >= sizeof(f->data)) return -1;
+	memcpy(f->data + f->len, d, n);
+	f->len += n;
+	return 0;
+}
+
+static int
+abort_sink(void *user, const char *d, unsigned n)
+{
+	(void)user; (void)d; (void)n;
+	return 7;
+}
+
 static const char *
 lookup_kv(void *user, const char *name)
 {
@@ -133,6 +155,33 @@ main(void)
 		char *got = expand_string(NULL, &ctx);
 		check_eq("null input", got, "");
 		free(got);
+	}
+
+	/* streaming API: accumulate into a fixed stack buffer. */
+	{
+		struct fbuf fb = { {0}, 0 };
+		int rc = expand_string_stream(
+			"hi $name, room=${room}, rc=$?", &ctx,
+			fbuf_sink, &fb);
+		fb.data[fb.len] = '\0';
+		if (rc != 0) {
+			fprintf(stderr, "FAIL stream rc %d\n", rc);
+			failures++;
+		}
+		check_eq("stream into stack buf", fb.data,
+			 "hi frodo, room=shire, rc=42");
+	}
+
+	/* streaming API: sink aborts; rc bubbles out. */
+	{
+		int rc = expand_string_stream("anything", &ctx,
+					      abort_sink, NULL);
+		if (rc != 7) {
+			fprintf(stderr, "FAIL abort: rc=%d want 7\n", rc);
+			failures++;
+		} else {
+			printf("ok   stream abort bubbles\n");
+		}
 	}
 
 	if (failures) {
