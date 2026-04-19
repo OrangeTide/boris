@@ -1472,6 +1472,7 @@ mud_config_process(void)
 	config_watch(&cfg, "newuser.room", do_config_string, &mud_config.newuser_room);
 	config_watch(&cfg, "cache.room.size", do_config_uint, &mud_config.room_cache_size);
 	config_watch(&cfg, "cache.character.size", do_config_uint, &mud_config.character_cache_size);
+	config_watch(&cfg, "rpg.enabled", do_config_uint, &mud_config.rpg_enabled);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", mud_config_show, 0);
 #endif

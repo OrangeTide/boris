@@ -2,6 +2,7 @@
 #define BORIS_CHARACTER_H_
 
 struct character;
+struct attr_list;
 
 int character_initialize(void);
 void character_shutdown(void);
@@ -31,5 +32,10 @@ const char *character_attr_get(struct character *ch, const char *name);
  * save a character to disk (only if it is dirty).
  */
 int character_save(struct character *ch);
+/**
+ * return the extra-attributes list for iteration. Does not include built-in
+ * fields (name.short, room.current, etc). Never returns NULL for a valid ch.
+ */
+struct attr_list *character_attrs_extras(struct character *ch);
 
 #endif

@@ -88,6 +88,9 @@ static const struct command_table {
 	{ "down", command_do_direction },
 	{ "roomget", command_do_roomget },
 	{ "char", command_do_character },
+	{ "stat", command_do_stat },
+	{ "roll", command_do_roll },
+	{ "resist", command_do_resist },
 };
 
 /**
