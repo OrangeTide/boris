@@ -24,7 +24,10 @@
 #include "comutil.h"
 #include <boris.h>
 #include "worldclock.h"
+#include <character.h>
+#include <variables.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 void
@@ -53,21 +56,90 @@ static const char * const dirs[] = {
 	"enter", NULL
 };
 
+/* sink state for streaming expand_string output to a telnetclient.
+ * buffers small chunks on the stack and flushes via telnetclient_puts
+ * so the expander never has to allocate. */
+struct tc_sink {
+	DESCRIPTOR_DATA	*cl;
+	char		buf[256];
+	unsigned	len;
+};
+
+static void
+tc_flush(struct tc_sink *s)
+{
+	if (s->len == 0) return;
+	s->buf[s->len] = '\0';
+	telnetclient_puts(s->cl, s->buf);
+	s->len = 0;
+}
+
+static int
+tc_sink(void *user, const char *data, unsigned n)
+{
+	struct tc_sink *s = user;
+
+	while (n > 0) {
+		unsigned room = sizeof(s->buf) - 1 - s->len;
+		unsigned w = n < room ? n : room;
+
+		memcpy(s->buf + s->len, data, w);
+		s->len += w;
+		data += w;
+		n -= w;
+		if (s->len + 1 >= sizeof(s->buf))
+			tc_flush(s);
+	}
+	return 0;
+}
+
+/* variable lookup for show_room: supports "room.<attr>" and "char.<attr>". */
+struct room_lookup_ctx {
+	struct room	*r;
+	struct character *ch;
+};
+
+static const char *
+room_lookup(void *user, const char *name)
+{
+	struct room_lookup_ctx *rl = user;
+
+	if (!strncmp(name, "room.", 5))
+		return rl->r ? room_attr_get(rl->r, name + 5) : NULL;
+	if (!strncmp(name, "char.", 5))
+		return rl->ch ? character_attr_get(rl->ch, name + 5) : NULL;
+	return NULL;
+}
+
+/** expand s through the ctx, streaming straight into cl. */
+static void
+expand_to_telnet(DESCRIPTOR_DATA *cl, const char *s,
+		 const struct var_ctx *ctx)
+{
+	struct tc_sink snk = { cl, {0}, 0 };
+
+	expand_string_stream(s, ctx, tc_sink, &snk);
+	tc_sink(&snk, "\n", 1);
+	tc_flush(&snk);
+}
+
 /** display the current room to the player. */
 void
 show_room(DESCRIPTOR_DATA *cl, struct room *r)
 {
+	struct room_lookup_ctx rl = { r, telnetclient_character(cl) };
+	struct var_ctx vctx = { room_lookup, &rl, 0, NULL, NULL, 0 };
 	const char *name, *desc;
 
 	name = room_attr_get(r, "name.short");
 	if (name)
-		telnetclient_printf(cl, "%s\n", name);
+		expand_to_telnet(cl, name, &vctx);
 
 	desc = room_attr_get(r, "desc.long");
 	if (!desc)
 		desc = room_attr_get(r, "desc.short");
 	if (desc)
-		telnetclient_printf(cl, "%s\n", desc);
+		expand_to_telnet(cl, desc, &vctx);
 
 	/* list exits */
 	telnetclient_puts(cl, "Exits:");
