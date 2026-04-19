@@ -41,11 +41,12 @@ INCLUDES      := -Isrc/thirdparty/jsmn
 
 # --- Include all modules ----------------------------------------------------
 include src/module.mk
-include src/thirdparty/dyad/module.mk
 include src/thirdparty/lmdb/module.mk
 include src/thirdparty/mth/module.mk
 include src/thirdparty/mongoose/module.mk
 include src/thirdparty/tiny-aes/module.mk
+include src/iox/module.mk
+include src/net/module.mk
 include src/scrypt/module.mk
 include src/passwd/module.mk
 include src/log/module.mk
@@ -71,10 +72,10 @@ CFLAGS += $(INCLUDES)
 
 # --- LTO detection ----------------------------------------------------------
 LTO_SUPPORTED := $(shell echo 'int main(){return 0;}' \
-	| $(CC) -flto -x c - -o /dev/null 2>/dev/null && echo yes)
+	| $(CC) -flto=auto -x c - -o /dev/null 2>/dev/null && echo yes)
 ifeq ($(LTO_SUPPORTED),yes)
-  CFLAGS  += -flto
-  LDFLAGS += -flto
+  CFLAGS  += -flto=auto
+  LDFLAGS += -flto=auto
 endif
 
 # --- Targets ----------------------------------------------------------------

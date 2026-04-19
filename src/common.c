@@ -119,7 +119,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
-#include <dyad.h>
 
 #include "boris.h"
 #include "mud.h"
