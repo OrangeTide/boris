@@ -43,6 +43,22 @@ testing, caching, and longer-term features.
     channel messages).
 
 
+### P2 -- user account schema
+
+  See doc/user-accounts.md. Fields not yet stored on the user
+  record, land in extra_values first; promote to named struct
+  fields if load-bearing:
+
+  * LOCKOUT / LOCKOUTTEXT -- operator-set lockout flag plus a
+    human-readable reason shown at login. Distinct from the ACS
+    disabled bit (recoverable state, not a permission change).
+  * LASTLOGINS -- fixed-size ring of {time, ip, success} entries.
+    Shown to the user at login and retained for operator audit.
+  * LOGINCOUNT / TOTALLOGIN -- separate counters for current
+    active sessions vs. lifetime logins.
+  * SINCE -- account creation timestamp.
+
+
 ### P2 -- longer term
 
   * redo the version number policy in boris. Remove per-file version numbers, except in boris.c
