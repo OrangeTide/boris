@@ -6,6 +6,7 @@
 #define OBJ_OK (0)
 #define OBJ_ERR (-1)
 #define OBJ_ERR_NOMEM (-2)
+#define OBJ_ERR_PROTECTED (-3)
 
 typedef struct obj OBJ;
 
@@ -15,9 +16,24 @@ void obj_free(OBJ *obj);
 
 /* returns borrowed pointer -- valid until next mutation or obj_free */
 char *obj_prop_get(OBJ *obj, const char *propname);
+
+/*
+ * Public setters/deleter. Reject propnames starting with '%' (structural
+ * fields like %parent, %kind) with OBJ_ERR_PROTECTED. Use the _internal
+ * variants when writing those from privileged code paths.
+ */
 int obj_prop_set(OBJ *obj, const char *propname, const char *value);
 int obj_prop_set_int(OBJ *obj, const char *propname, int value);
 int obj_prop_delete(OBJ *obj, const char *propname);
+
+/* Privileged variants -- bypass the %-prefix protection and tombstone
+ * semantics. Used internally by the prototype/cache layer. */
+int obj_prop_set_internal(OBJ *obj, const char *propname, const char *value);
+int obj_prop_delete_internal(OBJ *obj, const char *propname);
+
+/* True if this object carries a local tombstone for propname ("!propname").
+ * Only meaningful at the prototype-walk layer. */
+int obj_prop_is_tombstoned(OBJ *obj, const char *propname);
 
 int obj_get_json(OBJ *obj, char *buf, size_t len);
 int obj_compact(OBJ *obj);
