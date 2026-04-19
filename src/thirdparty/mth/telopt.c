@@ -3,7 +3,7 @@
  ***************************************************************************/
 
 #include "mth.h"
-#include <dyad.h>
+#include <net.h>
 #include <stdio.h>
 #include <stdbool.h>
 
@@ -1094,7 +1094,7 @@ void write_mccp2( DESCRIPTOR_DATA *d, const char *txt, int length)
 
 void process_mccp2( DESCRIPTOR_DATA *d )
 {
-	dyad_write(d->stream, mud.mccp_buf, mud.mccp_len - d->mth->mccp2->avail_out);
+	net_write(d->stream, mud.mccp_buf, mud.mccp_len - d->mth->mccp2->avail_out);
 }
 
 int process_do_mccp2( DESCRIPTOR_DATA *d, unsigned char *src, int srclen )

@@ -41,7 +41,6 @@ INCLUDES      := -Isrc/thirdparty/jsmn
 
 # --- Include all modules ----------------------------------------------------
 include src/module.mk
-include src/thirdparty/dyad/module.mk
 include src/thirdparty/lmdb/module.mk
 include src/thirdparty/mth/module.mk
 include src/thirdparty/mongoose/module.mk

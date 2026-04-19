@@ -27,7 +27,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
-#include <dyad.h>
+#include <net.h>
 #include <list.h>
 #include <mud.h>
 #define LOG_SUBSYSTEM "telnetserver"
@@ -52,7 +52,7 @@
 struct telnetserver {
 	LIST_HEAD(struct client_list_head, DESCRIPTOR_DATA) client_list;
 	LIST_ENTRY(struct telnetserver) list;
-	dyad_Stream *stream;
+	struct net_stream *stream;
 };
 
 /******************************************************************************
@@ -65,13 +65,13 @@ static LIST_HEAD(struct server_list_head, struct telnetserver) server_list;
  * Prototypes
  ******************************************************************************/
 
-static void telnetserver_on_accept(dyad_Event *e);
-static void telnetserver_on_error(dyad_Event *e);
+static void telnetserver_on_accept(net_event *e);
+static void telnetserver_on_error(net_event *e);
 static int telnetclient_channel_add(DESCRIPTOR_DATA *cl, struct channel *ch);
 static int telnetclient_channel_remove(DESCRIPTOR_DATA *cl, struct channel *ch);
-static void telnetclient_on_destroy(dyad_Event *e);
+static void telnetclient_on_destroy(net_event *e);
 static void telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const char *msg);
-static DESCRIPTOR_DATA *telnetclient_newclient(struct telnetserver *server, dyad_Stream *stream);
+static DESCRIPTOR_DATA *telnetclient_newclient(struct telnetserver *server, struct net_stream *stream);
 
 /******************************************************************************
  * Functions
@@ -87,7 +87,7 @@ telnetclient_start_lineinput(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_
 }
 
 static void
-telnetclient_on_data(dyad_Event *e)
+telnetclient_on_data(net_event *e)
 {
 	DESCRIPTOR_DATA *cl = e->udata;
 
@@ -95,9 +95,9 @@ telnetclient_on_data(dyad_Event *e)
 
 	if (!cl) {
 		LOG_ERROR("Illegal client state! [fd=%ld, %s:%u]",
-			  (long)dyad_getSocket(e->remote),
-			  dyad_getAddress(e->remote), dyad_getPort(e->remote));
-		dyad_close(e->remote);
+			  (long)net_get_socket(e->stream),
+			  net_get_address(e->stream), net_get_port(e->stream));
+		net_close(e->stream);
 		return;
 	}
 
@@ -105,9 +105,9 @@ telnetclient_on_data(dyad_Event *e)
 	unsigned char *output = buf_reserve(cl->linebuf, &outlen, e->size + 1);
 	if (!output || (long)outlen < e->size) {
 		LOG_CRITICAL("Unable to reserse buffer memory. [fd=%ld, %s]",
-			     (long)dyad_getSocket(e->remote),
+			     (long)net_get_socket(e->stream),
 			     telnetclient_socket_name(cl));
-		dyad_close(e->remote);
+		net_close(e->stream);
 		return;
 	}
 
@@ -144,7 +144,7 @@ telnetclient_on_data(dyad_Event *e)
 			if (cl->line_input) {
 				cl->line_input(cl, start);
 			} else {
-				LOG_WARNING("Missing or invalid line input handler [fd=%ld %s]", (long)dyad_getSocket(e->remote), telnetclient_socket_name(cl));
+				LOG_WARNING("Missing or invalid line input handler [fd=%ld %s]", (long)net_get_socket(e->stream), telnetclient_socket_name(cl));
 				telnetclient_printf(cl, "ERROR, missing or invalid line input handler: \"%.*s\"\n", linelen, start);
 			}
 		}
@@ -154,7 +154,7 @@ telnetclient_on_data(dyad_Event *e)
 }
 
 static void
-telnetserver_on_accept(dyad_Event *e)
+telnetserver_on_accept(net_event *e)
 {
 	DESCRIPTOR_DATA *cl = telnetclient_newclient(e->udata, e->remote);
 
@@ -163,29 +163,29 @@ telnetserver_on_accept(dyad_Event *e)
 		return;
 	}
 
-	LOG_INFO("*** Connection %ld: %s", (long)dyad_getSocket(e->remote), telnetclient_socket_name(cl));
+	LOG_INFO("*** Connection %ld: %s", (long)net_get_socket(e->remote), telnetclient_socket_name(cl));
 }
 
 static void
-telnetserver_on_error(dyad_Event *e)
+telnetserver_on_error(net_event *e)
 {
 	LOG_CRITICAL("telnet server error: %s", e->msg);
 }
 
 static void
-telnetclient_on_error(dyad_Event *e)
+telnetclient_on_error(net_event *e)
 {
 	LOG_CRITICAL("telnet client error: %s", e->msg);
 	if (e->udata) {
 		DESCRIPTOR_DATA *cl = e->udata;
 		cl->stream = NULL;
 	}
-	dyad_close(e->stream);
+	net_close(e->stream);
 }
 
 /** free a telnetclient structure. */
 static void
-telnetclient_on_destroy(dyad_Event *e)
+telnetclient_on_destroy(net_event *e)
 {
 	DESCRIPTOR_DATA *client = e->udata;
 
@@ -223,7 +223,7 @@ telnetclient_on_destroy(dyad_Event *e)
 
 /** notifies a client's disconnect. */
 static void
-telnetclient_on_close(dyad_Event *e)
+telnetclient_on_close(net_event *e)
 {
 	DESCRIPTOR_DATA *client = e->udata;
 
@@ -283,19 +283,19 @@ write_to_descriptor(DESCRIPTOR_DATA *d, const char *txt, int length)
 	assert(d != NULL);
 
 	/* treat as already closedif stream is NULL */
-	int state = d && d->stream ? dyad_getState(d->stream) : DYAD_STATE_CLOSED;
+	int state = d && d->stream ? net_get_state(d->stream) : NET_STATE_CLOSED;
 
-	if (state == DYAD_STATE_CONNECTED) {
+	if (state == NET_STATE_CONNECTED) {
 		if (d->mth->mccp2) {
 			write_mccp2(d, txt, length);
 		} else {
-			dyad_write(d->stream, txt, length);
+			net_write(d->stream, txt, length);
 		}
-	} else if (state == DYAD_STATE_CLOSED) {
-		/* silently ignore - clean up will occur on next dyad_update() */
+	} else if (state == NET_STATE_CLOSED) {
+		/* silently ignore - clean up will occur on next loop iteration */
 	} else {
 		/* not a valid socket type or not ready for writing */
-		LOG_INFO("%s():failed to write to fd (%ld) state=%d len=%d", __func__, (long)dyad_getSocket(d->stream), dyad_getState(d->stream), length);
+		LOG_INFO("%s():failed to write to fd (%ld) state=%d len=%d", __func__, (long)net_get_socket(d->stream), net_get_state(d->stream), length);
 	}
 
 	return 0;
@@ -472,7 +472,7 @@ telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const c
 
 /** allocate a new telnetclient based on an existing valid dyad handle. */
 static DESCRIPTOR_DATA *
-telnetclient_newclient(struct telnetserver *server, dyad_Stream *stream)
+telnetclient_newclient(struct telnetserver *server, struct net_stream *stream)
 {
 	DESCRIPTOR_DATA *cl = malloc(sizeof * cl);
 	FAILON(!cl, "malloc()", failed);
@@ -502,10 +502,10 @@ telnetclient_newclient(struct telnetserver *server, dyad_Stream *stream)
 
 	telnetclient_channel_add(cl, channel_public(CHANNEL_SYS));
 
-	dyad_addListener(stream, DYAD_EVENT_ERROR, telnetclient_on_error, server);
-	dyad_addListener(stream, DYAD_EVENT_DESTROY, telnetclient_on_destroy, cl);
-	dyad_addListener(stream, DYAD_EVENT_DATA, telnetclient_on_data, cl);
-	dyad_addListener(stream, DYAD_EVENT_CLOSE, telnetclient_on_close, cl);
+	net_add_listener(stream, NET_EVENT_ERROR, telnetclient_on_error, server);
+	net_add_listener(stream, NET_EVENT_DESTROY, telnetclient_on_destroy, cl);
+	net_add_listener(stream, NET_EVENT_DATA, telnetclient_on_data, cl);
+	net_add_listener(stream, NET_EVENT_CLOSE, telnetclient_on_close, cl);
 
 	init_mth_socket(cl);
 
@@ -656,9 +656,9 @@ void
 telnetclient_close(DESCRIPTOR_DATA *cl)
 {
 	if (cl && cl->stream) {
-		dyad_Stream *stream = cl->stream;
+		struct net_stream *stream = cl->stream;
 		cl->stream = NULL;
-		dyad_close(stream);
+		net_close(stream);
 	}
 }
 
@@ -692,7 +692,7 @@ telnetclient_channel_member(DESCRIPTOR_DATA *cl)
 }
 
 
-dyad_Stream *
+struct net_stream *
 telnetclient_socket_handle(DESCRIPTOR_DATA *cl)
 {
 	return cl->stream;
@@ -704,7 +704,7 @@ telnetclient_socket_name(DESCRIPTOR_DATA *cl)
 	static char tmp[64];
 
 	if (cl && cl->stream) {
-		snprintf(tmp, sizeof(tmp), "%s:%u", dyad_getAddress(cl->stream), dyad_getPort(cl->stream));
+		snprintf(tmp, sizeof(tmp), "%s:%u", net_get_address(cl->stream), net_get_port(cl->stream));
 	} else {
 		snprintf(tmp, sizeof(tmp), "INVALID");
 	}
@@ -726,16 +726,16 @@ telnetserver_listen(int port)
 		return ERR;
 	}
 
-	dyad_Stream *s = dyad_newStream();
+	struct net_stream *s = net_new_stream();
 	if (!s) {
 		free(server);
 		return ERR;
 	}
 
-	dyad_addListener(s, DYAD_EVENT_ERROR, telnetserver_on_error, server);
-	dyad_addListener(s, DYAD_EVENT_ACCEPT, telnetserver_on_accept, server);
-	if (dyad_listen(s, port) != 0) {
-		dyad_close(s);
+	net_add_listener(s, NET_EVENT_ERROR, telnetserver_on_error, server);
+	net_add_listener(s, NET_EVENT_ACCEPT, telnetserver_on_accept, server);
+	if (net_listen(s, port) != 0) {
+		net_close(s);
 		free(server);
 		return ERR;
 	}

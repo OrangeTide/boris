@@ -36,7 +36,9 @@
 #define LOG_SUBSYSTEM "server"
 #include <log.h>
 #include <debug.h>
-#include <dyad.h>
+#include <iox_loop.h>
+#include <iox_signal.h>
+#include <net.h>
 #include <user.h>
 #include <game.h>
 #include <mth.h>
@@ -76,12 +78,9 @@ show_version(void)
 	puts("Version " BORIS_VERSION_STR " (built " __DATE__ ")");
 }
 
-/**
- * flag used for the main loop, zero to terminated.
- */
-static sig_atomic_t keep_going_fl = 1;
+static struct iox_loop *g_loop;
 
-/** set by SIGHUP handler, checked in main loop to flush caches. */
+/** set by SIGHUP handler, checked in idle callback to flush caches. */
 static volatile sig_atomic_t sighup_fl;
 
 MUDDB *mud_db;
@@ -95,20 +94,32 @@ muddb_shutdown(void)
 	}
 }
 
-/**
- * signal handler to cause the main loop to terminated by clearing keep_going_fl.
- */
 static void
-sh_quit(int s UNUSED)
+sh_quit(struct iox_loop *loop, int signo UNUSED, void *arg UNUSED)
 {
-	keep_going_fl = 0;
+	iox_loop_stop(loop);
 }
 
-/** signal handler for SIGHUP -- sets a flag for the main loop. */
 static void
-sh_hup(int s UNUSED)
+sh_hup(struct iox_loop *loop UNUSED, int signo UNUSED, void *arg UNUSED)
 {
 	sighup_fl = 1;
+}
+
+static void
+main_idle(struct iox_loop *loop UNUSED, void *arg UNUSED)
+{
+	struct telnetserver *cur;
+
+	if (sighup_fl) {
+		sighup_fl = 0;
+		LOG_INFO("SIGHUP received -- invalidating caches");
+		help_cache_invalidate();
+	}
+
+	for (cur = telnetserver_first(); cur; cur = telnetserver_next(cur)) {
+		telnetclient_prompt_refresh_all(cur);
+	}
 }
 
 /**
@@ -232,12 +243,6 @@ main(int argc, char **argv)
 {
 	show_version();
 
-	signal(SIGINT, sh_quit);
-	signal(SIGTERM, sh_quit);
-#ifndef WIN32
-	signal(SIGHUP, sh_hup);
-#endif
-
 #ifndef NTEST
 	acs_test();
 	config_test();
@@ -269,8 +274,18 @@ main(int argc, char **argv)
 	}
 
 	fds_init();
-	dyad_init();
-	atexit(dyad_shutdown);
+
+	g_loop = iox_loop_new();
+	if (!g_loop || net_init(g_loop) != 0) {
+		LOG_ERROR("could not initialize event loop");
+		return EXIT_FAILURE;
+	}
+
+	iox_signal_add(g_loop, SIGINT, sh_quit, NULL);
+	iox_signal_add(g_loop, SIGTERM, sh_quit, NULL);
+#ifndef WIN32
+	iox_signal_add(g_loop, SIGHUP, sh_hup, NULL);
+#endif
 
 	if (log_init()) {
 		LOG_ERROR("could not initialize logging");
@@ -340,13 +355,6 @@ main(int argc, char **argv)
 
 	/* start the webserver if webserver.port is defined. */
 	if (mud_config.webserver_port > 0) {
-		dyad_Stream *webserver_downstream = dyad_newStream();
-		dyad_addListener(webserver_downstream, DYAD_EVENT_ACCEPT, webserver_accept_callback, NULL);
-		if (dyad_listen(webserver_downstream, 4445)) {
-			LOG_ERROR("error creating webserver downstream socket");
-			return EXIT_FAILURE;
-		}
-
 		struct webserver_context web_ctx = {
 			.upstream_port = 4445,
 			.family = mud_config.default_family
@@ -376,30 +384,15 @@ main(int argc, char **argv)
 
 	atexit(telnetserver_shutdown);
 
-	LOG_TODO("use the next event for the timer");
-
-	dyad_setUpdateTimeout(10);
-
-	while (keep_going_fl && dyad_getStreamCount() > 0) {
-		struct telnetserver *cur;
-
-		if (sighup_fl) {
-			sighup_fl = 0;
-			LOG_INFO("SIGHUP received -- invalidating caches");
-			help_cache_invalidate();
-		}
-
-		for (cur = telnetserver_first(); cur; cur = telnetserver_next(cur)) {
-			telnetclient_prompt_refresh_all(cur);
-		}
-
-		dyad_update();
-
-		LOG_INFO("Tick");
-	}
+	iox_loop_set_idle(g_loop, main_idle, NULL);
+	iox_loop_run(g_loop);
 
 	eventlog_server_shutdown();
 	LOG_INFO("Server shutting down.");
+
+	net_shutdown();
+	iox_loop_free(g_loop);
+	g_loop = NULL;
 
 	return 0;
 }
