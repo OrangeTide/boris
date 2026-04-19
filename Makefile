@@ -53,6 +53,7 @@ include src/util/module.mk
 include src/help/module.mk
 include src/web/module.mk
 include src/obj/module.mk
+include src/entity/module.mk
 include src/rpg/module.mk
 include src/database/module.mk
 include src/muddb-tool/module.mk

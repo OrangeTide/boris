@@ -1,6 +1,7 @@
 BORIS_SRCS += \
 	src/obj/obj.c \
-	src/obj/obj_cache.c
+	src/obj/obj_cache.c \
+	src/obj/obj_cache_muddb.c
 
 INCLUDES += -Isrc/obj
 

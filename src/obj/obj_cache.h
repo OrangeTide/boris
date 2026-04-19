@@ -65,4 +65,8 @@ char *obj_cache_prop_resolve(OBJ_CACHE *c, OBJ *obj, const char *propname);
 unsigned obj_cache_size(OBJ_CACHE *c);     /* total objects held */
 unsigned obj_cache_lru_count(OBJ_CACHE *c); /* unreferenced count */
 
+/* Retrieve the ctx pointer passed to obj_cache_new. Used by backend
+ * shims (e.g. obj_cache_muddb) to reach their own state. */
+void *obj_cache_ctx(OBJ_CACHE *c);
+
 #endif
