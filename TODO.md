@@ -104,3 +104,7 @@ testing, caching, and longer-term features.
 
   * Feature Request : variables and command-line expansion in COMMAND.COM
   * Feature Request : secret "sh" command. gives a full unix-like shell. (see jsh.c)
+
+  * provide documentation to tighten up security for a production system:
+    - run the MUD as a dedicated unprivileged user
+    - seccomp the process so even an escape can't do much
