@@ -5,23 +5,23 @@ BORIS_SRCS += \
 	src/crypt/sha1.c \
 	src/crypt/sha1crypt.c \
 	src/room/room.c \
-	src/task/command.c \
-	src/task/comutil.c \
-	src/task/command/character.c \
-	src/task/command/chsay.c \
-	src/task/command/emote.c \
-	src/task/command/help.c \
-	src/task/command/look.c \
-	src/task/command/move.c \
-	src/task/command/pose.c \
-	src/task/command/quit.c \
-	src/task/command/resist.c \
-	src/task/command/roll.c \
-	src/task/command/roomget.c \
-	src/task/command/say.c \
-	src/task/command/stat.c \
-	src/task/command/time.c \
-	src/task/command/yell.c \
+	src/cmd/cmd.c \
+	src/cmd/cmdutil.c \
+	src/cmd/character.c \
+	src/cmd/chsay.c \
+	src/cmd/emote.c \
+	src/cmd/help.c \
+	src/cmd/look.c \
+	src/cmd/move.c \
+	src/cmd/pose.c \
+	src/cmd/quit.c \
+	src/cmd/resist.c \
+	src/cmd/roll.c \
+	src/cmd/roomget.c \
+	src/cmd/say.c \
+	src/cmd/stat.c \
+	src/cmd/time.c \
+	src/cmd/yell.c \
 	src/worldclock/worldclock.c \
 	src/acs.c \
 	src/boris.c \
@@ -45,7 +45,7 @@ INCLUDES += \
 	-Isrc/character \
 	-Isrc/crypt \
 	-Isrc/room \
-	-Isrc/task \
+	-Isrc/cmd \
 	-Isrc/worldclock \
 	-Isrc/web/server
 
