@@ -61,19 +61,35 @@ struct var_ctx {
 };
 
 /**
- * expand variables and process quoting in a string.
+ * sink used by expand_string_stream() to consume expanded output in
+ * pieces. data is NOT nul-terminated -- len bytes exactly. return 0
+ * to continue or non-zero to abort the expansion (the return value
+ * bubbles back out of expand_string_stream()).
+ */
+typedef int (*expand_sink_fn)(void *user, const char *data, unsigned len);
+
+/**
+ * stream variable expansion and quoting through a sink callback.
+ * no heap allocation: literal runs are passed through in batches and
+ * variable values are forwarded as-is. ctx may be NULL. returns 0 on
+ * success, or the first non-zero value the sink returned.
  *
  * quoting rules:
  *   '...'       literal, no expansion
  *   "..."       expand $vars, literal everything else
  *   \x          outside single quotes, copy x literally
  *
- * returns a malloc()'d string; caller must free(). returns NULL on
- * allocation failure. ctx may be NULL (no named vars, no positionals,
- * $? == 0).
- *
  * $(cmd) command substitution is NOT supported; a literal "$(" is
  * emitted and parsing continues.
+ */
+int expand_string_stream(const char *s, const struct var_ctx *ctx,
+			 expand_sink_fn sink, void *user);
+
+/**
+ * convenience: expand into a malloc()'d, nul-terminated string. caller
+ * must free(). returns NULL on allocation failure. prefer
+ * expand_string_stream() when you already have an output buffer or
+ * sink.
  */
 char *expand_string(const char *s, const struct var_ctx *ctx);
 
