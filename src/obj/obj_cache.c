@@ -296,3 +296,9 @@ obj_cache_lru_count(OBJ_CACHE *c)
 {
 	return c ? c->unref_count : 0;
 }
+
+void *
+obj_cache_ctx(OBJ_CACHE *c)
+{
+	return c ? c->ctx : NULL;
+}
