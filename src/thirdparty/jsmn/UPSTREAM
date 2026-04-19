@@ -1,0 +1,7 @@
+repo:   https://github.com/zserge/jsmn.git
+commit: 25647e692c7906b96ffd2b05ca54c097948e879c
+ref:    master (v1.0.0-11-g25647e6)
+date:   2024-02-23
+
+Vendored files: jsmn.h, LICENSE, README.md
+Update with: scripts/update-jsmn.sh
