@@ -540,3 +540,81 @@ Resolve before or during implementation planning.
 - Economy, encumbrance detail, item quality tables.
 
 Each becomes its own design note once this core is agreed.
+
+## Appendix A: Reference notes from 6mud (HERO-system sketch)
+
+Preserved from the author's earlier MUD project (`6mud/combat.txt`) as
+research material. This is **not** the boris system — boris is W&L-based
+(see sections above). These notes are kept here so a future session can
+mine them when fleshing out combat, derived stats, and campaign-tier
+budgets. Full integration deferred.
+
+### A.1 Characteristics / ability scores
+
+| Code | Name          | Description                                            |
+|------|---------------|--------------------------------------------------------|
+| INT  | Intelligence  | General mental ability and awareness.                  |
+| WILL | Willpower     | Ability to overcome stressful situations.              |
+| PRE  | Presence      | Influence through character and charisma.              |
+| TECH | Technique     | Manual dexterity manipulating things with hands.       |
+| REF  | Reflexes      | Respond, aim, and hit things in combat.                |
+| DEX  | Dexterity     | Bodily agility; move in combat and avoid being hit.    |
+| CON  | Constitution  | Overall healthiness and immunity.                      |
+| STR  | Strength      | Ability at applying physical force.                    |
+| BODY | Body          | Ability to resist physical harm.                       |
+| MOVE | Movement      | Speed of chosen locomotion.                            |
+
+### A.2 Derived characteristics
+
+| Code | Name             | Formula                                                |
+|------|------------------|--------------------------------------------------------|
+| STUN | Stun             | BODY * 5                                               |
+| HP   | Hits             | BODY * 5                                               |
+| SD   | Stun Defense     | CON * 2                                                |
+| REC  | Recovery         | STR + CON                                              |
+| RUN  | Combat Movement  | MOVE * 2 m                                             |
+|      | Non-combat       | Sprint MOVE*3m; Swim MOVE*1m; Leap MOVE*1m.            |
+| RES  | Resistance       | WILL * 3 (mental hits)                                 |
+| LUCK | Luck (optional)  | INT + REF                                              |
+| END  | Endurance        | CON * 10                                               |
+| ED   | Energy Defense   | CON * 2                                                |
+| SPD  | Speed            | REF / 2                                                |
+| HUM  | Humanity         | WILL * 10                                              |
+
+### A.3 Characteristic point rating
+
+| Score | Tier                 |
+|-------|----------------------|
+| < 1   | Child-like           |
+| 1-2   | Ordinary             |
+| 3-4   | Competent / bright   |
+| 5-6   | Heroic               |
+| 7-8   | Incredible / Olympic |
+| 9-10  | Legendary            |
+| 10+   | Superhero / godlike  |
+
+### A.4 Campaign-style point budgets
+
+| Campaign style         | Characteristic points | Option points |
+|------------------------|-----------------------|---------------|
+| Everyday / Realistic   | 20                    | 25            |
+| Elite / Semi-realistic | 30                    | 35            |
+| Heroic                 | 50                    | 45            |
+| Incredible             | 60                    | 55            |
+| Legendary              | 80                    | 65            |
+| Superheroic            | 90+                   | 75+           |
+
+### A.5 How this relates to boris
+
+- W&L's four attributes (Body / Finesse / Mind / Presence) and sixteen
+  actions replace the ten HERO characteristics. Don't graft both sets
+  on; pick one vocabulary and stick with it.
+- The derived-stat pattern (STUN/HP/SD as multiples of a base
+  characteristic) is worth stealing conceptually. Boris currently
+  derives attribute scores from action ranks (§2.2); a similar pattern
+  could define HP, defenses, and endurance from Body/Finesse without
+  adding player-facing stats.
+- The campaign-tier point budgets are a possible knob for zone or
+  server difficulty scaling — a "Heroic" zone might allow higher rank
+  caps or larger starting pools than an "Everyday" one.
+
