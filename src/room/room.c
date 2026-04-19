@@ -182,6 +182,13 @@ room_attr_get(struct room *r, const char *name)
 	return NULL; /* failure - not found. */
 }
 
+struct attr_list *
+room_attrs_extras(struct room *r)
+{
+	if (!r) return NULL;
+	return &r->extra_values;
+}
+
 static struct room *
 room_load(const char *room_id)
 {

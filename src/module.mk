@@ -15,8 +15,11 @@ BORIS_SRCS += \
 	src/task/command/move.c \
 	src/task/command/pose.c \
 	src/task/command/quit.c \
+	src/task/command/resist.c \
+	src/task/command/roll.c \
 	src/task/command/roomget.c \
 	src/task/command/say.c \
+	src/task/command/stat.c \
 	src/task/command/time.c \
 	src/task/command/yell.c \
 	src/worldclock/worldclock.c \
