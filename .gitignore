@@ -16,7 +16,11 @@ junk*/
 
 /data/users/
 /build
+/_build
+/_out
 /bin
+/compile_commands.json
 
 boris.log
 .env
+*.env

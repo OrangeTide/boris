@@ -1,3 +1,3 @@
-BORIS_SRCS += src/thirdparty/mongoose/mongoose.c
-
-INCLUDES += -Isrc/thirdparty/mongoose
+LIBRARIES    += mongoose
+mongoose_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+mongoose_SRCS = mongoose.c

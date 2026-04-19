@@ -1,19 +1,13 @@
-BORIS_SRCS += \
-	src/database/muddb.c
+LIBRARIES    += database
+database_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+database_SRCS = muddb.c
+database_LIBS = lmdb
 
-INCLUDES += -Isrc/database
-
-# --- Test targets ---
-TEST_SRCS += src/database/test_muddb.c
-TEST_BINS += $(BINDIR)/test_muddb
-
-TEST_MUDDB_OBJS := \
-	$(BUILDDIR)/src/database/test_muddb.o \
-	$(BUILDDIR)/src/database/muddb.o \
-	$(BUILDDIR)/src/obj/obj.o \
-	$(BUILDDIR)/src/log/log.o \
-	$(BUILDDIR)/src/thirdparty/lmdb/mdb.o \
-	$(BUILDDIR)/src/thirdparty/lmdb/midl.o
-
-$(BINDIR)/test_muddb: $(TEST_MUDDB_OBJS) | $(BINDIR)
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+EXECUTABLES    += test_muddb
+TEST_TARGETS   += test_muddb
+test_muddb_DIR := $(database_DIR)
+test_muddb_SRCS = test_muddb.c
+test_muddb_LIBS = database obj log lmdb
+define test_muddb_TESTCMD
+$(test_muddb_EXEC)
+endef
