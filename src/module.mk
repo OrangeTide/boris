@@ -1,58 +1,57 @@
-BORIS_SRCS += \
-	src/channel/channel.c \
-	src/character/character.c \
-	src/crypt/base64.c \
-	src/crypt/sha1.c \
-	src/crypt/sha1crypt.c \
-	src/room/room.c \
-	src/cmd/cmd.c \
-	src/cmd/cmdutil.c \
-	src/cmd/character.c \
-	src/cmd/chsay.c \
-	src/cmd/emote.c \
-	src/cmd/help.c \
-	src/cmd/look.c \
-	src/cmd/move.c \
-	src/cmd/pose.c \
-	src/cmd/quit.c \
-	src/cmd/resist.c \
-	src/cmd/roll.c \
-	src/cmd/roomget.c \
-	src/cmd/say.c \
-	src/cmd/stat.c \
-	src/cmd/time.c \
-	src/cmd/yell.c \
-	src/worldclock/worldclock.c \
-	src/acs.c \
-	src/boris.c \
-	src/buf.c \
-	src/common.c \
-	src/config.c \
-	src/fds.c \
-	src/form.c \
-	src/freelist.c \
-	src/game.c \
-	src/hashtable.c \
-	src/login.c \
-	src/menu.c \
-	src/telnetclient.c \
-	src/user.c \
-	src/web/server/webserver.c
+SUBDIRS = \
+	thirdparty/lmdb thirdparty/mth thirdparty/mongoose thirdparty/tiny-aes \
+	log scrypt util help iox net passwd obj entity rpg database muddb-tool
 
-INCLUDES += \
-	-Isrc \
-	-Isrc/channel \
-	-Isrc/character \
-	-Isrc/crypt \
-	-Isrc/room \
-	-Isrc/cmd \
-	-Isrc/worldclock \
-	-Isrc/web/server
+LIBRARIES    += hashtable
+hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+hashtable_SRCS = hashtable.c
 
-# --- Test targets ---
-TEST_SRCS += src/test_hashtable.c
-TEST_BINS += $(BINDIR)/test_hashtable
-TEST_HT_OBJS := $(BUILDDIR)/src/test_hashtable.o $(BUILDDIR)/src/log/log.o
+EXECUTABLES        += test_hashtable
+test_hashtable_DIR := $(hashtable_DIR)
+test_hashtable_SRCS = test_hashtable.c
+test_hashtable_LIBS = log
 
-$(BINDIR)/test_hashtable: $(TEST_HT_OBJS) | $(BINDIR)
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+EXECUTABLES += boris
+boris_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
+boris_SRCS = \
+	boris.c \
+	buf.c \
+	common.c \
+	config.c \
+	fds.c \
+	form.c \
+	freelist.c \
+	game.c \
+	login.c \
+	menu.c \
+	telnetclient.c \
+	user.c \
+	acs.c \
+	channel/channel.c \
+	character/character.c \
+	crypt/base64.c \
+	crypt/sha1.c \
+	crypt/sha1crypt.c \
+	room/room.c \
+	cmd/cmd.c \
+	cmd/cmdutil.c \
+	cmd/character.c \
+	cmd/chsay.c \
+	cmd/emote.c \
+	cmd/help.c \
+	cmd/look.c \
+	cmd/move.c \
+	cmd/pose.c \
+	cmd/quit.c \
+	cmd/resist.c \
+	cmd/roll.c \
+	cmd/roomget.c \
+	cmd/say.c \
+	cmd/stat.c \
+	cmd/time.c \
+	cmd/yell.c \
+	worldclock/worldclock.c \
+	web/server/webserver.c
+boris_LIBS = \
+	hashtable log scrypt util help iox net passwd obj entity rpg database \
+	lmdb mth mongoose tinyaes

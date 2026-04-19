@@ -1,6 +1,4 @@
-BORIS_SRCS += \
-	src/thirdparty/mth/mth.c \
-	src/thirdparty/mth/msdp.c \
-	src/thirdparty/mth/telopt.c
-
-INCLUDES += -Isrc/thirdparty/mth
+LIBRARIES += mth
+mth_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
+mth_SRCS   = mth.c msdp.c telopt.c
+mth_EXPORTED_LDLIBS = -lz
