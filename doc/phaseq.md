@@ -83,7 +83,7 @@ worry about.
 (e.g. one per active combat), use the existing iox timer wheel as the
 global aggregator -- see [combat-queue.md](combat-queue.md).
 
-## Refactor plan (status: not started)
+## Refactor plan (status: complete)
 
 The pre-refactor file (`src/util/phaseq.{h,c}`) has a single global
 queue, `time_t` resolution, group ids, and `phaseq_ready` state. The
