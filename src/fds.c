@@ -1,4 +1,5 @@
 #include "boris.h"
+#define LOG_SUBSYSTEM "fds"
 #include "log.h"
 #include <stdio.h>
 #include <stdlib.h>
