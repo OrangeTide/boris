@@ -25,7 +25,7 @@
 #include "command.h"
 #include <boris.h>
 #include "character.h"
-#include "comutil.h"
+#include "cmdutil.h"
 #include "room.h"
 #include "util.h"
 
