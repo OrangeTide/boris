@@ -1,6 +1,6 @@
 LIBRARIES += util
 util_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
-util_SRCS  = util.c grow.c variables.c wordwrap.c
+util_SRCS  = util.c grow.c variables.c wordwrap.c pool.c phaseq.c
 
 EXECUTABLES       += test_variables
 TEST_TARGETS      += test_variables
