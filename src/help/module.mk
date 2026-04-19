@@ -1,3 +1,3 @@
-BORIS_SRCS += src/help/help.c
-
-INCLUDES += -Isrc/help
+LIBRARIES += help
+help_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
+help_SRCS  = help.c

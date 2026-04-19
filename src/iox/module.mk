@@ -1,7 +1,3 @@
-BORIS_SRCS += \
-	src/iox/iox_loop.c \
-	src/iox/iox_fd.c \
-	src/iox/iox_signal.c \
-	src/iox/iox_timer.c
-
-INCLUDES += -Isrc/iox
+LIBRARIES += iox
+iox_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
+iox_SRCS   = iox_loop.c iox_fd.c iox_signal.c iox_timer.c
