@@ -8,8 +8,15 @@ testing, caching, and longer-term features.
   * add unit tests for room and character load/save round-trips
     through muddb.
 
-  * unit tests for dice engine (src/rpg) -- traitor/exploding dice,
-    position/difficulty outcome tables, stress/harm tracks.
+
+## P1 -- priority queue / timers
+
+  * use pq.h for all priority queues.
+
+  * add timer-wheel semantics (realtime clock + run dispatcher)
+    to pq.h. a thin wrapper -- entries hold {deadline, func, args},
+    PQ_KEY is deadline, and the run loop peeks top() and dequeues
+    while deadline <= now.
 
 
 ## P1 -- RPG next phases
