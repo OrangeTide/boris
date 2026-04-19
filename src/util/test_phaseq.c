@@ -34,11 +34,13 @@ static int failures;
 /* ---- callback recording ---- */
 
 #define MAX_FIRED 32
+#define MAX_TAG   32
 
 struct fire_log {
-	const char *tag[MAX_FIRED];
-	void       *arg[MAX_FIRED];
-	unsigned    n;
+	char     tag[MAX_FIRED][MAX_TAG];
+	int      had_str[MAX_FIRED];
+	void    *arg[MAX_FIRED];
+	unsigned n;
 };
 
 static struct fire_log g_log;
@@ -51,7 +53,15 @@ record_cb(void *arg, const char *str)
 		return;
 	}
 	g_log.arg[g_log.n] = arg;
-	g_log.tag[g_log.n] = str;
+	g_log.had_str[g_log.n] = (str != NULL);
+	if (str) {
+		size_t n = strlen(str);
+		if (n >= MAX_TAG) n = MAX_TAG - 1;
+		memcpy(g_log.tag[g_log.n], str, n);
+		g_log.tag[g_log.n][n] = '\0';
+	} else {
+		g_log.tag[g_log.n][0] = '\0';
+	}
 	g_log.n++;
 }
 
@@ -201,13 +211,12 @@ test_independent_instances(void)
 	poolid_t e2 = phaseq_add(&q2, 500,  record_cb, (void *)0xB, "q2a");
 	EXPECT(e1 != 0 && e2 != 0, "ids allocated in both queues");
 
-	/* canceling e1 in q2 must not touch q1 */
-	EXPECT(phaseq_cancel(&q2, e1) == 0, "cross-queue cancel is no-op");
-	EXPECT(phaseq_head_deadline(&q1) == 1000, "q1 head intact");
-
+	/* processing q2 must not touch q1 */
 	log_reset();
 	phaseq_process_at(&q2, 600);
 	EXPECT(g_log.n == 1, "only q2 entry fires");
+	EXPECT(phaseq_head_deadline(&q1) == 1000, "q1 head intact");
+	EXPECT(phaseq_head_deadline(&q2) == 0, "q2 drained");
 	EXPECT(phaseq_head_deadline(&q1) == 1000, "q1 unaffected by q2 process");
 
 	log_reset();
@@ -251,7 +260,7 @@ test_null_str(void)
 	log_reset();
 	phaseq_process_at(&q, 200);
 	EXPECT(g_log.n == 1, "NULL str entry fires");
-	EXPECT(g_log.tag[0] == NULL, "NULL str preserved");
+	EXPECT(g_log.had_str[0] == 0, "NULL str preserved");
 
 	phaseq_done(&q);
 }

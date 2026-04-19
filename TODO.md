@@ -11,12 +11,22 @@ testing, caching, and longer-term features.
 
 ## P1 -- priority queue / timers
 
-  * use pq.h for all priority queues.
+  Two complementary primitives:
 
-  * add timer-wheel semantics (realtime clock + run dispatcher)
-    to pq.h. a thin wrapper -- entries hold {deadline, func, args},
-    PQ_KEY is deadline, and the run loop peeks top() and dequeues
-    while deadline <= now.
+  * pq.h (src/iox/pq.h) -- generic binary-heap, used by the iox
+    timer wheel. Keep as the substrate for low-level scheduler
+    cores.
+
+  * phaseq (src/util/phaseq.{h,c}) -- per-instance deadline-ordered
+    callback queue. uint64 ms deadlines, scrub-by-arg cleanup, no
+    global state. Intended for gameplay schedulers (combat, spell
+    timers, room programs). See doc/phaseq.md and
+    doc/combat-queue.md.
+
+  Remaining work:
+  * implement the combat subsystem on top of phaseq + iox per
+    doc/combat-queue.md (one phaseq per session, one iox timer slot
+    bridging head deadline into the main loop).
 
 
 ## P1 -- RPG next phases

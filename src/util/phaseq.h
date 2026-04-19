@@ -1,49 +1,60 @@
-/* phaseq.h - deadline-ordered event queue
+/* phaseq.h - per-instance deadline-ordered event queue
  * Originally from gredin (2007 J.Mayo). Imported into boris 2026.
- * Generic callback scheduler for async/delayed actions (combat ticks,
- * spell timers, periodic system events).
+ *
+ * Each phaseq instance is a sorted singly-linked list of
+ * {deadline_ms, callback, arg, str} entries. Owners poll the head to
+ * learn when to wake, then call phaseq_process() to fire all entries
+ * whose deadline has passed.
+ *
+ * See doc/phaseq.md for design notes and doc/combat-queue.md for the
+ * intended use pattern (one instance per combat session, fronted by an
+ * iox timer slot).
  */
 #ifndef PHASEQ_H_
 #define PHASEQ_H_
 
-#include <time.h>
+#include <stdint.h>
+
 #include "pool.h"
 
-#define PHASEQ_SINGLE ((poolid_t)0)
+struct phaseq_entry;
+
+struct phaseq {
+	struct phaseq_entry *head;
+	struct id_pool_head  ids;
+};
 
 typedef void (*phaseq_func_t)(void *arg, const char *str);
 
-int phaseq_init(void);
-void phaseq_done(void);
+/** monotonic millisecond clock used by phaseq_process(). */
+uint64_t phaseq_now_ms(void);
 
-/** compute absolute deadline 'minutes:seconds' from now */
-time_t phaseq_expire_in(unsigned minutes, unsigned seconds);
+/** initialize an instance. returns 0 on success. */
+int  phaseq_init(struct phaseq *q);
 
-/** schedule a callback for 'deadline'. returns event_id (nonzero) on success, 0 on failure.
- * group_id: PHASEQ_SINGLE for ungrouped, or a previously allocated group id
- * (via phaseq_group_new) so related events can be scrubbed together.
- * 'str' is copied. */
-poolid_t phaseq_add(time_t deadline, poolid_t group_id,
+/** release all entries and the id pool. */
+void phaseq_done(struct phaseq *q);
+
+/** schedule a callback for absolute deadline_ms. returns event_id (nonzero)
+ * on success, 0 on failure. 'str' is copied; may be NULL. */
+poolid_t phaseq_add(struct phaseq *q, uint64_t deadline_ms,
                     phaseq_func_t func, void *arg, const char *str);
 
-/** cancel a single event by its event_id. returns 1 if removed. */
-int phaseq_cancel(poolid_t event_id);
+/** cancel a single event by event_id. returns 1 if removed, 0 otherwise. */
+int phaseq_cancel(struct phaseq *q, poolid_t event_id);
 
-/** cancel all events matching group_id. returns count removed. */
-int phaseq_scrub_group(poolid_t group_id);
+/** cancel all entries whose 'arg' pointer equals arg. returns count. */
+int phaseq_scrub_arg(struct phaseq *q, const void *arg);
 
-/** cancel all events whose 'arg' pointer matches 'arg'. returns count removed.
- * Useful when tearing down a character/client: pass its pointer. */
-int phaseq_scrub_arg(const void *arg);
+/** absolute deadline of the head entry, or 0 if the queue is empty. */
+uint64_t phaseq_head_deadline(const struct phaseq *q);
 
-/** allocate a new group id for grouping related events. returns 0 on failure. */
-poolid_t phaseq_group_new(void);
+/** fire all entries whose deadline <= phaseq_now_ms().
+ * returns ms-until-next-head, or -1 if the queue is empty. */
+int64_t phaseq_process(struct phaseq *q);
 
-/** release a group id after its events are gone. */
-void phaseq_group_release(poolid_t group_id);
-
-/** run all events whose deadline has passed.
- * returns seconds until the next event, or -1 if the queue is empty. */
-long phaseq_process(void);
+/** same, with a caller-supplied 'now' (avoids a clock read; lets tests
+ * advance time deterministically). */
+int64_t phaseq_process_at(struct phaseq *q, uint64_t now_ms);
 
 #endif

@@ -13,7 +13,7 @@ endef
 EXECUTABLES       += test_phaseq
 TEST_TARGETS      += test_phaseq
 test_phaseq_DIR   := $(util_DIR)
-test_phaseq_SRCS   = test_phaseq.c phaseq.c pool.c
+test_phaseq_SRCS   = test_phaseq.c phaseq.c pool.c ../log/log.c
 define test_phaseq_TESTCMD
 $(test_phaseq_EXEC)
 endef
