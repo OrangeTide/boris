@@ -1,5 +1,5 @@
 /**
- * @file command.c
+ * @file cmd.c
  *
  * Commands and actions
  *
@@ -27,7 +27,7 @@
 #include <channel.h>
 #include <character.h>
 #include <room.h>
-#include <comutil.h>
+#include <cmdutil.h>
 #define LOG_SUBSYSTEM "command"
 #include <log.h>
 #include <util.h>
