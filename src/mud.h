@@ -1,6 +1,5 @@
 #ifndef MUD_H_
 #define MUD_H_
-#include <dyad.h>
 #include <terminal.h>
 #include <channel.h>
 #include <list.h>
@@ -11,10 +10,11 @@ struct menuinfo;
 struct user;
 struct character;
 struct buf;
+struct net_stream;
 
 typedef struct descriptor_data DESCRIPTOR_DATA;
 struct descriptor_data {
-	dyad_Stream *stream;
+	struct net_stream *stream;
 	struct mth_data *mth;
 	LIST_ENTRY(DESCRIPTOR_DATA) list;
 	enum client_type { CLIENT_TYPE_USER = 1 } type;

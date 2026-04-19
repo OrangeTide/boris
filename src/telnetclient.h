@@ -13,7 +13,7 @@ int telnetclient_isstate(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA
 void telnetclient_close(DESCRIPTOR_DATA *cl);
 void telnetclient_clear_statedata(DESCRIPTOR_DATA *cl);
 struct channel_member *telnetclient_channel_member(DESCRIPTOR_DATA *cl);
-dyad_Stream *telnetclient_socket_handle(DESCRIPTOR_DATA *cl);
+struct net_stream *telnetclient_socket_handle(DESCRIPTOR_DATA *cl);
 const char *telnetclient_socket_name(DESCRIPTOR_DATA *cl);
 const struct terminal *telnetclient_get_terminal(DESCRIPTOR_DATA *cl);
 int telnetserver_listen(int port);

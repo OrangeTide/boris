@@ -4,7 +4,6 @@
 #include <log.h>
 
 #include <mongoose.h>
-#include <dyad.h>
 #include <webserver.h>
 #include <pthread.h>
 #include <signal.h>
@@ -19,21 +18,6 @@ static pthread_t webserver_thread;
 
 static const char *web_root = "./bin/www";
 static struct mg_mgr webserver_mgr;
-
-void
-webserver_test_callback(dyad_Event *ev)
-{
-	char buf[48] = { 0 };
-
-	snprintf(buf, 47, "Webserver Event: %s", ev->data);
-	log_logf(LOG_LEVEL_INFO, "server", "%s", buf);
-}
-
-void
-webserver_accept_callback(dyad_Event *ev)
-{
-	dyad_addListener(ev->remote, DYAD_EVENT_DATA, webserver_test_callback, NULL);
-}
 
 static void
 webserver_handler(struct mg_connection *c, int ev, void *ev_data, void *fn_data)
