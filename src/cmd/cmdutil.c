@@ -1,5 +1,5 @@
 /**
- * @file comutil.c
+ * @file cmdutil.c
  *
  * Communication utilities - show_gametime, show_room, ...
  *
@@ -21,7 +21,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-#include "comutil.h"
+#include "cmdutil.h"
 #include <boris.h>
 #include "worldclock.h"
 #include <character.h>

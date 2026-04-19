@@ -1,5 +1,5 @@
-#ifndef COMUTIL_H_
-#define COMUTIL_H_
+#ifndef CMDUTIL_H_
+#define CMDUTIL_H_
 #include "boris.h"
 #include "room.h"
 

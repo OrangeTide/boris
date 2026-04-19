@@ -24,7 +24,7 @@
 
 #include "command.h"
 #include <boris.h>
-#include "comutil.h"
+#include "cmdutil.h"
 
 /** action callback to do the "time" command. */
 int
