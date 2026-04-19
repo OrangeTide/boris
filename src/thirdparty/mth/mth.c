@@ -1,5 +1,5 @@
 #include "mth.h"
-#include <dyad.h>
+#include <net.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -85,7 +85,7 @@ void log_descriptor_printf(DESCRIPTOR_DATA *d, char *fmt, ...)
 
 	va_end(args);
 
-	printf("D%ld@%s %s\n", (long)dyad_getSocket(d->stream), dyad_getAddress(d->stream), buf);
+	printf("D%ld@%s %s\n", (long)net_get_socket(d->stream), net_get_address(d->stream), buf);
 
 	return;
 }

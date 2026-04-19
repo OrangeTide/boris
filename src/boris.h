@@ -46,7 +46,6 @@ struct user;
 #include <stdarg.h>
 #include <sys/socket.h>
 #include <string.h>
-#include <dyad.h>
 
 #include "mudconfig.h"
 #include "list.h"
