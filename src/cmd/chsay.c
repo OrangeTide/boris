@@ -24,6 +24,7 @@
 
 #include "command.h"
 #include <boris.h>
+#define LOG_SUBSYSTEM "command"
 #include "log.h"
 
 /** action callback to do the "chsay" command. */
