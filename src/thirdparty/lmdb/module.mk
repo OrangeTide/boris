@@ -1,5 +1,3 @@
-BORIS_SRCS += \
-	src/thirdparty/lmdb/mdb.c \
-	src/thirdparty/lmdb/midl.c
-
-INCLUDES += -Isrc/thirdparty/lmdb
+LIBRARIES += lmdb
+lmdb_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
+lmdb_SRCS  = mdb.c midl.c
