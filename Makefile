@@ -71,10 +71,10 @@ CFLAGS += $(INCLUDES)
 
 # --- LTO detection ----------------------------------------------------------
 LTO_SUPPORTED := $(shell echo 'int main(){return 0;}' \
-	| $(CC) -flto -x c - -o /dev/null 2>/dev/null && echo yes)
+	| $(CC) -flto=auto -x c - -o /dev/null 2>/dev/null && echo yes)
 ifeq ($(LTO_SUPPORTED),yes)
-  CFLAGS  += -flto
-  LDFLAGS += -flto
+  CFLAGS  += -flto=auto
+  LDFLAGS += -flto=auto
 endif
 
 # --- Targets ----------------------------------------------------------------
