@@ -163,7 +163,10 @@ muddb_open(const char *path, unsigned flags)
 	mdb_env_set_mapsize(db->env, MUDDB_MAPSIZE);
 	mdb_env_set_maxdbs(db->env, MUDDB_MAX_DBS);
 
-	rc = mdb_env_open(db->env, path, 0, 0664);
+	/* MDB_NOTLS: tie reader slot to the MDB_txn object, not TLS.
+	 * required because we nest read txns on one thread (e.g. a
+	 * muddb_iter_begin loop calling muddb_get per key). */
+	rc = mdb_env_open(db->env, path, MDB_NOTLS, 0664);
 	if (rc != 0) {
 		LOG_ERROR("mdb_env_open(%s): %s", path, mdb_strerror(rc));
 		mdb_env_close(db->env);
