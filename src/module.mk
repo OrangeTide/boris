@@ -1,6 +1,6 @@
 SUBDIRS = \
 	thirdparty/lmdb thirdparty/mth thirdparty/mongoose thirdparty/tiny-aes \
-	log scrypt util help iox net passwd obj entity rpg database muddb-tool
+	log scrypt util help iox net passwd obj entity rpg combat database muddb-tool
 
 LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
