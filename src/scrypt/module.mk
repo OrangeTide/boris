@@ -10,3 +10,5 @@ scrypt_SRCS = \
 	memlimit.c \
 	scryptenc.c \
 	sha256.c
+# Third-party code -- suppress warnings we don't control.
+scrypt_CFLAGS = -w
