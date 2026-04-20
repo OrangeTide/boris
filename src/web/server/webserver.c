@@ -62,6 +62,8 @@ webserver_upstream_handler(struct mg_connection *c, int ev, void *ev_data, void 
 	} else if (ev == MG_EV_POLL) {
 		// Nothing yet
 	}
+	(void)c;
+	(void)ev_data;
 	(void)fn_data;
 }
 

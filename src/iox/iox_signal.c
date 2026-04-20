@@ -31,7 +31,8 @@ sig_handler(int signo)
 	int saved_errno = errno;
 
 	/* best-effort write; if pipe is full, signal is already pending */
-	(void)write(sig_pipe[1], &s, 1);
+	ssize_t n = write(sig_pipe[1], &s, 1);
+	(void)n;
 	errno = saved_errno;
 }
 

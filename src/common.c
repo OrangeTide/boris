@@ -303,10 +303,7 @@ value_get(enum value_type type, void *p)
  * Debug and test routines
  ******************************************************************************/
 
-/* enable these routines unless both NDEBUG and NTEST are defined.
- * if debugging or testing is enabled then we need some of these functions.
- */
-#if !defined(NTEST) || !defined(NDEBUG)
+#ifndef NTEST
 /**
  * debug routine to convert a number to a string.
  * @param n the value.
