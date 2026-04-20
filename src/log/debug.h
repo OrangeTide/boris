@@ -26,7 +26,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include "log.h"
-#if defined(NTRACE) || defined(NDEBUG)
+#if !defined(NTRACE) || !defined(NDEBUG)
 #  include "util.h"
 #endif
 
