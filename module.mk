@@ -1,7 +1,13 @@
 # Boris MUD - top-level module.mk (modular-make)
 
+ifdef DEBUG
+PROJECT_CFLAGS   := -Wall -W -Werror=implicit -pthread
+PROJECT_CPPFLAGS := -DNTEST
+else
 PROJECT_CFLAGS   := -Wall -W -Werror=implicit -O2 -g -pthread
-PROJECT_CPPFLAGS := -DNTEST -DNDEBUG \
+PROJECT_CPPFLAGS := -DNTEST -DNDEBUG
+endif
+PROJECT_CPPFLAGS += \
 	-Isrc \
 	-Isrc/channel -Isrc/character -Isrc/crypt -Isrc/room -Isrc/cmd \
 	-Isrc/worldclock -Isrc/web/server \
@@ -28,6 +34,11 @@ install: all
 	cp $(boris_EXEC)      $(STAGE_BINDIR)/boris
 	cp $(mkpass_EXEC)     $(STAGE_BINDIR)/mkpass
 	cp $(muddb-tool_EXEC) $(STAGE_BINDIR)/muddb-tool
+	@for b in boris mkpass muddb-tool; do \
+		if [ -f "$(BINDIR)/$$b.debug" ]; then \
+			cp "$(BINDIR)/$$b.debug" "$(STAGE_BINDIR)/$$b.debug"; \
+		fi; \
+	done
 	@mkdir -p $(WEB_INSTALL_DIR)/assets
 	rsync -a --exclude='assets' src/web/client/ $(WEB_INSTALL_DIR)/
 	cp src/web/client/assets/layout.css $(WEB_INSTALL_DIR)/assets/ 2>/dev/null || true

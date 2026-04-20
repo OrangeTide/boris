@@ -30,9 +30,13 @@ mkdir -p "$RELEASE_NAME"/data/chars
 mkdir -p "$RELEASE_NAME"/data/users
 mkdir -p "$RELEASE_NAME"/data/muddb
 
-# binaries
+# binaries (already stripped + .debug sidecars produced by `make install`)
 cp bin/boris bin/mkpass bin/muddb-tool "$RELEASE_NAME"/bin/
-strip "$RELEASE_NAME"/bin/boris "$RELEASE_NAME"/bin/mkpass "$RELEASE_NAME"/bin/muddb-tool
+for b in boris mkpass muddb-tool; do
+	if [ -f "bin/$b.debug" ]; then
+		cp "bin/$b.debug" "$RELEASE_NAME/bin/$b.debug"
+	fi
+done
 
 # web client
 if [ -d bin/www ]; then
