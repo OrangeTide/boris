@@ -291,8 +291,12 @@ import_domain(MUDDB *db, const char *domain, const char *indir)
 			continue;
 		}
 
-		snprintf(filepath, sizeof(filepath), "%s/%s",
+		int n = snprintf(filepath, sizeof(filepath), "%s/%s",
 			dirpath, ent->d_name);
+		if (n < 0 || (size_t)n >= sizeof(filepath)) {
+			LOG_ERROR("path too long: %s/%s", dirpath, ent->d_name);
+			continue;
+		}
 		json = read_file(filepath, NULL);
 		if (!json)
 			continue;

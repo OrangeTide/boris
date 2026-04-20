@@ -200,14 +200,13 @@ freelist_alloc(struct freelist *fl, unsigned count)
 void
 freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 {
-	struct freelist_entry *new, *curr, *last;
+	struct freelist_entry *curr, *last;
 
 	TRACE_ENTER();
 
 	assert(count != 0);
 
 	last = NULL;
-	new = NULL;
 
 	for (curr = LIST_TOP(fl->global); curr; curr = LIST_NEXT(curr, global)) {
 		assert(curr != last);
@@ -241,7 +240,7 @@ freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 			assert(LIST_TOP(fl->global) != curr);
 			assert(LIST_NEXT(last, global) != (void*)0x99999999);
 			assert(LIST_NEXT(last, global) != curr); /* deleting it must take it off the list */
-			new = curr = last;
+			curr = last;
 			break;
 		} else if (curr->extent.offset == ofs + count) {
 			/* |.....|_XXX|.......|		grow-next */
@@ -249,14 +248,12 @@ freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 			/* merge new entry into a following entry */
 			curr->extent.offset = ofs;
 			curr->extent.length += count;
-			new = curr;
 			break;
 		} else if (last && curr->extent.offset + curr->extent.length == ofs) {
 			/* |......|XXX_|......|		grow-prev */
 			LOG_DEBUG("|......|XXX_|......|		grow-prev. curr=%u+%u new=%u+%u", curr->extent.offset, curr->extent.length, ofs, count);
 			/* merge the new entry into the end of the previous entry */
 			curr->extent.length += count;
-			new = curr;
 			break;
 		} else if (ofs < curr->extent.offset) {
 			if (ofs + count > curr->extent.offset) {
@@ -267,7 +264,7 @@ freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 
 			LOG_DEBUG("|.....|_XXX_|......|		normal new=%u+%u", ofs, count);
 			/* create a new entry */
-			new = freelist_ll_new(LIST_PREVPTR(curr, global), ofs, count);
+			freelist_ll_new(LIST_PREVPTR(curr, global), ofs, count);
 			break;
 		}
 
@@ -279,14 +276,13 @@ freelist_pool(struct freelist *fl, unsigned ofs, unsigned count)
 			if (last->extent.offset + last->extent.length == ofs) {
 				LOG_DEBUG("|......|XXX_|......|		grow-prev. last=%u+%u new=%u+%u", last->extent.offset, last->extent.length, ofs, count);
 				last->extent.length += count;
-				new = last;
 			} else {
 				LOG_DEBUG("|............|XXX  |		end. new=%u+%u", ofs, count);
-				new = freelist_ll_new(&LIST_NEXT(last, global), ofs, count);
+				freelist_ll_new(&LIST_NEXT(last, global), ofs, count);
 			}
 		} else {
 			LOG_DEBUG("|XXX               |		initial. new=%u+%u", ofs, count);
-			new = freelist_ll_new(&LIST_TOP(fl->global), ofs, count);
+			freelist_ll_new(&LIST_TOP(fl->global), ofs, count);
 		}
 	}
 }

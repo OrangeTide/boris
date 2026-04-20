@@ -22,6 +22,7 @@
  */
 
 #include "wordwrap.h"
+#include "boris.h"
 #include <errno.h>
 
 /* design of wordwrap()
@@ -58,10 +59,12 @@ struct wordwrap_info {
  * it with results. return WORDWRAP_OK on success, WORDWRAP_ERR on failure and
  * sets errno. */
 int
-wordwrap(const char *input, struct wordwrap_info *ww_info_in_out)
+wordwrap(const char *input UNUSED, struct wordwrap_info *ww_info_in_out UNUSED)
 {
     // TODO: change the parameters
     // TODO: implement this
+    errno = ENOSYS;
+    return WORDWRAP_ERR;
 }
 
 // TODO: cite our research
