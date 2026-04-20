@@ -773,21 +773,24 @@ obj_iter_next(OBJ_ITER *it, const char **key, const char **value)
 	t = obj->tokens;
 	if (t->type != JSMN_OBJECT)
 		return 0;
-	if (it->pair_idx >= t[0].size)
-		return 0;
 
-	key_tok = &obj->tokens[it->token_pos];
-	val_tok = &obj->tokens[it->token_pos + 1];
+	while (it->pair_idx < t[0].size) {
+		key_tok = &obj->tokens[it->token_pos];
+		val_tok = &obj->tokens[it->token_pos + 1];
 
-	*key = json_token_tostr(obj->data, key_tok);
-	*value = json_token_tostr(obj->data, val_tok);
+		val_span_n = token_span(val_tok, obj->tokens_used - it->token_pos - 1);
+		it->token_pos += 1 + val_span_n;
+		it->pair_idx++;
 
-	/* advance past this key-value pair */
-	val_span_n = token_span(val_tok, obj->tokens_used - it->token_pos - 1);
-	it->token_pos += 1 + val_span_n;
-	it->pair_idx++;
+		*key = json_token_tostr(obj->data, key_tok);
+		if (!*key)
+			continue; /* skip corrupt non-string key */
 
-	return 1;
+		*value = json_token_tostr(obj->data, val_tok);
+		return 1;
+	}
+
+	return 0;
 }
 
 void

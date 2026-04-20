@@ -277,7 +277,8 @@ user_load_byname(const char *username, int id_already_exists)
 			    !strcasecmp(key, "acs.level") ||
 			    !strcasecmp(key, "acs.flags"))
 				continue;
-			parse_attr(key, v, &u->extra_values);
+			if (v)
+				parse_attr(key, v, &u->extra_values);
 		}
 		obj_iter_end(it);
 	}
