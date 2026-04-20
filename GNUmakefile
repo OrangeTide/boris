@@ -1,4 +1,4 @@
-# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.3.1]
+# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.3.2]
 # updated: 13 Apr 2026
 # Requires GNU Make 4.0 or later (uses $(file) function).
 #
@@ -359,6 +359,12 @@ GM2     ?= gm2
 # RELEASE block and module.mk files can reference it.
 TARGET_TRIPLET := $(shell $(CC) -dumpmachine 2>/dev/null)
 
+# Cross-toolchain prefix derived from $(CC) so OBJCOPY/STRIP match the target.
+# e.g. CC=aarch64-linux-gnu-gcc -> aarch64-linux-gnu-objcopy.  Empty for native.
+_TOOLCHAIN_PREFIX := $(shell echo "$(CC)" | sed -E 's|.*/||; s/(gcc|clang|cc)(-[0-9.]+)?$$//')
+OBJCOPY ?= $(_TOOLCHAIN_PREFIX)objcopy
+STRIP   ?= $(_TOOLCHAIN_PREFIX)strip
+
 # Release build flags.  Invoke with `make RELEASE=1` for optimized binaries.
 #
 # Override architecture: `make RELEASE=1 RELEASE_MARCH=x86-64-v3`
@@ -393,11 +399,11 @@ ifdef RELEASE
   ifneq ($(findstring emscripten,$(TARGET_TRIPLET)),)
     # Emscripten does not support -march or -Wl,--gc-sections; its own
     # optimizer handles dead-code elimination internally.
-    _BUILD_MODE_CFLAGS  := -O2 $(_LTO)
+    _BUILD_MODE_CFLAGS  := -O2 -g $(_LTO)
     _BUILD_MODE_CPPFLAGS := -DNDEBUG
     _BUILD_MODE_LDFLAGS := $(_LTO)
   else
-    _BUILD_MODE_CFLAGS  := -O2 $(_LTO) -march=$(RELEASE_MARCH) \
+    _BUILD_MODE_CFLAGS  := -O2 -g $(_LTO) -march=$(RELEASE_MARCH) \
       -ffunction-sections -fdata-sections
     _BUILD_MODE_CPPFLAGS := -DNDEBUG
     _BUILD_MODE_LDFLAGS := $(_LTO) -Wl,--gc-sections -Wl,-O1
@@ -412,6 +418,17 @@ else ifdef DEBUG
   _BUILD_MODE_CPPFLAGS :=
   _BUILD_MODE_LDFLAGS := -g
   $(info DEBUG build)
+endif
+
+# Split-debug post-link step: extract debug symbols to <exec>.debug, strip the
+# binary, and add a .gnu_debuglink section so GDB/LLDB find the symbols by
+# filename next to the binary.  Enabled for RELEASE; harmless if absent.
+ifdef RELEASE
+  define _split_debug
+	$(OBJCOPY) --only-keep-debug $@ $@.debug
+	$(STRIP) --strip-debug --strip-unneeded $@
+	$(OBJCOPY) --add-gnu-debuglink=$@.debug $@
+  endef
 endif
 
 # Project-wide CFLAGS / CXXFLAGS / CPPFLAGS / etc...
@@ -440,7 +457,7 @@ EXTENSIONS := c cc cpp d m mm f f90 S asm pas mod
 
 # Command Macros
 link.c      = $(if $(CXX_MODE),$(CXX),$(CC)) -o $@ $(_BUILD_MODE_LDFLAGS) $(PROJECT_LDFLAGS) $(LDFLAGS) $(if $(LIBDIR),-L$(LIBDIR)) $^ $(PROJECT_LDLIBS) $(LDLIBS)
-link.a      = $(RM) $@ && $(AR) $(ARFLAGS) $@ $(filter %.o,$^)
+link.a      = $(RM) $@.tmp && $(AR) $(ARFLAGS) $@.tmp $(filter %.o,$^) && mv -f $@.tmp $@
 link.so     = $(if $(CXX_MODE),$(CXX),$(CC)) -shared -o $@ $(_BUILD_MODE_LDFLAGS) $(PROJECT_LDFLAGS) $(LDFLAGS) $^ $(PROJECT_LDLIBS) $(LDLIBS)
 compile.c   = $(CC) -c -o $@ $< -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CFLAGS) $(PROJECT_CPPFLAGS) $(CFLAGS) $(CPPFLAGS)
 compile.cc  = $(CXX) -c -o $@ $< -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CXXFLAGS) $(PROJECT_CPPFLAGS) $(CXXFLAGS) $(CPPFLAGS)
@@ -721,6 +738,7 @@ $1_EXEC := $(BINDIR)/$1$(EXTENSION.exe)
 $1 : $(BINDIR)/$1$(EXTENSION.exe)
 $(BINDIR)/$1$(EXTENSION.exe) : $$(call get_all_objs,$1) $$($1_EXTRA_OBJS) $(foreach d,$(call get_all_libs,$1),$(call get_lib_file,$d)) | $(BINDIR)/
 	$$(link.c)
+	$$(_split_debug)
 $(BINDIR)/$1$(EXTENSION.exe) : CXX_MODE=$(if $(call needs_cxx,$1),1)
 $(BINDIR)/$1$(EXTENSION.exe) : LDFLAGS=$$($1_LDFLAGS) $(call get_exported_ldflags,$1)
 $(BINDIR)/$1$(EXTENSION.exe) : LDLIBS=$$($1_LDLIBS) $(call get_exported_ldlibs,$1)
@@ -735,7 +753,7 @@ $(call get_all_objs,$1) : FPCFLAGS=$$($1_FPCFLAGS)
 $(call get_all_objs,$1) : GM2FLAGS=$$($1_GM2FLAGS)
 clean_$1 :
 	$$(RM) $$(call get_all_objs,$1) $$(patsubst %.o,%.dep,$$(call get_all_objs,$1)) $$(patsubst %.o,%.cmd.json,$$(call get_all_objs,$1)) $$(call get_side_effects,$1) $$(call get_gen_srcs,$1)
-	$$(RM) $(BINDIR)/$1$(EXTENSION.exe)$(if $(findstring emscripten,$(TARGET_TRIPLET)), $(BINDIR)/$1.js $(BINDIR)/$1.wasm $(BINDIR)/$1.data)
+	$$(RM) $(BINDIR)/$1$(EXTENSION.exe) $(BINDIR)/$1$(EXTENSION.exe).debug$(if $(findstring emscripten,$(TARGET_TRIPLET)), $(BINDIR)/$1.js $(BINDIR)/$1.wasm $(BINDIR)/$1.data)
 endef
 $(foreach p,$(EXECUTABLES),$(eval $(call project_rules,$p)))
 
