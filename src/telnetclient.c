@@ -196,7 +196,10 @@ telnetclient_on_destroy(net_event *e)
 
 	LIST_REMOVE(client, list);
 
-	telnetclient_close(client);
+	/* Clear the stream pointer without calling net_close -- we are
+	 * already inside stream_free, so re-entering net_close would
+	 * double-free the stream and this client struct. */
+	client->stream = NULL;
 
 	telnetclient_clear_statedata(client); /* free data associated with current state */
 
@@ -213,10 +216,11 @@ telnetclient_on_destroy(net_event *e)
 		client->character = NULL;
 	}
 
+	user_put(&client->user);
+
 #ifndef NDEBUG
 	memset(client, 0xBB, sizeof * client); /* fill with fake data before freeing */
 #endif
-	user_put(&client->user);
 
 	free(client);
 }
