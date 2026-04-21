@@ -120,11 +120,11 @@ test_prop_set_new(void)
 	OBJ *obj = obj_new_from_json("test", house_json);
 	check("create for set_new", obj != NULL);
 
-	int rc = obj_prop_set(obj, "size", "\"large\"");
+	int rc = obj_prop_set(obj, "size", "large");
 	check("set new prop", rc == OBJ_OK);
 
 	char *val = obj_prop_get(obj, "size");
-	check("get new prop", val != NULL && strcmp(val, "\"large\"") == 0);
+	check("get new prop", val != NULL && strcmp(val, "large") == 0);
 
 	/* original props still accessible */
 	char *name = obj_prop_get(obj, "name");
@@ -152,11 +152,11 @@ test_prop_set_override(void)
 	OBJ *obj = obj_new_from_json("test", house_json);
 	check("create for override", obj != NULL);
 
-	int rc = obj_prop_set(obj, "color", "\"blue\"");
+	int rc = obj_prop_set(obj, "color", "blue");
 	check("override existing prop", rc == OBJ_OK);
 
 	char *val = obj_prop_get(obj, "color");
-	check("get overridden prop", val != NULL && strcmp(val, "\"blue\"") == 0);
+	check("get overridden prop", val != NULL && strcmp(val, "blue") == 0);
 
 	/* name should be unchanged */
 	char *name = obj_prop_get(obj, "name");
@@ -220,8 +220,8 @@ test_compact(void)
 	OBJ *obj = obj_new_from_json("test", house_json);
 	check("create for compact", obj != NULL);
 
-	obj_prop_set(obj, "color", "\"red\"");
-	obj_prop_set(obj, "size", "\"big\"");
+	obj_prop_set(obj, "color", "red");
+	obj_prop_set(obj, "size", "big");
 	obj_prop_delete(obj, "name");
 
 	int rc = obj_compact(obj);
@@ -279,11 +279,11 @@ test_empty_object(void)
 		obj_prop_get(obj, "anything") == NULL);
 
 	/* set a property on empty obj */
-	int rc = obj_prop_set(obj, "hello", "\"world\"");
+	int rc = obj_prop_set(obj, "hello", "world");
 	check("set on empty obj", rc == OBJ_OK);
 
 	char *val = obj_prop_get(obj, "hello");
-	check("get from empty+set", val != NULL && strcmp(val, "\"world\"") == 0);
+	check("get from empty+set", val != NULL && strcmp(val, "world") == 0);
 
 	obj_free(obj);
 }
@@ -514,6 +514,111 @@ test_tombstone_protected(void)
 	obj_free(obj);
 }
 
+static void
+test_escaped_len(void)
+{
+	check("escaped_len plain", escaped_len("hello", 5) == 5);
+	check("escaped_len dquote", escaped_len("a\"b", 3) == 4);
+	check("escaped_len backslash", escaped_len("a\\b", 3) == 4);
+	check("escaped_len newline", escaped_len("a\nb", 3) == 4);
+	check("escaped_len tab", escaped_len("a\tb", 3) == 4);
+	check("escaped_len control", escaped_len("\x01", 1) == 6);
+
+	check("unescape_len plain", unescape_len("hello", 5) == 5);
+	check("unescape_len dquote", unescape_len("a\\\"b", 4) == 3);
+	check("unescape_len backslash", unescape_len("a\\\\b", 4) == 3);
+	check("unescape_len newline", unescape_len("a\\nb", 4) == 3);
+	check("unescape_len unicode", unescape_len("a\\u0001b", 8) == 3);
+}
+
+static void
+test_prop_set_with_special_chars(void)
+{
+	OBJ *obj = obj_new("test");
+	char buf[1024];
+	int rc, result;
+	char *val;
+	OBJ *obj2;
+
+	rc = obj_prop_set(obj, "q", "a\"b");
+	check("special: set dquote", rc == OBJ_OK);
+	val = obj_prop_get(obj, "q");
+	check("special: get dquote", val != NULL && strcmp(val, "a\\\"b") == 0);
+
+	rc = obj_prop_set(obj, "bs", "a\\b");
+	check("special: set backslash", rc == OBJ_OK);
+	val = obj_prop_get(obj, "bs");
+	check("special: get backslash", val != NULL && strcmp(val, "a\\\\b") == 0);
+
+	rc = obj_prop_set(obj, "nl", "a\nb");
+	check("special: set newline", rc == OBJ_OK);
+	val = obj_prop_get(obj, "nl");
+	check("special: get newline", val != NULL && strcmp(val, "a\\nb") == 0);
+
+	rc = obj_prop_set(obj, "tab", "a\tb");
+	check("special: set tab", rc == OBJ_OK);
+	val = obj_prop_get(obj, "tab");
+	check("special: get tab", val != NULL && strcmp(val, "a\\tb") == 0);
+
+	result = obj_get_json(obj, buf, sizeof(buf), NULL);
+	check("special: get_json", result == OBJ_OK);
+
+	obj2 = obj_new_from_json("test2", buf);
+	check("special: round-trip parse", obj2 != NULL);
+
+	val = obj_prop_get(obj2, "q");
+	check("special: round-trip dquote",
+		val != NULL && strcmp(val, "a\\\"b") == 0);
+
+	val = obj_prop_get(obj2, "bs");
+	check("special: round-trip backslash",
+		val != NULL && strcmp(val, "a\\\\b") == 0);
+
+	val = obj_prop_get(obj2, "nl");
+	check("special: round-trip newline",
+		val != NULL && strcmp(val, "a\\nb") == 0);
+
+	val = obj_prop_get(obj2, "tab");
+	check("special: round-trip tab",
+		val != NULL && strcmp(val, "a\\tb") == 0);
+
+	obj_free(obj2);
+	obj_free(obj);
+}
+
+static void
+test_json_with_escapes(void)
+{
+	const char *json = "{\"msg\":\"he said \\\"hello\\\"\"}";
+	OBJ *obj = obj_new_from_json("test", json);
+	check("json_esc: parse", obj != NULL);
+
+	char *val = obj_prop_get(obj, "msg");
+	check("json_esc: get value",
+		val != NULL && strcmp(val, "he said \\\"hello\\\"") == 0);
+
+	int rc = obj_prop_set(obj, "msg", "she said \"goodbye\"");
+	check("json_esc: override", rc == OBJ_OK);
+
+	val = obj_prop_get(obj, "msg");
+	check("json_esc: get overridden",
+		val != NULL && strcmp(val, "she said \\\"goodbye\\\"") == 0);
+
+	char buf[1024];
+	int result = obj_get_json(obj, buf, sizeof(buf), NULL);
+	check("json_esc: serialize dirty", result == OBJ_OK);
+
+	OBJ *obj2 = obj_new_from_json("test2", buf);
+	check("json_esc: round-trip parse", obj2 != NULL);
+
+	val = obj_prop_get(obj2, "msg");
+	check("json_esc: round-trip value",
+		val != NULL && strcmp(val, "she said \\\"goodbye\\\"") == 0);
+
+	obj_free(obj2);
+	obj_free(obj);
+}
+
 int
 main(void)
 {
@@ -536,6 +641,9 @@ main(void)
 	test_tombstone_no_parent();
 	test_tombstone_with_parent();
 	test_tombstone_protected();
+	test_escaped_len();
+	test_prop_set_with_special_chars();
+	test_json_with_escapes();
 
 	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
 		pass_count, fail_count);
