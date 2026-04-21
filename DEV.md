@@ -4,69 +4,75 @@ Information for developers working on Boris MUD.
 
 ## Project Layout
 
-| Directory              | Description                                              |
-|------------------------|----------------------------------------------------------|
-| src/                   | Main source and miscellaneous modules                    |
-| src/obj/               | OBJ -- mutable JSON objects with property iteration      |
-| src/database/          | muddb -- LMDB persistence layer (OBJ-centric API)       |
-| src/room/              | Room subsystem (load/save/cache with refcount)           |
+| Directory              | Description                                                    |
+|------------------------|----------------------------------------------------------------|
+| src/                   | Main source and miscellaneous modules                          |
+| src/obj/               | OBJ -- mutable JSON objects with property iteration            |
+| src/database/          | muddb -- LMDB persistence layer (OBJ-centric API)              |
+| src/room/              | Room subsystem (load/save/cache with refcount)                 |
 | src/character/         | Character subsystem (load/save/cache with refcount + freelist) |
-| src/channel/           | Chat channel pub/sub system                              |
-| src/help/              | Online help system (reads plain text from data/help/)    |
-| src/log/               | Subsystem-tagged logging and event log                   |
-| src/task/              | Command dispatch and processing                          |
-| src/web/server/        | WebSocket server (mongoose)                              |
-| src/crypt/             | SHA1 hash and base-64 encoding                           |
-| src/scrypt/            | scrypt key derivation for password hashing               |
-| src/passwd/            | Password crypt utility (mkpass)                          |
-| src/muddb-tool/        | muddb import/export CLI tool                             |
-| src/util/              | Miscellaneous utility functions                          |
-| src/worldclock/        | In-game time tracking                                    |
-| src/thirdparty/        | Third-party libraries (separate licenses)                |
-| src/thirdparty/dyad/   | Async event-driven networking                            |
-| src/thirdparty/lmdb/   | LMDB embedded key-value database                         |
-| src/thirdparty/jsmn/   | Minimal JSON parser (zero-copy)                          |
-| src/thirdparty/mth/    | MUD Telopt Handler (TELNET protocol)                     |
-| src/thirdparty/mongoose/| HTTP/WebSocket server                                   |
-| src/thirdparty/tiny-aes/| AES-256 block cipher (public domain, Unlicense)         |
-| sample/                | Starter database for new MUDs (import with muddb-tool)   |
+| src/channel/           | Chat channel pub/sub system                                    |
+| src/help/              | Online help system (reads plain text from data/help/)          |
+| src/log/               | Subsystem-tagged logging and event log                         |
+| src/iox/               | I/O multiplexing                                               |
+| src/net/               | TCP networking layer on top of iox                             |
+| src/entity/            | RPG-capable entity layer on top of objects                     |
+| src/rpg/               | RPG attribute/skills helper functions                          |
+| src/combat/            | Combat session management and tick scheduler                   |
+| src/task/              | Command dispatch and processing                                |
+| src/web/server/        | WebSocket server (mongoose)                                    |
+| src/crypt/             | SHA1 hash and base-64 encoding                                 |
+| src/scrypt/            | scrypt key derivation for password hashing                     |
+| src/passwd/            | Password crypt utility (mkpass)                                |
+| src/muddb-tool/        | muddb import/export CLI tool                                   |
+| src/util/              | Miscellaneous utility functions                                |
+| src/worldclock/        | In-game time tracking                                          |
+| src/thirdparty/        | Third-party libraries (separate licenses)                      |
+| src/thirdparty/jsmn/   | Minimal JSON parser (zero-copy)                                |
+| src/thirdparty/lmdb/   | LMDB embedded key-value database                               |
+| src/thirdparty/mth/    | MUD Telopt Handler (TELNET protocol)                           |
+| src/thirdparty/mongoose/| HTTP/WebSocket server                                         |
+| src/thirdparty/tiny-aes/| AES-256 block cipher (public domain, Unlicense)               |
+| sample/                | Starter database for new MUDs (import with muddb-tool)         |
 
 ## Build System
 
-The build uses a plain GNU Makefile with per-directory `module.mk` files.
-Each `module.mk` appends to three variables:
+The build uses `GNUmakefile` with per-directory `module.mk` files discovered
+via `SUBDIRS`. Each `module.mk` declares targets using:
 
-- `BORIS_SRCS` -- source files for the `boris` server binary
-- `MKPASS_SRCS` -- source files for the `mkpass` password utility
-- `INCLUDES` -- `-I` flags shared across all compilation units
+- `LIBRARIES += <name>` -- static library (.a)
+- `EXECUTABLES += <name>` -- executable binary
+- Per-target variables: `<name>_DIR`, `<name>_SRCS`, `<name>_LIBS`
 
-The top-level Makefile includes all `module.mk` files and compiles everything
-with a single pattern rule. There are no intermediate static archives -- all
-`.o` files link flat, which avoids circular dependency issues between modules.
+The top-level GNUmakefile includes all `module.mk` files and generates build
+rules for each target via `$(eval $(call ...))` templates. Libraries produce
+static archives (.a) that executables link against.
 
-Object files go to `build/<triplet>/`, mirroring the source tree. The triplet
-is derived from `$(CC) -dumpmachine` (e.g. `build/x86_64-linux-gnu/`), so
-cross-compiled object files don't clobber native ones. Binaries go to `bin/`.
-Auto-dependency tracking uses `-MMD -MP`. LTO is enabled automatically if the
-compiler supports it.
+Object files go to `_build/<triplet>/`, mirroring the source tree. The triplet
+is derived from `$(CC) -dumpmachine` (e.g. `_build/x86_64-linux-gnu/`), so
+cross-compiled object files don't clobber native ones. Binaries go to
+`_out/<triplet>/bin/`. Auto-dependency tracking uses `-MMD -MP`. LTO is enabled
+automatically if the compiler supports it.
 
 ### Adding a new source file
 
-Add it to the appropriate `module.mk` in its directory. If adding a new
-directory, create a `module.mk` there and add an `include` line in the
-top-level Makefile.
+Add it to the appropriate `<name>_SRCS` in its directory's `module.mk`. If
+adding a new directory, create a `module.mk` there and add the directory to
+`SUBDIRS` in the parent `module.mk`.
 
 ### Tests
 
-`make tests` builds and runs all test binaries. Test sources and binaries are
-declared in each module's `module.mk` via `TEST_SRCS` and `TEST_BINS`. Tests
-use `#include "source.c"` for internal access and print
+`make tests` (alias for `run-tests`) builds and runs all test binaries. Tests
+are declared in each module's `module.mk` via `EXECUTABLES +=`,
+`TEST_TARGETS +=`, and a `<name>_TESTCMD` define. Tests use
+`#include "source.c"` for internal access and print
 `%%%%%%%%%%%% START-TEST` / `%%%%%%%%%%%% END-TEST` markers.
 
 Current test suites:
-- `bin/test_obj` -- OBJ mutable JSON objects (77 tests)
-- `bin/test_muddb` -- LMDB persistence layer (39 tests)
-- `bin/test_hashtable` -- hash table (uint and string keyed) (58 tests)
+- `test_obj` -- OBJ mutable JSON objects
+- `test_obj_cache` -- OBJ cache layer
+- `test_muddb` -- LMDB persistence layer
+- `test_hashtable` -- hash table (uint and string keyed)
 
 `make smoke` starts the server in a temporary directory and exercises telnet
 login flows via expect. Requires `expect` (`apt install expect` on
@@ -211,10 +217,10 @@ A **domain** is a named LMDB database within the environment -- a separate
 key-value namespace, analogous to a table in SQL. Each game subsystem uses
 its own domain:
 
-| Domain     | Constant           | Consumer     | Key                        |
-|------------|--------------------|--------------|----------------------------|
-| `"users"`  | `DOMAIN_USER`      | user.c       | username                   |
-| `"rooms"`  | `DOMAIN_ROOM`      | room.c       | room id (string)           |
+| Domain     | Constant           | Consumer     | Key                           |
+|------------|--------------------|--------------|-------------------------------|
+| `"users"`  | `DOMAIN_USER`      | user.c       | username                      |
+| `"rooms"`  | `DOMAIN_ROOM`      | room.c       | room id (string)              |
 | `"chars"`  | `DOMAIN_CHARACTER` | character.c  | character id (decimal string) |
 
 Domain constants are defined in boris.h. Domains are created on first write
@@ -275,8 +281,7 @@ WebSocket clients simultaneously.
 
 ### Key Subsystems
 
-- **Networking**: `src/thirdparty/dyad/` -- async event-driven I/O for
-  TELNET connections
+- **Networking**: `src/iox/` -- I/O multiplexing for TELNET connections
 - **TELNET protocol**: `src/thirdparty/mth/` -- MTH (Mud Telopt Handler)
   for protocol negotiation
 - **Web server**: `src/web/server/webserver.c` (mongoose) + client assets
@@ -312,14 +317,15 @@ WebSocket clients simultaneously.
 
 ### Third-Party Libraries
 
-All in `src/thirdparty/`:
-- dyad (async networking)
-- lmdb (database)
-- mongoose (HTTP/WebSocket)
-- mth (TELNET)
-- jsmn (JSON parser)
-- tiny-AES-c (AES-256 block cipher)
-- scrypt (password hashing)
+In `src/thirdparty/`:
+- jsmn (JSON parser, zero-copy)
+- lmdb (embedded key-value database)
+- mongoose (HTTP/WebSocket server)
+- mth (MUD Telopt Handler, TELNET protocol)
+- tiny-aes (AES-256 block cipher, public domain)
+
+In `src/scrypt/`: scrypt key derivation for password hashing (no upstream
+maintainer, maintained in-tree).
 
 ### Entry Point
 
@@ -331,13 +337,13 @@ reading here, then follow to `src/telnetclient.c` -> `src/user.c` ->
 
 Server configuration is in `boris.cfg`. Key settings:
 
-| Setting              | Default                                  | Description                    |
-|----------------------|------------------------------------------|--------------------------------|
-| `server.port`        | 4444                                     | TELNET listen port             |
-| `webserver.port`     | 8080                                     | Web client listen port         |
-| `channels.default`   | `@system,@wiz,OOC,auction,chat,newbie`   | Default communication channels |
-| `eventlog.filename`  | `boris.log`                              | Event log output file          |
-| `newuser.allowed`    | 1                                        | Allow new account creation     |
+| Setting              | Default                                  | Description                      |
+|----------------------|------------------------------------------|----------------------------------|
+| `server.port`        | 4444                                     | TELNET listen port               |
+| `webserver.port`     | 8080                                     | Web client listen port           |
+| `channels.default`   | `@system,@wiz,OOC,auction,chat,newbie`   | Default communication channels   |
+| `eventlog.filename`  | `boris.log`                              | Event log output file            |
+| `newuser.allowed`    | 1                                        | Allow new account creation       |
 | `newuser.room`       | `tower-entrance`                         | Starting room for new characters |
 
 
