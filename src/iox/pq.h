@@ -80,7 +80,11 @@
 #endif
 
 #ifdef PQ_STATIC
-#  define PQ__API static
+#  if defined(__GNUC__) || defined(__clang__)
+#    define PQ__API static __attribute__((unused))
+#  else
+#    define PQ__API static
+#  endif
 #else
 #  define PQ__API extern
 #endif
