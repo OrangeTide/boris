@@ -6,6 +6,7 @@
 gmon.out
 .*.swp
 junk*/
+/OLD
 
 *.o
 *.a
@@ -14,13 +15,17 @@ junk*/
 *.lib
 *.exe
 
-/data/users/
-/build
+/data/users/*
 /_build
 /_out
-/bin
 /compile_commands.json
+
+boris-*.tar.xz
 
 boris.log
 .env
 *.env
+core
+
+# ignore AI junk
+.claude
