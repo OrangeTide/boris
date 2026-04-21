@@ -200,6 +200,32 @@ character_attrs_extras(struct character *ch)
 	return &ch->extra_values;
 }
 
+static int
+character_validate(OBJ *obj, const char *key)
+{
+	const char *val;
+	int ok = 1;
+
+	val = obj_prop_get(obj, "id");
+	if (!val) {
+		LOG_ERROR("character '%s': missing id", key);
+		ok = 0;
+	} else {
+		char *endptr;
+		unsigned long id = strtoul(val, &endptr, 10);
+		if (*endptr || id == 0) {
+			LOG_ERROR("character '%s': invalid id '%s'", key, val);
+			ok = 0;
+		} else if (strcmp(val, key)) {
+			LOG_ERROR("character '%s': id '%s' does not match key",
+				key, val);
+			ok = 0;
+		}
+	}
+
+	return ok;
+}
+
 /**
  * load a character from the database.
  */
@@ -300,6 +326,12 @@ character_save(struct character *ch)
 
 	for (curr = LIST_TOP(ch->extra_values); curr; curr = LIST_NEXT(curr, list)) {
 		obj_prop_set(obj, curr->name, curr->value);
+	}
+
+	if (!character_validate(obj, numbuf)) {
+		LOG_ERROR("refusing to write invalid character \"%u\"", ch->id);
+		obj_free(obj);
+		return 0; /* failure */
 	}
 
 	if (muddb_put(mud_db, DOMAIN_CHARACTER, numbuf, obj) != MUDDB_OK) {
@@ -441,47 +473,71 @@ character_preflight(void)
 		return 1;
 	}
 
-	while ((id = muddb_iter_next(it))) {
-		struct character *ch;
-		unsigned character_id;
-		char *endptr;
-		LOG_DEBUG("Found character: \"%s\"", id);
-		character_id = strtoul(id, &endptr, 10);
+	{
+		unsigned load_count = 0, error_count = 0;
 
-		if (*endptr) {
-			LOG_CRITICAL("character id \"%s\" is invalid!", id);
-			muddb_iter_end(it);
-			return 0; /* could not load */
-		}
+		while ((id = muddb_iter_next(it))) {
+			struct character *ch;
+			unsigned character_id;
+			char *endptr;
+			OBJ *obj;
 
-		ch = character_load(character_id);
+			LOG_DEBUG("Found character: \"%s\"", id);
 
-		if (!ch) {
-			LOG_CRITICAL("could not load character id \"%u\"", character_id);
-			muddb_iter_end(it);
-			return 0; /* could not load */
-		}
+			obj = muddb_iter_value(it);
+			if (!obj) {
+				LOG_ERROR("could not read character record \"%s\"", id);
+				error_count++;
+				continue;
+			}
 
-		/* compare ch->id with character_id */
-		if (ch->id != character_id) {
-			LOG_CRITICAL("bad or non-matching character id \"%u\"", character_id);
+			if (!character_validate(obj, id)) {
+				obj_free(obj);
+				error_count++;
+				continue;
+			}
+			obj_free(obj);
+
+			character_id = strtoul(id, &endptr, 10);
+			if (*endptr) {
+				LOG_ERROR("character id \"%s\" is invalid", id);
+				error_count++;
+				continue;
+			}
+
+			ch = character_load(character_id);
+			if (!ch) {
+				LOG_ERROR("could not load character id \"%u\"", character_id);
+				error_count++;
+				continue;
+			}
+
+			if (ch->id != character_id) {
+				LOG_ERROR("bad or non-matching character id \"%u\"", character_id);
+				character_ll_free(ch);
+				error_count++;
+				continue;
+			}
+
+			if (!freelist_thwack(character_id_freelist, ch->id, 1)) {
+				LOG_ERROR("bad or duplicate character id \"%u\"", character_id);
+				character_ll_free(ch);
+				error_count++;
+				continue;
+			}
+
 			character_ll_free(ch);
-			muddb_iter_end(it);
-			return 0; /* could not load */
+			load_count++;
 		}
 
-		/* allocate id from the pool */
-		if (!freelist_thwack(character_id_freelist, ch->id, 1)) {
-			LOG_CRITICAL("bad or duplicate character id \"%u\"", character_id);
-			character_ll_free(ch);
-			muddb_iter_end(it);
-			return 0; /* could not load */
-		}
+		muddb_iter_end(it);
 
-		character_ll_free(ch);
+		if (error_count)
+			LOG_WARNING("Validated %u characters, %u errors",
+				load_count, error_count);
+		else
+			LOG_INFO("Validated %u characters", load_count);
 	}
-
-	muddb_iter_end(it);
 
 	return 1; /* success */
 }

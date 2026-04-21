@@ -240,19 +240,32 @@ muddb_get(MUDDB *db, const char *domain, const char *key)
 	}
 
 	/* mdata.mv_data is not null-terminated -- make a copy */
-	char *json = malloc(mdata.mv_size + 1);
-	if (!json) {
+	{
+		size_t json_len = mdata.mv_size;
+		char *json = malloc(json_len + 1);
+
+		if (!json) {
+			mdb_txn_abort(txn);
+			return NULL;
+		}
+		memcpy(json, mdata.mv_data, json_len);
+		json[json_len] = '\0';
+
 		mdb_txn_abort(txn);
-		return NULL;
+
+		/* check and strip record sentinel */
+		if (json_len > 0 && json[json_len - 1] == '\n') {
+			json_len--;
+			json[json_len] = '\0';
+		} else {
+			LOG_WARNING("record %s/%s: missing sentinel"
+				" (possible truncation)", domain, key);
+		}
+
+		obj = obj_new_from_json(key, json);
+		free(json);
+		return obj;
 	}
-	memcpy(json, mdata.mv_data, mdata.mv_size);
-	json[mdata.mv_size] = '\0';
-
-	mdb_txn_abort(txn);
-
-	obj = obj_new_from_json(key, json);
-	free(json);
-	return obj;
 }
 
 int
@@ -265,21 +278,24 @@ muddb_put(MUDDB *db, const char *domain, const char *key, OBJ *obj)
 	MDB_dbi dbi;
 	MDB_val mkey, mdata;
 	int rc, result;
-
-	/* serialize OBJ to JSON */
-	result = obj_get_json(obj, buf, bufsz);
+	size_t json_len = 0;
+	result = obj_get_json(obj, buf, bufsz - 1, &json_len);
 	while (result == OBJ_ERR_NOMEM) {
 		bufsz *= 2;
 		buf = (buf == stackbuf) ? malloc(bufsz) : realloc(buf, bufsz);
 		if (!buf)
 			return MUDDB_ERR;
-		result = obj_get_json(obj, buf, bufsz);
+		result = obj_get_json(obj, buf, bufsz - 1, &json_len);
 	}
 	if (result != OBJ_OK) {
 		if (buf != stackbuf)
 			free(buf);
 		return MUDDB_ERR;
 	}
+
+	/* append record sentinel */
+	buf[json_len] = '\n';
+	json_len++;
 
 	pthread_mutex_lock(&db->lock);
 
@@ -303,7 +319,7 @@ muddb_put(MUDDB *db, const char *domain, const char *key, OBJ *obj)
 	mkey.mv_data = (void *)key;
 	mkey.mv_size = strlen(key);
 	mdata.mv_data = buf;
-	mdata.mv_size = strlen(buf);
+	mdata.mv_size = json_len;
 
 	rc = mdb_put(txn, dbi, &mkey, &mdata, 0);
 	if (rc != 0) {
@@ -473,15 +489,28 @@ muddb_iter_value(MUDDB_ITER *it)
 	keybuf[len] = '\0';
 
 	/* null-terminate the value */
-	json = malloc(mdata.mv_size + 1);
-	if (!json)
-		return NULL;
-	memcpy(json, mdata.mv_data, mdata.mv_size);
-	json[mdata.mv_size] = '\0';
+	{
+		size_t json_len = mdata.mv_size;
 
-	obj = obj_new_from_json(keybuf, json);
-	free(json);
-	return obj;
+		json = malloc(json_len + 1);
+		if (!json)
+			return NULL;
+		memcpy(json, mdata.mv_data, json_len);
+		json[json_len] = '\0';
+
+		/* check and strip record sentinel */
+		if (json_len > 0 && json[json_len - 1] == '\n') {
+			json_len--;
+			json[json_len] = '\0';
+		} else {
+			LOG_WARNING("record %s: missing sentinel"
+				" (possible truncation)", keybuf);
+		}
+
+		obj = obj_new_from_json(keybuf, json);
+		free(json);
+		return obj;
+	}
 }
 
 void

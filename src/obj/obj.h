@@ -35,7 +35,7 @@ int obj_prop_delete_internal(OBJ *obj, const char *propname);
  * Only meaningful at the prototype-walk layer. */
 int obj_prop_is_tombstoned(OBJ *obj, const char *propname);
 
-int obj_get_json(OBJ *obj, char *buf, size_t len);
+int obj_get_json(OBJ *obj, char *buf, size_t len, size_t *out_len);
 int obj_compact(OBJ *obj);
 
 void obj_debug_dump(OBJ *obj, void (*output_str)(const char *s));

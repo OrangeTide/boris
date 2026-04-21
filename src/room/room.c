@@ -189,6 +189,24 @@ room_attrs_extras(struct room *r)
 	return &r->extra_values;
 }
 
+static int
+room_validate(OBJ *obj, const char *key)
+{
+	const char *val;
+	int ok = 1;
+
+	val = obj_prop_get(obj, "id");
+	if (!val) {
+		LOG_ERROR("room '%s': missing id", key);
+		ok = 0;
+	} else if (strcmp(val, key)) {
+		LOG_ERROR("room '%s': id '%s' does not match key", key, val);
+		ok = 0;
+	}
+
+	return ok;
+}
+
 static struct room *
 room_load(const char *room_id)
 {
@@ -298,6 +316,12 @@ room_save(struct room *r)
 
 	for (curr = LIST_TOP(r->extra_values); curr; curr = LIST_NEXT(curr, list)) {
 		obj_prop_set(obj, curr->name, curr->value);
+	}
+
+	if (!room_validate(obj, r->id)) {
+		LOG_ERROR("refusing to write invalid room \"%s\"", r->id);
+		obj_free(obj);
+		return 0; /* failure */
 	}
 
 	if (muddb_put(mud_db, DOMAIN_ROOM, r->id, obj) != MUDDB_OK) {
@@ -411,23 +435,37 @@ room_initialize(void)
 		return 0;
 	}
 
-	/* preflight all of the rooms using the iterator's transaction. */
-	while ((id = muddb_iter_next(it))) {
-		OBJ *obj;
-		LOG_DEBUG("Found room: \"%s\"", id);
+	{
+		unsigned load_count = 0, error_count = 0;
 
-		obj = muddb_iter_value(it);
+		while ((id = muddb_iter_next(it))) {
+			OBJ *obj;
+			LOG_DEBUG("Found room: \"%s\"", id);
 
-		if (!obj) {
-			LOG_CRITICAL("could not load room \"%s\"!", id);
-			muddb_iter_end(it);
-			return -1; /* could not load */
+			obj = muddb_iter_value(it);
+			if (!obj) {
+				LOG_ERROR("could not read room \"%s\"", id);
+				error_count++;
+				continue;
+			}
+
+			if (!room_validate(obj, id)) {
+				obj_free(obj);
+				error_count++;
+				continue;
+			}
+
+			obj_free(obj);
+			load_count++;
 		}
 
-		obj_free(obj);
-	}
+		muddb_iter_end(it);
 
-	muddb_iter_end(it);
+		if (error_count)
+			LOG_WARNING("Validated %u rooms, %u errors", load_count, error_count);
+		else
+			LOG_INFO("Validated %u rooms", load_count);
+	}
 
 	return 0; /* success */
 }

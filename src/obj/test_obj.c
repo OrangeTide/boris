@@ -99,7 +99,7 @@ test_get_json_unmodified(void)
 	check("create for get_json", obj != NULL);
 
 	char buf[1024];
-	int result = obj_get_json(obj, buf, sizeof(buf));
+	int result = obj_get_json(obj, buf, sizeof(buf), NULL);
 	check("get_json ok", result == OBJ_OK);
 	LOG_INFO("get_json unmodified: %s", buf);
 
@@ -132,7 +132,7 @@ test_prop_set_new(void)
 
 	/* serialize and verify */
 	char buf[1024];
-	int result = obj_get_json(obj, buf, sizeof(buf));
+	int result = obj_get_json(obj, buf, sizeof(buf), NULL);
 	check("get_json with new prop", result == OBJ_OK);
 	LOG_INFO("get_json after set new: %s", buf);
 
@@ -165,7 +165,7 @@ test_prop_set_override(void)
 
 	/* serialize */
 	char buf[1024];
-	int result = obj_get_json(obj, buf, sizeof(buf));
+	int result = obj_get_json(obj, buf, sizeof(buf), NULL);
 	check("get_json with override", result == OBJ_OK);
 	LOG_INFO("get_json after override: %s", buf);
 
@@ -197,7 +197,7 @@ test_prop_delete(void)
 
 	/* serialize -- deleted prop should be absent */
 	char buf[1024];
-	int result = obj_get_json(obj, buf, sizeof(buf));
+	int result = obj_get_json(obj, buf, sizeof(buf), NULL);
 	check("get_json after delete", result == OBJ_OK);
 	LOG_INFO("get_json after delete: %s", buf);
 
@@ -256,7 +256,7 @@ test_prop_set_int(void)
 
 	/* serialize and round-trip */
 	char buf[1024];
-	int result = obj_get_json(obj, buf, sizeof(buf));
+	int result = obj_get_json(obj, buf, sizeof(buf), NULL);
 	check("get_json with int prop", result == OBJ_OK);
 	LOG_INFO("get_json after set_int: %s", buf);
 
@@ -309,7 +309,7 @@ test_buffer_too_small(void)
 	check("create for small buf", obj != NULL);
 
 	char buf[4];
-	int result = obj_get_json(obj, buf, sizeof(buf));
+	int result = obj_get_json(obj, buf, sizeof(buf), NULL);
 	check("small buffer returns NOMEM", result == OBJ_ERR_NOMEM);
 
 	obj_free(obj);

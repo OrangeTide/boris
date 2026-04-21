@@ -277,8 +277,7 @@ user_load_byname(const char *username, int id_already_exists)
 			    !strcasecmp(key, "acs.level") ||
 			    !strcasecmp(key, "acs.flags"))
 				continue;
-			if (v)
-				parse_attr(key, v, &u->extra_values);
+			parse_attr(key, v, &u->extra_values);
 		}
 		obj_iter_end(it);
 	}
@@ -309,6 +308,46 @@ user_load_byname(const char *username, int id_already_exists)
 failure:
 	user_ll_free(u);
 	return NULL; /* failure */
+}
+
+static int
+user_validate(OBJ *obj, const char *key)
+{
+	const char *val;
+	int ok = 1;
+
+	val = obj_prop_get(obj, "id");
+	if (!val) {
+		LOG_ERROR("user '%s': missing id", key);
+		ok = 0;
+	} else {
+		char *endptr;
+		unsigned long id = strtoul(val, &endptr, 10);
+		if (*endptr || id == 0) {
+			LOG_ERROR("user '%s': invalid id '%s'", key, val);
+			ok = 0;
+		}
+	}
+
+	val = obj_prop_get(obj, "username");
+	if (!val) {
+		LOG_ERROR("user '%s': missing username", key);
+		ok = 0;
+	} else if (strcasecmp(val, key)) {
+		LOG_ERROR("user '%s': username '%s' does not match key", key, val);
+		ok = 0;
+	} else if (user_illegal(val)) {
+		LOG_ERROR("user '%s': illegal username", key);
+		ok = 0;
+	}
+
+	val = obj_prop_get(obj, "pwcrypt");
+	if (!val) {
+		LOG_ERROR("user '%s': missing password hash", key);
+		ok = 0;
+	}
+
+	return ok;
 }
 
 /** write a user record. */
@@ -343,6 +382,12 @@ user_write(const struct user *u)
 
 	for (curr = LIST_TOP(u->extra_values); curr; curr = LIST_NEXT(curr, list)) {
 		obj_prop_set(obj, curr->name, curr->value);
+	}
+
+	if (!user_validate(obj, u->username)) {
+		LOG_ERROR("Refusing to write invalid user \"%s\"", u->username);
+		obj_free(obj);
+		return 0; /* failure */
 	}
 
 	if (muddb_put(mud_db, "users", u->username, obj) != MUDDB_OK) {
@@ -552,32 +597,49 @@ user_init(void)
 		return 1;
 	}
 
-	/* scan for account records.
-	 * loads full user record in memory cache.
-	 * This is important to find the in-use user IDs.
-	 * And confirms that records are not corrupted.
-	 */
+	{
+		unsigned load_count = 0, error_count = 0;
 
-	while ((id = muddb_iter_next(it))) {
-		struct user *u;
+		while ((id = muddb_iter_next(it))) {
+			struct user *u;
+			OBJ *obj;
 
-		LOG_DEBUG("Found user record '%s'", id);
+			LOG_DEBUG("Found user record '%s'", id);
 
-		u = user_load_byname(id, 0);
+			obj = muddb_iter_value(it);
+			if (!obj) {
+				LOG_ERROR("Could not read user record '%s'", id);
+				error_count++;
+				continue;
+			}
 
-		if (!u) {
-			LOG_ERROR("Could not load user from record '%s'", id);
-			goto failure;
+			if (!user_validate(obj, id)) {
+				obj_free(obj);
+				error_count++;
+				continue;
+			}
+			obj_free(obj);
+
+			u = user_load_byname(id, 0);
+			if (!u) {
+				LOG_ERROR("Could not load user record '%s'", id);
+				error_count++;
+				continue;
+			}
+
+			user_cache_add(u);
+			load_count++;
 		}
 
-		user_cache_add(u);
+		muddb_iter_end(it);
+
+		if (error_count)
+			LOG_WARNING("Validated %u users, %u errors", load_count, error_count);
+		else
+			LOG_INFO("Validated %u users", load_count);
 	}
 
-	muddb_iter_end(it);
 	return 1; /* success */
-failure:
-	muddb_iter_end(it);
-	return 0; /* failure */
 }
 
 /** shutdown the user system. */
