@@ -562,7 +562,7 @@ int
 user_password_check(struct user *u, const char *cleartext)
 {
 	// LOG_DEBUG("cleartext=\"%s\"", cleartext);
-	if (u && cleartext && sha1crypt_checkpass(u->password_crypt, cleartext)) {
+	if (u && u->password_crypt && cleartext && sha1crypt_checkpass(u->password_crypt, cleartext)) {
 		return 1; /* success */
 	}
 

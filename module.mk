@@ -8,6 +8,7 @@ PROJECT_CFLAGS   := -Wall -W -Werror=implicit -O2 -g -pthread
 PROJECT_CPPFLAGS := -DNTEST -DNDEBUG
 endif
 PROJECT_CPPFLAGS += \
+	-DJSMN_STRICT \
 	-Isrc \
 	-Isrc/channel -Isrc/character -Isrc/crypt -Isrc/room -Isrc/cmd \
 	-Isrc/worldclock -Isrc/web/server \

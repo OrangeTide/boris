@@ -163,6 +163,109 @@ data_append(OBJ *obj, const char *s, unsigned slen)
 	return off;
 }
 
+/* return the length of s when JSON-escaped (without surrounding quotes) */
+static unsigned
+escaped_len(const char *s, unsigned slen)
+{
+	unsigned len = 0;
+	unsigned i;
+
+	for (i = 0; i < slen; i++) {
+		switch (s[i]) {
+		case '"': case '\\': case '\n': case '\r': case '\t':
+			len += 2;
+			break;
+		default:
+			if ((unsigned char)s[i] < 0x20)
+				len += 6;
+			else
+				len += 1;
+		}
+	}
+	return len;
+}
+
+/* return the length that a JSON-escaped string would use when unescaped */
+static unsigned
+unescape_len(const char *s, unsigned slen)
+{
+	unsigned len = 0;
+	unsigned i;
+
+	for (i = 0; i < slen; i++) {
+		if (s[i] == '\\' && i + 1 < slen) {
+			if (s[i + 1] == 'u' && i + 5 < slen)
+				i += 5;
+			else
+				i++;
+		}
+		len++;
+	}
+	return len;
+}
+
+/* append a string to obj->data with JSON escaping, return its offset.
+ * returns DATA_APPEND_FAIL on allocation failure. */
+static unsigned
+data_append_escaped(OBJ *obj, const char *s, unsigned slen)
+{
+	unsigned elen = escaped_len(s, slen);
+	unsigned off;
+	unsigned need = obj->data_used + elen + 1;
+	unsigned i, pos;
+
+	if (need > obj->data_alloc) {
+		unsigned new_alloc = obj->data_alloc ? obj->data_alloc * 2 : 128;
+		char *new_data;
+
+		while (new_alloc < need)
+			new_alloc *= 2;
+		new_data = realloc(obj->data, new_alloc);
+		if (!new_data)
+			return DATA_APPEND_FAIL;
+		obj->data = new_data;
+		obj->data_alloc = new_alloc;
+	}
+
+	off = obj->data_used;
+	pos = off;
+	for (i = 0; i < slen; i++) {
+		char c = s[i];
+		switch (c) {
+		case '"':
+			obj->data[pos++] = '\\';
+			obj->data[pos++] = '"';
+			break;
+		case '\\':
+			obj->data[pos++] = '\\';
+			obj->data[pos++] = '\\';
+			break;
+		case '\n':
+			obj->data[pos++] = '\\';
+			obj->data[pos++] = 'n';
+			break;
+		case '\r':
+			obj->data[pos++] = '\\';
+			obj->data[pos++] = 'r';
+			break;
+		case '\t':
+			obj->data[pos++] = '\\';
+			obj->data[pos++] = 't';
+			break;
+		default:
+			if ((unsigned char)c < 0x20) {
+				pos += snprintf(obj->data + pos, 7,
+					"\\u%04x", (unsigned char)c);
+			} else {
+				obj->data[pos++] = c;
+			}
+		}
+	}
+	obj->data[pos] = '\0';
+	obj->data_used = pos + 1;
+	return off;
+}
+
 /* count tokens consumed by a token and its children */
 static int
 token_span(const jsmntok_t *t, unsigned count)
@@ -259,45 +362,6 @@ buf_append(char *buf, size_t len, int pos, const char *src, int srclen)
 		memcpy(buf + pos, src, srclen);
 	}
 	return pos + srclen;
-}
-
-/* emit a JSON-quoted string */
-static int
-buf_append_quoted(char *buf, size_t len, int pos, const char *s, int slen)
-{
-	int i;
-
-	pos = buf_append(buf, len, pos, "\"", 1);
-	for (i = 0; i < slen && pos >= 0; i++) {
-		char c = s[i];
-		switch (c) {
-		case '"':
-			pos = buf_append(buf, len, pos, "\\\"", 2);
-			break;
-		case '\\':
-			pos = buf_append(buf, len, pos, "\\\\", 2);
-			break;
-		case '\n':
-			pos = buf_append(buf, len, pos, "\\n", 2);
-			break;
-		case '\r':
-			pos = buf_append(buf, len, pos, "\\r", 2);
-			break;
-		case '\t':
-			pos = buf_append(buf, len, pos, "\\t", 2);
-			break;
-		default:
-			if ((unsigned char)c < 0x20) {
-				char esc[7];
-				snprintf(esc, sizeof(esc), "\\u%04x", (unsigned char)c);
-				pos = buf_append(buf, len, pos, esc, 6);
-			} else {
-				pos = buf_append(buf, len, pos, &c, 1);
-			}
-		}
-	}
-	pos = buf_append(buf, len, pos, "\"", 1);
-	return pos;
 }
 
 OBJ *
@@ -401,11 +465,12 @@ obj_prop_get(OBJ *obj, const char *propname)
 int
 obj_prop_set_internal(OBJ *obj, const char *propname, const char *value)
 {
-	unsigned val_off, val_len;
+	unsigned val_off, val_len, esc_len;
 	int key_idx;
 
 	val_len = strlen(value);
-	val_off = data_append(obj, value, val_len);
+	esc_len = escaped_len(value, val_len);
+	val_off = data_append_escaped(obj, value, val_len);
 	if (val_off == DATA_APPEND_FAIL)
 		return OBJ_ERR_NOMEM;
 
@@ -430,9 +495,9 @@ obj_prop_set_internal(OBJ *obj, const char *propname, const char *value)
 
 		/* re-seat after possible memmove */
 		val_tok = &obj->tokens[key_idx + 1];
-		val_tok->type = JSMN_PRIMITIVE;
+		val_tok->type = JSMN_STRING;
 		val_tok->start = val_off;
-		val_tok->end = val_off + val_len;
+		val_tok->end = val_off + esc_len;
 		val_tok->size = 0;
 	} else {
 		/* new property: append key and value tokens */
@@ -468,9 +533,9 @@ obj_prop_set_internal(OBJ *obj, const char *propname, const char *value)
 		obj->tokens[insert_pos].end = key_off + key_len;
 		obj->tokens[insert_pos].size = 1;
 
-		obj->tokens[insert_pos + 1].type = JSMN_PRIMITIVE;
+		obj->tokens[insert_pos + 1].type = JSMN_STRING;
 		obj->tokens[insert_pos + 1].start = val_off;
-		obj->tokens[insert_pos + 1].end = val_off + val_len;
+		obj->tokens[insert_pos + 1].end = val_off + esc_len;
 		obj->tokens[insert_pos + 1].size = 0;
 
 		obj->tokens_used += 2;
@@ -651,9 +716,10 @@ obj_get_json(OBJ *obj, char *buf, size_t len, size_t *out_len)
 			pos = buf_append(buf, len, pos, ",", 1);
 
 		/* emit key */
-		pos = buf_append_quoted(buf, len, pos,
+		pos = buf_append(buf, len, pos, "\"", 1);
+		pos = buf_append(buf, len, pos,
 			obj->data + key_tok->start, klen);
-		pos = buf_append(buf, len, pos, ":", 1);
+		pos = buf_append(buf, len, pos, "\":", 2);
 
 		/* emit value */
 		val_span_n = token_span(val_tok,
