@@ -611,7 +611,7 @@ obj_prop_is_tombstoned(OBJ *obj, const char *propname)
 }
 
 int
-obj_get_json(OBJ *obj, char *buf, size_t len)
+obj_get_json(OBJ *obj, char *buf, size_t len, size_t *out_len)
 {
 	const jsmntok_t *t;
 	int pos, i, tok_pos;
@@ -623,6 +623,8 @@ obj_get_json(OBJ *obj, char *buf, size_t len)
 		}
 		memcpy(buf, obj->data, obj->json_len);
 		buf[obj->json_len] = '\0';
+		if (out_len)
+			*out_len = obj->json_len;
 		return OBJ_OK;
 	}
 
@@ -681,6 +683,8 @@ obj_get_json(OBJ *obj, char *buf, size_t len)
 		return OBJ_ERR_NOMEM;
 	}
 	buf[pos] = '\0';
+	if (out_len)
+		*out_len = (size_t)pos;
 	return OBJ_OK;
 }
 
@@ -705,7 +709,7 @@ obj_compact(OBJ *obj)
 			return OBJ_ERR_NOMEM;
 		}
 
-		result = obj_get_json(obj, new_data, new_alloc);
+		result = obj_get_json(obj, new_data, new_alloc, &new_len);
 		if (result == OBJ_OK) {
 			break;
 		}
@@ -718,7 +722,6 @@ obj_compact(OBJ *obj)
 
 	/* replace buffer entirely */
 	free(obj->data);
-	new_len = strlen(new_data);
 	obj->json_len = new_len;
 	obj->data_used = new_len + 1;
 	obj->data_alloc = new_alloc;
@@ -787,6 +790,8 @@ obj_iter_next(OBJ_ITER *it, const char **key, const char **value)
 			continue; /* skip corrupt non-string key */
 
 		*value = json_token_tostr(obj->data, val_tok);
+		if (!*value)
+			continue; /* skip non-primitive value (object/array) */
 		return 1;
 	}
 

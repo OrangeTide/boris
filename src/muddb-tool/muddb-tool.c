@@ -179,7 +179,7 @@ export_domain(MUDDB *db, const char *domain, const char *outdir)
 			continue;
 		}
 
-		if (obj_get_json(obj, buf, sizeof(buf)) != OBJ_OK) {
+		if (obj_get_json(obj, buf, sizeof(buf), NULL) != OBJ_OK) {
 			LOG_ERROR("could not serialize %s/%s", domain, key);
 			obj_free(obj);
 			continue;

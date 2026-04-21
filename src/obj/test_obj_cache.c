@@ -80,7 +80,7 @@ mock_save(void *ctx, const char *id, OBJ *obj)
 	struct mock_backend *m = ctx;
 	m->save_calls++;
 	char buf[1024];
-	if (obj_get_json(obj, buf, sizeof(buf)) < 0) return -1;
+	if (obj_get_json(obj, buf, sizeof(buf), NULL) < 0) return -1;
 	mock_put(m, id, buf);
 	return 0;
 }
