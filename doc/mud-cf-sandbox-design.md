@@ -5,17 +5,17 @@
 Embed the ColdFire V4e CPU emulator (`coldfire.{c,h}`, ~2200 LOC) as
 the script sandbox for a MUD server. Each connected
 script/area/NPC runs in its own CF VM instance, scheduled cooperatively
-by the host with reduction-budget preemption (Erlang-style).
+by the host with credit-budget preemption.
 
-Replaces an earlier Q3VM-based design. Rejected alternatives: Wasm
-(heavyweight; validation guarantees not needed), LuaJIT
-(sandboxing weaknesses), pure Lua (no preemption).
+Rejected alternatives: Q3VM (limited tools; cumbersome instruction indices),
+Wasm (heavyweight; validation guarantees not needed), LuaJIT (sandboxing
+weaknesses), pure Lua (no preemption).
 
 ## Why ColdFire
 
 - **Tooling.** `m68k-linux-gnu-gcc` 14, binutils, gdb, newlib, libstdc++,
-  Ada (gnat), Fortran (gfortran). Builders write in any language with an
-  m68k backend.
+  Ada (gnat), Fortran (gfortran), [FreePascal][1]. Builders write in any
+  language with an m68k backend.
 - **FFI ergonomics.** LINE_A opcodes (0xAxxx, ~4096 slots) trap to a host
   hypercall handler with full register access. No i32-only marshaling.
 - **Isolation.** Per-instance `cf_cpu` + bus callbacks bound to a private
@@ -31,27 +31,28 @@ Host: Raspberry Pi 5, quad-core, 3 cores idle. Interpretation overhead
 
 ## Trust Model
 
-Builders are semi-trusted (granted a wiz bit). Threats are runaway
+Builders are semi-trusted (granted a builder-access bit). Threats are runaway
 loops, memory exhaustion, accidental sandbox escape via emulator bugs.
 Defense in depth:
 
 1. CF user-mode (CF_SR_S clear) traps privileged instructions.
 2. Bus callbacks reject out-of-range addresses.
-3. Reduction budget caps CPU per tick.
+3. Credit budget caps CPU per task per quantum; `MAX_TASKS_PER_TICK`
+   bounds the tick as a whole.
 4. Per-task RAM cap (start at 64KB, tune).
 5. Run MUD as dedicated unprivileged user.
 6. seccomp profile on the MUD process — even an emulator escape can't
    make syscalls outside an allowlist.
-7. AFL-fuzz coldfire.c against random instruction streams before
+7. [AFL][2]-fuzz coldfire.c against random instruction streams before
    exposing to builders.
 
 ## Terminology
 
-- **program** (`program_t`) — an ELF blob plus metadata. Owned by muddb,
-  thawed from storage on demand. A program is inert code; you need one
-  to create a VM state. Multiple tasks can share a program; if the
-  loader marks text RO, that RAM region can be COW-shared across tasks
-  running the same program.
+- **program** (`program_t`) — an ELF blob plus metadata. Owned by muddb or
+  content-addressable storage, thawed from storage on demand. A program is
+  inert code; you need one to create a VM state. Multiple tasks can share a
+  program; if the loader marks text RO, that RAM region can be COW-shared
+  across tasks running the same program.
 - **vm state** (`vm_state_t`) — CPU + registers + RAM + bus callback
   table. One per task. May reference a program's text region via COW.
 - **task** (`task_t`) — a running instance. Owns a `vm_state_t`, an fd
@@ -80,7 +81,7 @@ typedef struct task {
     program_t    *program;           /* code this task is running */
     task_state_t  state;
     uint32_t      priority;          /* MLFQ level */
-    uint64_t      reductions_used;   /* lifetime */
+    uint64_t      credits_used;      /* lifetime */
     uint64_t      wake_tick;
     uint32_t      blocked_on;        /* channel id */
     uint32_t      msg_inbox_head;
@@ -150,13 +151,56 @@ Single-threaded scheduler on one MUD core. Other 2–3 RPi5 cores remain
 free for MUD I/O, persistence, etc. (Multi-core scheduler is a v2
 feature — keep v1 simple.)
 
+### Credits: the unit of CPU accounting
+
+A **credit** is an abstract unit of work charged to a task. One cheap
+CF instruction costs 1 credit; a hypercall carries a larger weight
+from a `credit_cost[hc_id]` table. The weight approximates "how much
+does this actually cost the server to service," not just instruction
+count.
+
+The `credit_cost[]` table lives host-side, loaded from configuration
+(e.g., `boris.cfg`), and is explicitly *not* part of the ABI — weights
+can change across host versions without affecting program
+compatibility. Programs can't inspect or depend on specific weights;
+they only know that expensive calls cost more than cheap ones.
+
+Charging happens in two places. `cf_run` increments a credit counter
+by 1 per plain CF instruction executed. The hypercall dispatch handler
+adds `credit_cost[hc_id]` to the same counter before returning to
+`cf_run`. The scheduler reads the accumulated total on each quantum
+return (`rc.spent` in the pseudocode below — raw cycles plus hypercall
+weights).
+
+Three thresholds use the same unit:
+
+- **`CREDIT_BUDGET`** — credits per quantum before the scheduler
+  preempts the task. Preemption is not a kill; the task goes back on
+  the runqueue.
+- **`credits_used`** — lifetime counter in `task_t`. Advances every
+  quantum by the credits spent that quantum.
+- **`CREDIT_LIMIT_TOTAL`** — lifetime cap. Crossing it kills the task.
+  The runaway-loop backstop.
+
+Using a weighted unit rather than raw instruction count means a task
+that spams expensive hypercalls pays in proportion to the work it
+creates for the host, not just the bytes of guest code it executes.
+
+::: aside
+Erlang/BEAM uses the same mechanism under the name "reductions" and
+has run production telecom switches on it for decades. We borrow the
+pattern and define credits as our own unit, free of the BEAM-specific
+connotations.
+:::
+
 ```
 sched_tick():
     while runqueue not empty and tick_budget > 0:
         t = dequeue runqueue
-        rc = cf_run(&t->vm.cpu, REDUCTION_BUDGET)
-        t->reductions_used += rc.executed
+        rc = cf_run(&t->vm.cpu, CREDIT_BUDGET)
+        t->credits_used += rc.spent
         if t->vm.cpu.fault: kill(t); continue
+        if t->credits_used >= CREDIT_LIMIT_TOTAL: kill(t); continue
         switch t->state:
             RUNNABLE:   enqueue runqueue (round-robin)
             SLEEPING:   insert sleep_heap by wake_tick
@@ -167,9 +211,9 @@ sched_tick():
 
 Constants (start values, measure and tune):
 
-- `REDUCTION_BUDGET` = 10000 instructions/quantum
+- `CREDIT_BUDGET` = 10000 credits/quantum
 - `MAX_TASKS_PER_TICK` = 256
-- `REDUCTION_LIMIT_TOTAL` = 1<<30 (kill runaways)
+- `CREDIT_LIMIT_TOTAL` = 1<<30 credits (kill runaways)
 
 Hypercalls return a status code from the dispatch handler indicating
 what state to put the task into (yield → runnable, sleep → sleeping,
@@ -377,7 +421,7 @@ hypercall is needed to ask what tick it is.
 - `task_id`, `owner_id`, `session_id`
 - `current_tick` — incremented by the scheduler
 - `argc`, `argv_ptr` — pointers into syspage string table
-- ulimits — RAM cap, reduction budget, etc.
+- ulimits — RAM cap, credit budget, etc.
 - `cap_entry[]` — the task's initial cap table, terminated by a
   zero-name entry
 
@@ -474,13 +518,14 @@ Listen on a Unix socket per-task, gated by wiz permission.
 
 ## Open Items
 
-- [ ] Tune `REDUCTION_BUDGET` and per-task RAM cap on real workload.
+- [ ] Populate `credit_cost[hc_id]` weight table; tune `CREDIT_BUDGET`
+      and per-task RAM cap against a real workload.
 - [ ] Write seccomp profile.
 - [ ] AFL-fuzz coldfire.c (one afternoon).
-- [ ] Decide MUD-specific hypercall opword range and table.
+- [ ] Enumerate v1 hypercall IDs and publish the freeze list.
 - [ ] Persistence format for task snapshots (and `tmp:` policy within).
-- [ ] Builder docs: how to write a script in C, where to find newlib,
-      what the hypercall shim looks like.
+- [ ] Builder docs: writing a program in C, Pascal, Forth, or 68k asm;
+      where to find newlib; what the hypercall shim looks like.
 - [ ] v2: GDB stub.
 - [ ] v2: multi-core scheduler (work-stealing across MUD cores).
 
@@ -494,7 +539,7 @@ the CF emulator catches anything that escapes.
 - **MicroPython** — similar story, larger footprint.
 - **QuickJS** — ~70 KLOC, runs on freestanding targets. Gives you
   TypeScript-via-`tsc`-strip-types-then-run-on-QuickJS-on-CF.
-- **mruby**, **Wren**, **Janet** — all viable.
+- **mruby**, **Wren**, **Janet**, **Forth** ([ATLAST][3]) — all viable.
 
 TypeScript itself has no native m68k backend; QuickJS-on-CF is the
 pragmatic path.
@@ -503,9 +548,13 @@ pragmatic path.
 
 - Scheduler + hypercall dispatch + channels: ~600 LOC host C.
 - Guest-side `mud.h` shim: ~200 LOC.
-- ELF loader: ~150 LOC (port from monitor.c).
+- ELF loader: ~150 LOC.
 - GDB stub (v2): ~400 LOC.
 - AFL fuzzing harness: ~50 LOC + an afternoon of triage.
 
 Total v1: roughly a week of focused work on top of the existing
 emulator.
+
+[1]: https://wiki.freepascal.org/m68k
+[2]: https://lcamtuf.coredump.cx/afl/
+[3]: https://www.fourmilab.ch/atlast/
