@@ -47,6 +47,8 @@ struct net_stream {
 static struct iox_loop *g_loop;
 static struct net_stream *g_streams;
 static int g_stream_count;
+static int g_dispatch_depth;
+static struct net_stream *g_pending_free;
 
 /* ---------- helpers ---------- */
 
@@ -75,6 +77,19 @@ fill_addr_from_sockaddr(struct net_stream *s, const struct sockaddr *sa)
 	}
 }
 
+static void stream_free(struct net_stream *s);
+
+static void
+flush_pending_frees(void)
+{
+	while (g_pending_free) {
+		struct net_stream *s = g_pending_free;
+		g_pending_free = s->next;
+		s->next = NULL;
+		stream_free(s);
+	}
+}
+
 static void
 dispatch(struct net_stream *s, int event, char *data, int size, const char *msg,
     struct net_stream *remote)
@@ -91,7 +106,10 @@ dispatch(struct net_stream *s, int event, char *data, int size, const char *msg,
 		.data = data,
 		.size = size,
 	};
+	g_dispatch_depth++;
 	slot->cb(&e);
+	if (--g_dispatch_depth == 0)
+		flush_pending_frees();
 }
 
 static void net_fd_cb(struct iox_loop *loop, int fd, unsigned events, void *arg);
@@ -272,6 +290,8 @@ net_init(struct iox_loop *loop)
 	g_loop = loop;
 	g_streams = NULL;
 	g_stream_count = 0;
+	g_dispatch_depth = 0;
+	g_pending_free = NULL;
 	return 0;
 }
 
@@ -283,6 +303,7 @@ net_shutdown(void)
 		stream_unlink(s);
 		stream_free(s);
 	}
+	flush_pending_frees();
 	g_loop = NULL;
 }
 
@@ -354,7 +375,12 @@ net_close(struct net_stream *s)
 	if (was_connected)
 		dispatch(s, NET_EVENT_CLOSE, NULL, 0, NULL, NULL);
 	stream_unlink(s);
-	stream_free(s);
+	if (g_dispatch_depth > 0) {
+		s->next = g_pending_free;
+		g_pending_free = s;
+	} else {
+		stream_free(s);
+	}
 }
 
 int
