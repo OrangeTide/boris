@@ -313,11 +313,11 @@ the primary aesthetic link between the MUD and W&L.
 Three levels; a box filled means "I am currently carrying this level of
 injury."
 
-| Level | Label    | Boxes | Mechanical effect                              |
-|-------|----------|-------|------------------------------------------------|
-| 1     | Minor    | 2     | None.                                          |
+| Level | Label    | Boxes | Mechanical effect                                 |
+|-------|----------|-------|---------------------------------------------------|
+| 1     | Minor    | 2     | None.                                             |
 | 2     | Moderate | 2     | -1D on actions the injury would plausibly impair. |
-| 3     | Severe   | 1     | Need treatment soon or die.                    |
+| 3     | Severe   | 1     | Need treatment soon or die.                       |
 
 If a level is full when new harm of that level arrives, the harm
 escalates to the next level. Level 3 full + new severe harm → dying.
@@ -573,7 +573,7 @@ budgets. Full integration deferred.
 | SD   | Stun Defense     | CON * 2                                                |
 | REC  | Recovery         | STR + CON                                              |
 | RUN  | Combat Movement  | MOVE * 2 m                                             |
-|      | Non-combat       | Sprint MOVE*3m; Swim MOVE*1m; Leap MOVE*1m.            |
+|      | Non-combat       | Sprint MOVE\*3m; Swim MOVE\*1m; Leap MOVE\*1m.         |
 | RES  | Resistance       | WILL * 3 (mental hits)                                 |
 | LUCK | Luck (optional)  | INT + REF                                              |
 | END  | Endurance        | CON * 10                                               |
