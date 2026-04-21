@@ -285,6 +285,71 @@ sample/
 Each `.json` file contains a single JSON object. The filename (minus `.json`)
 is the database key.
 
+### Backup and Restore
+
+The server runs unattended on hobby hardware, so regular backups are
+important. Two approaches:
+
+**JSON export (portable, human-readable)**
+
+```sh
+./bin/muddb-tool export data/muddb backup/
+```
+
+This creates one `.json` file per record. The export can be inspected,
+edited, diffed, or version-controlled. To restore from a JSON export, stop
+the server, then:
+
+```sh
+rm -rf data/muddb
+mkdir -p data/muddb
+./bin/muddb-tool import data/muddb backup/
+```
+
+**LMDB file copy with `mdb_copy` (fast, compact)**
+
+`mdb_copy` creates a consistent snapshot even while the server is running.
+Install it from the system LMDB package (`apt install lmdb-utils` on
+Debian/Ubuntu).
+
+```sh
+mdb_copy data/muddb /path/to/backup/muddb
+```
+
+Add `-c` to compact free pages during copy:
+
+```sh
+mdb_copy -c data/muddb /path/to/backup/muddb
+```
+
+To restore, stop the server and replace the database directory:
+
+```sh
+rm -rf data/muddb
+cp -r /path/to/backup/muddb data/muddb
+```
+
+**Automated daily backup (cron)**
+
+Back up with `muddb-tool`, keep 14 days of snapshots. Adjust `MUD_DIR` to
+match your installation:
+
+```
+MUD_DIR=/home/mud/boris
+
+# daily database export, 04:00, keep 14 days
+0 4 * * * d=$MUD_DIR/backups/$(date +\%F); mkdir -p "$d" && $MUD_DIR/bin/muddb-tool export $MUD_DIR/data/muddb "$d" && find $MUD_DIR/backups -maxdepth 1 -mindepth 1 -mtime +14 -exec rm -rf {} +
+```
+
+Or with `mdb_copy` for a faster binary snapshot:
+
+```
+MUD_DIR=/home/mud/boris
+
+# daily LMDB snapshot, 04:00, keep 14 days
+0 4 * * * d=$MUD_DIR/backups/muddb-$(date +\%F); mkdir -p "$d" && mdb_copy -c $MUD_DIR/data/muddb "$d" && find $MUD_DIR/backups -maxdepth 1 -name 'muddb-*' -mtime +14 -exec rm -rf {} +
+```
+
 ## Running the Server
 
 ### Configure
