@@ -3,12 +3,12 @@
 ## Goal
 
 Embed the ColdFire V4e CPU emulator (`coldfire.{c,h}`, ~2200 LOC) as
-the script sandbox for a multi-user MUD server. Each connected
+the script sandbox for a MUD server. Each connected
 script/area/NPC runs in its own CF VM instance, scheduled cooperatively
 by the host with reduction-budget preemption (Erlang-style).
 
 Replaces an earlier Q3VM-based design. Rejected alternatives: Wasm
-(heavyweight, validation guarantees a MUD doesn't need), LuaJIT
+(heavyweight; validation guarantees not needed), LuaJIT
 (sandboxing weaknesses), pure Lua (no preemption).
 
 ## Why ColdFire
@@ -31,13 +31,13 @@ Host: Raspberry Pi 5, quad-core, 3 cores idle. Interpretation overhead
 
 ## Trust Model
 
-Builders are semi-trusted (you grant a wiz bit). Threats are runaway
+Builders are semi-trusted (granted a wiz bit). Threats are runaway
 loops, memory exhaustion, accidental sandbox escape via emulator bugs.
 Defense in depth:
 
 1. CF user-mode (CF_SR_S clear) traps privileged instructions.
 2. Bus callbacks reject out-of-range addresses.
-3. Reduction budget caps per-tick CPU.
+3. Reduction budget caps CPU per tick.
 4. Per-task RAM cap (start at 64KB, tune).
 5. Run MUD as dedicated unprivileged user.
 6. seccomp profile on the MUD process — even an emulator escape can't
@@ -102,7 +102,7 @@ opword. New hypercalls get appended to the enum. Never reassign an ID;
 never change the register convention of a shipped ID. See **ABI
 Versioning** below for how clients declare which IDs they use.
 
-For domain-typed hypercalls the dirfd carries the domain type, so the
+For domain-typed hypercalls, the dirfd carries the domain type, so the
 host can reject `HC_OBJ_GET` on a `user:` dirfd without encoding the
 type in the opword.
 
@@ -213,7 +213,7 @@ blob-domain fds, `HC_OBJ_GET` only accepts `obj:`-typed fds, and so on.
 The guest libc picks the right wrapper based on the `type` field in
 the task's cap table; builders rarely see the distinction.
 
-### Drive prefixes are UI, dirfds are the capability
+### Drive prefixes are a UI convenience; dirfds are the capability
 
 Guest code refers to domains by colon-prefixed name: `local:quests/dragon`,
 `tmp:scratch.log`, `bin:npc/guard.prg`. The guest libc (`mud.h`) parses
