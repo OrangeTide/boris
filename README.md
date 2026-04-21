@@ -215,12 +215,12 @@ cp env.example .env
 
 Available settings:
 
-| Variable       | Description                                        | Example                          |
-|----------------|----------------------------------------------------|----------------------------------|
-| `DEPLOY_DEST`  | Deploy target for `make deploy` (user@host[:dir])  | `jon@myserver.com:mud`           |
-| `RELEASE_ARCH` | Override release architecture label                | `linux-arm32`                    |
-| `CC`           | C compiler (useful for cross-compilation)          | `arm-linux-gnueabihf-gcc`       |
-| `LDFLAGS`      | Linker flags                                       | `-static`                        |
+| Variable       | Description                                        | Example                   |
+|----------------|----------------------------------------------------|---------------------------|
+| `DEPLOY_DEST`  | Deploy target for `make deploy` (user@host[:dir])  | `jon@myserver.com:mud`    |
+| `RELEASE_ARCH` | Override release architecture label                | `linux-arm32`             |
+| `CC`           | C compiler (useful for cross-compilation)          | `arm-linux-gnueabihf-gcc` |
+| `LDFLAGS`      | Linker flags                                       | `-static`                 |
 
 ## Database Tools
 
