@@ -1,0 +1,2 @@
+# Documents to publish -- one filename per line (relative to doc/)
+mud-cf-sandbox-design.md

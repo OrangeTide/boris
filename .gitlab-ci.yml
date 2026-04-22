@@ -107,15 +107,30 @@ publish:client:
   rules:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 
+publish:docs:
+  stage: docs
+  before_script:
+    - apk update
+    - apk add pandoc
+  script:
+    - ./scripts/pages-build.sh doc-pages
+  artifacts:
+    paths:
+      - doc-pages
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
 pages:
   stage: publish
   dependencies:
     - publish:dev-docs
     - publish:client
+    - publish:docs
   script:
     - cp -r homepage public
     - cp -r documentation/html public/dev-docs
     - cp -r client-pages public/client
+    - cp -r doc-pages public/docs
   artifacts:
     paths:
       - public
