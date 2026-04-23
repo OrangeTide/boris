@@ -1,6 +1,6 @@
 SUBDIRS = \
 	thirdparty/lmdb thirdparty/mth thirdparty/mongoose thirdparty/tiny-aes \
-	log scrypt util help iox net passwd obj entity rpg combat database muddb-tool
+	log scrypt util help iox net passwd obj entity rpg combat database security muddb-tool
 
 LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
@@ -54,5 +54,5 @@ boris_SRCS = \
 	worldclock/worldclock.c \
 	web/server/webserver.c
 boris_LIBS = \
-	hashtable log scrypt util help iox net passwd obj entity rpg database \
+	hashtable log scrypt util help iox net passwd obj entity rpg database security \
 	lmdb mth mongoose tinyaes

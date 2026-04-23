@@ -1391,6 +1391,8 @@ mud_config_init(void)
 	mud_config.newuser_room = strdup("tower-entrance");
 	mud_config.room_cache_size = 128;
 	mud_config.character_cache_size = 128;
+	mud_config.security_landlock = 1;
+	mud_config.security_seccomp = 1;
 }
 
 /**
@@ -1469,6 +1471,8 @@ mud_config_process(void)
 	config_watch(&cfg, "cache.room.size", do_config_uint, &mud_config.room_cache_size);
 	config_watch(&cfg, "cache.character.size", do_config_uint, &mud_config.character_cache_size);
 	config_watch(&cfg, "rpg.enabled", do_config_uint, &mud_config.rpg_enabled);
+	config_watch(&cfg, "security.landlock", do_config_uint, &mud_config.security_landlock);
+	config_watch(&cfg, "security.seccomp", do_config_uint, &mud_config.security_seccomp);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", mud_config_show, 0);
 #endif

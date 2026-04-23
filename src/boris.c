@@ -44,6 +44,7 @@
 #include <mth.h>
 #include <form.h>
 #include <webserver.h>
+#include <security.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
@@ -383,6 +384,13 @@ main(int argc, char **argv)
 	}
 
 	atexit(telnetserver_shutdown);
+
+	if (security_init() < 0) {
+		LOG_ERROR("could not initialize security sandbox");
+		return EXIT_FAILURE;
+	}
+
+	atexit(security_shutdown);
 
 	iox_loop_set_idle(g_loop, main_idle, NULL);
 	iox_loop_run(g_loop);
