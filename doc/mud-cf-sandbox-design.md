@@ -21,7 +21,7 @@ v1 is what gets the freeze discipline.
   never change, structured records append-only. Forward-compatible from
   here on.
 - **v2 -- deferred from v1.** Root-bounded `..` in paths, selective-peek
-  mailbox semantics if we find we need them, typed hypercalls for
+  message channel semantics if we find we need them, typed hypercalls for
   non-obj domains (`user:`, `area:`, ...), multi-core scheduler, GDB
   stub, multi-thread-per-task.
 - **v3 -- unplanned re-architecture.** Optimistically never.
@@ -109,7 +109,7 @@ typedef struct task {
     uint32_t      priority;          /* MLFQ level */
     uint64_t      credits_used;      /* lifetime */
     uint64_t      wake_tick;
-    uint32_t      blocked_on;        /* reply handle or mailbox fd */
+    uint32_t      blocked_on;        /* reply handle or message channel fd */
     fd_table_t    fds;               /* caps; see Capabilities section */
     uint8_t      *tmp_ram;           /* tmp: ramdisk, reaped in task_free */
     uint32_t      tmp_size;
@@ -160,7 +160,7 @@ Removing or changing a frozen ID requires an `abi_major` bump.
 | 17 | 0xA011 | HC_SELECT         | wait on multiple fds          |
 | 18 | 0xA012 | HC_MSG_SEND       | synchronous RPC send          |
 | 19 | 0xA013 | HC_MSG_POST       | fire-and-forget message       |
-| 20 | 0xA014 | HC_MSG_RECV       | receive on mailbox            |
+| 20 | 0xA014 | HC_MSG_RECV       | receive on message channel    |
 | 21 | 0xA015 | HC_MSG_REPLY      | reply to received message     |
 
 Groups: sentinel/debug (0--1), task lifecycle (2--4), debug output (5),
@@ -181,6 +181,80 @@ Reserved for asserts, breakpoints synthesized by the guest (distinct
 from the GDB stub's `illegal`-instruction breakpoint patching), and
 similar diagnostic stops.
 
+### Register convention
+
+Hypercall register assignments follow the 68k architecture's natural
+data/address split: integer and size arguments fill d0, d1, d2, d3
+in declaration order; pointer arguments fill a0, a1, a2 in
+declaration order. Every hypercall returns its result in d0. The two
+sequences are independent -- a call taking two pointers and one
+integer uses a0, a1, d0 regardless of how the arguments are ordered
+in the C prototype.
+
+This matches the register-parameter convention that
+`m68k-linux-gnu-gcc` generates with `__attribute__((regparm))`.
+Aligning with the compiler's output has three consequences:
+
+1. **Each hypercall IS a C prototype.** `HC_OPENAT` is
+   `int mud_openat(int dirfd, const char *path, int flags)`. The
+   register assignments add nothing the prototype doesn't already
+   say -- `dirfd` is `int` so it goes in d0, `path` is a pointer so
+   it goes in a0, `flags` is `int` so it goes in d1. Return in d0.
+2. **Debug wrappers are trivial.** A host-side shim for any hypercall
+   is a C function with the same prototype and a register-parameter
+   annotation. The compiler places arguments in exactly the registers
+   the guest expects.
+3. **ABI documentation is the header file.** The `mud.h` guest header
+   carries C prototypes; the register table below is a redundant
+   quick-reference. If a prototype and the table ever disagree, the
+   prototype wins.
+
+Caller-saved registers are d0, d1, a0, a1. Hypercalls may clobber
+these. All other registers (d2--d7, a2--a6) are callee-saved per the
+standard m68k convention. In practice, arguments passed via d2/d3/a2
+are consumed by the hypercall and should be treated as clobbered by
+the caller.
+
+64-bit values (e.g., reply handles) are passed by pointer, not by
+register pair. This avoids d0:d1 pairing awkwardness and keeps the
+upgrade path clean -- widening a pointed-to type from `uint64_t` to
+a 128-bit struct changes no register conventions (see **Reply handle
+sizing** in the Messaging section).
+
+#### Full register map
+
+```
+HC_ABORT(0):          (no args)                                              -> (no return)
+HC_TRAP(1):           d0=trap_code                                           -> (no return)
+HC_YIELD(2):          (no args)                                              -> (no return)
+HC_SLEEP(3):          d0=ticks                                               -> (no return)
+HC_EXIT(4):           d0=status                                              -> (no return)
+HC_PRINT(5):          d0=len, a0=str                                         -> d0=0/-errno
+HC_SPAWN(6):          d0=prog_fd, d1=cap_count, a0=cap_array                 -> d0=task_id/-errno
+HC_OPENAT(7):         d0=dirfd, d1=flags, a0=path                            -> d0=fd/-errno
+HC_CLOSE(8):          d0=fd                                                  -> d0=0/-errno
+HC_READ(9):           d0=fd, d1=count, a0=buf                                -> d0=n/-errno
+HC_WRITE(10):         d0=fd, d1=count, a0=buf                                -> d0=n/-errno
+HC_READDIR(11):       d0=fd, d1=buf_cap, a0=buf, a1=&count                   -> d0=0/-errno
+HC_STAT(12):          d0=fd, a0=stat_buf                                     -> d0=0/-errno
+HC_UNLINK(13):        d0=dirfd, a0=path                                      -> d0=0/-errno
+HC_OBJ_PROP_GET(14):  d0=fd, d1=flags, d2=buf_cap, a0=key, a1=buf, a2=&len  -> d0=0/-errno
+HC_OBJ_PROP_PUT(15):  d0=fd, d1=flags, d2=data_len, a0=key, a1=data         -> d0=0/-errno
+HC_OBJ_PROP_LIST(16): d0=fd, d1=buf_cap, a0=path, a1=buf, a2=&count         -> d0=0/-errno
+HC_SELECT(17):        d0=fd_bitmask, d1=timeout, a0=fd_array                 -> d0=index/-errno
+HC_MSG_SEND(18):      d0=target_fd, d1=msg_len, d2=reply_cap, d3=timeout,
+                      a0=msg, a1=reply_buf, a2=&reply_len                    -> d0=status/-errno
+HC_MSG_POST(19):      d0=target_fd, d1=msg_len, a0=msg                      -> d0=0/-errno
+HC_MSG_RECV(20):      d0=ch_fd, d1=buf_cap, d2=timeout,
+                      a0=buf, a1=&reply_handle, a2=&recv_len                 -> d0=0/-errno
+HC_MSG_REPLY(21):     d0=status, d1=reply_len,
+                      a0=reply_buf, a1=&reply_handle                         -> d0=0/-errno
+```
+
+HC_MSG_RECV and HC_MSG_REPLY share a1=&reply_handle by design. After
+receiving a message, the guest transitions to reply without moving
+the handle pointer between registers.
+
 ### Capability-flag model
 
 HC_OPENAT flags in `d1` express the caller's intent and become the
@@ -200,7 +274,7 @@ access-mode enum plus independent family bits.
 #define O_OBJECT     (1UL << 3)   /* 0x08 */
 #define O_DIRECTORY  (1UL << 4)   /* 0x10 */
 #define O_PROGRAM    (1UL << 5)   /* 0x20 */
-#define O_MAILBOX    (1UL << 6)   /* 0x40 */
+#define O_MSGCHAN    (1UL << 6)   /* 0x40 */
 
 /* blob-only modifiers (rejected unless O_BLOB is set) */
 #define O_BLOB_CREAT  (1UL << 8)
@@ -225,8 +299,8 @@ unloadable programs fail fast.
 `O_OBJECT` -- enables the HC_OBJ_PROP_* hypercalls on the returned
 fd. Only valid for fds opened from typed obj-domain dirfds.
 
-`O_MAILBOX` -- opens a mailbox for HC_MSG_RECV. See **Messaging**
-below.
+`O_MSGCHAN` -- opens a message channel for HC_MSG_RECV. See
+**Messaging** below.
 
 (Open: whether blob domains carry an on-disk x-bit that `O_PROGRAM`
 checks against, or whether `O_PROGRAM` only validates the ELF header
@@ -270,9 +344,14 @@ Examples: `name`, `stats.hp`, `"key with spaces"."nested.key"`.
 HC_READ / HC_WRITE apply only to blob-domain fds (`tmp:`, `bin:`).
 HC_OBJ_PROP_GET / HC_OBJ_PROP_PUT / HC_OBJ_PROP_LIST apply only to
 object-domain fds (fds opened with O_OBJECT from an obj: dirfd).
-HC_READDIR works on both blob directories and object fds (listing
-children). HC_STAT and HC_UNLINK work on both but HC_UNLINK is
-ACL-gated on typed domains.
+HC_READDIR works on both blob directories and object fds. On blob
+directories it lists files; on object fds it lists **contents**
+(sub-objects within the object). HC_OBJ_PROP_LIST, by contrast,
+enumerates the properties of an object at the current level. The
+distinction -- children vs properties -- is part of the v0
+proof-of-concept; the final semantics may shift in v2. HC_STAT and
+HC_UNLINK work on both blob and object fds but HC_UNLINK is ACL-gated
+on typed domains.
 
 ### Object property hypercalls
 
@@ -304,10 +383,10 @@ Object access uses implicit transactions: the first write in a
 quantum opens a write transaction, which commits when the task
 yields, sleeps, or is preempted. No explicit begin/commit hypercalls.
 
-### Messaging (QNX-style synchronous IPC)
+### Messaging (QNX-style synchronous)
 
-IPC follows the QNX MsgSend/MsgReceive/MsgReply pattern: synchronous
-RPC with reply handles.
+Message passing follows the QNX MsgSend/MsgReceive/MsgReply pattern:
+synchronous RPC with reply handles.
 
 ```
 HC_MSG_SEND:  d0=target_fd, a0=msg, d1=msg_len, a1=reply_buf,
@@ -315,31 +394,64 @@ HC_MSG_SEND:  d0=target_fd, a0=msg, d1=msg_len, a1=reply_buf,
               -> d0=status or -errno
 HC_MSG_POST:  d0=target_fd, a0=msg, d1=msg_len
               -> d0=0 or -errno
-HC_MSG_RECV:  d0=mbox_fd, a0=buf, d1=buf_cap, a1=&recv_len,
-              a2=&reply_handle, d2=timeout_ticks
+HC_MSG_RECV:  d0=ch_fd, a0=buf, d1=buf_cap, a1=&reply_handle,
+              a2=&recv_len, d2=timeout_ticks
               -> d0=0 or -errno
-HC_MSG_REPLY: a0=&reply_handle, a1=reply_buf, d1=reply_len,
-              d2=status -> d0=0 or -errno
+HC_MSG_REPLY: d0=status, a0=reply_buf, d1=reply_len,
+              a1=&reply_handle -> d0=0 or -errno
 ```
 
 **HC_MSG_SEND** is a blocking RPC. The caller blocks until the
 receiver calls HC_MSG_REPLY or the timeout expires. The reply lands
 in `reply_buf`. The returned `status` is the value the receiver
-passed to HC_MSG_REPLY's `d2`.
+passed to HC_MSG_REPLY's `d0`.
 
 **HC_MSG_POST** is fire-and-forget. The message is queued on the
-target's mailbox; the sender does not block. No reply expected.
+target's message channel; the sender does not block. No reply
+expected.
 
-**HC_MSG_RECV** blocks on a mailbox fd (opened with O_MAILBOX) until
-a message arrives or the timeout expires. On return, `*reply_handle`
-is a 64-bit opaque token the receiver must pass to HC_MSG_REPLY. For
-HC_MSG_POST messages, `*reply_handle` is zero (no reply expected).
+**HC_MSG_RECV** blocks on a message channel fd (opened with
+O_MSGCHAN) until a message arrives or the timeout expires. On return,
+`*reply_handle` is a 64-bit opaque token the receiver must pass to
+HC_MSG_REPLY. For HC_MSG_POST messages, `*reply_handle` is zero (no
+reply expected). HC_MSG_RECV and HC_MSG_REPLY share a1=&reply_handle
+-- after receiving, the guest transitions to reply without moving the
+handle pointer between registers.
 
 **HC_MSG_REPLY** sends a reply to a pending HC_MSG_SEND caller,
-unblocking it. The reply handle is consumed on use. Reply handles are
-64-bit random tokens stored in a system-wide hash table; a reaper
-process expires stale handles (30--300s configurable timeout) and
-unblocks senders with `-ETIMEDOUT`.
+unblocking it. The reply handle is consumed on use.
+
+#### Reply handle table
+
+Reply handles are 64-bit random tokens stored in a global
+(system-wide) hash table, not in per-task state. Three reasons for a
+global table:
+
+1. **Delegatable.** A receiver can pass the reply handle to a helper
+   task via messaging; the helper replies on behalf of the original
+   receiver. Per-task tables can't express this without a forwarding
+   layer.
+2. **Arbitrary routing.** The reply travels back through whichever
+   task holds the handle, not necessarily the one that received the
+   message. This lets service tasks fan out work.
+3. **Simpler timeout.** A single reaper scans one table (30--300s
+   configurable timeout) and unblocks senders with `-ETIMEDOUT`.
+   Per-task tables need per-task reapers or a cross-task sweep.
+
+#### Reply handle sizing
+
+v0 and v1 use 64-bit handles. For sandboxed builders with
+credit-limited guesses, 64 bits of randomness is sufficient -- an
+attacker running at full credit budget cannot brute-force a handle
+before the reaper expires it.
+
+The ABI is designed so upgrading to 128-bit handles requires only a
+header change, recompile, and `abi_minor` bump. Handles are always
+passed by pointer (a1=&reply_handle), never in a register pair, so
+widening the pointed-to type from `uint64_t` to a 128-bit struct
+changes no register conventions. Programs built against the 64-bit
+header continue to work until they encounter a handle that doesn't
+fit, at which point the version check catches the mismatch.
 
 **Example: globalchat SAY.** A player's task sends
 `HC_MSG_SEND(globalchat_fd, "SAY Hello", 9, reply_buf, ...)`. The
@@ -363,7 +475,7 @@ bitmask in `d0` selects which entries in the `int16_t` array are
 active. Entry `i` is checked if bit `i` of `d0` is set. Returns the
 index of the first ready fd, or `-ETIMEDOUT`.
 
-This covers the "wait on mailbox OR timer OR multiple services"
+This covers the "wait on message channel OR timer OR multiple services"
 pattern without polling. There is no edge-triggered mode -- a ready
 fd stays ready until consumed.
 
@@ -509,12 +621,13 @@ Discovery follows a getenv-style API:
 DIR_tmp=0
 DIR_bin=3
 OBJ_player=5
-MBOX_self=7
+MSGCHAN_self=7
 PROG_guard=9
 ```
 
 Prefixes encode the family: `DIR_` for directories, `OBJ_` for
-object handles, `MBOX_` for mailboxes, `PROG_` for program fds.
+object handles, `MSGCHAN_` for message channels, `PROG_` for
+program fds.
 The guest libc provides `mud_getenv(key)` to parse the env block.
 This replaces the earlier `cap_entry[]` struct -- the env block is
 just bytes in the syspage, no structured record to version.
@@ -530,7 +643,7 @@ just bytes in the syspage, no structured record to version.
 | `local:`   | (typed) | owner (persistent) | muddb            | Per-player persistent storage.               |
 | `area:`    | (typed) | persistent         | muddb            | The task's home zone. Usually RO.            |
 | `world:`   | (typed) | persistent         | muddb            | Shared world state. Privileged tasks only.   |
-| `service:` | mailbox | persistent         | host             | Well-known service mailboxes (globalchat, etc.). |
+| `service:` | msgchan | persistent         | host             | Well-known message channels (globalchat, etc.). |
 
 Two tasks spawned from the same program by the same user in the same
 session each get a private `tmp:` and a shared `session:`. `tmp:`
