@@ -84,8 +84,11 @@ weaknesses), pure Lua (no preemption).
 ## Why ColdFire
 
 - **Tooling.** `m68k-linux-gnu-gcc` 14, binutils, gdb, newlib, libstdc++,
-  Ada (gnat), Fortran (gfortran), [FreePascal][1]. Builders write in any
-  language with an m68k backend.
+  Ada (gnat), Fortran (gfortran), [FreePascal][1]. Seven GCC-frontend
+  languages have been validated producing correct bare-metal ColdFire
+  binaries (see **Guest Language Support**). The m68k backend handles
+  code generation; the practical barrier is each language's runtime
+  requirements, not the compiler.
 - **FFI ergonomics.** LINE_A opcodes (0xAxxx, ~4096 slots) trap to a host
   hypercall handler with full register access. No i32-only marshaling.
 - **Isolation.** Per-instance `cf_cpu` + bus callbacks bound to a private
@@ -916,6 +919,85 @@ the scheduler skips it while a developer is poking around.
 
 Listen on a Unix socket per-task, gated by wiz permission.
 
+## Guest Language Support
+
+### Compiled languages (GCC frontends)
+
+Seven GCC-frontend languages have been cross-compiled and validated on
+the ColdFire V4e emulator, all passing identical test suites (recursive
+Fibonacci, Euclidean GCD, summation, bitwise manipulation, Newton's
+method square root). The m68k backend handles code generation; the real
+variable is each language's runtime requirements in a bare-metal
+environment.
+
+**Tier 1 -- production-ready.** C is the baseline. C++ with
+`-fno-exceptions -fno-rtti` produces byte-identical binaries -- it is
+C with nicer syntax, zero runtime cost. Fortran via `ISO_C_BINDING`
+needs only a C shim for `_start` and produces dramatically fewer
+instructions than C (484 vs 1,528 in testing) thanks to stricter
+aliasing guarantees (`intent(in)` parameters cannot overlap) and GCC's
+interprocedural scalar replacement (`.isra`) transforms. A builder
+writing compute-heavy scripts in Fortran gets more work done per
+credit -- the credit model naturally rewards efficient guest code
+regardless of source language.
+
+**Tier 2 -- usable with a small runtime port.** Ada with `-gnatp`
+(suppress runtime checks) compiles through `gcc` directly and produces
+code within 6% of C (1,616 instructions). It needs a C shim for entry
+and a `last_chance_handler` for unrecoverable errors -- a natural fit
+for HC_ABORT. Modula-2 needs M2RTS module-registration stubs and a
+`_ctor`/`_init` calling convention, but GM2 (GCC 13) produces clean
+ColdFire code. Both languages are realistic once the guest SDK
+stabilizes.
+
+**Tier 3 -- significant runtime gaps.** D with `-fno-druntime`
+compiles but loses float support entirely -- float-to-integer
+conversion calls runtime functions that don't exist bare-metal.
+Integer-only workarounds are possible but costly (2,466 instructions
+vs 1,528 for C on the same test suite). Objective-C and Objective-C++
+without `libobjc` have no objects, no message passing, no
+`@interface` -- the test binaries are byte-identical to C because no
+ObjC features can be used. These are not practically useful without
+porting their respective runtimes.
+
+Instruction counts from bare-metal testing (identical algorithms,
+same emulator, `-O2`):
+
+| Language       | Instructions | Runtime needs                            |
+|----------------|-------------|------------------------------------------|
+| Fortran        |         484 | C shim for `_start`                      |
+| Modula-2       |      1,251* | M2RTS stubs, `_ctor`/`_init` shim        |
+| C              |       1,528 | none (baseline)                          |
+| C++            |       1,528 | `-fno-exceptions -fno-rtti`              |
+| Ada            |       1,616 | C shim, `-gnatp`                         |
+| D              |       2,466 | `object.d` stub, no floats               |
+
+\* Modula-2 ran 3/5 tests natively; 2/5 hardcoded in C shim due to
+module export limitations. ObjC/ObjC++ omitted -- byte-identical to C
+(no ObjC features usable without `libobjc`).
+
+The v0/v1 guest SDK (`mud.h`) targets C. C++ and Fortran are viable
+from day one with minimal additional tooling (a `-fno-exceptions` flag
+and a `_start` shim respectively). Ada and Modula-2 are realistic
+stretch goals. Supporting a new compiled language means providing an
+entry-point shim that works with the syspage and env block -- not
+porting an entire language runtime.
+
+### Interpreted language VMs as CF guests
+
+Doubly-sandboxed: the language's own VM enforces type/GC discipline,
+the CF emulator catches anything that escapes.
+
+- **Lua 5.4** -- ~24 KLOC portable C, needs only newlib + a tiny shim.
+  Stub `os.*` with hypercalls.
+- **MicroPython** -- similar story, larger footprint.
+- **QuickJS** -- ~70 KLOC, runs on freestanding targets. Gives you
+  TypeScript-via-`tsc`-strip-types-then-run-on-QuickJS-on-CF.
+- **mruby**, **Wren**, **Janet**, **Forth** ([ATLAST][3]) -- all viable.
+
+TypeScript itself has no native m68k backend; QuickJS-on-CF is the
+pragmatic path.
+
 ## What We Give Up vs Wasm
 
 - Load-time validation guarantees (don't need them -- semi-trusted
@@ -945,26 +1027,12 @@ Listen on a Unix socket per-task, gated by wiz permission.
 - [ ] Reply handle reaper: configurable timeout range (30--300s),
       system-wide hash table sizing, snapshot/restore expiry semantics.
 - [ ] Persistence format for task snapshots (and `tmp:` policy within).
-- [ ] Builder docs: writing a program in C, Pascal, Forth, or 68k asm;
-      where to find newlib; what the hypercall shim looks like.
+- [ ] Builder docs: writing a program in C, C++, Fortran, Pascal, or
+      68k asm; language-specific runtime requirements; where to find
+      newlib; what the hypercall shim looks like.
 - [ ] v2: typed hypercalls for non-obj domains (`user:`, `area:`, ...).
 - [ ] v2: GDB stub.
 - [ ] v2: multi-core scheduler (work-stealing across MUD cores).
-
-## Stretch: Higher-Level Languages as CF Guests
-
-Doubly-sandboxed: the language's own VM enforces type/GC discipline,
-the CF emulator catches anything that escapes.
-
-- **Lua 5.4** -- ~24 KLOC portable C, needs only newlib + a tiny shim.
-  Stub `os.*` with hypercalls.
-- **MicroPython** -- similar story, larger footprint.
-- **QuickJS** -- ~70 KLOC, runs on freestanding targets. Gives you
-  TypeScript-via-`tsc`-strip-types-then-run-on-QuickJS-on-CF.
-- **mruby**, **Wren**, **Janet**, **Forth** ([ATLAST][3]) -- all viable.
-
-TypeScript itself has no native m68k backend; QuickJS-on-CF is the
-pragmatic path.
 
 ## Estimated Effort
 
