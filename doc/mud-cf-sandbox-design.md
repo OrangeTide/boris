@@ -7,6 +7,50 @@ Items**). v0 (the throwaway proof-of-concept) has a much smaller scope;
 v1 is what gets the freeze discipline.
 :::
 
+## Introduction
+
+This document describes a script sandbox for the boris MUD server
+built on a ColdFire V4e CPU emulator (~2200 LOC). Each
+script, NPC, or area runs in its own emulator instance with private
+RAM. Guest code communicates with the host through LINE_A opcodes
+(0xAxxx), which trap into a fixed set of 22 hypercalls -- the v1
+frozen ABI. Isolation comes from user-mode trapping, bus callback
+bounds checking, seccomp on the host process, and credit-budget
+preemption, not from language-level guarantees.
+
+There is no ambient filesystem. A task starts with a set of directory
+file descriptors in its fd table, and that fd table is the entire
+security boundary. HC_OPENAT takes a dirfd, a path, and intent flags
+(O_BLOB, O_OBJECT, O_MSGCHAN, etc.) and returns a capability-scoped
+fd. Parents delegate narrowed capabilities to children at spawn time.
+There is no mechanism by which a task can manufacture a dirfd it was
+not granted.
+
+Tasks communicate through QNX-style synchronous message passing.
+HC_MSG_SEND blocks the caller until the receiver replies or a timeout
+expires. Reply handles are 64-bit random tokens in a global hash
+table -- delegatable to helper tasks, with a single reaper for
+timeout expiry. Message passing is also how tasks reach typed domains
+(user:, area:) that have no direct hypercalls in v1: a trusted
+service task owns the domain and accepts requests on a message
+channel.
+
+The scheduler charges one credit per CF instruction and a weighted
+cost per hypercall from a tunable host-side table. Three thresholds
+govern execution: a per-quantum budget (preemption), a lifetime
+counter (accounting), and a lifetime cap (kill runaways). The
+scheduler runs single-threaded on one RPi5 core with cooperative
+yielding and forced preemption -- the same mechanism Erlang/BEAM uses
+under the name "reductions."
+
+Task state snapshots are a memcpy of the CPU registers plus the RAM
+block. Write that to disk and the script hibernates across server
+reboots. The syspage address is frozen so guest pointers stay valid
+on restore; in-flight message sends are unblocked with -EINTR. This
+is the key practical advantage over Wasm, where runtime-internal
+state (stack, locals) is not part of the spec and cannot be
+portably serialized.
+
 ## Release Plan
 
 - **v0 -- proof-of-concept.** Throwaway ABI. Goal is end-to-end wire-up:
