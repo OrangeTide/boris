@@ -12,4 +12,7 @@ int user_init(void);
 void user_shutdown(void);
 void user_put(struct user **user);
 void user_get(struct user *user);
+const char *user_extra_get(struct user *u, const char *name);
+int user_extra_set(struct user *u, const char *name, const char *value);
+int user_save(struct user *u);
 #endif

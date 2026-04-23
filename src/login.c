@@ -31,6 +31,7 @@
 #include <eventlog.h>
 #include <game.h>
 #include <user.h>
+#include <charset.h>
 
 /** undocumented - please add documentation. */
 void
@@ -52,6 +53,15 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 		/* verify the password */
 		if (user_password_check(u, line)) {
 			telnetclient_setuser(cl, u);
+
+			/* apply saved charset preference */
+			const char *charset_pref = user_extra_get(u, "charset");
+			if (charset_pref) {
+				struct charset *cs = charset_load(charset_pref);
+				if (cs)
+					telnetclient_set_encoding(cl, cs);
+			}
+
 			eventlog_signon(cl->state.login.username, telnetclient_socket_name(cl));
 			telnetclient_printf(cl, "Hello, %s.\n\n", user_username(u));
 			menu_start_input(cl, &gamemenu_main);

@@ -91,6 +91,8 @@ static const struct command_table {
 	{ "stat", command_do_stat },
 	{ "roll", command_do_roll },
 	{ "resist", command_do_resist },
+	{ "charset", command_do_charset },
+	{ "chartest", command_do_chartest },
 };
 
 /**

@@ -25,4 +25,6 @@ struct telnetserver *telnetserver_next(struct telnetserver *server);
 void telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u);
 void telnetclient_setcharacter(DESCRIPTOR_DATA *cl, struct character *ch);
 struct character *telnetclient_character(DESCRIPTOR_DATA *cl);
+void telnetclient_set_encoding(DESCRIPTOR_DATA *cl, struct charset *cs);
+struct charset *telnetclient_get_encoding(DESCRIPTOR_DATA *cl);
 #endif
