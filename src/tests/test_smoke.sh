@@ -183,6 +183,7 @@ run_test menu_quit
 run_test bad_login
 run_test new_user
 run_test enter_game
+run_test charset_command
 
 echo "%%%%%%%%%%%% END-TEST : $PASS passed, $FAIL failed (of $TOTAL)"
 

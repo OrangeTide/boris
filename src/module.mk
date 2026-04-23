@@ -50,6 +50,7 @@ boris_SRCS = \
 	cmd/stat.c \
 	cmd/time.c \
 	cmd/yell.c \
+	cmd/charset.c \
 	worldclock/worldclock.c \
 	web/server/webserver.c
 boris_LIBS = \

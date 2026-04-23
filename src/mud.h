@@ -5,6 +5,7 @@
 #include <list.h>
 #include <acs.h>
 
+struct charset;
 struct form_state;
 struct menuinfo;
 struct user;
@@ -39,6 +40,7 @@ struct descriptor_data {
 	unsigned nr_channel; /**< number of channels monitoring. */
 	struct channel **channel; /**< pointer to every monitoring channel. */
 	struct channel_member channel_member;
+	struct charset *encoding;
 };
 
 typedef struct mud_data MUD_DATA;

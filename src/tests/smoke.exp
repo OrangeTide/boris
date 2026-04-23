@@ -8,6 +8,7 @@
 #   bad_login    - connect, attempt login with bad creds, see error
 #   new_user     - create account, login, reach main menu
 #   enter_game   - login, enter game world, run help, quit
+#   charset_command - login, set charset, run chartest, reset
 
 set timeout 10
 set port [lindex $argv 0]
@@ -221,6 +222,97 @@ switch -- $test {
 		expect {
 			eof { pass "enter_game: entered game, look and movement work" }
 			timeout { fail "enter_game: no disconnect after quit" }
+		}
+	}
+
+	charset_command {
+		# login with the account created by new_user
+		send "L\r"
+		expect {
+			"Username:" {}
+			timeout { fail "charset_command: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "charset_command: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {}
+			-re "Invalid|invalid" {
+				fail "charset_command: login rejected"
+			}
+			timeout { fail "charset_command: no main menu after login" }
+		}
+		expect {
+			"Choose:" {}
+			timeout { fail "charset_command: no menu prompt" }
+		}
+		# enter the game
+		send "E\r"
+		expect {
+			"> " {}
+			timeout { fail "charset_command: no command prompt" }
+		}
+		# check default encoding
+		send "charset\r"
+		expect {
+			"UTF-8" {}
+			timeout { fail "charset_command: charset did not show default" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "charset_command: no prompt after charset" }
+		}
+		# set to cp437
+		send "charset cp437\r"
+		expect {
+			"Encoding set to CP437" {}
+			timeout { fail "charset_command: charset cp437 failed" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "charset_command: no prompt after charset set" }
+		}
+		# verify it stuck
+		send "charset\r"
+		expect {
+			"CP437" {}
+			timeout { fail "charset_command: encoding not showing CP437" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "charset_command: no prompt after charset check" }
+		}
+		# run chartest to verify output is produced
+		send "chartest\r"
+		expect {
+			"Box drawing" {}
+			timeout { fail "charset_command: chartest no box drawing section" }
+		}
+		expect {
+			"Currency" {}
+			timeout { fail "charset_command: chartest no currency section" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "charset_command: no prompt after chartest" }
+		}
+		# reset to utf8
+		send "charset utf8\r"
+		expect {
+			"UTF-8" {}
+			timeout { fail "charset_command: reset to utf8 failed" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "charset_command: no prompt after reset" }
+		}
+		send "quit\r"
+		expect {
+			eof { pass "charset_command: charset and chartest commands work" }
+			timeout { fail "charset_command: no disconnect after quit" }
 		}
 	}
 
