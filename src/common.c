@@ -744,8 +744,8 @@ heapqueue_test(void)
 /**
  * a large bitarray that can be allocated to any size.
  * @see bitmap_init bitmap_free bitmap_resize bitmap_clear bitmap_set
- *      bitmap_next_set bitmap_next_clear bitmap_loadmem bitmap_length
- *      bitmap_test
+ *	bitmap_next_set bitmap_next_clear bitmap_loadmem bitmap_length
+ *	bitmap_test
  */
 struct bitmap {
 	unsigned *bitmap;
@@ -1397,6 +1397,8 @@ mud_config_init(void)
 #ifdef CONFIG_SECCOMP
 	mud_config.security_seccomp = 1;
 #endif
+	mud_config.daemonize = 0;
+	mud_config.pid_file = strdup("boris.pid");
 }
 
 /**
@@ -1481,6 +1483,8 @@ mud_config_process(void)
 #ifdef CONFIG_SECCOMP
 	config_watch(&cfg, "security.seccomp", do_config_uint, &mud_config.security_seccomp);
 #endif
+	config_watch(&cfg, "server.daemonize", do_config_uint, &mud_config.daemonize);
+	config_watch(&cfg, "server.pidfile", do_config_string, &mud_config.pid_file);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", mud_config_show, 0);
 #endif

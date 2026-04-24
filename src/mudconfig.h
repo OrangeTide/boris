@@ -40,6 +40,8 @@ struct mud_config {
 #ifdef CONFIG_SECCOMP
 	unsigned security_seccomp;
 #endif
+	unsigned daemonize;
+	char *pid_file;
 };
 
 typedef struct mud_config MUD_CONFIG;
