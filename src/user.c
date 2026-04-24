@@ -659,6 +659,31 @@ user_shutdown(void)
 	user_id_freelist = NULL;
 }
 
+const char *
+user_extra_get(struct user *u, const char *name)
+{
+	if (!u || !name)
+		return NULL;
+	struct attr_entry *at = attr_find(&u->extra_values, name);
+	return at ? at->value : NULL;
+}
+
+int
+user_extra_set(struct user *u, const char *name, const char *value)
+{
+	if (!u || !name)
+		return 0;
+	return parse_attr(name, value, &u->extra_values);
+}
+
+int
+user_save(struct user *u)
+{
+	if (!u)
+		return 0;
+	return user_write(u);
+}
+
 /**
  * decrement a reference count.
  */

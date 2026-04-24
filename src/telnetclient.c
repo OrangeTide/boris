@@ -41,6 +41,7 @@
 #include <menu.h>
 #include <mth.h>
 #include <buf.h>
+#include <charset.h>
 
 #define OK (0)
 #define ERR (-1)
@@ -117,6 +118,18 @@ telnetclient_on_data(net_event *e)
 		  outlen);
 
 	int size = translate_telopts(cl, (unsigned char*)e->data, e->size, output, 0);
+
+	if (cl->encoding && size > 0) {
+		char conv[2048];
+		int conv_len = charset_to_utf8(cl->encoding,
+					       (const char *)output, size,
+					       conv, sizeof(conv));
+		if (conv_len > 0 && (size_t)conv_len <= outlen) {
+			memcpy(output, conv, conv_len);
+			size = conv_len;
+		}
+	}
+
 	buf_commit(cl->linebuf, size);
 
 	size_t cmdlen;
@@ -354,7 +367,15 @@ telnetclient_puts(DESCRIPTOR_DATA *cl, const char *s)
 	assert(cl->stream != NULL);
 
 	size_t n = strlen(s);
-	write_escaped(cl, s, n);
+
+	if (cl->encoding) {
+		char buf[2048];
+		int len = charset_from_utf8(cl->encoding, s, n, buf, sizeof(buf));
+		write_escaped(cl, buf, len);
+	} else {
+		write_escaped(cl, s, n);
+	}
+
 	cl->prompt_flag = 0;
 
 	return OK;
@@ -371,7 +392,16 @@ telnetclient_vprintf(DESCRIPTOR_DATA *cl, const char *fmt, va_list ap)
 	char buf[1024];
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 
-	write_escaped(cl, buf, strlen(buf));
+	size_t n = strlen(buf);
+
+	if (cl->encoding) {
+		char conv[2048];
+		int len = charset_from_utf8(cl->encoding, buf, n, conv, sizeof(conv));
+		write_escaped(cl, conv, len);
+	} else {
+		write_escaped(cl, buf, n);
+	}
+
 	cl->prompt_flag = 0;
 
 	return OK;
@@ -775,4 +805,17 @@ struct telnetserver *
 telnetserver_next(struct telnetserver *server)
 {
 	return LIST_NEXT(server, list);
+}
+
+void
+telnetclient_set_encoding(DESCRIPTOR_DATA *cl, struct charset *cs)
+{
+	if (cl)
+		cl->encoding = cs;
+}
+
+struct charset *
+telnetclient_get_encoding(DESCRIPTOR_DATA *cl)
+{
+	return cl ? cl->encoding : NULL;
 }
