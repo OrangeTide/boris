@@ -237,7 +237,7 @@ form_menu_show(DESCRIPTOR_DATA *cl, const struct form *f, struct form_state *fs)
 static void
 form_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 {
-	struct form_state *fs = cl->state.form;
+	struct form_state *fs = telnetclient_get_form(cl);
 	const struct form *f = fs->form;
 	char **value = &fs->value[fs->curritem->value_index];
 
@@ -287,7 +287,7 @@ form_menu_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 		return;
 	}
 
-	struct form_state *fs = cl->state.form;
+	struct form_state *fs = telnetclient_get_form(cl);
 	if (!fs) {
 		LOG_ERROR("No form state. [%s]", telnetclient_socket_name(cl));
 		return;
@@ -343,7 +343,7 @@ form_menu_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 static void
 form_state_free(DESCRIPTOR_DATA *cl)
 {
-	struct form_state *fs = cl->state.form;
+	struct form_state *fs = telnetclient_get_form(cl);
 	unsigned i;
 	LOG_DEBUG("%s:freeing state", telnetclient_socket_name(cl));
 
@@ -364,7 +364,7 @@ form_state_free(DESCRIPTOR_DATA *cl)
 	fs->value = 0;
 	fs->nr_value = 0;
 	free(fs);
-	cl->state.form = NULL;
+	telnetclient_set_form(cl, NULL);
 }
 
 /** undocumented - please add documentation. */
@@ -423,8 +423,8 @@ form_createaccount_username_check(DESCRIPTOR_DATA *cl, const char *str)
 	return 1;
 failure:
 	telnetclient_puts(cl, mud_config.msg_tryagain);
-	if (cl->state.form) {
-		telnetclient_setprompt(cl, cl->state.form->curritem->prompt);
+	if (telnetclient_get_form(cl)) {
+		telnetclient_setprompt(cl, telnetclient_get_form(cl)->curritem->prompt);
 	}
 
 	return 0;
@@ -436,7 +436,7 @@ form_createaccount_password_check(DESCRIPTOR_DATA *cl, const char *str)
 	TRACE_ENTER();
 
 	assert(cl != NULL);
-	assert(cl->state.form->form != NULL);
+	assert(telnetclient_get_form(cl)->form != NULL);
 
 	if (str && strlen(str) > 3) {
 		LOG_DEBUG("success.");
@@ -445,7 +445,7 @@ form_createaccount_password_check(DESCRIPTOR_DATA *cl, const char *str)
 
 	/* failure */
 	telnetclient_puts(cl, mud_config.msg_tryagain);
-	telnetclient_setprompt(cl, cl->state.form->curritem->prompt);
+	telnetclient_setprompt(cl, telnetclient_get_form(cl)->curritem->prompt);
 
 	return 0;
 }
@@ -455,7 +455,7 @@ static int
 form_createaccount_password2_check(DESCRIPTOR_DATA *cl, const char *str)
 {
 	const char *password1;
-	struct form_state *fs = cl->state.form;
+	struct form_state *fs = telnetclient_get_form(cl);
 
 	TRACE_ENTER();
 
@@ -539,8 +539,9 @@ form_start(void *p, long unused2, void *form)
 	if (f->message)
 		telnetclient_puts(cl, f->message);
 
-	cl->state_free = form_state_free;
-	struct form_state *fs = cl->state.form = form_state_new(f);
+	telnetclient_set_state_free(cl, form_state_free);
+	struct form_state *fs = form_state_new(f);
+	telnetclient_set_form(cl, fs);
 	fs->curritem = LIST_TOP(f->items);
 	fs->nr_value = f->item_count;
 	fs->value = calloc(fs->nr_value, sizeof * fs->value);

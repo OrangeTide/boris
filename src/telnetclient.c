@@ -42,6 +42,7 @@
 #include <mth.h>
 #include <buf.h>
 #include <charset.h>
+#include <webclient.h>
 
 #define OK (0)
 #define ERR (-1)
@@ -359,21 +360,25 @@ write_escaped(DESCRIPTOR_DATA *d, const char *txt, int length)
 	}
 }
 
-/** write a null terminated string to a telnetclient buffer. */
+/** write a null terminated string to a client buffer. */
 int
 telnetclient_puts(DESCRIPTOR_DATA *cl, const char *s)
 {
 	assert(cl != NULL);
-	assert(cl->stream != NULL);
 
 	size_t n = strlen(s);
 
-	if (cl->encoding) {
-		char buf[2048];
-		int len = charset_from_utf8(cl->encoding, s, n, buf, sizeof(buf));
-		write_escaped(cl, buf, len);
+	if (cl->ops && cl->ops->puts) {
+		cl->ops->puts(cl, s, n);
 	} else {
-		write_escaped(cl, s, n);
+		assert(cl->stream != NULL);
+		if (cl->encoding) {
+			char buf[2048];
+			int len = charset_from_utf8(cl->encoding, s, n, buf, sizeof(buf));
+			write_escaped(cl, buf, len);
+		} else {
+			write_escaped(cl, s, n);
+		}
 	}
 
 	cl->prompt_flag = 0;
@@ -381,12 +386,11 @@ telnetclient_puts(DESCRIPTOR_DATA *cl, const char *s)
 	return OK;
 }
 
-/** vprintf for a telnetclient output buffer. */
+/** vprintf for a client output buffer. */
 int
 telnetclient_vprintf(DESCRIPTOR_DATA *cl, const char *fmt, va_list ap)
 {
 	assert(cl != NULL);
-	assert(cl->stream != NULL);
 	assert(fmt != NULL);
 
 	char buf[1024];
@@ -394,12 +398,17 @@ telnetclient_vprintf(DESCRIPTOR_DATA *cl, const char *fmt, va_list ap)
 
 	size_t n = strlen(buf);
 
-	if (cl->encoding) {
-		char conv[2048];
-		int len = charset_from_utf8(cl->encoding, buf, n, conv, sizeof(conv));
-		write_escaped(cl, conv, len);
+	if (cl->ops && cl->ops->puts) {
+		cl->ops->puts(cl, buf, n);
 	} else {
-		write_escaped(cl, buf, n);
+		assert(cl->stream != NULL);
+		if (cl->encoding) {
+			char conv[2048];
+			int len = charset_from_utf8(cl->encoding, buf, n, conv, sizeof(conv));
+			write_escaped(cl, conv, len);
+		} else {
+			write_escaped(cl, buf, n);
+		}
 	}
 
 	cl->prompt_flag = 0;
@@ -685,11 +694,15 @@ telnetclient_isstate(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA *cl
 		(cl->prompt_string == prompt || strcmp(cl->prompt_string, prompt));
 }
 
-/** mark a telnetclient to be closed and freed. */
+/** mark a client to be closed and freed. */
 void
 telnetclient_close(DESCRIPTOR_DATA *cl)
 {
-	if (cl && cl->stream) {
+	if (!cl)
+		return;
+	if (cl->ops && cl->ops->close) {
+		cl->ops->close(cl);
+	} else if (cl->stream) {
 		struct net_stream *stream = cl->stream;
 		cl->stream = NULL;
 		net_close(stream);
@@ -700,7 +713,7 @@ telnetclient_close(DESCRIPTOR_DATA *cl)
 void
 telnetclient_prompt_refresh(DESCRIPTOR_DATA *cl)
 {
-	if (cl && cl->type == CLIENT_TYPE_USER
+	if (cl && (cl->type == CLIENT_TYPE_USER || cl->type == CLIENT_TYPE_WEB)
 	    && cl->prompt_string && !cl->prompt_flag) {
 		telnetclient_output_prompt(cl);
 	}
@@ -739,6 +752,8 @@ telnetclient_socket_name(DESCRIPTOR_DATA *cl)
 
 	if (cl && cl->stream) {
 		snprintf(tmp, sizeof(tmp), "%s:%u", net_get_address(cl->stream), net_get_port(cl->stream));
+	} else if (cl && cl->type == CLIENT_TYPE_WEB) {
+		snprintf(tmp, sizeof(tmp), "web");
 	} else {
 		snprintf(tmp, sizeof(tmp), "INVALID");
 	}
@@ -807,6 +822,78 @@ telnetserver_next(struct telnetserver *server)
 	return LIST_NEXT(server, list);
 }
 
+DESCRIPTOR_DATA *
+telnetclient_webclient_new(struct web_client *wc, const struct client_ops *ops)
+{
+	DESCRIPTOR_DATA *cl = calloc(1, sizeof(*cl));
+	if (!cl)
+		return NULL;
+
+	*cl = (DESCRIPTOR_DATA){
+		.type = CLIENT_TYPE_WEB,
+		.ops = ops,
+		.client_ctx = wc,
+	};
+
+	cl->linebuf = buf_new();
+	cl->state_free = NULL;
+	telnetclient_clear_statedata(cl);
+	cl->prompt_string = NULL;
+	cl->prompt_flag = 0;
+
+	cl->nr_channel = 0;
+	cl->channel = NULL;
+	cl->channel_member.send = telnetclient_channel_send;
+	cl->channel_member.p = cl;
+
+	telnetclient_channel_add(cl, channel_public(CHANNEL_SYS));
+
+	telnetclient_puts(cl, mud_config.msgfile_welcome);
+	menu_start_input(cl, &gamemenu_login);
+
+	return cl;
+}
+
+void
+telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl)
+{
+	if (!cl)
+		return;
+
+	eventlog_signoff(telnetclient_username(cl), "web");
+
+	{
+		unsigned i;
+		struct channel_member *exclude_list[] = { &cl->channel_member };
+		const char *name = telnetclient_username(cl);
+		for (i = 0; i < cl->nr_channel; i++) {
+			channel_broadcast(cl->channel[i], exclude_list, 1,
+				"%s has left the channel.\n", name);
+		}
+	}
+
+	cl->channel_member.send = NULL;
+	cl->channel_member.p = NULL;
+	while (cl->nr_channel)
+		telnetclient_channel_remove(cl, cl->channel[0]);
+
+	telnetclient_clear_statedata(cl);
+
+	free(cl->prompt_string);
+	cl->prompt_string = NULL;
+
+	buf_free(cl->linebuf);
+	cl->linebuf = NULL;
+
+	if (cl->character) {
+		character_put(cl->character);
+		cl->character = NULL;
+	}
+
+	user_put(&cl->user);
+	free(cl);
+}
+
 void
 telnetclient_set_encoding(DESCRIPTOR_DATA *cl, struct charset *cs)
 {
@@ -818,4 +905,53 @@ struct charset *
 telnetclient_get_encoding(DESCRIPTOR_DATA *cl)
 {
 	return cl ? cl->encoding : NULL;
+}
+
+struct user *
+telnetclient_user(DESCRIPTOR_DATA *cl)
+{
+	return cl ? cl->user : NULL;
+}
+
+const struct menuinfo *
+telnetclient_get_menu(DESCRIPTOR_DATA *cl)
+{
+	return cl->state.menu;
+}
+
+void
+telnetclient_set_menu(DESCRIPTOR_DATA *cl, const struct menuinfo *menu)
+{
+	cl->state.menu = menu;
+}
+
+const char *
+telnetclient_get_login_username(DESCRIPTOR_DATA *cl)
+{
+	return cl->state.login.username;
+}
+
+void
+telnetclient_set_login_username(DESCRIPTOR_DATA *cl, const char *name)
+{
+	snprintf(cl->state.login.username,
+		 sizeof(cl->state.login.username), "%s", name);
+}
+
+struct form_state *
+telnetclient_get_form(DESCRIPTOR_DATA *cl)
+{
+	return cl->state.form;
+}
+
+void
+telnetclient_set_form(DESCRIPTOR_DATA *cl, struct form_state *form)
+{
+	cl->state.form = form;
+}
+
+void
+telnetclient_set_state_free(DESCRIPTOR_DATA *cl, void (*fn)(DESCRIPTOR_DATA *))
+{
+	cl->state_free = fn;
 }

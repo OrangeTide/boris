@@ -5,14 +5,16 @@
 
 #include <mongoose.h>
 #include <webserver.h>
+#include <webclient.h>
+#include <msgqueue.h>
 #include <pthread.h>
 #include <signal.h>
+#include <unistd.h>
 
 #define OK  (0)
 #define ERR (-1)
 
 static struct webserver_context web_context;
-static struct mg_connection *upstream;
 static sig_atomic_t interrupted = 0;
 static pthread_t webserver_thread;
 
@@ -20,62 +22,115 @@ static const char *web_root = "./bin/www";
 static struct mg_mgr webserver_mgr;
 
 static void
-webserver_handler(struct mg_connection *c, int ev, void *ev_data, void *fn_data)
+write_game_wakeup(void)
 {
-
-	if (ev == MG_EV_WS_OPEN) {
-		mg_send(upstream, "@NEWCLIENT@", 12);
-		LOG_INFO("websocket client connected");
-		mg_ws_send(c, mud_config.msgfile_welcome, strlen(mud_config.msgfile_welcome), WEBSOCKET_OP_TEXT);
-		char json_sample[] = "{\"data\": {\"motd\": \"Welcome to BorisMUD\"}}\n";
-		mg_ws_send(c, json_sample, strlen(json_sample), WEBSOCKET_OP_TEXT);
-	} else if (ev == MG_EV_HTTP_MSG) {
-		struct mg_http_message *hm = (struct mg_http_message *)ev_data;
-		if (mg_http_match_uri(hm, "/ws")) {
-			// Upgrade to websocket. From now on, a connection is a full-duplex
-			// Websocket connection, which will receive MG_EV_WS_MSG events.
-			mg_ws_upgrade(c, hm, NULL);
-		} else if (mg_http_match_uri(hm, "/api")) {
-			// Serve REST response
-			mg_http_reply(c, 200, "", "{\"result\": \"%s\"}\n", "boris");
-		} else {
-			// Serve static files
-			struct mg_http_serve_opts opts = { .root_dir = web_root };
-			mg_http_serve_dir(c, ev_data, &opts);
-		}
-	} else if (ev == MG_EV_WS_MSG) {
-		// Got websocket frame. Received data is wm->data. Echo it back!
-		struct mg_ws_message *wm = (struct mg_ws_message *)ev_data;
-		mg_ws_send(c, wm->data.ptr, wm->data.len, WEBSOCKET_OP_TEXT);
-		mg_send(upstream, "@MESSAGE@", 10);
+	char b = 1;
+	int fd = webclient_get_wake_fd();
+	if (fd >= 0) {
+		if (write(fd, &b, 1) < 0) { /* best-effort wakeup */ }
 	}
-	(void)fn_data;
 }
 
 static void
-webserver_upstream_handler(struct mg_connection *c, int ev, void *ev_data, void *fn_data)
+drain_output_queues(void)
 {
-	if (ev == MG_EV_CONNECT) {
-		LOG_INFO("Connected to main thread");
-	} else if (ev == MG_EV_CLOSE) {
-		LOG_INFO("Disconnected from main thread");
-	} else if (ev == MG_EV_POLL) {
-		// Nothing yet
+	int need_game_wakeup = 0;
+
+	webclient_lock();
+	for (struct web_client *wc = webclient_first(); wc; wc = wc->next) {
+		if (!wc->ws_conn)
+			continue;
+
+		struct client_msg *msg;
+		while ((msg = msgqueue_get(&wc->output_q)) != NULL) {
+			mg_ws_send(wc->ws_conn, msg->data, msg->len,
+				   WEBSOCKET_OP_TEXT);
+			free(msg);
+		}
+
+		if (wc->state == WC_CLOSING) {
+			struct mg_connection *conn = wc->ws_conn;
+			wc->ws_conn = NULL;
+			conn->fn_data = NULL;
+			conn->is_closing = 1;
+			need_game_wakeup = 1;
+		}
 	}
-	(void)c;
+	webclient_unlock();
+
+	if (need_game_wakeup)
+		write_game_wakeup();
+}
+
+static void
+wakeup_handler(struct mg_connection *c, int ev, void *ev_data,
+	       void *fn_data)
+{
+	if (ev == MG_EV_READ) {
+		c->recv.len = 0;
+		drain_output_queues();
+	}
 	(void)ev_data;
 	(void)fn_data;
 }
 
-void *
+static void
+webserver_handler(struct mg_connection *c, int ev, void *ev_data,
+		  void *fn_data)
+{
+	if (ev == MG_EV_WS_OPEN) {
+		struct web_client *wc = webclient_new(c);
+		if (!wc) {
+			LOG_ERROR("could not create web client");
+			c->is_closing = 1;
+			return;
+		}
+		c->fn_data = wc;
+		LOG_INFO("websocket client connected");
+		write_game_wakeup();
+	} else if (ev == MG_EV_HTTP_MSG) {
+		struct mg_http_message *hm = (struct mg_http_message *)ev_data;
+		if (mg_http_match_uri(hm, "/ws")) {
+			mg_ws_upgrade(c, hm, NULL);
+		} else if (mg_http_match_uri(hm, "/api")) {
+			mg_http_reply(c, 200, "",
+				      "{\"result\": \"%s\"}\n", "boris");
+		} else {
+			struct mg_http_serve_opts opts = {
+				.root_dir = web_root
+			};
+			mg_http_serve_dir(c, ev_data, &opts);
+		}
+	} else if (ev == MG_EV_WS_MSG) {
+		struct web_client *wc = (struct web_client *)c->fn_data;
+		struct mg_ws_message *wm = (struct mg_ws_message *)ev_data;
+		if (wc) {
+			msgqueue_put(&wc->input_q, wm->data.ptr,
+				     (int)wm->data.len);
+			write_game_wakeup();
+		}
+	} else if (ev == MG_EV_CLOSE) {
+		struct web_client *wc = (struct web_client *)c->fn_data;
+		if (wc) {
+			webclient_lock();
+			wc->state = WC_CLOSING;
+			wc->ws_conn = NULL;
+			webclient_unlock();
+			c->fn_data = NULL;
+			write_game_wakeup();
+		}
+	}
+	(void)fn_data;
+}
+
+static void *
 webserver_service(void *arg)
 {
-	const struct webserver_context *options = (struct webserver_context *)arg;
-	char upstream_addr[32] = { 0 };
-	snprintf(upstream_addr, 31, "tcp://localhost:%d", options->upstream_port);
+	const struct webserver_context *options =
+		(struct webserver_context *)arg;
 
-	upstream = mg_connect(&webserver_mgr, upstream_addr,
-			      webserver_upstream_handler, NULL);
+	mg_wrapfd(&webserver_mgr, options->wake_fd, wakeup_handler, NULL);
+
 	while (!interrupted) {
 		mg_mgr_poll(&webserver_mgr, 1000);
 	}
@@ -90,11 +145,13 @@ webserver_init(struct webserver_context ctx, unsigned port)
 
 	mg_mgr_init(&webserver_mgr);
 	snprintf(webserver_addr, 31, "http://0.0.0.0:%d", port);
-	mg_http_listen(&webserver_mgr, webserver_addr, webserver_handler, NULL);
+	mg_http_listen(&webserver_mgr, webserver_addr,
+		       webserver_handler, NULL);
 
 	LOG_INFO("Starting webserver..");
 
-	int err = pthread_create(&webserver_thread, NULL, webserver_service, (void *)&web_context);
+	int err = pthread_create(&webserver_thread, NULL,
+				 webserver_service, (void *)&web_context);
 	if (err) {
 		LOG_ERROR("failed to start webserver service");
 		return ERR;
@@ -116,5 +173,4 @@ webserver_shutdown(void)
 	}
 	mg_mgr_free(&webserver_mgr);
 	LOG_INFO("webserver ended");
-	return;
 }

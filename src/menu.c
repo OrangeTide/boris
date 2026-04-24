@@ -37,7 +37,7 @@
 static void
 menu_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 {
-	menu_input(cl, cl->state.menu, line);
+	menu_input(cl, telnetclient_get_menu(cl), line);
 }
 
 /** start menu input mode for a telnet client. */
@@ -45,8 +45,8 @@ void
 menu_start_input(DESCRIPTOR_DATA *cl, const struct menuinfo *menu)
 {
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
-	cl->state.menu = menu;
-	menu_show(cl, cl->state.menu);
+	telnetclient_set_menu(cl, menu);
+	menu_show(cl, telnetclient_get_menu(cl));
 	telnetclient_start_lineinput(cl, menu_lineinput, mud_config.menu_prompt);
 }
 

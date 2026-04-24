@@ -27,4 +27,15 @@ void telnetclient_setcharacter(DESCRIPTOR_DATA *cl, struct character *ch);
 struct character *telnetclient_character(DESCRIPTOR_DATA *cl);
 void telnetclient_set_encoding(DESCRIPTOR_DATA *cl, struct charset *cs);
 struct charset *telnetclient_get_encoding(DESCRIPTOR_DATA *cl);
+struct web_client;
+DESCRIPTOR_DATA *telnetclient_webclient_new(struct web_client *wc, const struct client_ops *ops);
+void telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl);
+struct user *telnetclient_user(DESCRIPTOR_DATA *cl);
+const struct menuinfo *telnetclient_get_menu(DESCRIPTOR_DATA *cl);
+void telnetclient_set_menu(DESCRIPTOR_DATA *cl, const struct menuinfo *menu);
+const char *telnetclient_get_login_username(DESCRIPTOR_DATA *cl);
+void telnetclient_set_login_username(DESCRIPTOR_DATA *cl, const char *name);
+struct form_state *telnetclient_get_form(DESCRIPTOR_DATA *cl);
+void telnetclient_set_form(DESCRIPTOR_DATA *cl, struct form_state *form);
+void telnetclient_set_state_free(DESCRIPTOR_DATA *cl, void (*fn)(DESCRIPTOR_DATA *));
 #endif
