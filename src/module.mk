@@ -52,6 +52,8 @@ boris_SRCS = \
 	cmd/yell.c \
 	cmd/charset.c \
 	worldclock/worldclock.c \
+	msgqueue.c \
+	web/server/webclient.c \
 	web/server/webserver.c
 boris_LIBS = \
 	hashtable log scrypt util help iox net passwd obj entity rpg database security \

@@ -44,7 +44,11 @@
 #include <mth.h>
 #include <form.h>
 #include <webserver.h>
+#include <webclient.h>
+#include <msgqueue.h>
+#include <iox_fd.h>
 #include <security.h>
+#include <unistd.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
 #if (defined(_MSC_VER) || defined(__WIN32__)) && !defined(WIN32)
@@ -80,6 +84,7 @@ show_version(void)
 }
 
 static struct iox_loop *g_loop;
+static int web_sv[2] = { -1, -1 };
 
 /** set by SIGHUP handler, checked in idle callback to flush caches. */
 static volatile sig_atomic_t sighup_fl;
@@ -108,6 +113,104 @@ sh_hup(struct iox_loop *loop UNUSED, int signo UNUSED, void *arg UNUSED)
 }
 
 static void
+write_wakeup(int fd)
+{
+	char b = 1;
+	if (write(fd, &b, 1) < 0) { /* best-effort wakeup */ }
+}
+
+static int
+web_ops_puts(DESCRIPTOR_DATA *cl, const char *data, size_t len)
+{
+	struct web_client *wc = cl->client_ctx;
+	if (!wc)
+		return -1;
+	msgqueue_put(&wc->output_q, data, (int)len);
+	write_wakeup(web_sv[0]);
+	return 0;
+}
+
+static void
+web_ops_close(DESCRIPTOR_DATA *cl)
+{
+	struct web_client *wc = cl->client_ctx;
+	if (!wc)
+		return;
+	webclient_lock();
+	wc->state = WC_CLOSING;
+	webclient_unlock();
+	write_wakeup(web_sv[0]);
+}
+
+static const struct client_ops web_client_ops = {
+	.puts = web_ops_puts,
+	.close = web_ops_close,
+};
+
+static void
+game_web_wakeup(struct iox_loop *loop UNUSED, int fd,
+		unsigned events UNUSED, void *arg UNUSED)
+{
+	char drain[64];
+	while (read(fd, drain, sizeof(drain)) > 0)
+		;
+
+	struct {
+		struct web_client *wc;
+		enum web_client_state state;
+		int has_conn;
+	} snaps[64];
+	int n = 0;
+
+	webclient_lock();
+	for (struct web_client *wc = webclient_first();
+	     wc && n < 64; wc = wc->next) {
+		snaps[n].wc = wc;
+		snaps[n].state = wc->state;
+		snaps[n].has_conn = (wc->ws_conn != NULL);
+		n++;
+	}
+	webclient_unlock();
+
+	for (int i = 0; i < n; i++) {
+		struct web_client *wc = snaps[i].wc;
+
+		switch (snaps[i].state) {
+		case WC_NEW:
+			wc->cl = telnetclient_webclient_new(wc,
+							    &web_client_ops);
+			if (!wc->cl) {
+				webclient_lock();
+				wc->state = WC_CLOSING;
+				webclient_unlock();
+				write_wakeup(web_sv[0]);
+				break;
+			}
+			webclient_lock();
+			wc->state = WC_ACTIVE;
+			webclient_unlock();
+			__attribute__((fallthrough));
+		case WC_ACTIVE: {
+			struct client_msg *msg;
+			while ((msg = msgqueue_get(&wc->input_q)) != NULL) {
+				if (wc->cl && wc->cl->line_input)
+					wc->cl->line_input(wc->cl, msg->data);
+				free(msg);
+			}
+			break;
+		}
+		case WC_CLOSING:
+			if (!snaps[i].has_conn && wc->cl) {
+				telnetclient_webclient_destroy(wc->cl);
+				wc->cl = NULL;
+				webclient_destroy(wc);
+			}
+			break;
+		}
+	}
+}
+
+static void
 main_idle(struct iox_loop *loop UNUSED, void *arg UNUSED)
 {
 	struct telnetserver *cur;
@@ -121,6 +224,13 @@ main_idle(struct iox_loop *loop UNUSED, void *arg UNUSED)
 	for (cur = telnetserver_first(); cur; cur = telnetserver_next(cur)) {
 		telnetclient_prompt_refresh_all(cur);
 	}
+
+	webclient_lock();
+	for (struct web_client *wc = webclient_first(); wc; wc = wc->next) {
+		if (wc->state == WC_ACTIVE && wc->cl)
+			telnetclient_prompt_refresh(wc->cl);
+	}
+	webclient_unlock();
 }
 
 /**
@@ -356,8 +466,23 @@ main(int argc, char **argv)
 
 	/* start the webserver if webserver.port is defined. */
 	if (mud_config.webserver_port > 0) {
+		if (socketpair(AF_UNIX, SOCK_STREAM, 0, web_sv) < 0) {
+			LOG_PERROR("socketpair");
+			return EXIT_FAILURE;
+		}
+		fcntl(web_sv[0], F_SETFL, O_NONBLOCK);
+		fcntl(web_sv[1], F_SETFL, O_NONBLOCK);
+
+		webclient_set_wake_fd(web_sv[1]);
+
+		if (iox_fd_add(g_loop, web_sv[0], IOX_READ,
+			       game_web_wakeup, NULL) < 0) {
+			LOG_ERROR("could not register web wakeup fd");
+			return EXIT_FAILURE;
+		}
+
 		struct webserver_context web_ctx = {
-			.upstream_port = 4445,
+			.wake_fd = web_sv[1],
 			.family = mud_config.default_family
 		};
 

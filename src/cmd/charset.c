@@ -6,7 +6,7 @@
 static void
 charset_save_preference(DESCRIPTOR_DATA *cl, const char *name)
 {
-	struct user *u = cl->user;
+	struct user *u = telnetclient_user(cl);
 	if (!u)
 		return;
 	user_extra_set(u, "charset", name);
