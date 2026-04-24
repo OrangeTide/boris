@@ -5,7 +5,8 @@
  *
  * Applies OS-level security restrictions after boris has finished
  * initialization and opened all resources it needs. Currently supports
- * Landlock (filesystem restriction) on Linux 5.13+.
+ * Landlock (filesystem restriction) on Linux 5.13+ and seccomp-bpf
+ * (syscall filtering) on Linux 3.5+.
  *
  * Copyright (c) 2026, Jon Mayo <jon@rm-f.net>
  *
@@ -36,6 +37,7 @@
 #include "mudconfig.h"
 
 int security_landlock_apply(void);
+int security_seccomp_apply(void);
 
 int
 security_init(void)
@@ -53,6 +55,11 @@ security_init(void)
 
 	if (mud_config.security_landlock) {
 		if (security_landlock_apply() < 0)
+			return -1;
+	}
+
+	if (mud_config.security_seccomp) {
+		if (security_seccomp_apply() < 0)
 			return -1;
 	}
 #else
