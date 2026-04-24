@@ -1,5 +1,5 @@
-# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.3.2]
-# updated: 13 Apr 2026
+# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.4.0]
+# updated: 23 Apr 2026
 # Requires GNU Make 4.0 or later (uses $(file) function).
 #
 # ============================================================================
@@ -267,6 +267,64 @@
 # list), so no manual -l flags are needed for internal libraries.
 #
 # ============================================================================
+# BUILD CONFIGURATION (CONFIG_* OPTIONS)
+# ============================================================================
+#
+# Optional per-triplet feature toggles.  A config.mk file in the build
+# directory (e.g. _build/x86_64-linux-gnu/config.mk) sets CONFIG_*
+# variables to 'y' or 'n' to control which sources, flags, and modules
+# are included in the build.
+#
+# If a defconfig file exists in the project root, config.mk is
+# auto-created from it on the first build.  To reset or switch:
+#
+#   make defconfig              reset to ./defconfig
+#   make defconfig_<name>       switch to configs/<name>.mk
+#
+# Then edit the generated file and rebuild.  Without a defconfig or
+# config.mk the build works normally with all CONFIG options disabled.
+#
+# After changing config options that add or remove source files,
+# remove _build/ manually before rebuilding (make clean only removes
+# files known to the current config).
+#
+# For each CONFIG_FOO = y, two things happen automatically:
+#
+#   1. Per-target variables with a .CONFIG_FOO suffix are merged into
+#      their base variable (same mechanism as platform suffixes):
+#
+#        myapp_SRCS.CONFIG_SSL = ssl.c
+#        myapp_LDLIBS.CONFIG_SSL = -lssl -lcrypto
+#
+#   2. -DCONFIG_FOO=1 is added to PROJECT_CPPFLAGS so C/C++ code can
+#      use #ifdef CONFIG_FOO.
+#
+#   3. A config.h header is auto-generated in the build directory.
+#      CONFIG_FOO = y becomes #define CONFIG_FOO 1; any other non-'n'
+#      value is emitted verbatim (#define CONFIG_BAR "string").
+#      Source files can #include "config.h" to access all config
+#      values without -D escaping.  -I$(BUILDDIR) is added
+#      automatically.
+#
+# Non-boolean parameters use the CONFIG_ prefix and a literal value:
+#
+#   # config.mk
+#   CONFIG_GREETING = y
+#   CONFIG_GREETING_STR = "What's up"
+#
+# Modules can also use ifdef to conditionally register entire targets:
+#
+#   ifeq ($(CONFIG_LUA_SCRIPTING),y)
+#     LIBRARIES += lua_bridge
+#     lua_bridge_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+#     lua_bridge_SRCS = lua_bridge.c
+#   endif
+#
+# Config options control features, not toolchains.  Compiler selection
+# (CC, USE_CLANG) and build modes (DEBUG, RELEASE) belong in .env or
+# on the command line.
+#
+# ============================================================================
 # MAKE TARGETS
 # ============================================================================
 #
@@ -283,6 +341,11 @@
 #   make compile_commands.json
 #                     Generate compile_commands.json for clangd and
 #                     other LSP tooling.  Also rebuilt by "make all".
+#   make defconfig    Reset $(BUILDDIR)/config.mk from the project's
+#                     defconfig template (auto-created on first build).
+#                     Edit the file to customize CONFIG_* options.
+#   make defconfig_<name>
+#                     Generate config.mk from configs/<name>.mk.
 #
 # ============================================================================
 # CUSTOMIZATION
@@ -325,6 +388,10 @@
 # not inherit the global values.  This is intentional -- it keeps each
 # target's flags self-contained and avoids surprising flag leakage
 # between unrelated targets.
+#
+# Optional build configuration is loaded from $(BUILDDIR)/config.mk,
+# auto-created from ./defconfig on first build (or via 'make defconfig').
+# See BUILD CONFIGURATION above for details.
 #
 # ============================================================================
 
@@ -573,6 +640,16 @@ endif
 %.o : %.f
 %.o : %.f90
 
+### Build Configuration (CONFIG_* options) ###
+
+ifneq ($(MAKECMDGOALS),clean-all)
+include $(BUILDDIR)/config.mk
+endif
+
+# Make $(BUILDDIR) available on the include path so source files can
+# #include "config.h" for non-boolean config parameters.
+PROJECT_CPPFLAGS += -I$(BUILDDIR)
+
 ### Module Loader ###
 
 # Recursive module.mk discovery.  Seed with top-level module files;
@@ -619,6 +696,16 @@ $(foreach V,$(_platform_vars),$(call _merge_one,$1,$2,$V))
 endef
 
 $(foreach t,$(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS),$(eval $(call _merge_platform_vars,$t,$(_target_platform_suffixes))))
+
+### Config-option variable merging ###
+
+# For each CONFIG_FOO = y, merge .CONFIG_FOO suffixed variables into
+# their base (same mechanism as platform suffixes above).
+_config_suffixes = $(foreach c,$(filter CONFIG_%,$(.VARIABLES)),$(if $(filter y,$($c)),.$c))
+$(foreach t,$(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS),$(eval $(call _merge_platform_vars,$t,$(_config_suffixes))))
+
+# Inject -DCONFIG_FOO=1 for every enabled option.
+PROJECT_CPPFLAGS += $(foreach c,$(filter CONFIG_%,$(.VARIABLES)),$(if $(filter y,$($c)),-D$c=1))
 
 ### Rules ###
 
@@ -678,9 +765,45 @@ $(_all_gen_srcs) : | $$(@D)/
 all :: $$(EXECUTABLES) compile_commands.json
 clean : $$(addprefix clean_,$$(EXECUTABLES) $$(LIBRARIES) $$(SHARED_LIBS))
 clean-all : clean
+	$(RM) $(BUILDDIR)/config.mk $(BUILDDIR)/config.h $(BUILDDIR)/config.h.tmp
 	-printf '%s\n' $(call explode_dirs,$(_all_dirs)) | sort -r | while read -r d; do $(RMDIR) "$$d" 2>/dev/null; done; true
 	$(RM) compile_commands.json
-.PHONY : all clean clean-all clean_% $(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS)
+.PHONY : all clean clean-all clean_% defconfig $(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS)
+
+# config.mk: auto-created from defconfig on first build.
+# Only fires when config.mk does not exist yet; updates go through
+# 'make defconfig'.
+ifeq ($(wildcard $(BUILDDIR)/config.mk),)
+ifneq ($(wildcard defconfig),)
+$(BUILDDIR)/config.mk : defconfig | $(BUILDDIR)/
+	cp $< $@
+else
+$(BUILDDIR)/config.mk : | $(BUILDDIR)/ ; touch $@
+endif
+endif
+
+# defconfig: reset config.mk from a template.
+defconfig : | $(BUILDDIR)/
+	$(if $(wildcard defconfig),cp defconfig $(BUILDDIR)/config.mk,$(error no defconfig found))
+defconfig_% : | $(BUILDDIR)/
+	$(if $(wildcard configs/$*.mk),cp configs/$*.mk $(BUILDDIR)/config.mk,$(error no configs/$*.mk found))
+
+# config.h: auto-generated header from config.mk.
+# CONFIG_FOO = y  ->  #define CONFIG_FOO 1
+# CONFIG_BAR = n  ->  (skipped)
+# CONFIG_X = val  ->  #define CONFIG_X val
+# Uses compare-and-swap to avoid unnecessary rebuilds.
+$(BUILDDIR)/config.h : $(BUILDDIR)/config.mk | $(BUILDDIR)/
+	@awk '/^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*[?:]*=/ { \
+		name = $$1; \
+		value = $$0; sub(/^[^=]*=[[:space:]]*/, "", value); \
+		if (name ~ /^CONFIG_/ && value == "y") \
+			print "#define " name " 1"; \
+		else if (value != "n" && value != "") \
+			print "#define " name " " value; \
+	}' $< > $@.tmp 2>/dev/null; \
+	cmp -s $@.tmp $@ 2>/dev/null && rm -f $@.tmp || mv -f $@.tmp $@
+
 
 # Create directories
 %/ : ; $(MKDIR_P) $@
@@ -788,6 +911,7 @@ $(foreach X,$(filter-out $(_compdb_exts),$(EXTENSIONS)),$(eval $(BUILDDIR)/%.o :
 # $(file) (see compdb._emit above).  This target depends on all object
 # files so the sidecars are created first, then concatenates them.
 _all_objs := $(foreach p,$(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS),$(call get_all_objs,$p))
+$(_all_objs) : $(BUILDDIR)/config.h
 compile_commands.json : $(_all_objs)
 	@cat $(wildcard $(patsubst %.o,%.cmd.json,$^)) /dev/null \
 	| awk 'BEGIN{printf "["}NR>1{printf ","}  \

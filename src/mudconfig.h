@@ -34,6 +34,12 @@ struct mud_config {
 	unsigned room_cache_size; /* max unreferenced rooms in LRU cache */
 	unsigned character_cache_size; /* max unreferenced characters in LRU cache */
 	unsigned rpg_enabled; /* feature gate for RPG subsystem commands */
+#ifdef CONFIG_LANDLOCK
+	unsigned security_landlock;
+#endif
+#ifdef CONFIG_SECCOMP
+	unsigned security_seccomp;
+#endif
 };
 
 typedef struct mud_config MUD_CONFIG;
