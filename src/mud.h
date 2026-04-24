@@ -1,5 +1,6 @@
 #ifndef MUD_H_
 #define MUD_H_
+#include <stddef.h>
 #include <terminal.h>
 #include <channel.h>
 #include <list.h>
@@ -14,11 +15,20 @@ struct buf;
 struct net_stream;
 
 typedef struct descriptor_data DESCRIPTOR_DATA;
+
+struct client_ops {
+	int (*puts)(DESCRIPTOR_DATA *cl, const char *data, size_t len);
+	void (*close)(DESCRIPTOR_DATA *cl);
+	void (*destroy)(DESCRIPTOR_DATA *cl);
+};
+
 struct descriptor_data {
 	struct net_stream *stream;
 	struct mth_data *mth;
 	LIST_ENTRY(DESCRIPTOR_DATA) list;
-	enum client_type { CLIENT_TYPE_USER = 1 } type;
+	enum client_type { CLIENT_TYPE_USER = 1, CLIENT_TYPE_WEB } type;
+	const struct client_ops *ops;
+	void *client_ctx;
 	char *host;
 	char *name;
 	struct buf *linebuf; /**< command input buffer */

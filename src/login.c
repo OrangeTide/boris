@@ -41,15 +41,15 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 
 	assert(cl != NULL);
 	assert(line != NULL);
-	assert(cl->state.login.username[0] != '\0'); /* must have a valid username */
+	assert(telnetclient_get_login_username(cl)[0] != '\0'); /* must have a valid username */
 
 	LOG_TODO("complete login process");
-	LOG_DEBUG("Login attempt: Username='%s'", cl->state.login.username);
+	LOG_DEBUG("Login attempt: Username='%s'", telnetclient_get_login_username(cl));
 
-	u = user_lookup(cl->state.login.username);
+	u = user_lookup(telnetclient_get_login_username(cl));
 
 	if (u) {
-		LOG_INFO("User '%s' found!", cl->state.login.username);
+		LOG_INFO("User '%s' found!", telnetclient_get_login_username(cl));
 		/* verify the password */
 		if (user_password_check(u, line)) {
 			telnetclient_setuser(cl, u);
@@ -62,7 +62,7 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 					telnetclient_set_encoding(cl, cs);
 			}
 
-			eventlog_signon(cl->state.login.username, telnetclient_socket_name(cl));
+			eventlog_signon(telnetclient_get_login_username(cl), telnetclient_socket_name(cl));
 			telnetclient_printf(cl, "Hello, %s.\n\n", user_username(u));
 			menu_start_input(cl, &gamemenu_main);
 			return; /* success */
@@ -74,7 +74,7 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 	}
 
 	/* report the attempt */
-	eventlog_login_failattempt(cl->state.login.username, telnetclient_socket_name(cl));
+	eventlog_login_failattempt(telnetclient_get_login_username(cl), telnetclient_socket_name(cl));
 
 	/* failed logins go back to the login menu or disconnect */
 	menu_start_input(cl, &gamemenu_login);
@@ -98,7 +98,7 @@ login_username_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 	assert(line != NULL);
 
 	telnetclient_clear_statedata(cl); /* this is a fresh state */
-	cl->state_free = 0; /* this state does not require anything special to free */
+	telnetclient_set_state_free(cl, NULL);
 
 	while (*line && isspace(*line)) line++; /* ignore leading spaces */
 
@@ -109,7 +109,7 @@ login_username_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 	}
 
 	/* store the username for the password state to use */
-	snprintf(cl->state.login.username, sizeof cl->state.login.username, "%s", line);
+	telnetclient_set_login_username(cl, line);
 
 	login_password_start(cl, 0, 0);
 }

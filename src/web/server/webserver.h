@@ -2,7 +2,7 @@
 #define WEBSERVER_H_
 
 struct webserver_context {
-    unsigned upstream_port;
+    int wake_fd;
     int family;
 };
 
