@@ -15,10 +15,15 @@ junk*/
 *.lib
 *.exe
 
+# ignore database
 /data/users/*
+data/muddb
+
+# ignore build & release artifacts
 /_build
 /_out
 /compile_commands.json
+/bin
 
 boris-*.tar.xz
 
