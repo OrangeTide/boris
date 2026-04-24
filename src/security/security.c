@@ -36,35 +36,52 @@
 
 #include "mudconfig.h"
 
+#ifdef CONFIG_LANDLOCK
 int security_landlock_apply(void);
+#endif
+#ifdef CONFIG_SECCOMP
 int security_seccomp_apply(void);
+#endif
 
 int
 security_init(void)
 {
-	if (!mud_config.security_landlock && !mud_config.security_seccomp) {
-		LOG_INFO("security sandboxing disabled by configuration");
+#ifdef __linux__
+	int active = 0;
+
+#ifdef CONFIG_LANDLOCK
+	if (mud_config.security_landlock)
+		active = 1;
+#endif
+#ifdef CONFIG_SECCOMP
+	if (mud_config.security_seccomp)
+		active = 1;
+#endif
+
+	if (!active) {
+		LOG_INFO("security sandboxing disabled");
 		return 0;
 	}
 
-#ifdef __linux__
 	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) {
 		LOG_ERROR("PR_SET_NO_NEW_PRIVS: %s", strerror(errno));
 		return -1;
 	}
 
+#ifdef CONFIG_LANDLOCK
 	if (mud_config.security_landlock) {
 		if (security_landlock_apply() < 0)
 			return -1;
 	}
+#endif
 
+#ifdef CONFIG_SECCOMP
 	if (mud_config.security_seccomp) {
 		if (security_seccomp_apply() < 0)
 			return -1;
 	}
-#else
-	LOG_INFO("security sandboxing: not available on this platform");
 #endif
+#endif /* __linux__ */
 
 	return 0;
 }

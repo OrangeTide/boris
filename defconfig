@@ -1,0 +1,3 @@
+# boris build configuration -- edit or override with configs/<name>.mk
+CONFIG_LANDLOCK = y
+CONFIG_SECCOMP = y
