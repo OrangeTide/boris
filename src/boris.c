@@ -29,6 +29,7 @@
 #include <time.h>
 #include <channel.h>
 #include <character.h>
+#include <daemonize.h>
 #include <eventlog.h>
 #include <muddb.h>
 #include <room.h>
@@ -233,6 +234,32 @@ main_idle(struct iox_loop *loop UNUSED, void *arg UNUSED)
 	webclient_unlock();
 }
 
+/* remove the pidfile when done */
+static void
+pidfile_done(void)
+{
+	if (mud_config.pid_file) {
+		unlink(mud_config.pid_file);
+	}
+}
+
+static int
+pidfile_init(void)
+{
+	if (mud_config.pid_file) {
+		FILE *f = fopen(mud_config.pid_file, "w");
+		if (!f) {
+			LOG_PERROR(mud_config.pid_file);
+			return -1;
+		}
+		fprintf(f, "%ld\n", (long)getpid());
+		fclose(f);
+		atexit(pidfile_done);
+	}
+
+	return 0;
+}
+
 /**
  * display a program usage message and terminated with an exit code.
  */
@@ -240,11 +267,14 @@ static void
 usage(void)
 {
 	fprintf(stderr,
-	        "usage: boris [-h46] [-p port]\n"
-	        "-4      use IPv4-only server addresses\n"
-	        "-6      use IPv6-only server addresses\n"
-		"-p n    listen on TCP port <n>\n"
-	        "-h      help\n"
+		"usage: boris [-h46] [-p port]\n"
+		"-4	 use IPv4-only server addresses\n"
+		"-6	 use IPv6-only server addresses\n"
+		"-c	 use alternate config file\n"
+		"-d	 daemonize\n"
+		"-f	 foreground (don't daemonize)\n"
+		"-p n	 listen on TCP port <n>\n"
+		"-h	 help\n"
 	       );
 	exit(EXIT_FAILURE);
 }
@@ -287,6 +317,14 @@ process_flag(int ch, const char *next_arg)
 		free(mud_config.config_filename);
 		mud_config.config_filename = strdup(next_arg);
 		return 1; /* uses next arg */
+
+	case 'd': /* daemonize */
+		mud_config.daemonize = 1;
+		return 0;
+
+	case 'f': /* foreground */
+		mud_config.daemonize = 0;
+		return 0;
 
 	case 'p': {
 			char *endptr;
@@ -384,6 +422,16 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	/* This needs to start atleast before seccomp takes away our ability to
+	 * open /dev/null */
+	if (mud_config.daemonize) {
+		LOG_INFO("Backgrounding ...");
+		if (daemonize() != 0) {
+			LOG_ERROR("could not daemonize into background");
+			return EXIT_FAILURE;
+		}
+	}
+
 	fds_init();
 
 	g_loop = iox_loop_new();
@@ -404,6 +452,11 @@ main(int argc, char **argv)
 	}
 
 	atexit(log_done);
+
+	if (pidfile_init() != 0) {
+		LOG_ERROR("could not create pidfile");
+		return EXIT_FAILURE;
+	}
 
 	mud_db = muddb_open("data/muddb", 0);
 	if (!mud_db) {

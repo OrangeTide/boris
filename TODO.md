@@ -118,3 +118,5 @@ testing, caching, and longer-term features.
   * provide documentation to tighten up security for a production system:
     - run the MUD as a dedicated unprivileged user
     - seccomp the process so even an escape can't do much
+
+  - [ ] move boris.log to boris.eventlog, and use boris.log as duplicate log output for log.c
