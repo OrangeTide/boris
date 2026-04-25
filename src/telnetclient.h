@@ -18,6 +18,7 @@ const char *telnetclient_socket_name(DESCRIPTOR_DATA *cl);
 const struct terminal *telnetclient_get_terminal(DESCRIPTOR_DATA *cl);
 unsigned telnetclient_get_width(DESCRIPTOR_DATA *cl);
 int telnetclient_puts_wrapped(DESCRIPTOR_DATA *cl, const char *s);
+int telnetclient_puts_paragraphs(DESCRIPTOR_DATA *cl, const char *s, unsigned indent);
 int telnetserver_listen(int port);
 void telnetserver_shutdown(void);
 void telnetclient_prompt_refresh(DESCRIPTOR_DATA *cl);
