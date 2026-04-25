@@ -1,10 +1,10 @@
 /**
  * @file wordwrap.h
  *
- * Utility routines - wordwarp
+ * Word wrapping with greedy and optimal (Knuth-Plass) algorithms.
  *
  * @author Jon Mayo <jon@rm-f.net>
- * @date 2026 Mar 23
+ * @date 2026 Apr 24
  *
  * Copyright (c) 2026 Jon Mayo <jon@rm-f.net>
  *
@@ -24,7 +24,27 @@
 #ifndef WORDWRAP_H_
 #define WORDWRAP_H_
 
-#define WORDWRAP_OK (0)
-#define WORDWRAP_ERR (-1)
+enum ww_style {
+	WW_OPTIMAL, /* Knuth-Plass optimal line breaking */
+	WW_GREEDY,  /* simple greedy break on whitespace */
+};
+
+struct ww_word {
+	unsigned off;   /* byte offset into source string */
+	unsigned len;   /* byte length */
+	unsigned width; /* display width in cells */
+};
+
+/* tokenize input into words. allocates *words_out (caller frees).
+ * returns word count, or -1 on error (sets errno). */
+int ww_wordify(const char *input, unsigned inputlen,
+               struct ww_word **words_out);
+
+/* compute line break positions. breaks_out[i] is the word index
+ * where line i starts. allocates *breaks_out (caller frees).
+ * returns line count, or -1 on error (sets errno). */
+int ww_wrap(const struct ww_word *words, unsigned nwords,
+            unsigned line_width, enum ww_style style,
+            unsigned **breaks_out);
 
 #endif

@@ -28,3 +28,12 @@ test_charset_LIBS   = util log
 define test_charset_TESTCMD
 $(test_charset_RUN)
 endef
+
+EXECUTABLES          += test_wordwrap
+TEST_TARGETS         += test_wordwrap
+test_wordwrap_DIR    := $(util_DIR)
+test_wordwrap_SRCS    = test_wordwrap.c
+test_wordwrap_LIBS    = util
+define test_wordwrap_TESTCMD
+$(test_wordwrap_RUN)
+endef
