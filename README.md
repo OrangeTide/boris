@@ -210,7 +210,7 @@ Per-checkout settings go in a `.env` file (not committed to git). The
 Makefile reads it automatically. Copy the example to get started:
 
 ```sh
-cp env.example .env
+cp doc/env.example .env
 ```
 
 Available settings:
@@ -415,7 +415,7 @@ Replace the port numbers if you changed `server.port` or `webserver.port` in
 
 ## Development
 
-See [DEV.md](DEV.md) for architecture, build system internals, code patterns, and contributor information.
+See [DEV.md](doc/DEV.md) for architecture, build system internals, code patterns, and contributor information.
 
 ## Support
 
