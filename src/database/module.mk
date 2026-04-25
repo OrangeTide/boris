@@ -9,5 +9,5 @@ test_muddb_DIR := $(database_DIR)
 test_muddb_SRCS = test_muddb.c
 test_muddb_LIBS = database obj log lmdb
 define test_muddb_TESTCMD
-$(test_muddb_EXEC)
+$(test_muddb_RUN)
 endef

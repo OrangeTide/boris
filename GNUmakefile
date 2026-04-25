@@ -1,4 +1,4 @@
-# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.4.1]
+# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.4.2]
 # updated: 24 Apr 2026
 # Requires GNU Make 4.0 or later (uses $(file) function).
 #
@@ -109,6 +109,10 @@
 #   <name>_LDLIBS    Link libraries          (executables and shared libs)
 #   <name>_EXEC      Set automatically for executables -- the full
 #                     output path (e.g. _out/<triplet>/bin/myapp).
+#   <name>_RUN       Set automatically -- expands to $(TESTWRAP)
+#                     followed by _EXEC.  Use _RUN instead of _EXEC
+#                     in _TESTCMD so that valgrind wrapping works
+#                     automatically.
 #   <name>_LIBS      Names of library targets this target depends on.
 #                     Works for both static and shared libraries --
 #                     the build system resolves each name to its .a or
@@ -203,16 +207,22 @@
 #   myapp_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
 #   myapp_SRCS   = main.c
 #   define myapp_TESTCMD
-#   $(myapp_EXEC) --selftest
-#   $(myapp_EXEC) < testdata/input.txt | diff - testdata/expected.txt
+#   $(myapp_RUN) --selftest
+#   $(myapp_RUN) < testdata/input.txt | diff - testdata/expected.txt
 #   endef
 #   TEST_TARGETS += myapp
 #
-# The _EXEC variable is set automatically for each executable (expands
-# to the full output path, e.g. _out/<triplet>/bin/myapp).  Use
-# define/endef for multi-line test commands -- each line becomes a
-# separate recipe line checked for errors by Make.  Run all tests
-# with 'make run-tests' or a single test with 'make run-test-<name>'.
+# Use _RUN (not _EXEC) in test commands.  _RUN expands to _EXEC by
+# default, but prepends TESTWRAP when set.  Run all tests with
+# 'make run-tests' or a single test with 'make run-test-<name>'.
+#
+# Run all tests under valgrind:
+#
+#   make run-tests-valgrind
+#
+# Override TESTWRAP and VALGRIND_FLAGS for a single test:
+#
+#   make TESTWRAP="valgrind --leak-check=full" run-test-myapp
 #
 # Example -- generated source files:
 #
@@ -862,6 +872,7 @@ $(foreach s,$(SHARED_LIBS),$(eval $(call shared_library_rules,$s)))
 # reliably propagate to prerequisite pattern rules in GNU Make.
 define project_rules
 $1_EXEC := $(BINDIR)/$1$(EXTENSION.exe)
+$1_RUN = $$(TESTWRAP) $$($1_EXEC)
 $1 : $(BINDIR)/$1$(EXTENSION.exe)
 $(BINDIR)/$1$(EXTENSION.exe) : $$(call get_all_objs,$1) $$($1_EXTRA_OBJS) $(foreach d,$(call get_all_libs,$1),$(call get_lib_file,$d)) | $(BINDIR)/
 	$$(link.c)
@@ -896,6 +907,12 @@ $(foreach t,$(TEST_TARGETS),$(eval $(call test_rules,$t)))
 
 .PHONY : run-tests
 run-tests : $(addprefix run-test-,$(TEST_TARGETS))
+
+# Run all tests under valgrind.  TESTWRAP propagates to prerequisites.
+VALGRIND_FLAGS ?= --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=99
+.PHONY : run-tests-valgrind
+run-tests-valgrind : TESTWRAP = valgrind $(VALGRIND_FLAGS)
+run-tests-valgrind : run-tests
 
 # Compile rules -- generated from EXTENSIONS list.  Per-target flags are
 # set via target-specific variables on the individual .o files above.

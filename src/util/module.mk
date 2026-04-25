@@ -7,7 +7,7 @@ TEST_TARGETS      += test_variables
 test_variables_DIR := $(util_DIR)
 test_variables_SRCS = test_variables.c variables.c
 define test_variables_TESTCMD
-$(test_variables_EXEC)
+$(test_variables_RUN)
 endef
 
 EXECUTABLES       += test_phaseq
@@ -15,7 +15,7 @@ TEST_TARGETS      += test_phaseq
 test_phaseq_DIR   := $(util_DIR)
 test_phaseq_SRCS   = test_phaseq.c phaseq.c pool.c ../log/log.c
 define test_phaseq_TESTCMD
-$(test_phaseq_EXEC)
+$(test_phaseq_RUN)
 endef
 
 EXECUTABLES        += test_charset
@@ -23,5 +23,5 @@ TEST_TARGETS       += test_charset
 test_charset_DIR   := $(util_DIR)
 test_charset_SRCS   = test_charset.c charset.c ../log/log.c
 define test_charset_TESTCMD
-$(test_charset_EXEC)
+$(test_charset_RUN)
 endef
