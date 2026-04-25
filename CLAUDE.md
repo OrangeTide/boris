@@ -18,6 +18,7 @@ Output binaries: `bin/boris`, `bin/mkpass`, `bin/muddb-tool`.
 
 ```sh
 make tests                 # Run unit tests (obj, muddb, hashtable)
+make tests-valgrind        # Run unit tests under valgrind (leak check)
 make smoke                 # Run smoke tests (requires expect)
 make release               # Build + package release tarball
 make deploy                # Build + package + deploy (needs DEPLOY_DEST)

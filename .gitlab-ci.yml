@@ -58,6 +58,19 @@ test:smoke:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 
+test:valgrind:
+  stage: test
+  before_script:
+    - *build-deps
+    - apk add valgrind
+  dependencies:
+    - build:mud
+  script:
+    - make run-tests-valgrind
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
 release:source:
   stage: release
   before_script:
