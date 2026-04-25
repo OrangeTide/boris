@@ -27,6 +27,7 @@
 #include <character.h>
 #include <variables.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -138,8 +139,13 @@ show_room(DESCRIPTOR_DATA *cl, struct room *r)
 	desc = room_attr_get(r, "desc.long");
 	if (!desc)
 		desc = room_attr_get(r, "desc.short");
-	if (desc)
-		expand_to_telnet(cl, desc, &vctx);
+	if (desc) {
+		char *expanded = expand_string(desc, &vctx);
+		if (expanded) {
+			telnetclient_puts_paragraphs(cl, expanded, 2);
+			free(expanded);
+		}
+	}
 
 	/* list exits */
 	telnetclient_puts(cl, "Exits:");

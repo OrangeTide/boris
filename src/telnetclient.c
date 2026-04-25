@@ -43,6 +43,7 @@
 #include <buf.h>
 #include <charset.h>
 #include <webclient.h>
+#include <wordwrap.h>
 
 #define OK (0)
 #define ERR (-1)
@@ -119,6 +120,13 @@ telnetclient_on_data(net_event *e)
 		  outlen);
 
 	int size = translate_telopts(cl, (unsigned char*)e->data, e->size, output, 0);
+
+	if (cl->mth) {
+		if (cl->mth->cols > 0)
+			cl->terminal.width = cl->mth->cols;
+		if (cl->mth->rows > 0)
+			cl->terminal.height = cl->mth->rows;
+	}
 
 	if (cl->encoding && size > 0) {
 		char conv[2048];
@@ -765,6 +773,169 @@ const struct terminal *
 telnetclient_get_terminal(DESCRIPTOR_DATA *cl)
 {
 	return cl ? &cl->terminal : NULL;
+}
+
+unsigned
+telnetclient_get_width(DESCRIPTOR_DATA *cl)
+{
+	if (cl && cl->terminal.width > 0)
+		return (unsigned)cl->terminal.width;
+	return 80;
+}
+
+int
+telnetclient_puts_wrapped(DESCRIPTOR_DATA *cl, const char *s)
+{
+	unsigned width = telnetclient_get_width(cl);
+	unsigned slen = (unsigned)strlen(s);
+
+	struct ww_word *words = NULL;
+	int nw = ww_wordify(s, slen, &words);
+	if (nw <= 0) {
+		telnetclient_puts(cl, "\n");
+		return OK;
+	}
+
+	unsigned *breaks = NULL;
+	int nl = ww_wrap(words, (unsigned)nw, width, WW_OPTIMAL, &breaks);
+	if (nl <= 0) {
+		free(words);
+		telnetclient_puts(cl, "\n");
+		return OK;
+	}
+
+	char *out = malloc(slen + (unsigned)nl + 1);
+	if (!out) {
+		free(breaks);
+		free(words);
+		return ERR;
+	}
+
+	unsigned pos = 0;
+	for (int i = 0; i < nl; i++) {
+		unsigned start = breaks[i];
+		unsigned end = (i + 1 < nl) ? breaks[i + 1] : (unsigned)nw;
+
+		for (unsigned j = start; j < end; j++) {
+			if (j > start)
+				out[pos++] = ' ';
+			memcpy(out + pos, s + words[j].off, words[j].len);
+			pos += words[j].len;
+		}
+		out[pos++] = '\n';
+	}
+	out[pos] = '\0';
+
+	telnetclient_puts(cl, out);
+
+	free(out);
+	free(breaks);
+	free(words);
+	return OK;
+}
+
+static int
+wrap_paragraph(DESCRIPTOR_DATA *cl, const char *text, unsigned len,
+	       unsigned wrap_width, const char *indent)
+{
+	char *norm = malloc(len + 1);
+	if (!norm)
+		return ERR;
+	for (unsigned i = 0; i < len; i++)
+		norm[i] = (text[i] == '\n' || text[i] == '\r') ? ' ' : text[i];
+	norm[len] = '\0';
+
+	struct ww_word *words = NULL;
+	int nw = ww_wordify(norm, len, &words);
+	if (nw <= 0) {
+		free(norm);
+		return OK;
+	}
+
+	unsigned *breaks = NULL;
+	int nl = ww_wrap(words, (unsigned)nw, wrap_width, WW_OPTIMAL, &breaks);
+	if (nl <= 0) {
+		free(words);
+		free(norm);
+		return OK;
+	}
+
+	unsigned indent_len = indent ? (unsigned)strlen(indent) : 0;
+	char *out = malloc(len + indent_len + (unsigned)nl + 1);
+	if (!out) {
+		free(breaks);
+		free(words);
+		free(norm);
+		return ERR;
+	}
+
+	unsigned pos = 0;
+	for (int i = 0; i < nl; i++) {
+		if (i == 0 && indent_len > 0) {
+			memcpy(out + pos, indent, indent_len);
+			pos += indent_len;
+		}
+
+		unsigned start = breaks[i];
+		unsigned end = (i + 1 < nl) ? breaks[i + 1] : (unsigned)nw;
+
+		for (unsigned j = start; j < end; j++) {
+			if (j > start)
+				out[pos++] = ' ';
+			memcpy(out + pos, norm + words[j].off, words[j].len);
+			pos += words[j].len;
+		}
+		out[pos++] = '\n';
+	}
+	out[pos] = '\0';
+
+	telnetclient_puts(cl, out);
+
+	free(out);
+	free(breaks);
+	free(words);
+	free(norm);
+	return OK;
+}
+
+int
+telnetclient_puts_paragraphs(DESCRIPTOR_DATA *cl, const char *s,
+			     unsigned indent)
+{
+	unsigned width = telnetclient_get_width(cl);
+	if (indent >= width)
+		indent = 0;
+	unsigned wrap_width = width - indent;
+
+	char indent_buf[16];
+	if (indent > sizeof(indent_buf) - 1)
+		indent = sizeof(indent_buf) - 1;
+	memset(indent_buf, ' ', indent);
+	indent_buf[indent] = '\0';
+
+	const char *p = s;
+	while (*p) {
+		while (*p == '\n' || *p == '\r')
+			p++;
+		if (!*p)
+			break;
+
+		const char *end = strstr(p, "\n\n");
+		unsigned plen;
+		if (end) {
+			plen = (unsigned)(end - p);
+		} else {
+			plen = (unsigned)strlen(p);
+			end = p + plen;
+		}
+
+		if (wrap_paragraph(cl, p, plen, wrap_width, indent_buf) != OK)
+			return ERR;
+
+		p = end;
+	}
+
+	return OK;
 }
 
 int
