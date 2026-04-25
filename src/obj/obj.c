@@ -222,24 +222,6 @@ escaped_len(const char *s, unsigned slen)
 	return len;
 }
 
-/* return the length that a JSON-escaped string would use when unescaped */
-static unsigned
-unescape_len(const char *s, unsigned slen)
-{
-	unsigned len = 0;
-	unsigned i;
-
-	for (i = 0; i < slen; i++) {
-		if (s[i] == '\\' && i + 1 < slen) {
-			if (s[i + 1] == 'u' && i + 5 < slen)
-				i += 5;
-			else
-				i++;
-		}
-		len++;
-	}
-	return len;
-}
 
 /* append a string to obj->data with JSON escaping, return its offset.
  * returns DATA_APPEND_FAIL on allocation failure. */

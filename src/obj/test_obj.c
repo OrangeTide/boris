@@ -524,11 +524,6 @@ test_escaped_len(void)
 	check("escaped_len tab", escaped_len("a\tb", 3) == 4);
 	check("escaped_len control", escaped_len("\x01", 1) == 6);
 
-	check("unescape_len plain", unescape_len("hello", 5) == 5);
-	check("unescape_len dquote", unescape_len("a\\\"b", 4) == 3);
-	check("unescape_len backslash", unescape_len("a\\\\b", 4) == 3);
-	check("unescape_len newline", unescape_len("a\\nb", 4) == 3);
-	check("unescape_len unicode", unescape_len("a\\u0001b", 8) == 3);
 }
 
 static void
