@@ -16,6 +16,8 @@ struct channel_member *telnetclient_channel_member(DESCRIPTOR_DATA *cl);
 struct net_stream *telnetclient_socket_handle(DESCRIPTOR_DATA *cl);
 const char *telnetclient_socket_name(DESCRIPTOR_DATA *cl);
 const struct terminal *telnetclient_get_terminal(DESCRIPTOR_DATA *cl);
+unsigned telnetclient_get_width(DESCRIPTOR_DATA *cl);
+int telnetclient_puts_wrapped(DESCRIPTOR_DATA *cl, const char *s);
 int telnetserver_listen(int port);
 void telnetserver_shutdown(void);
 void telnetclient_prompt_refresh(DESCRIPTOR_DATA *cl);
