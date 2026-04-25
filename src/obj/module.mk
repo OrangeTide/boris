@@ -14,8 +14,8 @@ endef
 EXECUTABLES        += test_obj_cache
 TEST_TARGETS       += test_obj_cache
 test_obj_cache_DIR := $(obj_DIR)
-test_obj_cache_SRCS = test_obj_cache.c obj_cache.c obj.c
-test_obj_cache_LIBS = hashtable log
+test_obj_cache_SRCS = test_obj_cache.c
+test_obj_cache_LIBS = obj hashtable log
 define test_obj_cache_TESTCMD
 $(test_obj_cache_RUN)
 endef
