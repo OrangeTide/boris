@@ -142,7 +142,7 @@ show_room(DESCRIPTOR_DATA *cl, struct room *r)
 	if (desc) {
 		char *expanded = expand_string(desc, &vctx);
 		if (expanded) {
-			telnetclient_puts_wrapped(cl, expanded);
+			telnetclient_puts_paragraphs(cl, expanded, 2);
 			free(expanded);
 		}
 	}
