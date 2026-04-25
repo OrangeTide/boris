@@ -6,27 +6,8 @@ testing, caching, and longer-term features.
 ## P1 -- testing
 
   * add unit tests for room and character load/save round-trips
-    through muddb.
-
-
-## P1 -- priority queue / timers
-
-  Two complementary primitives:
-
-  * pq.h (src/iox/pq.h) -- generic binary-heap, used by the iox
-    timer wheel. Keep as the substrate for low-level scheduler
-    cores.
-
-  * phaseq (src/util/phaseq.{h,c}) -- per-instance deadline-ordered
-    callback queue. uint64 ms deadlines, scrub-by-arg cleanup, no
-    global state. Intended for gameplay schedulers (combat, spell
-    timers, room programs). See doc/phaseq.md and
-    doc/combat-queue.md.
-
-  Remaining work:
-  * implement the combat subsystem on top of phaseq + iox per
-    doc/combat-queue.md (one phaseq per session, one iox timer slot
-    bridging head deadline into the main loop).
+    through muddb. (generic muddb tests exist in test_muddb.c but
+    no entity-specific round-trip coverage yet.)
 
 
 ## P1 -- RPG next phases
@@ -42,15 +23,10 @@ testing, caching, and longer-term features.
 
 ## P1 -- in-flight utilities
 
-  * src/util/variables.c :: expand_string() done -- named vars via
-    caller-supplied lookup, $0-$9, $#, $*/$@, $?, $$, quoting, and
-    unit tests (bin/test_variables). $(cmd) is out of scope (emits
-    literal). Still to do: wire into the command interpreter so
-    aliases and room/character descriptions run through it.
-
-  * wordwrap utility landed; audit callers of printf/telnetclient
-    output that should flow through it (help text, room desc,
-    channel messages).
+  * wordwrap utility (src/util/wordwrap.c) is a stub -- returns
+    ENOSYS. Implement the actual algorithm, then audit callers of
+    printf/telnetclient output that should flow through it (help
+    text, room desc, channel messages).
 
 
 ### P2 -- user account schema
@@ -73,7 +49,7 @@ testing, caching, and longer-term features.
 
   * redo the version number policy in boris. Remove per-file version numbers, except in boris.c
     A global version number is tracked in boris.h (BORIS_VERSION_MAJ/MIN/PAT,
-    currently 0.7.0). 21 source files still have per-file @version headers
+    currently 0.7.0). 33 source files still have per-file @version headers
     that need removal. Use semver for our version numbers. We will start
     at 0.7.1. Any major merge request should increment at least the patch
     number. The maintainer will handle trivial conflicts, but the general
@@ -120,3 +96,4 @@ testing, caching, and longer-term features.
     - seccomp the process so even an escape can't do much
 
   - [ ] move boris.log to boris.eventlog, and use boris.log as duplicate log output for log.c
+  - [ ] fix trailing newline in default eventlog filename (common.c:1383 has "boris.log\n")
