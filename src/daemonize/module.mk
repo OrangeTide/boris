@@ -9,5 +9,5 @@ test_daemonize_DIR  := $(daemonize_DIR)
 test_daemonize_SRCS  = test_daemonize.c ../log/log.c
 test_daemonize_LIBS  = daemonize
 define test_daemonize_TESTCMD
-$(test_daemonize_EXEC)
+$(test_daemonize_RUN)
 endef
