@@ -24,7 +24,7 @@ make release               # Build + package release tarball
 make deploy                # Build + package + deploy (needs DEPLOY_DEST)
 ```
 
-Local configuration (deploy destination, etc.) goes in `.env` (see `env.example`). The Makefile reads it automatically via `-include .env`.
+Local configuration (deploy destination, etc.) goes in `.env` (see `doc/env.example`). The Makefile reads it automatically via `-include .env`.
 
 ## Running
 
@@ -36,11 +36,11 @@ Configuration: `boris.cfg` (server.port, webserver.port, channels, messages, new
 
 ## Architecture and Developer Guide
 
-See [DEV.md](DEV.md) for architecture, subsystems, code patterns, and build system internals.
+See [DEV.md](doc/DEV.md) for architecture, subsystems, code patterns, and build system internals.
 
 ## Secure Programming Principles
 
-See [SECURITY.md](SECURITY.md) for full details.
+See [SECURITY.md](doc/SECURITY.md) for full details.
 
 - Never trust external input.
 - Always use parameterized queries and records, not string concatenation.
