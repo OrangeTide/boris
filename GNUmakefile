@@ -1,5 +1,5 @@
-# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.4.2]
-# updated: 24 Apr 2026
+# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.4.3]
+# updated: 25 Apr 2026
 # Requires GNU Make 4.0 or later (uses $(file) function).
 #
 # ============================================================================
@@ -719,10 +719,11 @@ PROJECT_CPPFLAGS += $(foreach c,$(filter CONFIG_%,$(.VARIABLES)),$(if $(filter y
 
 ### Rules ###
 
-# get_srcs: expand _SRCS (supports wildcards like *.c) relative to _DIR
-get_srcs     = $(wildcard $(addprefix $($1_DIR),$($1_SRCS)))
+# get_srcs: expand _SRCS relative to _DIR; abspath normalizes ../ so
+# aliased paths resolve to a single Make target (prevents -j races).
+get_srcs     = $(patsubst $(CURDIR)/%,%,$(abspath $(wildcard $(addprefix $($1_DIR),$($1_SRCS)))))
 # get_gen_srcs: expand _GENERATED_SRCS relative to BUILDDIR/_DIR
-get_gen_srcs = $(addprefix $(BUILDDIR)/$($1_DIR),$($1_GENERATED_SRCS))
+get_gen_srcs = $(patsubst $(CURDIR)/%,%,$(abspath $(addprefix $(BUILDDIR)/$($1_DIR),$($1_GENERATED_SRCS))))
 # get_objs: map source files to object files (works for any extension)
 get_objs     = $(strip $(foreach X,$(EXTENSIONS),$(patsubst %.$X,$(BUILDDIR)/%.o,$(filter %.$X,$(call get_srcs,$1)))))
 # get_gen_objs: map generated sources (already under BUILDDIR) to .o files
@@ -779,6 +780,7 @@ clean-all : clean
 	-printf '%s\n' $(call explode_dirs,$(_all_dirs)) | sort -r | while read -r d; do $(RMDIR) "$$d" 2>/dev/null; done; true
 	$(RM) compile_commands.json
 .PHONY : all clean clean-all clean_% defconfig $(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS)
+.DELETE_ON_ERROR :
 
 # config.mk: auto-created from defconfig on first build.
 # Only fires when config.mk does not exist yet; updates go through
@@ -894,6 +896,14 @@ clean_$1 :
 	$$(RM) $(BINDIR)/$1$(EXTENSION.exe) $(BINDIR)/$1$(EXTENSION.exe).debug$(if $(findstring emscripten,$(TARGET_TRIPLET)), $(BINDIR)/$1.js $(BINDIR)/$1.wasm $(BINDIR)/$1.data)
 endef
 $(foreach p,$(EXECUTABLES),$(eval $(call project_rules,$p)))
+
+# Detect .o files shared between targets (flag conflict under -j).
+_all_obj_words := $(foreach t,$(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS),$(call get_all_objs,$t))
+_dup_objs := $(strip $(foreach o,$(sort $(_all_obj_words)),$(if $(word 2,$(filter $o,$(_all_obj_words))),$o)))
+ifneq ($(_dup_objs),)
+$(warning [modular-make] .o files shared between targets: $(_dup_objs))
+$(warning [modular-make] The last-evaluated target's flags win. Consider using _LIBS instead of duplicating sources.)
+endif
 
 # Per-target test rules: build the target, then run its _TESTCMD.
 # The subst inserts .RECIPEPREFIX after each newline so multi-line
