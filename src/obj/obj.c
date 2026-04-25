@@ -70,12 +70,49 @@ json_token_streq(const char *json, const jsmntok_t *t, const char *s)
 /* return a pointer into the json buffer for a string or primitive token.
  * modifies the buffer by writing a null terminator. */
 static char *
-json_token_tostr(char *json, const jsmntok_t *t)
+json_token_tostr(char *json, jsmntok_t *t)
 {
-	if (t->type != JSMN_STRING && t->type != JSMN_PRIMITIVE) {
+	char *src, *dst, *end;
+
+	if (t->type != JSMN_STRING && t->type != JSMN_PRIMITIVE)
 		return NULL;
+
+	if (t->type == JSMN_PRIMITIVE) {
+		json[t->end] = '\0';
+		return json + t->start;
 	}
-	json[t->end] = '\0';
+
+	src = dst = json + t->start;
+	end = json + t->end;
+	while (src < end) {
+		if (*src == '\\' && src + 1 < end) {
+			src++;
+			switch (*src) {
+			case '"': *dst++ = '"'; break;
+			case '\\': *dst++ = '\\'; break;
+			case '/': *dst++ = '/'; break;
+			case 'b': *dst++ = '\b'; break;
+			case 'f': *dst++ = '\f'; break;
+			case 'n': *dst++ = '\n'; break;
+			case 'r': *dst++ = '\r'; break;
+			case 't': *dst++ = '\t'; break;
+			case 'u':
+				/* \uXXXX -- pass through as-is for now */
+				*dst++ = '\\';
+				*dst++ = 'u';
+				src++;
+				continue;
+			default:
+				*dst++ = *src;
+				break;
+			}
+			src++;
+		} else {
+			*dst++ = *src++;
+		}
+	}
+	*dst = '\0';
+	t->end = (int)(dst - json);
 	return json + t->start;
 }
 
@@ -364,6 +401,63 @@ buf_append(char *buf, size_t len, int pos, const char *src, int srclen)
 	return pos + srclen;
 }
 
+static int
+buf_append_escaped(char *buf, size_t len, int pos, const char *src, int srclen)
+{
+	int i;
+
+	if (pos < 0)
+		return pos;
+	for (i = 0; i < srclen; i++) {
+		unsigned char c = (unsigned char)src[i];
+
+		switch (c) {
+		case '"':
+		case '\\':
+			if ((size_t)(pos + 1) < len) {
+				buf[pos] = '\\';
+				buf[pos + 1] = c;
+			}
+			pos += 2;
+			break;
+		case '\n':
+			if ((size_t)(pos + 1) < len) {
+				buf[pos] = '\\';
+				buf[pos + 1] = 'n';
+			}
+			pos += 2;
+			break;
+		case '\r':
+			if ((size_t)(pos + 1) < len) {
+				buf[pos] = '\\';
+				buf[pos + 1] = 'r';
+			}
+			pos += 2;
+			break;
+		case '\t':
+			if ((size_t)(pos + 1) < len) {
+				buf[pos] = '\\';
+				buf[pos + 1] = 't';
+			}
+			pos += 2;
+			break;
+		default:
+			if (c < 0x20) {
+				int n = snprintf(
+					(size_t)(pos + 6) < len ? buf + pos : NULL,
+					(size_t)(pos + 6) < len ? 7 : 0,
+					"\\u%04x", c);
+				pos += n > 0 ? n : 6;
+			} else {
+				if ((size_t)pos < len)
+					buf[pos] = c;
+				pos++;
+			}
+		}
+	}
+	return pos;
+}
+
 OBJ *
 obj_new(const char *key)
 {
@@ -459,6 +553,7 @@ obj_prop_get(OBJ *obj, const char *propname)
 
 	if (key_idx < 0)
 		return NULL;
+	obj->json_len = 0;
 	return json_token_tostr(obj->data, &obj->tokens[key_idx + 1]);
 }
 
@@ -717,7 +812,7 @@ obj_get_json(OBJ *obj, char *buf, size_t len, size_t *out_len)
 
 		/* emit key */
 		pos = buf_append(buf, len, pos, "\"", 1);
-		pos = buf_append(buf, len, pos,
+		pos = buf_append_escaped(buf, len, pos,
 			obj->data + key_tok->start, klen);
 		pos = buf_append(buf, len, pos, "\":", 2);
 
@@ -728,7 +823,7 @@ obj_get_json(OBJ *obj, char *buf, size_t len, size_t *out_len)
 			int slen = val_tok->end - val_tok->start;
 
 			pos = buf_append(buf, len, pos, "\"", 1);
-			pos = buf_append(buf, len, pos,
+			pos = buf_append_escaped(buf, len, pos,
 				obj->data + val_tok->start, slen);
 			pos = buf_append(buf, len, pos, "\"", 1);
 		} else {
@@ -834,7 +929,7 @@ obj_iter_next(OBJ_ITER *it, const char **key, const char **value)
 {
 	OBJ *obj = it->obj;
 	const jsmntok_t *t;
-	const jsmntok_t *key_tok, *val_tok;
+	jsmntok_t *key_tok, *val_tok;
 	int val_span_n;
 
 	if (!obj->tokens || obj->tokens_used == 0)
@@ -851,6 +946,7 @@ obj_iter_next(OBJ_ITER *it, const char **key, const char **value)
 		it->token_pos += 1 + val_span_n;
 		it->pair_idx++;
 
+		obj->json_len = 0;
 		*key = json_token_tostr(obj->data, key_tok);
 		if (!*key)
 			continue; /* skip corrupt non-string key */

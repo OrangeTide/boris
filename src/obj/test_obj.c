@@ -543,22 +543,22 @@ test_prop_set_with_special_chars(void)
 	rc = obj_prop_set(obj, "q", "a\"b");
 	check("special: set dquote", rc == OBJ_OK);
 	val = obj_prop_get(obj, "q");
-	check("special: get dquote", val != NULL && strcmp(val, "a\\\"b") == 0);
+	check("special: get dquote", val != NULL && strcmp(val, "a\"b") == 0);
 
 	rc = obj_prop_set(obj, "bs", "a\\b");
 	check("special: set backslash", rc == OBJ_OK);
 	val = obj_prop_get(obj, "bs");
-	check("special: get backslash", val != NULL && strcmp(val, "a\\\\b") == 0);
+	check("special: get backslash", val != NULL && strcmp(val, "a\\b") == 0);
 
 	rc = obj_prop_set(obj, "nl", "a\nb");
 	check("special: set newline", rc == OBJ_OK);
 	val = obj_prop_get(obj, "nl");
-	check("special: get newline", val != NULL && strcmp(val, "a\\nb") == 0);
+	check("special: get newline", val != NULL && strcmp(val, "a\nb") == 0);
 
 	rc = obj_prop_set(obj, "tab", "a\tb");
 	check("special: set tab", rc == OBJ_OK);
 	val = obj_prop_get(obj, "tab");
-	check("special: get tab", val != NULL && strcmp(val, "a\\tb") == 0);
+	check("special: get tab", val != NULL && strcmp(val, "a\tb") == 0);
 
 	result = obj_get_json(obj, buf, sizeof(buf), NULL);
 	check("special: get_json", result == OBJ_OK);
@@ -568,19 +568,19 @@ test_prop_set_with_special_chars(void)
 
 	val = obj_prop_get(obj2, "q");
 	check("special: round-trip dquote",
-		val != NULL && strcmp(val, "a\\\"b") == 0);
+		val != NULL && strcmp(val, "a\"b") == 0);
 
 	val = obj_prop_get(obj2, "bs");
 	check("special: round-trip backslash",
-		val != NULL && strcmp(val, "a\\\\b") == 0);
+		val != NULL && strcmp(val, "a\\b") == 0);
 
 	val = obj_prop_get(obj2, "nl");
 	check("special: round-trip newline",
-		val != NULL && strcmp(val, "a\\nb") == 0);
+		val != NULL && strcmp(val, "a\nb") == 0);
 
 	val = obj_prop_get(obj2, "tab");
 	check("special: round-trip tab",
-		val != NULL && strcmp(val, "a\\tb") == 0);
+		val != NULL && strcmp(val, "a\tb") == 0);
 
 	obj_free(obj2);
 	obj_free(obj);
@@ -595,14 +595,14 @@ test_json_with_escapes(void)
 
 	char *val = obj_prop_get(obj, "msg");
 	check("json_esc: get value",
-		val != NULL && strcmp(val, "he said \\\"hello\\\"") == 0);
+		val != NULL && strcmp(val, "he said \"hello\"") == 0);
 
 	int rc = obj_prop_set(obj, "msg", "she said \"goodbye\"");
 	check("json_esc: override", rc == OBJ_OK);
 
 	val = obj_prop_get(obj, "msg");
 	check("json_esc: get overridden",
-		val != NULL && strcmp(val, "she said \\\"goodbye\\\"") == 0);
+		val != NULL && strcmp(val, "she said \"goodbye\"") == 0);
 
 	char buf[1024];
 	int result = obj_get_json(obj, buf, sizeof(buf), NULL);
@@ -613,7 +613,7 @@ test_json_with_escapes(void)
 
 	val = obj_prop_get(obj2, "msg");
 	check("json_esc: round-trip value",
-		val != NULL && strcmp(val, "she said \\\"goodbye\\\"") == 0);
+		val != NULL && strcmp(val, "she said \"goodbye\"") == 0);
 
 	obj_free(obj2);
 	obj_free(obj);
