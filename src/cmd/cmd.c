@@ -247,7 +247,7 @@ command_start_lineinput(DESCRIPTOR_DATA *cl)
 	if (ch) {
 		const char *room_id = character_attr_get(ch, "room.current");
 		if (room_id) {
-			struct room *r = room_get(room_id);
+			OBJ *r = room_get(room_id);
 			if (r) {
 				show_room(cl, r);
 				room_put(r);

@@ -32,6 +32,7 @@
 #include <daemonize.h>
 #include <eventlog.h>
 #include <muddb.h>
+#include <obj.h>
 #include <room.h>
 #include <help.h>
 #define LOG_SUBSYSTEM "server"
@@ -483,12 +484,12 @@ main(int argc, char **argv)
 
 	atexit(channel_shutdown);
 
-	if (room_initialize()) {
-		LOG_ERROR("could not load room sub-system");
+	if (obj_initialize(mud_db, mud_config.obj_cache_size)) {
+		LOG_ERROR("could not load object cache");
 		return EXIT_FAILURE;
 	}
 
-	atexit(room_shutdown);
+	atexit(obj_shutdown);
 
 	if (character_initialize()) {
 		LOG_ERROR("could not load character sub-system");

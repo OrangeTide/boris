@@ -31,7 +31,7 @@
 int
 command_do_roomget(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg)
 {
-	struct room *r;
+	OBJ *r;
 	char roomid_str[64];
 	char attrname[64];
 	const char *attrvalue;
@@ -54,7 +54,7 @@ command_do_roomget(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd U
 		return 0;
 	}
 
-	attrvalue = room_attr_get(r, attrname);
+	attrvalue = obj_prop_get(r, attrname);
 
 	if (attrvalue) {
 		telnetclient_printf(cl, "room \"%s\" \"%s\" = \"%s\"\n", roomid_str, attrname, attrvalue);

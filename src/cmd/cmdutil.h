@@ -5,6 +5,6 @@
 
 /* communication utility functions */
 void show_gametime(DESCRIPTOR_DATA *cl);
-void show_room(DESCRIPTOR_DATA *cl, struct room *r);
+void show_room(DESCRIPTOR_DATA *cl, OBJ *r);
 
 #endif

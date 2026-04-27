@@ -35,7 +35,7 @@ command_do_roll(DESCRIPTOR_DATA *cl, struct user *u UNUSED,
 	const char *cmd UNUSED, const char *arg)
 {
 	struct character *ch;
-	struct room *room = NULL;
+	OBJ *room = NULL;
 	const char *room_id;
 	char action_name[32];
 	char word[32];

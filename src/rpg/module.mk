@@ -10,7 +10,7 @@ test_dice_LIBS = log
 EXECUTABLES  += test_tag
 test_tag_DIR := $(rpg_DIR)
 test_tag_SRCS = test_tag.c
-test_tag_LIBS = log
+test_tag_LIBS = obj log
 
 EXECUTABLES     += test_stress
 test_stress_DIR := $(rpg_DIR)
