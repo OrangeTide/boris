@@ -30,19 +30,13 @@ check(const char *description, bool e)
 
 /* ------------------------------------------------------------------
  * Stubs for symbols tag.c references outside this unit.
- * The test treats the character/room pointers as attr_list handles.
+ * The test treats the character pointer as an attr_list handle.
  * ------------------------------------------------------------------ */
 
 struct attr_list *
 character_attrs_extras(struct character *ch)
 {
 	return (struct attr_list *)ch;
-}
-
-struct attr_list *
-room_attrs_extras(struct room *r)
-{
-	return (struct attr_list *)r;
 }
 
 /* tag.c only uses rpg_action_name via rpg_tag_affects. */
@@ -174,29 +168,29 @@ test_position_shift(void)
 static void
 test_apply_folds_actor_and_room(void)
 {
-	struct attr_list actor, room;
+	struct attr_list actor;
+	OBJ *room;
 	enum rpg_position pos = RPG_POS_RISKY;
 	int diff = 2;
 
 	LIST_INIT(&actor);
-	LIST_INIT(&room);
 
 	/* +1 pos globally, applies to move */
 	al_push(&actor, "rpg.tag.focused", "1");
-	/* +2 difficulty reduction, move only -- lowers difficulty */
-	al_push(&room, "rpg.tag.tools", "2:d:move");
-	/* irrelevant: applies only to fight */
-	al_push(&room, "rpg.tag.noisy", "-1:p:fight");
+	/* room tags: +2 difficulty reduction (move only), -1 pos (fight only) */
+	room = obj_new_from_json("test-room",
+		"{\"rpg.tag.tools\":\"2:d:move\","
+		"\"rpg.tag.noisy\":\"-1:p:fight\"}");
 
 	rpg_tags_apply((struct character *)&actor,
-		(struct room *)&room, RPG_ACTION_MOVE, &pos, &diff);
+		room, RPG_ACTION_MOVE, &pos, &diff);
 
 	check("apply: pos shifted to controlled",
 		pos == RPG_POS_CONTROLLED);
 	check("apply: difficulty reduced to 1 (2-2 clamp)", diff == 1);
 
 	al_free(&actor);
-	al_free(&room);
+	obj_free(room);
 }
 
 static void

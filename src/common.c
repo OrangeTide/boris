@@ -1389,7 +1389,7 @@ mud_config_init(void)
 	mud_config.form_newuser_filename = strdup("data/forms/newuser.form");
 	mud_config.default_family = 0;
 	mud_config.newuser_room = strdup("tower-entrance");
-	mud_config.room_cache_size = 128;
+	mud_config.obj_cache_size = 256;
 	mud_config.character_cache_size = 128;
 #ifdef CONFIG_LANDLOCK
 	mud_config.security_landlock = 1;
@@ -1474,7 +1474,7 @@ mud_config_process(void)
 	config_watch(&cfg, "webserver.port", do_config_uint, &mud_config.webserver_port);
 	config_watch(&cfg, "form.newuser.filename", do_config_string, &mud_config.form_newuser_filename);
 	config_watch(&cfg, "newuser.room", do_config_string, &mud_config.newuser_room);
-	config_watch(&cfg, "cache.room.size", do_config_uint, &mud_config.room_cache_size);
+	config_watch(&cfg, "cache.obj.size", do_config_uint, &mud_config.obj_cache_size);
 	config_watch(&cfg, "cache.character.size", do_config_uint, &mud_config.character_cache_size);
 	config_watch(&cfg, "rpg.enabled", do_config_uint, &mud_config.rpg_enabled);
 #ifdef CONFIG_LANDLOCK

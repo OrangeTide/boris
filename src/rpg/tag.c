@@ -5,7 +5,6 @@
 #include "tag.h"
 #include "boris.h"
 #include "character.h"
-#include "room.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -100,8 +99,39 @@ apply_list(struct attr_list *al, enum rpg_action action,
 	}
 }
 
+static void
+apply_obj(OBJ *obj, enum rpg_action action,
+	int *sum_pos, int *sum_diff)
+{
+	OBJ_ITER *it;
+	const char *key, *val;
+	int value, mode;
+	const char *affects;
+
+	if (!obj) return;
+
+	it = obj_iter_begin(obj);
+	if (!it) return;
+
+	while (obj_iter_next(it, &key, &val)) {
+		if (strncmp(key, RPG_TAG_PREFIX, RPG_TAG_PREFIX_LEN))
+			continue;
+		if (!rpg_tag_parse(val, &value, &mode, &affects))
+			continue;
+		if (!rpg_tag_affects(affects, action))
+			continue;
+
+		if (mode == RPG_TAG_MODE_POSITION)
+			*sum_pos += value;
+		else
+			*sum_diff += value;
+	}
+
+	obj_iter_end(it);
+}
+
 void
-rpg_tags_apply(struct character *actor, struct room *room,
+rpg_tags_apply(struct character *actor, OBJ *room,
 	enum rpg_action action,
 	enum rpg_position *pos, int *difficulty)
 {
@@ -109,7 +139,7 @@ rpg_tags_apply(struct character *actor, struct room *room,
 	int d;
 
 	apply_list(character_attrs_extras(actor), action, &sum_pos, &sum_diff);
-	apply_list(room_attrs_extras(room), action, &sum_pos, &sum_diff);
+	apply_obj(room, action, &sum_pos, &sum_diff);
 
 	if (pos)
 		*pos = rpg_position_shift(*pos, sum_pos);

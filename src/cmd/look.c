@@ -33,7 +33,7 @@ int
 command_do_look(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
 {
 	struct character *ch;
-	struct room *r;
+	OBJ *r;
 	const char *room_id;
 
 	ch = telnetclient_character(cl);

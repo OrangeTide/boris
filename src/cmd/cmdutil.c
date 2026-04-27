@@ -96,7 +96,7 @@ tc_sink(void *user, const char *data, unsigned n)
 
 /* variable lookup for show_room: supports "room.<attr>" and "char.<attr>". */
 struct room_lookup_ctx {
-	struct room	*r;
+	OBJ *r;
 	struct character *ch;
 };
 
@@ -106,7 +106,7 @@ room_lookup(void *user, const char *name)
 	struct room_lookup_ctx *rl = user;
 
 	if (!strncmp(name, "room.", 5))
-		return rl->r ? room_attr_get(rl->r, name + 5) : NULL;
+		return rl->r ? obj_prop_get(rl->r, name + 5) : NULL;
 	if (!strncmp(name, "char.", 5))
 		return rl->ch ? character_attr_get(rl->ch, name + 5) : NULL;
 	return NULL;
@@ -126,19 +126,19 @@ expand_to_telnet(DESCRIPTOR_DATA *cl, const char *s,
 
 /** display the current room to the player. */
 void
-show_room(DESCRIPTOR_DATA *cl, struct room *r)
+show_room(DESCRIPTOR_DATA *cl, OBJ *r)
 {
 	struct room_lookup_ctx rl = { r, telnetclient_character(cl) };
 	struct var_ctx vctx = { room_lookup, &rl, 0, NULL, NULL, 0 };
 	const char *name, *desc;
 
-	name = room_attr_get(r, "name.short");
+	name = obj_prop_get(r, "name.short");
 	if (name)
 		expand_to_telnet(cl, name, &vctx);
 
-	desc = room_attr_get(r, "desc.long");
+	desc = obj_prop_get(r, "desc.long");
 	if (!desc)
-		desc = room_attr_get(r, "desc.short");
+		desc = obj_prop_get(r, "desc.short");
 	if (desc) {
 		char *expanded = expand_string(desc, &vctx);
 		if (expanded) {
@@ -156,7 +156,7 @@ show_room(DESCRIPTOR_DATA *cl, struct room *r)
 
 		for (i = 0; dirs[i]; i++) {
 			snprintf(exitname, sizeof exitname, "exit.%s", dirs[i]);
-			if (room_attr_get(r, exitname)) {
+			if (obj_prop_get(r, exitname)) {
 				telnetclient_printf(cl, " %s", dirs[i]);
 				found = 1;
 			}
