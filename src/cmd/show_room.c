@@ -37,6 +37,12 @@ struct room_lookup_ctx {
 	struct character *ch;
 };
 
+struct exit_room_lookup_ctx {
+	OBJ		*room;
+	OBJ		*exit_room;
+	const char	*dir;
+};
+
 static const char * const dirs[] = {
 	"n", "north", "s", "south", "e", "east",
 	"w", "west", "u", "up", "d", "down",
@@ -44,6 +50,36 @@ static const char * const dirs[] = {
 	"se", "southeast", "sw", "southwest",
 	"enter", NULL
 };
+
+static const char *
+dir_info(OBJ *r, const char *d, const char *arg)
+{
+	(void)r; // TODO: we can reach into the current room's "exit.*.name", if it exists.
+	if (!strcmp(arg, "desc")) {
+		if (!strcmp(d, "n"))
+			return "the north";
+		if (!strcmp(d, "s"))
+			return "the south";
+		if (!strcmp(d, "w"))
+			return "the west";
+		if (!strcmp(d, "e"))
+			return "the east";
+		if (!strcmp(d, "nw"))
+			return "the northwest";
+		if (!strcmp(d, "ne"))
+			return "the northeast";
+		if (!strcmp(d, "sw"))
+			return "the southwest";
+		if (!strcmp(d, "se"))
+			return "the southeast";
+		if (!strcmp(d, "u"))
+			return "above";
+		if (!strcmp(d, "d"))
+			return "below";
+		return "an unknown direction";
+	}
+	return NULL;
+}
 
 /* room_lookup resolves "room.<attr>" and "char.<attr>" variable references. */
 static const char *
@@ -55,6 +91,21 @@ room_lookup(void *user, const char *name)
 		return rl->r ? obj_prop_get(rl->r, name + 5) : NULL;
 	if (!strncmp(name, "char.", 5))
 		return rl->ch ? character_attr_get(rl->ch, name + 5) : NULL;
+	return NULL;
+}
+
+/* exit_room_lookup resolves room exits to other rooms. */
+static const char *
+exit_room_lookup(void *user, const char *name)
+{
+	struct exit_room_lookup_ctx *orl = user;
+
+	if (!strncmp(name, "room.", 5))
+		return orl->room ? obj_prop_get(orl->room, name + 5) : NULL;
+	if (!strncmp(name, "to.", 5))
+		return orl->exit_room ? obj_prop_get(orl->exit_room, name + 5) : NULL;
+	if (!strncmp(name, "dir.", 4))
+		return orl->dir ? dir_info(orl->exit_room, orl->dir, name + 4) : NULL;;
 	return NULL;
 }
 
@@ -94,7 +145,7 @@ show_glance(DESCRIPTOR_DATA *cl, OBJ *r, struct var_ctx *vctx)
  * 6. New Line (space)
  * 7. List of entities - TODO: not yet supported!
  * 8. New Line (space)
- * 9. Static exit Desc or dynamic exit description list
+ * 9. Static exit Desc or dynamic exit description list (paragraphs with indent)
  * 10. New Line (space)
  * 11. Print available Exits - TODO: not yet supported!
  *
@@ -105,6 +156,8 @@ show_room(DESCRIPTOR_DATA *cl, OBJ *r)
 	struct room_lookup_ctx rl = { r, telnetclient_character(cl) };
 	struct var_ctx vctx = { room_lookup, &rl, 0, NULL, NULL, 0 };
 	const char *name, *desc;
+	char exitname[64];
+	unsigned i;
 
 	// 1. Room Title (name)
 	name = obj_prop_get(r, "name");
@@ -158,13 +211,68 @@ show_room(DESCRIPTOR_DATA *cl, OBJ *r)
 	if (show_pose(cl) > 0)
 		telnetclient_puts(cl, "\n");
 
+	// 9. Static exit Desc or dynamic exit description list (paragraphs with indent)
+	{
+		static const char *fallback = "${to.name} lies to ${dir.desc}.";
+		char para[4096];
+		unsigned plen = 0;
+
+		for (i = 0; dirs[i]; i++) {
+			const char *exit_room_id, *exit_desc, *tmpl;
+			struct exit_room_lookup_ctx orl;
+			struct var_ctx evctx;
+			char descname[64];
+			char *expanded;
+			unsigned elen;
+			OBJ *exit_room;
+
+			snprintf(exitname, sizeof exitname, "exit.%s.to", dirs[i]);
+			exit_room_id = obj_prop_get(r, exitname);
+			if (!exit_room_id)
+				continue;
+
+			snprintf(descname, sizeof descname, "exit.%s.desc", dirs[i]);
+			exit_desc = obj_prop_get(r, descname);
+			exit_room = room_get(exit_room_id);
+
+			if (!exit_desc && !exit_room)
+				continue;
+
+			tmpl = exit_desc ? exit_desc : fallback;
+			orl = (struct exit_room_lookup_ctx){ r, exit_room, dirs[i] };
+			evctx = (struct var_ctx){ exit_room_lookup, &orl, 0, NULL, NULL, 0 };
+			expanded = expand_string(tmpl, &evctx);
+
+			if (exit_room)
+				room_put(exit_room);
+			if (!expanded)
+				continue;
+
+			elen = strlen(expanded);
+			if (plen + 1 + elen >= sizeof para) {
+				free(expanded);
+				break;
+			}
+			if (plen > 0)
+				para[plen++] = ' ';
+			memcpy(para + plen, expanded, elen);
+			plen += elen;
+			free(expanded);
+		}
+
+		if (plen > 0) {
+			para[plen] = '\0';
+			telnetclient_puts_paragraphs(cl, para, 0);
+			telnetclient_puts(cl, "\n");
+		}
+	}
+	// 10. New Line (space)
+
+	// 11. Print available Exits
 	/* list exits */
-	// 9. Exit Desc list
 	telnetclient_puts(cl, "Exits:");
 	{
-		char exitname[64];
 		int found = 0;
-		unsigned i;
 
 		for (i = 0; dirs[i]; i++) {
 			snprintf(exitname, sizeof exitname, "exit.%s.to", dirs[i]);
