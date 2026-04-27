@@ -243,6 +243,8 @@ command_start_lineinput(DESCRIPTOR_DATA *cl)
 		}
 	}
 
+	telnetclient_puts(cl, "\n-----\n\n");
+
 	/* show the starting room */
 	if (ch) {
 		const char *room_id = character_attr_get(ch, "room.current");
