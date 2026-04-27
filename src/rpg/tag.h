@@ -19,9 +19,9 @@
 
 #include "rpg_char.h"
 #include "position.h"
+#include "obj.h"
 
 struct character;
-struct room;
 
 #define RPG_TAG_MODE_POSITION 0
 #define RPG_TAG_MODE_DIFFICULTY 1
@@ -48,7 +48,7 @@ int rpg_tag_affects(const char *affects_csv, enum rpg_action a);
  * contribution into *pos and *difficulty. Safe to pass NULL for either
  * entity. *pos and *difficulty must be pre-seeded with the baseline.
  */
-void rpg_tags_apply(struct character *actor, struct room *room,
+void rpg_tags_apply(struct character *actor, OBJ *room,
 	enum rpg_action action,
 	enum rpg_position *pos, int *difficulty);
 

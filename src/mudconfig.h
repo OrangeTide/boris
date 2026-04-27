@@ -31,7 +31,7 @@ struct mud_config {
 	char *form_newuser_filename;
 	int default_family; /* IPv4 or IPv6 */
 	char *newuser_room; /* starting room for new characters */
-	unsigned room_cache_size; /* max unreferenced rooms in LRU cache */
+	unsigned obj_cache_size; /* max unreferenced objects in LRU cache */
 	unsigned character_cache_size; /* max unreferenced characters in LRU cache */
 	unsigned rpg_enabled; /* feature gate for RPG subsystem commands */
 #ifdef CONFIG_LANDLOCK

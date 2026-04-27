@@ -59,12 +59,16 @@ struct obj {
 	jsmntok_t *tokens;
 };
 
-/* compare a jsmn token to a null-terminated string */
+/* compare a jsmn token to a string of known length.
+ * pass (size_t)-1 for slen to use strlen(s). */
 static int
-json_token_streq(const char *json, const jsmntok_t *t, const char *s)
+json_token_streq(const char *json, const jsmntok_t *t,
+	const char *s, size_t slen)
 {
-	return strncmp(json + t->start, s, t->end - t->start) == 0
-		&& strlen(s) == (size_t)(t->end - t->start);
+	if (slen == (size_t)-1)
+		slen = strlen(s);
+	return slen == (size_t)(t->end - t->start)
+		&& strncmp(json + t->start, s, slen) == 0;
 }
 
 /* return a pointer into the json buffer for a string or primitive token.
@@ -317,13 +321,13 @@ token_span(const jsmntok_t *t, unsigned count)
 	}
 }
 
-/** find property by name in token array.
- *
+/**
+ * find property by name within the object at token index obj_tok.
+ * name_len is the length to compare; pass (size_t)-1 to use strlen.
  * Returns the token index of the matching key, or -1 if not found.
- * Handles complex values correctly via token_span.
  */
 static int
-find_prop(OBJ *obj, const char *name)
+find_prop_in(OBJ *obj, int obj_tok, const char *name, size_t name_len)
 {
 	const jsmntok_t *t;
 	int i, pos;
@@ -331,20 +335,29 @@ find_prop(OBJ *obj, const char *name)
 	if (!obj->tokens || obj->tokens_used == 0)
 		return -1;
 	t = obj->tokens;
-	if (t->type != JSMN_OBJECT)
+	if (t[obj_tok].type != JSMN_OBJECT)
 		return -1;
 
-	pos = 1;
-	for (i = 0; i < t[0].size; i++) {
+	if (name_len == (size_t)-1)
+		name_len = strlen(name);
+
+	pos = obj_tok + 1;
+	for (i = 0; i < t[obj_tok].size; i++) {
 		int val_span;
 
-		if (json_token_streq(obj->data, &t[pos], name))
+		if (json_token_streq(obj->data, &t[pos], name, name_len))
 			return pos;
 
 		val_span = token_span(&t[pos + 1], obj->tokens_used - pos - 1);
 		pos += 1 + val_span;
 	}
 	return -1;
+}
+
+static int
+find_prop(OBJ *obj, const char *name)
+{
+	return find_prop_in(obj, 0, name, (size_t)-1);
 }
 
 /* ensure tokens array has room for at least n more tokens */
@@ -531,12 +544,44 @@ obj_free(OBJ *obj)
 char *
 obj_prop_get(OBJ *obj, const char *propname)
 {
-	int key_idx = find_prop(obj, propname);
+	int key_idx;
 
-	if (key_idx < 0)
+	if (!obj || !propname)
 		return NULL;
-	obj->json_len = 0;
-	return json_token_tostr(obj->data, &obj->tokens[key_idx + 1]);
+
+	/* exact match at top level first (handles flat dotted keys) */
+	key_idx = find_prop(obj, propname);
+	if (key_idx >= 0) {
+		obj->json_len = 0;
+		return json_token_tostr(obj->data, &obj->tokens[key_idx + 1]);
+	}
+
+	/* walk nested objects along '.' separators */
+	{
+		const char *seg, *dot;
+		int cur = 0;
+
+		seg = propname;
+		while ((dot = strchr(seg, '.')) != NULL) {
+			key_idx = find_prop_in(obj, cur, seg,
+				(size_t)(dot - seg));
+			if (key_idx < 0)
+				return NULL;
+			cur = key_idx + 1;
+			if (obj->tokens[cur].type != JSMN_OBJECT)
+				return NULL;
+			seg = dot + 1;
+		}
+
+		if (cur == 0)
+			return NULL;
+
+		key_idx = find_prop_in(obj, cur, seg, (size_t)-1);
+		if (key_idx < 0)
+			return NULL;
+		obj->json_len = 0;
+		return json_token_tostr(obj->data, &obj->tokens[key_idx + 1]);
+	}
 }
 
 int

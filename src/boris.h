@@ -244,10 +244,13 @@ struct socketio_handle;
 
 /* names of various domains */
 #define DOMAIN_USER "users"
-#define DOMAIN_ROOM "rooms"
+#define DOMAIN_OBJS "objs"
 #define DOMAIN_CHARACTER "chars"
 #define DOMAIN_ENTITY "entities"
 #define DOMAIN_TEMPLATE "templates"
+
+/* root directories within DOMAIN_OBJS */
+#define ROOM_ROOTDIR "rooms"
 
 /** max id in any domain */
 #define ID_MAX 32767

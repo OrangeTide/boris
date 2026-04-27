@@ -114,7 +114,7 @@ static int
 muddb_preopen_domains(MUDDB *db)
 {
 	static const char *known_domains[] = {
-		"users", "rooms", "chars", NULL
+		"users", "objs", "chars", NULL
 	};
 	MDB_txn *txn;
 	MDB_dbi dbi;

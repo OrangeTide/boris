@@ -67,8 +67,9 @@ static int
 do_move(DESCRIPTOR_DATA *cl, const char *exit_name)
 {
 	struct character *ch;
-	struct room *r;
+	OBJ *r;
 	const char *room_id, *dest;
+	char dest_buf[OBJ_PATH_MAX];
 	char exitkey[DIRECTION_STRING_MAX];
 	unsigned i;
 
@@ -99,23 +100,24 @@ do_move(DESCRIPTOR_DATA *cl, const char *exit_name)
 	}
 
 	snprintf(exitkey, sizeof exitkey, "exit.%s", exit_name);
-	dest = room_attr_get(r, exitkey);
-	room_put(r);
-
+	dest = obj_prop_get(r, exitkey);
 	if (!dest) {
+		room_put(r);
 		telnetclient_puts(cl, "You can't go that way.\n");
 		return 0;
 	}
+	snprintf(dest_buf, sizeof dest_buf, "%s", dest);
+	room_put(r);
 
 	/* verify destination exists */
-	r = room_get(dest);
+	r = room_get(dest_buf);
 	if (!r) {
-		telnetclient_printf(cl, "That exit leads nowhere (\"%s\").\n", dest);
+		telnetclient_printf(cl, "That exit leads nowhere (\"%s\").\n", dest_buf);
 		return 0;
 	}
 
 	/* move the character */
-	character_attr_set(ch, "room.current", dest);
+	character_attr_set(ch, "room.current", dest_buf);
 	show_room(cl, r);
 	room_put(r);
 	return 1;
@@ -157,7 +159,7 @@ command_do_enter(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNU
 		/* no argument -- check if an "enter" exit exists */
 		struct character *ch = telnetclient_character(cl);
 		const char *room_id;
-		struct room *r;
+		OBJ *r;
 
 		if (!ch) {
 			telnetclient_puts(cl, "You have no character.\n");
@@ -172,9 +174,9 @@ command_do_enter(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNU
 
 		r = room_get(room_id);
 		if (r) {
-			const char *dest = room_attr_get(r, "exit.enter");
+			int has_enter = obj_prop_get(r, "exit.enter.to") != NULL;
 			room_put(r);
-			if (dest)
+			if (has_enter)
 				return do_move(cl, "enter");
 		}
 

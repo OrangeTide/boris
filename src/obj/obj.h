@@ -3,10 +3,14 @@
 
 #include <stddef.h>
 
+struct muddb;
+
 #define OBJ_OK (0)
 #define OBJ_ERR (-1)
 #define OBJ_ERR_NOMEM (-2)
 #define OBJ_ERR_PROTECTED (-3)
+
+#define OBJ_PATH_MAX 256
 
 typedef struct obj OBJ;
 
@@ -47,5 +51,11 @@ typedef struct obj_iter OBJ_ITER;
 OBJ_ITER *obj_iter_begin(OBJ *obj);
 int obj_iter_next(OBJ_ITER *it, const char **key, const char **value);
 void obj_iter_end(OBJ_ITER *it);
+
+/* global object cache backed by muddb */
+int obj_initialize(struct muddb *db, unsigned cache_size);
+void obj_shutdown(void);
+OBJ *obj_get(const char *id);
+void obj_release(OBJ *obj);
 
 #endif
