@@ -31,6 +31,7 @@
 #include <string.h>
 #include <time.h>
 
+/* show_gametime displays the system local time and in-game time to the client. */
 void
 show_gametime(DESCRIPTOR_DATA *cl)
 {
@@ -49,25 +50,32 @@ show_gametime(DESCRIPTOR_DATA *cl)
 		telnetclient_printf(cl, "Current time in game: %s\n", gametime);
 }
 
-static const char * const dirs[] = {
-	"n", "north", "s", "south", "e", "east",
-	"w", "west", "u", "up", "d", "down",
-	"ne", "northeast", "nw", "northwest",
-	"se", "southeast", "sw", "southwest",
-	"enter", NULL
-};
+/* show_ambient displays the current time of day and returns 1 if anything was printed. */
+int
+show_ambient(DESCRIPTOR_DATA *cl)
+{
+	char ambient[256];
+	if (worldclock_timeofdaystr(ambient, sizeof(ambient), worldclock_now()) != -1) {
+		telnetclient_printf(cl, "It is %s.\n", ambient);
+		return 1;
+	}
 
-/* sink state for streaming expand_string output to a telnetclient.
- * buffers small chunks on the stack and flushes via telnetclient_puts
- * so the expander never has to allocate. */
-struct tc_sink {
-	DESCRIPTOR_DATA	*cl;
-	char		buf[256];
-	unsigned	len;
-};
+	return 0;
+}
 
-static void
-tc_flush(struct tc_sink *s)
+/* show_pose displays the player's own pose/apperance to themselves.
+ * Returns 1 if anything was printed. */
+int
+show_pose(DESCRIPTOR_DATA *cl)
+{
+	// TODO: improve this when we have 'pose' and other character status.
+	telnetclient_puts(cl, "You are standing here.\n");
+	return 1;
+}
+
+/* _tc_flush writes any buffered data in the sink to the client. */
+void
+_tc_flush(struct _tc_sink *s)
 {
 	if (s->len == 0) return;
 	s->buf[s->len] = '\0';
@@ -75,10 +83,11 @@ tc_flush(struct tc_sink *s)
 	s->len = 0;
 }
 
-static int
-tc_sink(void *user, const char *data, unsigned n)
+/* _tc_sink buffers data and flushes it to the client when the buffer is full. */
+int
+_tc_sink(void *user, const char *data, unsigned n)
 {
-	struct tc_sink *s = user;
+	struct _tc_sink *s = user;
 
 	while (n > 0) {
 		unsigned room = sizeof(s->buf) - 1 - s->len;
@@ -89,81 +98,7 @@ tc_sink(void *user, const char *data, unsigned n)
 		data += w;
 		n -= w;
 		if (s->len + 1 >= sizeof(s->buf))
-			tc_flush(s);
+			_tc_flush(s);
 	}
 	return 0;
-}
-
-/* variable lookup for show_room: supports "room.<attr>" and "char.<attr>". */
-struct room_lookup_ctx {
-	OBJ *r;
-	struct character *ch;
-};
-
-static const char *
-room_lookup(void *user, const char *name)
-{
-	struct room_lookup_ctx *rl = user;
-
-	if (!strncmp(name, "room.", 5))
-		return rl->r ? obj_prop_get(rl->r, name + 5) : NULL;
-	if (!strncmp(name, "char.", 5))
-		return rl->ch ? character_attr_get(rl->ch, name + 5) : NULL;
-	return NULL;
-}
-
-/** expand s through the ctx, streaming straight into cl. */
-static void
-expand_to_telnet(DESCRIPTOR_DATA *cl, const char *s,
-		 const struct var_ctx *ctx)
-{
-	struct tc_sink snk = { cl, {0}, 0 };
-
-	expand_string_stream(s, ctx, tc_sink, &snk);
-	tc_sink(&snk, "\n", 1);
-	tc_flush(&snk);
-}
-
-/** display the current room to the player. */
-void
-show_room(DESCRIPTOR_DATA *cl, OBJ *r)
-{
-	struct room_lookup_ctx rl = { r, telnetclient_character(cl) };
-	struct var_ctx vctx = { room_lookup, &rl, 0, NULL, NULL, 0 };
-	const char *name, *desc;
-
-	name = obj_prop_get(r, "name.short");
-	if (name)
-		expand_to_telnet(cl, name, &vctx);
-
-	desc = obj_prop_get(r, "desc.long");
-	if (!desc)
-		desc = obj_prop_get(r, "desc.short");
-	if (desc) {
-		char *expanded = expand_string(desc, &vctx);
-		if (expanded) {
-			telnetclient_puts_paragraphs(cl, expanded, 2);
-			free(expanded);
-		}
-	}
-
-	/* list exits */
-	telnetclient_puts(cl, "Exits:");
-	{
-		char exitname[64];
-		int found = 0;
-		unsigned i;
-
-		for (i = 0; dirs[i]; i++) {
-			snprintf(exitname, sizeof exitname, "exit.%s", dirs[i]);
-			if (obj_prop_get(r, exitname)) {
-				telnetclient_printf(cl, " %s", dirs[i]);
-				found = 1;
-			}
-		}
-
-		if (!found)
-			telnetclient_puts(cl, " none");
-		telnetclient_puts(cl, "\n");
-	}
 }

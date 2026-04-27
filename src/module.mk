@@ -48,6 +48,7 @@ boris_SRCS = \
 	cmd/roll.c \
 	cmd/roomget.c \
 	cmd/say.c \
+	cmd/show_room.c \
 	cmd/stat.c \
 	cmd/time.c \
 	cmd/yell.c \

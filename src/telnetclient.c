@@ -80,7 +80,7 @@ static DESCRIPTOR_DATA *telnetclient_newclient(struct telnetserver *server, stru
  * Functions
  ******************************************************************************/
 
-/** start line input mode on a telnetclient. */
+/* telnetclient_start_lineinput sets the line input handler and prompt for a client. */
 void
 telnetclient_start_lineinput(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA *cl, const char *line), const char *prompt)
 {
@@ -89,6 +89,7 @@ telnetclient_start_lineinput(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_
 	cl->line_input = line_input;
 }
 
+/* telnetclient_on_data processes incoming data from a client socket. */
 static void
 telnetclient_on_data(net_event *e)
 {
@@ -175,6 +176,7 @@ telnetclient_on_data(net_event *e)
 	buf_consume(cl->linebuf, consumed);
 }
 
+/* telnetserver_on_accept handles a new incoming connection. */
 static void
 telnetserver_on_accept(net_event *e)
 {
@@ -188,12 +190,14 @@ telnetserver_on_accept(net_event *e)
 	LOG_INFO("*** Connection %ld: %s", (long)net_get_socket(e->remote), telnetclient_socket_name(cl));
 }
 
+/* telnetserver_on_error logs a server-level error. */
 static void
 telnetserver_on_error(net_event *e)
 {
 	LOG_CRITICAL("telnet server error: %s", e->msg);
 }
 
+/* telnetclient_on_error logs a client-level error and closes the stream. */
 static void
 telnetclient_on_error(net_event *e)
 {
@@ -205,7 +209,7 @@ telnetclient_on_error(net_event *e)
 	net_close(e->stream);
 }
 
-/** free a telnetclient structure. */
+/* telnetclient_on_destroy frees a client and all its associated resources. */
 static void
 telnetclient_on_destroy(net_event *e)
 {
@@ -247,7 +251,7 @@ telnetclient_on_destroy(net_event *e)
 	free(client);
 }
 
-/** notifies a client's disconnect. */
+/* telnetclient_on_close handles a client disconnect by notifying channels and cleaning up. */
 static void
 telnetclient_on_close(net_event *e)
 {
@@ -283,9 +287,7 @@ telnetclient_on_close(net_event *e)
 	}
 }
 
-/**
- * @return the username
- */
+/* telnetclient_username returns the username associated with the client. */
 const char *
 telnetclient_username(DESCRIPTOR_DATA *cl)
 {
@@ -302,7 +304,7 @@ telnetclient_username(DESCRIPTOR_DATA *cl)
 	return "<UNKNOWN>";
 }
 
-/* called by MTH */
+/* write_to_descriptor writes raw bytes to a client's stream, called by MTH. */
 int
 write_to_descriptor(DESCRIPTOR_DATA *d, const char *txt, int length)
 {
@@ -327,7 +329,7 @@ write_to_descriptor(DESCRIPTOR_DATA *d, const char *txt, int length)
 	return 0;
 }
 
-/* process regular input data, escape newline as CR/LF and IAC as IAC IAC */
+/* write_escaped writes text to a descriptor, escaping newlines as CR/LF and IAC bytes. */
 static void
 write_escaped(DESCRIPTOR_DATA *d, const char *txt, int length)
 {
@@ -368,7 +370,7 @@ write_escaped(DESCRIPTOR_DATA *d, const char *txt, int length)
 	}
 }
 
-/** write a null terminated string to a client buffer. */
+/* telnetclient_puts writes a null-terminated string to a client. */
 int
 telnetclient_puts(DESCRIPTOR_DATA *cl, const char *s)
 {
@@ -394,7 +396,7 @@ telnetclient_puts(DESCRIPTOR_DATA *cl, const char *s)
 	return OK;
 }
 
-/** vprintf for a client output buffer. */
+/* telnetclient_vprintf formats and writes a string to a client using a va_list. */
 int
 telnetclient_vprintf(DESCRIPTOR_DATA *cl, const char *fmt, va_list ap)
 {
@@ -424,7 +426,7 @@ telnetclient_vprintf(DESCRIPTOR_DATA *cl, const char *fmt, va_list ap)
 	return OK;
 }
 
-/** printf for a telnetclient output buffer. */
+/* telnetclient_printf formats and writes a string to a client. */
 int
 telnetclient_printf(DESCRIPTOR_DATA *cl, const char *fmt, ...)
 {
@@ -438,7 +440,7 @@ telnetclient_printf(DESCRIPTOR_DATA *cl, const char *fmt, ...)
 	return res;
 }
 
-/** releases current state (frees it). */
+/* telnetclient_clear_statedata frees the current state data and zeroes the state union. */
 void
 telnetclient_clear_statedata(DESCRIPTOR_DATA *cl)
 {
@@ -450,6 +452,7 @@ telnetclient_clear_statedata(DESCRIPTOR_DATA *cl)
 	memset(&cl->state, 0, sizeof cl->state);
 }
 
+/* telnetclient_channel_add joins the client to a channel and appends it to the client's channel list. */
 static int
 telnetclient_channel_add(DESCRIPTOR_DATA *cl, struct channel *ch)
 {
@@ -475,6 +478,7 @@ telnetclient_channel_add(DESCRIPTOR_DATA *cl, struct channel *ch)
 	return 1; /* success */
 }
 
+/* telnetclient_channel_remove parts the client from a channel and removes it from the client's channel list. */
 static int
 telnetclient_channel_remove(DESCRIPTOR_DATA *cl, struct channel *ch)
 {
@@ -507,6 +511,7 @@ telnetclient_channel_remove(DESCRIPTOR_DATA *cl, struct channel *ch)
 	return 0; /* not found. */
 }
 
+/* telnetclient_channel_send delivers a channel message to the client. */
 static void
 telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const char *msg)
 {
@@ -521,7 +526,7 @@ telnetclient_channel_send(struct channel_member *cm, struct channel *ch, const c
 	telnetclient_printf(cl, "[%p] %s\n", (void*)ch, msg);
 }
 
-/** allocate a new telnetclient based on an existing valid dyad handle. */
+/* telnetclient_newclient allocates and initializes a new client on the given stream. */
 static DESCRIPTOR_DATA *
 telnetclient_newclient(struct telnetserver *server, struct net_stream *stream)
 {
@@ -571,9 +576,7 @@ failed:
 	return NULL;
 }
 
-/**
- * replaces the current user with a different one and updates the reference counts.
- */
+/* telnetclient_setuser replaces the current user, updating reference counts on both old and new. */
 void
 telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u)
 {
@@ -587,9 +590,7 @@ telnetclient_setuser(DESCRIPTOR_DATA *cl, struct user *u)
 	user_put(&old_user);
 }
 
-/**
- * replaces the current character with a different one and updates reference counts.
- */
+/* telnetclient_setcharacter replaces the current character, releasing the old one. */
 void
 telnetclient_setcharacter(DESCRIPTOR_DATA *cl, struct character *ch)
 {
@@ -605,9 +606,7 @@ telnetclient_setcharacter(DESCRIPTOR_DATA *cl, struct character *ch)
 	}
 }
 
-/**
- * return the character associated with this descriptor.
- */
+/* telnetclient_character returns the character associated with the client. */
 struct character *
 telnetclient_character(DESCRIPTOR_DATA *cl)
 {
@@ -616,7 +615,7 @@ telnetclient_character(DESCRIPTOR_DATA *cl)
 }
 
 #if 0 // TODO: use MTH to change ECHO mode
-/** send TELNET protocol messages to control echo mode. */
+/* telnetclient_echomode sends TELNET protocol messages to enable or disable echo. */
 static int
 telnetclient_echomode(DESCRIPTOR_DATA *cl, int mode)
 {
@@ -641,7 +640,7 @@ telnetclient_echomode(DESCRIPTOR_DATA *cl, int mode)
 #endif
 
 #if 0 // TODO: use MTH to change line mode
-/** send TELNET protocol messages to control line mode. */
+/* telnetclient_linemode sends TELNET protocol messages to enable or disable line mode. */
 static int
 telnetclient_linemode(DESCRIPTOR_DATA *cl, int mode)
 {
@@ -669,6 +668,7 @@ telnetclient_linemode(DESCRIPTOR_DATA *cl, int mode)
 }
 #endif
 
+/* telnetclient_output_prompt writes the prompt string to the client and sets the prompt flag. */
 static void
 telnetclient_output_prompt(DESCRIPTOR_DATA *cl)
 {
@@ -679,7 +679,7 @@ telnetclient_output_prompt(DESCRIPTOR_DATA *cl)
 	}
 }
 
-/** configures the prompt string for telnetclient_rdev_lineinput. */
+/* telnetclient_setprompt sets the prompt string and immediately displays it. */
 void
 telnetclient_setprompt(DESCRIPTOR_DATA *cl, const char *prompt)
 {
@@ -689,9 +689,7 @@ telnetclient_setprompt(DESCRIPTOR_DATA *cl, const char *prompt)
 	free(oldprompt);
 }
 
-/**
- * @return true if client is still in this state
- */
+/* telnetclient_isstate returns true if the client's line input handler and prompt match the given values. */
 int
 telnetclient_isstate(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA *cl, const char *line), const char *prompt)
 {
@@ -702,7 +700,7 @@ telnetclient_isstate(DESCRIPTOR_DATA *cl, void (*line_input)(DESCRIPTOR_DATA *cl
 		(cl->prompt_string == prompt || strcmp(cl->prompt_string, prompt));
 }
 
-/** mark a client to be closed and freed. */
+/* telnetclient_close marks a client for closure, dispatching to the appropriate close handler. */
 void
 telnetclient_close(DESCRIPTOR_DATA *cl)
 {
@@ -717,7 +715,7 @@ telnetclient_close(DESCRIPTOR_DATA *cl)
 	}
 }
 
-/** display the currently configured prompt string again. */
+/* telnetclient_prompt_refresh redisplays the prompt if one is set and not already shown. */
 void
 telnetclient_prompt_refresh(DESCRIPTOR_DATA *cl)
 {
@@ -727,7 +725,7 @@ telnetclient_prompt_refresh(DESCRIPTOR_DATA *cl)
 	}
 }
 
-/** update the prompts on all open sockets if they are type 1(client). */
+/* telnetclient_prompt_refresh_all redisplays the prompt on every connected client. */
 void
 telnetclient_prompt_refresh_all(struct telnetserver *server)
 {
@@ -740,6 +738,7 @@ telnetclient_prompt_refresh_all(struct telnetserver *server)
 	}
 }
 
+/* telnetclient_channel_member returns the client's channel membership handle. */
 struct channel_member *
 telnetclient_channel_member(DESCRIPTOR_DATA *cl)
 {
@@ -747,12 +746,14 @@ telnetclient_channel_member(DESCRIPTOR_DATA *cl)
 }
 
 
+/* telnetclient_socket_handle returns the underlying network stream for the client. */
 struct net_stream *
 telnetclient_socket_handle(DESCRIPTOR_DATA *cl)
 {
 	return cl->stream;
 }
 
+/* telnetclient_socket_name returns a human-readable address string for the client's connection. */
 const char *
 telnetclient_socket_name(DESCRIPTOR_DATA *cl)
 {
@@ -769,12 +770,14 @@ telnetclient_socket_name(DESCRIPTOR_DATA *cl)
 	return tmp;
 }
 
+/* telnetclient_get_terminal returns the client's terminal information. */
 const struct terminal *
 telnetclient_get_terminal(DESCRIPTOR_DATA *cl)
 {
 	return cl ? &cl->terminal : NULL;
 }
 
+/* telnetclient_get_width returns the client's terminal width, defaulting to 80. */
 unsigned
 telnetclient_get_width(DESCRIPTOR_DATA *cl)
 {
@@ -783,6 +786,7 @@ telnetclient_get_width(DESCRIPTOR_DATA *cl)
 	return 80;
 }
 
+/* telnetclient_puts_wrapped word-wraps a single line of text to the client's terminal width. */
 int
 telnetclient_puts_wrapped(DESCRIPTOR_DATA *cl, const char *s)
 {
@@ -834,6 +838,7 @@ telnetclient_puts_wrapped(DESCRIPTOR_DATA *cl, const char *s)
 	return OK;
 }
 
+/* wrap_paragraph normalizes and word-wraps a single paragraph, writing it to the client. */
 static int
 wrap_paragraph(DESCRIPTOR_DATA *cl, const char *text, unsigned len,
 	       unsigned wrap_width, const char *indent)
@@ -898,10 +903,14 @@ wrap_paragraph(DESCRIPTOR_DATA *cl, const char *text, unsigned len,
 	return OK;
 }
 
+/* telnetclient_puts_paragraphs splits text on blank lines, word-wraps each paragraph, and
+ * emits them with blank line spacing and optional indentation.
+ */
 int
 telnetclient_puts_paragraphs(DESCRIPTOR_DATA *cl, const char *s,
 			     unsigned indent)
 {
+	const unsigned spacing = 1; /* number of blank lines between paragraphs */
 	unsigned width = telnetclient_get_width(cl);
 	if (indent >= width)
 		indent = 0;
@@ -913,6 +922,14 @@ telnetclient_puts_paragraphs(DESCRIPTOR_DATA *cl, const char *s,
 	memset(indent_buf, ' ', indent);
 	indent_buf[indent] = '\0';
 
+	/* fill a buffer with blank lines to use for spacing */
+	char blank_lines[spacing + 1];
+	for (unsigned i = 0; i < spacing; i++)
+		blank_lines[i] = '\n';
+	blank_lines[spacing] = '\0';
+
+
+	unsigned paragraph_num = 0; /* track the paragraph number we are on */
 	const char *p = s;
 	while (*p) {
 		while (*p == '\n' || *p == '\r')
@@ -929,8 +946,13 @@ telnetclient_puts_paragraphs(DESCRIPTOR_DATA *cl, const char *s,
 			end = p + plen;
 		}
 
+		if (blank_lines[0] && paragraph_num)
+			telnetclient_puts(cl, blank_lines);
+
 		if (wrap_paragraph(cl, p, plen, wrap_width, indent_buf) != OK)
 			return ERR;
+
+		paragraph_num++;
 
 		p = end;
 	}
@@ -938,6 +960,7 @@ telnetclient_puts_paragraphs(DESCRIPTOR_DATA *cl, const char *s,
 	return OK;
 }
 
+/* telnetserver_listen creates a server and begins accepting connections on the given port. */
 int
 telnetserver_listen(int port)
 {
@@ -970,6 +993,7 @@ telnetserver_listen(int port)
 	return OK;
 }
 
+/* telnetserver_shutdown frees all telnet servers and their resources. */
 void
 telnetserver_shutdown(void)
 {
@@ -981,18 +1005,21 @@ telnetserver_shutdown(void)
 	}
 }
 
+/* telnetserver_first returns the first server in the global server list. */
 struct telnetserver *
 telnetserver_first(void)
 {
 	return LIST_TOP(server_list);
 }
 
+/* telnetserver_next returns the next server in the global server list. */
 struct telnetserver *
 telnetserver_next(struct telnetserver *server)
 {
 	return LIST_NEXT(server, list);
 }
 
+/* telnetclient_webclient_new allocates and initializes a client backed by a web connection. */
 DESCRIPTOR_DATA *
 telnetclient_webclient_new(struct web_client *wc, const struct client_ops *ops)
 {
@@ -1025,6 +1052,7 @@ telnetclient_webclient_new(struct web_client *wc, const struct client_ops *ops)
 	return cl;
 }
 
+/* telnetclient_webclient_destroy tears down a web client, parting all channels and freeing resources. */
 void
 telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl)
 {
@@ -1065,6 +1093,7 @@ telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl)
 	free(cl);
 }
 
+/* telnetclient_set_encoding sets the character encoding for the client. */
 void
 telnetclient_set_encoding(DESCRIPTOR_DATA *cl, struct charset *cs)
 {
@@ -1072,36 +1101,42 @@ telnetclient_set_encoding(DESCRIPTOR_DATA *cl, struct charset *cs)
 		cl->encoding = cs;
 }
 
+/* telnetclient_get_encoding returns the client's character encoding. */
 struct charset *
 telnetclient_get_encoding(DESCRIPTOR_DATA *cl)
 {
 	return cl ? cl->encoding : NULL;
 }
 
+/* telnetclient_user returns the user associated with the client. */
 struct user *
 telnetclient_user(DESCRIPTOR_DATA *cl)
 {
 	return cl ? cl->user : NULL;
 }
 
+/* telnetclient_get_menu returns the current menu state for the client. */
 const struct menuinfo *
 telnetclient_get_menu(DESCRIPTOR_DATA *cl)
 {
 	return cl->state.menu;
 }
 
+/* telnetclient_set_menu sets the current menu state for the client. */
 void
 telnetclient_set_menu(DESCRIPTOR_DATA *cl, const struct menuinfo *menu)
 {
 	cl->state.menu = menu;
 }
 
+/* telnetclient_get_login_username returns the username entered during login. */
 const char *
 telnetclient_get_login_username(DESCRIPTOR_DATA *cl)
 {
 	return cl->state.login.username;
 }
 
+/* telnetclient_set_login_username stores the username entered during login. */
 void
 telnetclient_set_login_username(DESCRIPTOR_DATA *cl, const char *name)
 {
@@ -1109,18 +1144,21 @@ telnetclient_set_login_username(DESCRIPTOR_DATA *cl, const char *name)
 		 sizeof(cl->state.login.username), "%s", name);
 }
 
+/* telnetclient_get_form returns the client's current form state. */
 struct form_state *
 telnetclient_get_form(DESCRIPTOR_DATA *cl)
 {
 	return cl->state.form;
 }
 
+/* telnetclient_set_form sets the client's current form state. */
 void
 telnetclient_set_form(DESCRIPTOR_DATA *cl, struct form_state *form)
 {
 	cl->state.form = form;
 }
 
+/* telnetclient_set_state_free registers a cleanup callback for the client's current state data. */
 void
 telnetclient_set_state_free(DESCRIPTOR_DATA *cl, void (*fn)(DESCRIPTOR_DATA *))
 {
