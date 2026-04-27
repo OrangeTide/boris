@@ -99,7 +99,7 @@ do_move(DESCRIPTOR_DATA *cl, const char *exit_name)
 		}
 	}
 
-	snprintf(exitkey, sizeof exitkey, "exit.%s", exit_name);
+	snprintf(exitkey, sizeof exitkey, "exit.%s.to", exit_name);
 	dest = obj_prop_get(r, exitkey);
 	if (!dest) {
 		room_put(r);

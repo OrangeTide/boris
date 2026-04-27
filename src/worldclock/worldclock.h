@@ -10,4 +10,5 @@ worldclock_t worldclock_now(void);
 int worldclock_datetimestr(char *s, size_t max, worldclock_t t);
 int worldclock_datestr(char *s, size_t max, worldclock_t t);
 int worldclock_timestr(char *s, size_t max, worldclock_t t);
+int worldclock_timeofdaystr(char *s, size_t max, worldclock_t t);
 #endif
