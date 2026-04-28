@@ -43,6 +43,7 @@ struct mud_config {
 #endif
 	unsigned daemonize;
 	char *pid_file;
+	char *image_path;
 };
 
 typedef struct mud_config MUD_CONFIG;

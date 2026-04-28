@@ -175,6 +175,7 @@ security_landlock_apply(void)
 	add_path_rule(ruleset_fd, "data/text", fs_read, handled);
 	add_path_rule(ruleset_fd, "data/forms", fs_read, handled);
 	add_path_rule(ruleset_fd, "data/unicode", fs_read, handled);
+	add_path_rule(ruleset_fd, "data/machine", fs_read, handled);
 
 	/* web server static files */
 	if (mud_config.webserver_port > 0)

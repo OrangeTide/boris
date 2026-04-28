@@ -36,6 +36,7 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 - LMDB back-end database for objects and user accounts.
 - Room navigation: look, go, enter, and direction aliases (north/n, south/s, etc.).
 - ***WIP*** Support for Web-based client(s).
+- ColdFire machine programs -- objects can have ColdFire V4e programs (ELF binaries) attached that post messages to the game world via hypercalls.
 - ***TODO*** ability to host multiple independent worlds from a single server.
 - ***TODO*** On-Line Creation: interactive wizard provides menu-based building.
 
@@ -44,6 +45,10 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 - GNU Make 4.2.1 (or later)
 - GCC or Clang
 - zlib development headers
+
+**Optional** (for rebuilding machine programs in `sdk/machine/`):
+
+- m68k-linux-gnu-gcc cross-compiler (`apt install gcc-m68k-linux-gnu` on Debian/Ubuntu)
 
 ### Linux
 
@@ -412,6 +417,25 @@ sudo ufw allow 8080/tcp
 
 Replace the port numbers if you changed `server.port` or `webserver.port` in
 `boris.cfg`. Check status with `sudo ufw status`.
+
+## Machine Programs
+
+Objects can have ColdFire V4e programs attached to them. Pre-built ELF
+binaries ship in `data/machine/` and are loaded automatically when the
+object enters the cache.
+
+Source code for machine programs lives in `sdk/machine/`. To rebuild:
+
+```sh
+cd sdk/machine
+make
+```
+
+This cross-compiles with `m68k-linux-gnu-gcc` and writes ELF files to
+`data/machine/`. The SDK header `sdk/machine/include/machine_hc.h` provides
+inline wrappers for all available hypercalls (sleep, message post, exit, etc.).
+
+See [DEV.md](doc/DEV.md) for the machine program architecture details.
 
 ## Development
 

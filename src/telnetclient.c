@@ -23,6 +23,8 @@
  */
 
 #include "telnetclient.h"
+#include <boris.h>
+#include <obj.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -1017,6 +1019,48 @@ struct telnetserver *
 telnetserver_next(struct telnetserver *server)
 {
 	return LIST_NEXT(server, list);
+}
+
+void
+telnetclient_room_broadcast(const char *room_id, const char *msg)
+{
+	struct telnetserver *sv;
+	DESCRIPTOR_DATA *cl;
+
+	for (sv = telnetserver_first(); sv; sv = telnetserver_next(sv)) {
+		for (cl = LIST_TOP(sv->client_list); cl; cl = LIST_NEXT(cl, list)) {
+			struct character *ch = cl->character;
+			const char *cur;
+			char key[OBJ_PATH_MAX];
+			if (!ch)
+				continue;
+			cur = character_attr_get(ch, "room.current");
+			if (!cur)
+				continue;
+			snprintf(key, sizeof(key),
+			         ROOM_ROOTDIR "/%s", cur);
+			if (strcmp(key, room_id) == 0)
+				telnetclient_puts(cl, msg);
+		}
+	}
+
+	webclient_lock();
+	for (struct web_client *wc = webclient_first(); wc; wc = wc->next) {
+		if (wc->state != WC_ACTIVE || !wc->cl)
+			continue;
+		struct character *ch = wc->cl->character;
+		const char *cur;
+		char key[OBJ_PATH_MAX];
+		if (!ch)
+			continue;
+		cur = character_attr_get(ch, "room.current");
+		if (!cur)
+			continue;
+		snprintf(key, sizeof(key), ROOM_ROOTDIR "/%s", cur);
+		if (strcmp(key, room_id) == 0)
+			telnetclient_puts(wc->cl, msg);
+	}
+	webclient_unlock();
 }
 
 /* telnetclient_webclient_new allocates and initializes a client backed by a web connection. */
