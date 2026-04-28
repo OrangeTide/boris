@@ -1,4 +1,5 @@
 #ifndef MUDCONFIG_H_
+#define MUDCONFIG_H_
 
 /** global configuration of the mud. */
 struct mud_config {
