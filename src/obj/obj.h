@@ -58,4 +58,8 @@ void obj_shutdown(void);
 OBJ *obj_get(const char *id);
 void obj_release(OBJ *obj);
 
+typedef void (*obj_notify_fn)(OBJ *obj, const char *id, void *arg);
+void obj_set_load_cb(obj_notify_fn cb, void *arg);
+void obj_set_evict_cb(obj_notify_fn cb, void *arg);
+
 #endif

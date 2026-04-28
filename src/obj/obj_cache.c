@@ -47,6 +47,10 @@ struct obj_cache {
 	struct cache_entry *lru_head, *lru_tail;
 	struct obj_cache_ops ops;
 	void *ctx;
+	obj_cache_notify_fn on_load;
+	void *on_load_arg;
+	obj_cache_notify_fn on_evict;
+	void *on_evict_arg;
 };
 
 /* --- LRU helpers ----------------------------------------------------- */
@@ -89,6 +93,8 @@ flush_entry(OBJ_CACHE *c, struct cache_entry *e)
 static void
 drop_entry(OBJ_CACHE *c, struct cache_entry *e)
 {
+	if (c->on_evict)
+		c->on_evict(e->obj, e->id, c->on_evict_arg);
 	ht_str_del(&c->ht, e->id);
 	obj_free(e->obj);
 	free(e->id);
@@ -172,6 +178,8 @@ obj_cache_get(OBJ_CACHE *c, const char *id)
 		return NULL;
 	}
 	c->total++;
+	if (c->on_load)
+		c->on_load(obj, id, c->on_load_arg);
 	return obj;
 }
 
@@ -295,6 +303,22 @@ unsigned
 obj_cache_lru_count(OBJ_CACHE *c)
 {
 	return c ? c->unref_count : 0;
+}
+
+void
+obj_cache_set_load_cb(OBJ_CACHE *c, obj_cache_notify_fn cb, void *arg)
+{
+	if (!c) return;
+	c->on_load = cb;
+	c->on_load_arg = arg;
+}
+
+void
+obj_cache_set_evict_cb(OBJ_CACHE *c, obj_cache_notify_fn cb, void *arg)
+{
+	if (!c) return;
+	c->on_evict = cb;
+	c->on_evict_arg = arg;
 }
 
 void *

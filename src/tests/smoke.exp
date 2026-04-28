@@ -316,6 +316,51 @@ switch -- $test {
 		}
 	}
 
+	fountain_script {
+		# login and enter the game -- Tower Entrance has a fountain script
+		send "L\r"
+		expect {
+			"Username:" {}
+			timeout { fail "fountain_script: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "fountain_script: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {}
+			-re "Invalid|invalid" {
+				fail "fountain_script: login rejected"
+			}
+			timeout { fail "fountain_script: no main menu after login" }
+		}
+		expect {
+			"Choose:" {}
+			timeout { fail "fountain_script: no menu prompt" }
+		}
+		send "E\r"
+		expect {
+			"Tower Entrance" {}
+			timeout { fail "fountain_script: no room description" }
+		}
+		# fountain posts immediately on load, then every 10s;
+		# machine ticks at 1s intervals so first message arrives quickly
+		set timeout 15
+		expect {
+			"fountain bubbles" {
+				pass "fountain_script: machine script produced output"
+			}
+			timeout { fail "fountain_script: no fountain output within 15s" }
+		}
+		send "quit\r"
+		expect {
+			eof {}
+			timeout {}
+		}
+	}
+
 	default {
 		fail "unknown test: $test"
 	}

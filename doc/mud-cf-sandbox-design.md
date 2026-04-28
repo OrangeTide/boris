@@ -53,13 +53,14 @@ portably serialized.
 
 ## Release Plan
 
-- **v0 -- proof-of-concept.** Throwaway ABI. Goal is end-to-end wire-up:
-  boot the emulator under the host, dispatch a handful of hypercalls
-  (`HC_ABORT`, `HC_EXIT`, `HC_PRINT`, `HC_YIELD`, `HC_SLEEP`), load a
-  `PT_LOAD`-only ELF, run "hello world" to completion. No capability
-  model, no syspage, no ABI versioning, no credits. Programs built for
-  v0 get discarded when v1 lands. The point is to de-risk the big v1
-  commitments by proving the basic shape works first.
+- **v0 -- proof-of-concept (DONE).** Throwaway ABI. End-to-end wire-up:
+  boot the emulator under the host, dispatch hypercalls, load ELF
+  binaries, run scripts to completion. Extended beyond the original
+  scope to include persistent sandbox instances, unified handle system,
+  cooperative verb dispatch, termination, interface checking, and a
+  cross-compiler SDK with examples. No capability model, no syspage,
+  no ABI versioning, no credits. Programs built for v0 get discarded
+  when v1 lands. See **v0 Implementation** below for details.
 - **v1 -- first frozen ABI.** Everything described in this document.
   Freeze discipline applies: IDs never reassigned, register conventions
   never change, structured records append-only. Forward-compatible from
@@ -69,6 +70,167 @@ portably serialized.
   non-obj domains (`user:`, `area:`, ...), multi-core scheduler, GDB
   stub, multi-thread-per-task.
 - **v3 -- unplanned re-architecture.** Optimistically never.
+
+## v0 Implementation
+
+v0 was intended as a minimal proof-of-concept but grew to cover the
+core execution model. The following subsystems are implemented and
+tested (unit tests + smoke tests).
+
+### Hypercalls implemented
+
+HC_ABORT (0), HC_TRAP (1), HC_YIELD (2), HC_SLEEP (3), HC_EXIT (4),
+HC_PRINT (5), HC_OPEN (6), HC_CLOSE (7), HC_WAIT (8), HC_MSG_POST (19).
+
+HC_WAIT replaces HC_SLEEP for guest code. It implements a
+WaitForMultipleObjects-style wait: `hc_wait(ncount, handles, timeout_ms)`.
+The CRT wraps `hc_sleep(ms)` as `hc_wait(0, NULL, ms)`. HC_SLEEP remains
+as a host-side legacy path.
+
+### Script objects
+
+Script objects live in the obj cache under `SCRIPT_ROOTDIR "scripts"`
+(defined in `boris.h`), accessed via `obj_get()` / `obj_release()` like
+rooms under `ROOM_ROOTDIR`. The `script.c` / `script.h` wrappers
+(`script_get`, `script_release`, `script_ram_size`, `script_interface`)
+enforce a schema on top of OBJ.
+
+Script object properties:
+
+| Property    | Required | Description                             |
+|-------------|----------|-----------------------------------------|
+| `elf.path`  | yes      | Path to ELF binary                      |
+| `ram.size`  | no       | RAM allocation in bytes (default 65536) |
+| `interface` | no       | Comma-separated supported interfaces    |
+
+Sample data lives in `sample/objs/scripts/` (imported into the "objs"
+LMDB domain alongside rooms).
+
+### Object reference system
+
+`objref.c` / `objref.h` provide domain-qualified reference parsing and
+hierarchical path resolution. Property values can include a domain
+prefix (`script:exits/random-portal`); without a prefix, the domain
+is inferred from context (exit properties default to `rooms`, script
+properties default to `scripts`). Paths support `../` relative
+resolution and are normalized before lookup.
+
+### Task state machine
+
+```
+INIT --> READY <--> BUSY --> DEAD
+  |        |                   ^
+  |        +--> SLEEPING ------+
+  +--------------------------------+
+```
+
+- **INIT**: CRT runs -- zeroes .bss, opens verb/event handles via
+  HC_OPEN, calls `main()` if present. First HC_WAIT transitions to
+  READY.
+- **READY**: parked, host may dispatch verbs/events.
+- **BUSY**: handler executing. May call HC_WAIT internally (e.g.,
+  sleep in a loop).
+- **SLEEPING**: waiting for a timeout before returning to READY.
+- **DEAD**: exited or force-killed.
+
+Inspired by Palm OS PilotMain: events are delivered as normal function
+calls when the sandbox is in a known quiescent state (parked in
+HC_WAIT). No async interruption, no reentrancy.
+
+### Unified handle system
+
+File descriptors, verbs, and events share a single `uint16_t` handle
+space. Every open handle is a `struct sandbox_file` in the task's fd
+table (256 entries). Handle types: `SF_IO`, `SF_VERB`, `SF_EVENT`.
+HC_CLOSE returns a kind enum (`KIND_IO`, `KIND_VERB`, `KIND_EVENT`) so
+the CRT can perform type-specific cleanup.
+
+Fds 0/1/2 (stdin/stdout/stderr) are opened as SF_IO at task creation.
+HC_OPEN parses domain-prefixed names (`"verb:go"`, `"event:term"`) to
+create SF_VERB/SF_EVENT entries at the next available fd. The host
+finds verbs by searching the fd table for SF_VERB entries with matching
+names -- no ELF symbol scanning, no verb table in sandbox RAM.
+
+### Verb dispatch
+
+`sandbox_task_find_verb(t, name)` searches the fd table for a matching
+SF_VERB entry. `sandbox_task_write_context(t, fd, verb, room_id,
+player_id, direction)` writes a context block at 0x0800 in guest RAM
+(big-endian, with string pointers into the block). The host sets PC to
+the handler's address and resumes execution with an instruction cap.
+
+`obj_program_dispatch_verb(obj_id, verb, player_id, direction)` is
+the external entry point, called from `do_move()` in `cmd/move.c` when
+an exit's destination has domain prefix `script:`.
+
+### Cooperative termination
+
+On room evict: if the sandbox has an `event:term` handle and is in
+READY state, the host dispatches it as a normal event with an
+instruction cap. If the handler calls HC_EXIT, clean shutdown. If it
+exceeds the cap, or `event:term` is not registered, or the sandbox is
+not READY: force-kill. Analogous to SIGTERM/SIGKILL.
+
+### Interface checking
+
+A script object declares compatibility via its `interface` property
+(e.g., `"exit"`). After the sandbox reaches READY, the host inspects
+the fd table for required SF_VERB entries. The `exit` interface
+requires `verb:go` and `verb:look`. Missing verbs produce a warning.
+
+### Room lifecycle integration
+
+Machine instances are tied to the obj cache, not to boot. Callbacks
+registered via `obj_set_load_cb()` / `obj_set_evict_cb()` in
+`obj_program_init()`:
+
+- **On obj load**: if the object has a `program.continuous` property,
+  look up the program object, load the ELF, create a machine instance.
+- **On obj evict**: initiate termination sequence, free the machine.
+- **At boot with no users**: no objects loaded, no machines running.
+
+A tick timer (`iox_timer`) drives periodic execution of sleeping
+sandboxes and continuous scripts (e.g., the fountain animation).
+
+### CRT and SDK
+
+The cross-compiler SDK (`sdk/machine/`) provides:
+
+- `include/machine.h`: hypercall wrappers (`hc_yield`, `hc_wait`,
+  `hc_open`, `hc_close`, `hc_exit`, `hc_print`), `VERB_HANDLER` /
+  `EVENT_HANDLER` macros, `struct verb_context` with `VERB_CONTEXT`
+  accessor macro.
+- `lib/crt0.S`: `_start` zeroes .bss, iterates `.data.verb_regs`
+  section calling HC_OPEN for each entry, populates dispatch table,
+  calls `main()`, enters HC_WAIT dispatch loop.
+- `lib/machine.ld`: linker script collecting `.data.verb_regs` section.
+
+Examples: `anim/fountain.c` (continuous animation script),
+`exits/random-portal.c` (verb script with `go` and `look` handlers,
+declares `exit` interface).
+
+### Files
+
+Host-side:
+
+- `src/machine/machine.c`, `machine.h` -- task lifecycle, hypercalls,
+  handle system, verb dispatch, context block.
+- `src/machine/obj_program.c`, `obj_program.h` -- obj/program
+  integration, attach/detach, verb dispatch entry point, tick timer.
+- `src/machine/program.c`, `program.h` -- program object access wrappers.
+- `src/machine/objref.c`, `objref.h` -- object reference parsing and
+  path resolution.
+- `src/machine/test_machine.c` -- unit tests.
+- `src/coldfire/coldfire.c`, `coldfire.h` -- ColdFire V4e emulator.
+- `src/coldfire/elf_loader.c`, `elf_loader.h` -- ELF loader.
+
+Guest-side (sdk/machine/):
+
+- `include/machine.h` -- SDK header.
+- `lib/crt0.S` -- CRT with verb registration and dispatch loop.
+- `lib/machine.ld` -- linker script.
+- `anim/fountain.c` -- continuous script example.
+- `exits/random-portal.c` -- verb script example.
 
 ## Goal
 
@@ -1011,9 +1173,9 @@ pragmatic path.
 
 ## Open Items
 
-- [ ] **v0 scope**: boot emulator, dispatch HC_ABORT/EXIT/PRINT/YIELD/SLEEP,
-      load PT_LOAD-only ELF, run hello-world to completion. No caps, no
-      syspage, no credits, no ABI versioning. Throwaway.
+- [x] **v0 scope**: boot emulator, dispatch hypercalls, load ELF, run
+      scripts. Extended to include persistent instances, unified handles,
+      verb dispatch, termination, interface checking, CRT/SDK.
 - [ ] Populate `credit_cost[hc_id]` weight table; tune `CREDIT_BUDGET`
       and per-task RAM cap against a real workload.
 - [ ] Write seccomp profile.

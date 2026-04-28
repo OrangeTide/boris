@@ -1399,6 +1399,7 @@ mud_config_init(void)
 #endif
 	mud_config.daemonize = 0;
 	mud_config.pid_file = strdup("boris.pid");
+	mud_config.image_path = strdup("data/machine");
 }
 
 /**
@@ -1431,6 +1432,7 @@ mud_config_shutdown(void)
 		&mud_config.default_channels,
 		&mud_config.form_newuser_filename,
 		&mud_config.newuser_room,
+		&mud_config.image_path,
 	};
 	unsigned i;
 
@@ -1485,6 +1487,7 @@ mud_config_process(void)
 #endif
 	config_watch(&cfg, "server.daemonize", do_config_uint, &mud_config.daemonize);
 	config_watch(&cfg, "server.pidfile", do_config_string, &mud_config.pid_file);
+	config_watch(&cfg, "mud.image_path", do_config_string, &mud_config.image_path);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", mud_config_show, 0);
 #endif
