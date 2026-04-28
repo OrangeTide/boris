@@ -30,6 +30,7 @@ void telnetclient_setcharacter(DESCRIPTOR_DATA *cl, struct character *ch);
 struct character *telnetclient_character(DESCRIPTOR_DATA *cl);
 void telnetclient_set_encoding(DESCRIPTOR_DATA *cl, struct charset *cs);
 struct charset *telnetclient_get_encoding(DESCRIPTOR_DATA *cl);
+void telnetclient_room_broadcast(const char *room_id, const char *msg);
 struct web_client;
 DESCRIPTOR_DATA *telnetclient_webclient_new(struct web_client *wc, const struct client_ops *ops);
 void telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl);

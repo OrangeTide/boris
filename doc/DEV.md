@@ -33,6 +33,10 @@ Information for developers working on Boris MUD.
 | src/thirdparty/mth/    | MUD Telopt Handler (TELNET protocol)                           |
 | src/thirdparty/mongoose/| HTTP/WebSocket server                                         |
 | src/thirdparty/tiny-aes/| AES-256 block cipher (public domain, Unlicense)               |
+| src/coldfire/          | ColdFire V4e CPU emulator                                      |
+| src/machine/           | Machine runtime (task lifecycle, fd table, ELF loader)         |
+| sdk/machine/           | SDK and source for machine programs (cross-compiled to m68k)   |
+| data/machine/          | Pre-built machine ELF binaries loaded at server startup        |
 | sample/                | Starter database for new MUDs (import with muddb-tool)         |
 
 ## Build System
@@ -326,6 +330,76 @@ In `src/thirdparty/`:
 
 In `src/scrypt/`: scrypt key derivation for password hashing (no upstream
 maintainer, maintained in-tree).
+
+### ColdFire Machine Programs
+
+Objects can have ColdFire V4e programs attached that run inside a
+ColdFire V4e CPU emulator (`src/coldfire/`). Programs are standard ELF32
+big-endian m68k binaries, cross-compiled with `m68k-linux-gnu-gcc`.
+
+**Architecture:**
+
+- `src/coldfire/` -- instruction-level ColdFire V4e emulator.
+- `src/machine/machine.c` -- task lifecycle, memory image, fd table, ELF
+  loader, hypercall dispatch.
+- `src/machine/obj_program.c` -- glue between machine tasks and the game
+  loop. A periodic `iox_timer` tick runs each task for up to 4096
+  instructions, handles sleep/wake transitions, and re-schedules itself.
+
+**Memory layout** (per task):
+
+| Address       | Contents                                    |
+|---------------|---------------------------------------------|
+| 0x0000-0x03FF | Exception vector table (all point to halt)  |
+| 0x0400        | Halt stub (infinite loop)                   |
+| 0x1000+       | Program code and data (loaded from ELF)     |
+
+The linker script (`sdk/machine/lib/machine.ld`) places `.text` at 0x1000 with
+explicit `PHDRS` so the LOAD segment starts above the vector table.
+
+**Hypercalls** use LINE_A opcodes (0xAxxx). Arguments are passed in data and
+address registers:
+
+| Name        | Opcode | Registers              | Description              |
+|-------------|--------|------------------------|--------------------------|
+| HC_ABORT    | 0xA000 | --                     | Terminate immediately    |
+| HC_YIELD    | 0xA002 | --                     | Yield remaining time     |
+| HC_SLEEP    | 0xA003 | d0=ticks               | Sleep for N seconds      |
+| HC_EXIT     | 0xA004 | d0=status              | Exit with status code    |
+| HC_PRINT    | 0xA005 | d0=len, a0=buf         | Debug print (log only)   |
+| HC_MSG_POST | 0xA013 | d0=fd, d1=len, a0=buf  | Post message to room     |
+
+The fd table (`MACHINE_MAX_FILES` entries) maps integer file descriptors to
+message callbacks. `obj_program_attach()` opens fd 1 with a callback that
+broadcasts to all players in the room.
+
+**SDK** (`sdk/machine/`):
+
+- `include/machine_hc.h` -- inline assembly wrappers for each hypercall,
+  using GCC register constraints to place arguments in the correct registers.
+- `lib/machine.ld` -- linker script for the machine memory layout.
+- `lib/crt0.S` -- CRT startup code with verb registration and dispatch loop.
+- `Makefile` -- cross-compiles `.c` files to ELF binaries in `data/machine/`.
+
+To rebuild machine programs:
+
+```sh
+cd sdk/machine
+make            # builds data/machine/*.elf
+make disasm     # disassemble all programs
+make clean      # remove objects and ELFs
+```
+
+**Attaching to an object** (via obj cache callbacks):
+
+```c
+obj_program_attach("rooms/tower-entrance", image_fd,
+                   "anim/fountain", 64 * 1024, "exit");
+```
+
+Programs are attached automatically when an object with a
+`program.continuous` property enters the obj cache. The tick timer
+runs each machine task every second.
 
 ### Entry Point
 

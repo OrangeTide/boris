@@ -59,3 +59,17 @@ obj_release(OBJ *obj)
 	if (obj)
 		obj_cache_release(obj_global_cache, obj);
 }
+
+void
+obj_set_load_cb(obj_notify_fn cb, void *arg)
+{
+	obj_cache_set_load_cb(obj_global_cache,
+	                      (obj_cache_notify_fn)cb, arg);
+}
+
+void
+obj_set_evict_cb(obj_notify_fn cb, void *arg)
+{
+	obj_cache_set_evict_cb(obj_global_cache,
+	                       (obj_cache_notify_fn)cb, arg);
+}

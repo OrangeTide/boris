@@ -28,6 +28,8 @@
 #include "cmdutil.h"
 #include "room.h"
 #include "util.h"
+#include <objref.h>
+#include <obj_program.h>
 
 #define DIRECTION_STRING_MAX 64
 
@@ -108,6 +110,21 @@ do_move(DESCRIPTOR_DATA *cl, const char *exit_name)
 	}
 	snprintf(dest_buf, sizeof dest_buf, "%s", dest);
 	room_put(r);
+
+	/* check if exit is handled by a script */
+	{
+		struct objref ref;
+		if (objref_parse(dest, ROOM_ROOTDIR, &ref) == 0 &&
+		    strcmp(ref.domain, "script") == 0) {
+			const char *player_name =
+				character_attr_get(ch, "name.short");
+			if (obj_program_dispatch_verb(room_id, "go",
+			    player_name, exit_name) < 0)
+				telnetclient_puts(cl,
+				    "The exit doesn't respond.\n");
+			return 1;
+		}
+	}
 
 	/* verify destination exists */
 	r = room_get(dest_buf);

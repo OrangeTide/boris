@@ -50,6 +50,8 @@
 #include <msgqueue.h>
 #include <iox_fd.h>
 #include <security.h>
+#include <obj_program.h>
+#include <program.h>
 #include <unistd.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
@@ -554,6 +556,18 @@ main(int argc, char **argv)
 	}
 
 	atexit(game_shutdown);
+
+	if (program_init() < 0)
+		LOG_WARNING("program loader disabled (no image directory)");
+
+	atexit(program_shutdown);
+
+	if (obj_program_init(g_loop) < 0) {
+		LOG_ERROR("could not initialize obj_program");
+		return EXIT_FAILURE;
+	}
+
+	atexit(obj_program_shutdown);
 
 	eventlog_server_startup();
 

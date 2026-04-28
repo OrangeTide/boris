@@ -17,7 +17,8 @@ PROJECT_CPPFLAGS += \
 	-Isrc/thirdparty/mongoose -Isrc/thirdparty/tiny-aes \
 	-Isrc/scrypt -Isrc/log -Isrc/util -Isrc/help \
 	-Isrc/iox -Isrc/net -Isrc/passwd \
-	-Isrc/obj -Isrc/entity -Isrc/rpg -Isrc/database
+	-Isrc/obj -Isrc/entity -Isrc/rpg -Isrc/database \
+	-Isrc/coldfire -Isrc/machine
 PROJECT_LDFLAGS  += -pthread
 PROJECT_LDLIBS   += -pthread
 

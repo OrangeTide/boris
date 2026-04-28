@@ -61,6 +61,12 @@ int obj_cache_flush_all(OBJ_CACHE *c);
  */
 char *obj_cache_prop_resolve(OBJ_CACHE *c, OBJ *obj, const char *propname);
 
+/* Optional notification callbacks. Fired on first load (cache miss) and
+ * just before eviction (drop from cache). */
+typedef void (*obj_cache_notify_fn)(OBJ *obj, const char *id, void *arg);
+void obj_cache_set_load_cb(OBJ_CACHE *c, obj_cache_notify_fn cb, void *arg);
+void obj_cache_set_evict_cb(OBJ_CACHE *c, obj_cache_notify_fn cb, void *arg);
+
 /* Test/debug helpers. */
 unsigned obj_cache_size(OBJ_CACHE *c);     /* total objects held */
 unsigned obj_cache_lru_count(OBJ_CACHE *c); /* unreferenced count */
