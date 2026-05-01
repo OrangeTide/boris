@@ -119,6 +119,8 @@ update_watch(struct net_stream *s)
 {
 	if (s->fd < 0) return;
 	unsigned want = IOX_READ;
+	if (s->state == NET_STATE_CLOSING)
+		want = 0;
 	if (s->wbuf_len > 0) want |= IOX_WRITE;
 	if (want == s->watched_events) return;
 	if (s->watched_events == 0) {
@@ -207,6 +209,8 @@ wbuf_drain(struct net_stream *s)
 			memmove(s->wbuf, s->wbuf + n, s->wbuf_len - (size_t)n);
 		s->wbuf_len -= (size_t)n;
 	}
+	if (s->state == NET_STATE_CLOSING)
+		net_close(s);
 }
 
 /* ---------- accept path ---------- */
@@ -381,6 +385,18 @@ net_close(struct net_stream *s)
 	} else {
 		stream_free(s);
 	}
+}
+
+void
+net_close_when_done(struct net_stream *s)
+{
+	if (!s || s->state == NET_STATE_CLOSED) return;
+	if (s->wbuf_len == 0) {
+		net_close(s);
+		return;
+	}
+	s->state = NET_STATE_CLOSING;
+	update_watch(s);
 }
 
 int

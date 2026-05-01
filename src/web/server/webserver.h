@@ -1,12 +1,10 @@
+/* webserver.h : SSE-based web server interface */
+/* PUBLIC DOMAIN (CC0-1.0) */
+
 #ifndef WEBSERVER_H_
 #define WEBSERVER_H_
 
-struct webserver_context {
-    int wake_fd;
-    int family;
-};
-
-int webserver_init(struct webserver_context ctx, unsigned port);
+int webserver_init(unsigned port);
 void webserver_shutdown(void);
 
 #endif /* WEBSERVER_H_ */

@@ -1,46 +1,53 @@
+/* webclient.c : web client connection management for SSE-based web server */
+/* PUBLIC DOMAIN (CC0-1.0) */
+
 #include "webclient.h"
+#include <net.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
 
-static pthread_mutex_t web_clients_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct web_client *web_clients_head;
-static int wake_fd = -1;
 
-void
-webclient_set_wake_fd(int fd)
+static int
+generate_session(char *out, int len)
 {
-	wake_fd = fd;
-}
-
-int
-webclient_get_wake_fd(void)
-{
-	return wake_fd;
+	unsigned char buf[16];
+	int fd = open("/dev/urandom", O_RDONLY);
+	if (fd < 0)
+		return -1;
+	ssize_t n = read(fd, buf, sizeof(buf));
+	close(fd);
+	if (n != (ssize_t)sizeof(buf))
+		return -1;
+	for (int i = 0; i < (int)sizeof(buf) && i * 2 + 1 < len; i++)
+		snprintf(out + i * 2, 3, "%02x", buf[i]);
+	out[len - 1] = '\0';
+	return 0;
 }
 
 struct web_client *
-webclient_new(struct mg_connection *c)
+webclient_new(struct net_stream *stream)
 {
 	struct web_client *wc = calloc(1, sizeof(*wc));
 	if (!wc)
 		return NULL;
-	wc->ws_conn = c;
-	wc->state = WC_NEW;
-	msgqueue_init(&wc->input_q);
-	msgqueue_init(&wc->output_q);
-
-	pthread_mutex_lock(&web_clients_lock);
+	wc->stream = stream;
+	wc->state = WC_HTTP;
+	if (generate_session(wc->session, sizeof(wc->session)) < 0) {
+		free(wc);
+		return NULL;
+	}
 	wc->next = web_clients_head;
 	web_clients_head = wc;
-	pthread_mutex_unlock(&web_clients_lock);
-
 	return wc;
 }
 
 void
 webclient_destroy(struct web_client *wc)
 {
-	pthread_mutex_lock(&web_clients_lock);
 	struct web_client **pp = &web_clients_head;
 	while (*pp) {
 		if (*pp == wc) {
@@ -49,10 +56,6 @@ webclient_destroy(struct web_client *wc)
 		}
 		pp = &(*pp)->next;
 	}
-	pthread_mutex_unlock(&web_clients_lock);
-
-	msgqueue_destroy(&wc->input_q);
-	msgqueue_destroy(&wc->output_q);
 	free(wc);
 }
 
@@ -62,14 +65,12 @@ webclient_first(void)
 	return web_clients_head;
 }
 
-void
-webclient_lock(void)
+struct web_client *
+webclient_find_session(const char *token)
 {
-	pthread_mutex_lock(&web_clients_lock);
-}
-
-void
-webclient_unlock(void)
-{
-	pthread_mutex_unlock(&web_clients_lock);
+	for (struct web_client *wc = web_clients_head; wc; wc = wc->next) {
+		if (strcmp(wc->session, token) == 0)
+			return wc;
+	}
+	return NULL;
 }
