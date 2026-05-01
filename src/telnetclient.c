@@ -1044,9 +1044,8 @@ telnetclient_room_broadcast(const char *room_id, const char *msg)
 		}
 	}
 
-	webclient_lock();
 	for (struct web_client *wc = webclient_first(); wc; wc = wc->next) {
-		if (wc->state != WC_ACTIVE || !wc->cl)
+		if (wc->state != WC_SSE || !wc->cl)
 			continue;
 		struct character *ch = wc->cl->character;
 		const char *cur;
@@ -1060,7 +1059,6 @@ telnetclient_room_broadcast(const char *room_id, const char *msg)
 		if (strcmp(key, room_id) == 0)
 			telnetclient_puts(wc->cl, msg);
 	}
-	webclient_unlock();
 }
 
 /* telnetclient_webclient_new allocates and initializes a client backed by a web connection. */
