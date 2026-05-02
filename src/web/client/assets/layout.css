@@ -115,7 +115,93 @@ ul[role="menu-bar"]>[class="padded-menu-item"] {
   top: calc(50vh - 100px);
   left: calc(50vw - 160px);
 }
-  
+
 #connect-to-dialog {
   display: none;
+}
+
+#login {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex: 1;
+}
+
+#login-form {
+  border: 2px solid var(--secondary);
+  padding: 16px 24px;
+  min-width: 280px;
+}
+
+.login-title {
+  text-align: center;
+  font-weight: bold;
+  margin-bottom: 12px;
+  color: var(--secondary);
+}
+
+.login-row {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.login-row label {
+  min-width: 40px;
+  text-align: right;
+}
+
+.login-row input {
+  flex: 1;
+  font-family: monospace;
+  font-size: 14px;
+  background: var(--primary);
+  color: var(--secondary);
+  border: 1px solid var(--secondary);
+  padding: 4px 6px;
+}
+
+.code-box {
+  width: 4em;
+  text-align: center;
+  flex: unset !important;
+}
+
+.login-buttons {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.login-buttons button {
+  font-family: monospace;
+  font-size: 14px;
+  background: var(--primary);
+  color: var(--secondary);
+  border: 1px solid var(--secondary);
+  padding: 6px 24px;
+  cursor: pointer;
+}
+
+.login-buttons button:hover {
+  background: var(--secondary);
+  color: var(--primary);
+}
+
+#login-error {
+  color: #f55;
+  text-align: center;
+  margin-bottom: 8px;
+  min-height: 1em;
+}
+
+#mode-toggle {
+  text-align: center;
+  margin-top: 8px;
+  cursor: pointer;
+  color: #888;
+}
+
+#mode-toggle:hover {
+  color: var(--secondary);
 }

@@ -50,6 +50,7 @@
 #include <security.h>
 #include <obj_program.h>
 #include <program.h>
+#include <invite.h>
 #include <unistd.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
@@ -418,6 +419,13 @@ main(int argc, char **argv)
 	}
 
 	atexit(form_module_shutdown);
+
+	if (!invite_init()) {
+		LOG_ERROR("could not initialize invite system");
+		return EXIT_FAILURE;
+	}
+
+	atexit(invite_shutdown);
 
 	if (mud_config.webserver_port > 0) {
 		if (webserver_init(mud_config.webserver_port) != OK) {

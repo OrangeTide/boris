@@ -55,7 +55,9 @@ boris_SRCS = \
 	cmd/charset.c \
 	cmd/edit.c \
 	worldclock/worldclock.c \
+	invite.c \
 	web/server/webclient.c \
+	web/server/weblogin.c \
 	web/server/webserver.c \
 	machine/obj_program.c \
 	machine/objref.c \
