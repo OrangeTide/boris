@@ -53,6 +53,7 @@ boris_SRCS = \
 	cmd/time.c \
 	cmd/yell.c \
 	cmd/charset.c \
+	cmd/edit.c \
 	worldclock/worldclock.c \
 	web/server/webclient.c \
 	web/server/webserver.c \
