@@ -167,7 +167,9 @@ telnetclient_on_data(net_event *e)
 		*end = 0; /* null terminate the string */
 		if (linelen > 0) {
 			if (cl->line_input) {
+				telnetclient_set_buffered(cl);
 				cl->line_input(cl, start);
+				telnetclient_clear_buffered(cl);
 			} else {
 				LOG_WARNING("Missing or invalid line input handler [fd=%ld %s]", (long)net_get_socket(e->stream), telnetclient_socket_name(cl));
 				telnetclient_printf(cl, "ERROR, missing or invalid line input handler: \"%.*s\"\n", linelen, start);
@@ -1133,6 +1135,32 @@ telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl)
 
 	user_put(&cl->user);
 	free(cl);
+}
+
+/* telnetclient_set_buffered enables output buffering on the client. */
+void
+telnetclient_set_buffered(DESCRIPTOR_DATA *cl)
+{
+	if (cl)
+		cl->buffered = 1;
+}
+
+/* telnetclient_clear_buffered disables output buffering and flushes pending output. */
+void
+telnetclient_clear_buffered(DESCRIPTOR_DATA *cl)
+{
+	if (!cl)
+		return;
+	cl->buffered = 0;
+	telnetclient_flush(cl);
+}
+
+/* telnetclient_flush sends any buffered output to the client. */
+void
+telnetclient_flush(DESCRIPTOR_DATA *cl)
+{
+	if (cl && cl->ops && cl->ops->flush)
+		cl->ops->flush(cl);
 }
 
 /* telnetclient_set_encoding sets the character encoding for the client. */

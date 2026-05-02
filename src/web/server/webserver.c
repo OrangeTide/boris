@@ -36,15 +36,25 @@ sse_write(struct web_client *wc, int cmd, const char *msg)
 
 	const char *p = msg;
 	const char *nl;
+	int first = 1;
 	do {
 		nl = strchr(p, '\n');
 		if (nl) {
-			net_writef(wc->stream, "data: %c%.*s\n",
-			           cmd, (int)(nl - p), p);
+			if (first) {
+				net_writef(wc->stream, "data: %c%.*s\n",
+				           cmd, (int)(nl - p), p);
+				first = 0;
+			} else {
+				net_writef(wc->stream, "data: %.*s\n",
+				           (int)(nl - p), p);
+			}
 			p = nl + 1;
 		} else {
-			net_writef(wc->stream, "data: %c%s\n\n",
-			           cmd, p);
+			if (first)
+				net_writef(wc->stream, "data: %c%s\n\n",
+				           cmd, p);
+			else
+				net_writef(wc->stream, "data: %s\n\n", p);
 		}
 	} while (nl);
 	return OK;
@@ -54,20 +64,72 @@ sse_write(struct web_client *wc, int cmd, const char *msg)
  * client_ops callbacks for game integration
  ****************************************************************/
 
+void
+webclient_flush(struct web_client *wc)
+{
+	if (!wc || wc->outlen <= 0)
+		return;
+	wc->outbuf[wc->outlen] = '\0';
+	int cmd = wc->outbuf[wc->outlen - 1] == '\n' ? 'm' : 'p';
+	sse_write(wc, cmd, wc->outbuf);
+	wc->outlen = 0;
+}
+
 static int
 web_ops_puts(DESCRIPTOR_DATA *cl, const char *data, size_t len)
 {
 	struct web_client *wc = cl->client_ctx;
 	if (!wc)
 		return ERR;
-	char *tmp = malloc(len + 1);
-	if (!tmp)
-		return ERR;
-	memcpy(tmp, data, len);
-	tmp[len] = '\0';
-	int rc = sse_write(wc, 'm', tmp);
-	free(tmp);
-	return rc;
+
+	const char *p = data;
+	size_t remain = len;
+
+	while (remain > 0) {
+		int avail = WC_OUTBUF_SIZE - wc->outlen - 1;
+		if (avail <= 0) {
+			webclient_flush(wc);
+			avail = WC_OUTBUF_SIZE - 1;
+		}
+
+		size_t copy = remain < (size_t)avail ? remain : (size_t)avail;
+		memcpy(wc->outbuf + wc->outlen, p, copy);
+		wc->outlen += (int)copy;
+		p += copy;
+		remain -= copy;
+	}
+
+	if (!cl->buffered && wc->outlen > 0) {
+		const char *last_nl = NULL;
+		for (int i = wc->outlen - 1; i >= 0; i--) {
+			if (wc->outbuf[i] == '\n') {
+				last_nl = wc->outbuf + i;
+				break;
+			}
+		}
+		if (last_nl) {
+			int flush_len = (int)(last_nl - wc->outbuf) + 1;
+			char saved = wc->outbuf[flush_len];
+			wc->outbuf[flush_len] = '\0';
+			sse_write(wc, 'm', wc->outbuf);
+			wc->outbuf[flush_len] = saved;
+
+			int tail = wc->outlen - flush_len;
+			if (tail > 0)
+				memmove(wc->outbuf, wc->outbuf + flush_len, tail);
+			wc->outlen = tail;
+		}
+	}
+
+	return OK;
+}
+
+static void
+web_ops_flush(DESCRIPTOR_DATA *cl)
+{
+	struct web_client *wc = cl->client_ctx;
+	if (wc)
+		webclient_flush(wc);
 }
 
 static void
@@ -83,6 +145,7 @@ web_ops_close(DESCRIPTOR_DATA *cl)
 
 const struct client_ops web_client_ops = {
 	.puts = web_ops_puts,
+	.flush = web_ops_flush,
 	.close = web_ops_close,
 };
 
@@ -291,8 +354,12 @@ handle_cmd(struct web_client *wc, const char *body, int body_len)
 		return;
 	}
 
-	if (target->cl->line_input)
+	if (target->cl->line_input) {
+		telnetclient_set_buffered(target->cl);
+		telnetclient_printf(target->cl, "%s\n", cmd);
 		target->cl->line_input(target->cl, cmd);
+		telnetclient_clear_buffered(target->cl);
+	}
 
 	net_writef(wc->stream,
 	           "HTTP/1.1 200 OK\r\n"
