@@ -48,7 +48,8 @@
   <script>
     var sid = '', connected = false,
         view = document.getElementById('game-view'),
-        inp = document.getElementById('game-input');
+        inp = document.getElementById('game-input'),
+        pending = null;
 
     function appendLine(text, color) {
       var p = document.createElement('p');
@@ -56,6 +57,29 @@
       if (color) p.style.color = color;
       view.appendChild(p);
       p.scrollIntoView();
+    }
+
+    function appendOutput(text, color) {
+      var lines = text.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        var part = lines[i];
+        var hasMore = i < lines.length - 1;
+        if (pending) {
+          pending.textContent += part;
+          if (hasMore) {
+            pending.scrollIntoView();
+            pending = null;
+          }
+        } else if (hasMore) {
+          appendLine(part, color);
+        } else if (part.length > 0) {
+          pending = document.createElement('p');
+          pending.textContent = part;
+          if (color) pending.style.color = color;
+          view.appendChild(pending);
+          pending.scrollIntoView();
+        }
+      }
     }
 
     var src = new EventSource('/events');
@@ -93,14 +117,15 @@
         /* status line updates -- ignore for now */
       } else if (c >= 'a' && c <= 'z') {
         /* terminal messages */
-        appendLine(s);
+        appendOutput(s);
       } else {
-        appendLine(e.data);
+        appendOutput(e.data);
       }
     };
 
     src.onerror = function() {
       if (connected) {
+        pending = null;
         appendLine('-- connection lost --', '#888');
         connected = false;
         inp.disabled = true;

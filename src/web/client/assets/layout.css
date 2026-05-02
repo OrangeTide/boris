@@ -60,6 +60,12 @@ main>section {
   width: 100%;
 }
 
+#game-view p {
+  white-space: pre-wrap;
+  margin: 0;
+  padding: 0 8px;
+}
+
 #game-input-container {
   width: 100%;
 }

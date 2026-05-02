@@ -16,6 +16,7 @@ enum web_client_state {
 
 #define WC_SESSION_LEN 32
 #define WC_REQBUF_SIZE 4096
+#define WC_OUTBUF_SIZE 4096
 
 struct web_client {
 	struct web_client *next;
@@ -25,6 +26,8 @@ struct web_client {
 	char session[WC_SESSION_LEN + 1];
 	char reqbuf[WC_REQBUF_SIZE];
 	int reqlen;
+	char outbuf[WC_OUTBUF_SIZE];
+	int outlen;
 };
 
 struct web_client *webclient_new(struct net_stream *stream);
@@ -33,6 +36,7 @@ struct web_client *webclient_first(void);
 struct web_client *webclient_find_session(const char *token);
 
 int sse_write(struct web_client *wc, int cmd, const char *msg);
+void webclient_flush(struct web_client *wc);
 
 extern const struct client_ops web_client_ops;
 

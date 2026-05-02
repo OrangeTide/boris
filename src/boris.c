@@ -129,8 +129,10 @@ main_idle(struct iox_loop *loop UNUSED, void *arg UNUSED)
 	}
 
 	for (struct web_client *wc = webclient_first(); wc; wc = wc->next) {
-		if (wc->state == WC_SSE && wc->cl)
+		if (wc->state == WC_SSE && wc->cl) {
 			telnetclient_prompt_refresh(wc->cl);
+			webclient_flush(wc);
+		}
 	}
 }
 

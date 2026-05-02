@@ -18,6 +18,7 @@ typedef struct descriptor_data DESCRIPTOR_DATA;
 
 struct client_ops {
 	int (*puts)(DESCRIPTOR_DATA *cl, const char *data, size_t len);
+	void (*flush)(DESCRIPTOR_DATA *cl);
 	void (*close)(DESCRIPTOR_DATA *cl);
 	void (*destroy)(DESCRIPTOR_DATA *cl);
 };
@@ -46,7 +47,8 @@ struct descriptor_data {
 	} state;
 	void (*line_input)(DESCRIPTOR_DATA *cl, const char *line);
 	char *prompt_string;
-	int prompt_flag:1;
+	unsigned prompt_flag:1;
+	unsigned buffered:1;
 	unsigned nr_channel; /**< number of channels monitoring. */
 	struct channel **channel; /**< pointer to every monitoring channel. */
 	struct channel_member channel_member;

@@ -42,4 +42,7 @@ void telnetclient_set_login_username(DESCRIPTOR_DATA *cl, const char *name);
 struct form_state *telnetclient_get_form(DESCRIPTOR_DATA *cl);
 void telnetclient_set_form(DESCRIPTOR_DATA *cl, struct form_state *form);
 void telnetclient_set_state_free(DESCRIPTOR_DATA *cl, void (*fn)(DESCRIPTOR_DATA *));
+void telnetclient_set_buffered(DESCRIPTOR_DATA *cl);
+void telnetclient_clear_buffered(DESCRIPTOR_DATA *cl);
+void telnetclient_flush(DESCRIPTOR_DATA *cl);
 #endif
