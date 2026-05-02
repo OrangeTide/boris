@@ -12,6 +12,7 @@ Information for developers working on Boris MUD.
 | src/room/              | Room subsystem (load/save/cache with refcount)                 |
 | src/character/         | Character subsystem (load/save/cache with refcount + freelist) |
 | src/channel/           | Chat channel pub/sub system                                    |
+| src/cmd/               | Command dispatch and handlers (look, go, say, etc.)            |
 | src/help/              | Online help system (reads plain text from data/help/)          |
 | src/log/               | Subsystem-tagged logging and event log                         |
 | src/iox/               | I/O multiplexing                                               |
@@ -19,13 +20,14 @@ Information for developers working on Boris MUD.
 | src/entity/            | RPG-capable entity layer on top of objects                     |
 | src/rpg/               | RPG attribute/skills helper functions                          |
 | src/combat/            | Combat session management and tick scheduler                   |
-| src/task/              | Command dispatch and processing                                |
 | src/web/server/        | SSE web server (built-in, on net_stream)                       |
 | src/crypt/             | SHA1 hash and base-64 encoding                                 |
 | src/scrypt/            | scrypt key derivation for password hashing                     |
+| src/security/          | Seccomp and Landlock sandboxing                                |
+| src/daemonize/         | Daemonize support (-d flag)                                    |
 | src/passwd/            | Password crypt utility (mkpass)                                |
 | src/muddb-tool/        | muddb import/export CLI tool                                   |
-| src/util/              | Miscellaneous utility functions                                |
+| src/util/              | Miscellaneous utilities (wordwrap, etc.)                       |
 | src/worldclock/        | In-game time tracking                                          |
 | src/thirdparty/        | Third-party libraries (separate licenses)                      |
 | src/thirdparty/jsmn/   | Minimal JSON parser (zero-copy)                                |
@@ -220,11 +222,13 @@ A **domain** is a named LMDB database within the environment -- a separate
 key-value namespace, analogous to a table in SQL. Each game subsystem uses
 its own domain:
 
-| Domain     | Constant           | Consumer     | Key                           |
-|------------|--------------------|--------------|-------------------------------|
-| `"users"`  | `DOMAIN_USER`      | user.c       | username                      |
-| `"rooms"`  | `DOMAIN_ROOM`      | room.c       | room id (string)              |
-| `"chars"`  | `DOMAIN_CHARACTER` | character.c  | character id (decimal string) |
+| Domain        | Constant           | Consumer     | Key                           |
+|---------------|----------------------|--------------|-------------------------------|
+| `"users"`     | `DOMAIN_USER`        | user.c       | username                      |
+| `"objs"`      | `DOMAIN_OBJS`        | room.c       | `rooms/<id>` (prefixed key)   |
+| `"chars"`     | `DOMAIN_CHARACTER`   | character.c  | character id (decimal string) |
+| `"entities"`  | `DOMAIN_ENTITY`      | entity.c     | entity id                     |
+| `"templates"` | `DOMAIN_TEMPLATE`    | --           | template id                   |
 
 Domain constants are defined in boris.h. Domains are created on first write
 (auto-vivify) -- read operations on a missing domain return NULL/empty rather
@@ -295,7 +299,7 @@ SSE web clients simultaneously.
   wrapper). Global `mud_db` opened in boris.c
 - **Game world**: `src/room/` (rooms), `src/character/` (player characters),
   `src/channel/` (communication channels)
-- **Commands**: `src/task/command.c` -- command dispatch (look, go, enter,
+- **Commands**: `src/cmd/cmd.c` -- command dispatch (look, go, enter,
   direction aliases, say, pose, etc.). Characters are associated with
   descriptors via `telnetclient_setcharacter()`
 - **Login/Menu/Forms**: `src/login.c`, `src/menu.c`, `src/form.c` --
@@ -328,6 +332,10 @@ In `src/thirdparty/`:
 
 In `src/scrypt/`: scrypt key derivation for password hashing (no upstream
 maintainer, maintained in-tree).
+
+In `src/security/`: seccomp and Landlock sandboxing, enabled at startup via
+`security_init()`.  Restricts syscalls and filesystem access after
+initialization.
 
 ### ColdFire Machine Programs
 
@@ -403,7 +411,7 @@ runs each machine task every second.
 
 `src/boris.c` -- signal handling, config loading, main event loop. Start
 reading here, then follow to `src/telnetclient.c` -> `src/user.c` ->
-`src/task/command.c`.
+`src/cmd/cmd.c`.
 
 ## Configuration
 
