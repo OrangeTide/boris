@@ -1386,6 +1386,7 @@ mud_config_init(void)
 	mud_config.msgfile_newuser_deny = strdup("\nNot accepting new user applications!\n\n");
 	mud_config.default_channels = strdup("@system,@wiz,OOC,auction,chat,newbie");
 	mud_config.webserver_port = 0; /* default is to disable. */
+	mud_config.invite_required = 0;
 	mud_config.form_newuser_filename = strdup("data/forms/newuser.form");
 	mud_config.default_family = 0;
 	mud_config.newuser_room = strdup("tower-entrance");
@@ -1479,6 +1480,7 @@ mud_config_process(void)
 	config_watch(&cfg, "cache.obj.size", do_config_uint, &mud_config.obj_cache_size);
 	config_watch(&cfg, "cache.character.size", do_config_uint, &mud_config.character_cache_size);
 	config_watch(&cfg, "rpg.enabled", do_config_uint, &mud_config.rpg_enabled);
+	config_watch(&cfg, "invite.required", do_config_uint, &mud_config.invite_required);
 #ifdef CONFIG_LANDLOCK
 	config_watch(&cfg, "security.landlock", do_config_uint, &mud_config.security_landlock);
 #endif

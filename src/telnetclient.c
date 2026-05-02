@@ -45,6 +45,7 @@
 #include <buf.h>
 #include <charset.h>
 #include <webclient.h>
+#include <weblogin.h>
 #include <wordwrap.h>
 
 #define OK (0)
@@ -1091,7 +1092,7 @@ telnetclient_webclient_new(struct web_client *wc, const struct client_ops *ops)
 	telnetclient_channel_add(cl, channel_public(CHANNEL_SYS));
 
 	telnetclient_puts(cl, mud_config.msgfile_welcome);
-	menu_start_input(cl, &gamemenu_login);
+	weblogin_start(cl);
 
 	return cl;
 }

@@ -30,12 +30,28 @@
       </div>
     </div>
   </header>
-  <main id="main-container">
+
+  <div id="login">
+    <form id="login-form">
+      <div class="login-title" id="login-title">LOGIN</div>
+      <div id="login-error"></div>
+      <div class="login-row"><label for="f-name">User:</label><input id="f-name" type="text" autocomplete="username" /></div>
+      <div class="login-row"><label for="f-pw">Pass:</label><input id="f-pw" type="password" autocomplete="current-password" /></div>
+      <div class="login-row" id="invite-row" style="display:none">
+        <label>Code:</label>
+        <input class="code-box" id="f-c1" maxlength="4" autocomplete="off" />-<input class="code-box" id="f-c2" maxlength="4" autocomplete="off" />-<input class="code-box" id="f-c3" maxlength="4" autocomplete="off" />
+      </div>
+      <div class="login-buttons"><button type="submit" id="btn-go">CONNECT</button></div>
+      <div id="mode-toggle">need an account? click here</div>
+    </form>
+  </div>
+
+  <main id="main-container" style="display:none">
     <section id="game-container">
       <div id="game-view"></div>
       <div id="game-input-container">
         <span for="game-input" class="input-prompt">
-          <input type="text" id="game-input" />
+          <input type="text" id="game-input" disabled />
         </span>
       </div>
     </section>
@@ -46,14 +62,86 @@
   </main>
 
   <script>
-    var sid = '', connected = false,
+    var sid = '', connected = false, loggedIn = false,
         view = document.getElementById('game-view'),
         inp = document.getElementById('game-input'),
+        login = document.getElementById('login'),
+        main = document.getElementById('main-container'),
         pending = null,
         cmdHist = [],
-        histIdx = -1;
+        histIdx = -1,
+        createMode = false;
 
-    inp.focus();
+    var fName = document.getElementById('f-name');
+    var fPw = document.getElementById('f-pw');
+    var fC1 = document.getElementById('f-c1');
+    var fC2 = document.getElementById('f-c2');
+    var fC3 = document.getElementById('f-c3');
+    var loginError = document.getElementById('login-error');
+    var loginTitle = document.getElementById('login-title');
+    var inviteRow = document.getElementById('invite-row');
+    var btnGo = document.getElementById('btn-go');
+    var modeToggle = document.getElementById('mode-toggle');
+
+    fName.focus();
+
+    /* auto-advance invite code boxes */
+    [fC1, fC2, fC3].forEach(function(box, i, arr) {
+      box.addEventListener('input', function() {
+        this.value = this.value.toUpperCase();
+        if (this.value.length >= 4 && i < arr.length - 1)
+          arr[i + 1].focus();
+      });
+    });
+
+    /* parse invite code from URL: /invite/XXXX-XXXX-XXXX */
+    (function() {
+      var m = location.pathname.match(/^\/invite\/([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})$/i);
+      if (m) {
+        var parts = m[1].toUpperCase().split('-');
+        fC1.value = parts[0];
+        fC2.value = parts[1];
+        fC3.value = parts[2];
+        createMode = true;
+        loginTitle.textContent = 'CREATE ACCOUNT';
+        inviteRow.style.display = '';
+        btnGo.textContent = 'CREATE';
+        modeToggle.textContent = 'have an account? click here';
+      }
+    })();
+
+    function getCode() {
+      return (fC1.value + '-' + fC2.value + '-' + fC3.value).toUpperCase();
+    }
+
+    modeToggle.addEventListener('click', function() {
+      createMode = !createMode;
+      if (createMode) {
+        loginTitle.textContent = 'CREATE ACCOUNT';
+        inviteRow.style.display = '';
+        btnGo.textContent = 'CREATE';
+        modeToggle.textContent = 'have an account? click here';
+      } else {
+        loginTitle.textContent = 'LOGIN';
+        inviteRow.style.display = 'none';
+        btnGo.textContent = 'CONNECT';
+        modeToggle.textContent = 'need an account? click here';
+      }
+      loginError.textContent = '';
+    });
+
+    document.getElementById('login-form').onsubmit = function(e) {
+      e.preventDefault();
+      var name = fName.value.trim(), pw = fPw.value;
+      if (!name || !pw || !sid) return;
+      loginError.textContent = '';
+      if (createMode) {
+        var code = getCode();
+        fetch('/cmd', { method: 'POST', body: sid + ' create ' + name + ' ' + pw + ' ' + code });
+      } else {
+        fetch('/cmd', { method: 'POST', body: sid + ' connect ' + name + ' ' + pw });
+      }
+    };
 
     function escHtml(s) {
       return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -170,6 +258,11 @@
           console.error('unknown server command: ' + c);
         }
       } else if (c === '+') {
+        if (!loggedIn) {
+          loggedIn = true;
+          login.style.display = 'none';
+          main.style.display = '';
+        }
         connected = true;
         inp.disabled = false;
         inp.focus();
@@ -178,7 +271,11 @@
       } else if (c === '=') {
         /* status line (ignored for now) */
       } else if (c === '!') {
-        appendLine(s, 'red');
+        if (!loggedIn) {
+          loginError.textContent = s;
+        } else {
+          appendLine(s, 'red');
+        }
       } else if (c === '^') {
         location.reload();
       } else if (c === '_') {

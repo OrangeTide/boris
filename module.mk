@@ -74,12 +74,15 @@ endif
 
 # --- Smoke tests -------------------------------------------------------------
 
-.PHONY: smoke smoke-valgrind
+.PHONY: smoke smoke-valgrind smoke-web
 smoke: install
 	@src/tests/test_smoke.sh
 
 smoke-valgrind: install
 	@USE_VALGRIND=1 src/tests/test_smoke.sh
+
+smoke-web: install
+	@src/tests/test_web_smoke.sh
 
 # --- tests alias for run-tests -----------------------------------------------
 

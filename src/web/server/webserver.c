@@ -435,7 +435,8 @@ handle_cmd(struct web_client *wc, const char *body, int body_len)
 
 	if (target->cl->line_input) {
 		telnetclient_set_buffered(target->cl);
-		telnetclient_printf(target->cl, "%s\n", cmd);
+		if (target->cl->user)
+			telnetclient_printf(target->cl, "%s\n", cmd);
 		target->cl->line_input(target->cl, cmd);
 		telnetclient_clear_buffered(target->cl);
 	}
@@ -599,6 +600,8 @@ process_request(struct web_client *wc, int hdr_end)
 			serve_file(wc->stream, "/editor.html");
 		} else if (strcmp(path, "/prop") == 0) {
 			handle_prop_get(wc, qs);
+		} else if (strncmp(path, "/invite/", 8) == 0) {
+			serve_file(wc->stream, "/index.html");
 		} else {
 			serve_file(wc->stream, path);
 		}
