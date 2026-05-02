@@ -35,7 +35,7 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 - MTH (Mud Telopt Handler) - standardized handling of TELNET protocol.
 - LMDB back-end database for objects and user accounts.
 - Room navigation: look, go, enter, and direction aliases (north/n, south/s, etc.).
-- ***WIP*** Support for Web-based client(s).
+- SSE-based web client with output buffering and multipart framing.
 - ColdFire machine programs -- objects can have ColdFire V4e programs (ELF binaries) attached that post messages to the game world via hypercalls.
 - ***TODO*** ability to host multiple independent worlds from a single server.
 - ***TODO*** On-Line Creation: interactive wizard provides menu-based building.
@@ -87,7 +87,7 @@ To specify a cross-compiler directly:
 make -j$(nproc) CC=arm-linux-gnueabihf-gcc
 ```
 
-Build output is `bin/boris` and `bin/mkpass`. Object files go to
+Build output is `bin/boris`, `bin/mkpass`, and `bin/muddb-tool`. Object files go to
 `build/<triplet>/` (e.g. `build/x86_64-linux-gnu/`) so cross-compiled
 object files don't clobber native ones.
 
@@ -454,9 +454,7 @@ Please contribute using [Github Flow](https://docs.github.com/en/get-started/usi
 Boris includes the following third-party libraries:
 
 - [tiny-AES-c](https://github.com/kokke/tiny-AES-c) -- Small portable AES128/192/256 in C. Public domain (Unlicense). Used for scrypt password encryption.
-- [dyad](https://github.com/rxi/dyad) -- Asynchronous networking library.
 - [LMDB](https://www.symas.com/lmdb) -- Lightning Memory-Mapped Database.
-- [Mongoose](https://github.com/cesanta/mongoose) -- Embedded web server library.
 - [jsmn](https://github.com/zserge/jsmn) -- Minimalistic JSON parser.
 - [MTH](https://tintin.mudhalla.net/protocols/mth/) -- MUD Telopt Handler.
 
