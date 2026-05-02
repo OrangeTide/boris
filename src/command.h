@@ -24,5 +24,7 @@ int command_do_time(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd 
 int command_do_yell(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg);
 int command_do_charset(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg);
 int command_do_chartest(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED);
+int command_do_edit(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg);
+int command_do_view(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg);
 
 #endif

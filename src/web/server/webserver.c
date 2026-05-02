@@ -9,11 +9,14 @@
 #include <webserver.h>
 #include <webclient.h>
 #include <telnetclient.h>
+#include <room.h>
+#include <obj.h>
 #include <net.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <ctype.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -23,6 +26,71 @@
 
 static struct net_stream *web_listener;
 static const char *web_root = "./bin/www";
+
+/****************************************************************
+ * URL decoding and query string parsing
+ ****************************************************************/
+
+static int
+hex_digit(int c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static void
+url_decode(char *dst, const char *src, int dsz)
+{
+    int i = 0;
+    while (*src && i < dsz - 1) {
+        if (*src == '%' && src[1] && src[2]) {
+            int hi = hex_digit(src[1]);
+            int lo = hex_digit(src[2]);
+            if (hi >= 0 && lo >= 0) {
+                dst[i++] = (char)(hi * 16 + lo);
+                src += 3;
+                continue;
+            }
+        }
+        if (*src == '+')
+            dst[i++] = ' ';
+        else
+            dst[i++] = *src;
+        src++;
+    }
+    dst[i] = '\0';
+}
+
+static const char *
+qs_get(const char *qs, const char *key, char *val, int vsz)
+{
+    if (!qs)
+        return NULL;
+    int klen = (int)strlen(key);
+    const char *p = qs;
+    while (*p) {
+        if (strncmp(p, key, klen) == 0 && p[klen] == '=') {
+            const char *v = p + klen + 1;
+            const char *end = strchr(v, '&');
+            int vlen = end ? (int)(end - v) : (int)strlen(v);
+            if (vlen >= vsz) vlen = vsz - 1;
+            char encoded[256];
+            if (vlen >= (int)sizeof(encoded))
+                vlen = (int)sizeof(encoded) - 1;
+            memcpy(encoded, v, vlen);
+            encoded[vlen] = '\0';
+            url_decode(val, encoded, vsz);
+            return val;
+        }
+        const char *amp = strchr(p, '&');
+        if (!amp) break;
+        p = amp + 1;
+    }
+    val[0] = '\0';
+    return NULL;
+}
 
 /****************************************************************
  * SSE frame output
@@ -371,6 +439,121 @@ handle_cmd(struct web_client *wc, const char *body, int body_len)
 }
 
 /****************************************************************
+ * Property read/write handlers (for editor)
+ ****************************************************************/
+
+static void
+http_respond_text(struct net_stream *stream, int code,
+                  const char *status, const char *body)
+{
+    int len = (int)strlen(body);
+    net_writef(stream,
+               "HTTP/1.1 %d %s\r\n"
+               "Content-Type: text/plain; charset=utf-8\r\n"
+               "Content-Length: %d\r\n"
+               "Connection: close\r\n"
+               "\r\n"
+               "%s",
+               code, status, len, body);
+    net_close_when_done(stream);
+}
+
+static void
+handle_prop_get(struct web_client *wc, const char *qs)
+{
+    char obj_id[64], prop_name[64], session[WC_SESSION_LEN + 1];
+
+    if (!qs_get(qs, "obj", obj_id, sizeof(obj_id)) ||
+        !qs_get(qs, "prop", prop_name, sizeof(prop_name)) ||
+        !qs_get(qs, "sid", session, sizeof(session))) {
+        http_respond_text(wc->stream, 400, "Bad Request",
+                          "missing obj, prop, or sid\n");
+        return;
+    }
+
+    struct web_client *target = webclient_find_session(session);
+    if (!target || !target->cl || target->state != WC_SSE) {
+        http_respond_text(wc->stream, 403, "Forbidden",
+                          "invalid session\n");
+        return;
+    }
+
+    OBJ *r = room_get(obj_id);
+    if (!r) {
+        http_respond_text(wc->stream, 404, "Not Found",
+                          "object not found\n");
+        return;
+    }
+
+    const char *value = obj_prop_get(r, prop_name);
+    if (!value)
+        value = "";
+
+    http_respond_text(wc->stream, 200, "OK", value);
+    room_put(r);
+}
+
+static void
+handle_prop_post(struct web_client *wc, const char *qs,
+                 const char *body, int body_len)
+{
+    char obj_id[64], prop_name[64], session[WC_SESSION_LEN + 1];
+
+    if (!qs_get(qs, "obj", obj_id, sizeof(obj_id)) ||
+        !qs_get(qs, "prop", prop_name, sizeof(prop_name)) ||
+        !qs_get(qs, "sid", session, sizeof(session))) {
+        http_respond_text(wc->stream, 400, "Bad Request",
+                          "missing obj, prop, or sid\n");
+        return;
+    }
+
+    struct web_client *target = webclient_find_session(session);
+    if (!target || !target->cl || target->state != WC_SSE) {
+        http_respond_text(wc->stream, 403, "Forbidden",
+                          "invalid session\n");
+        return;
+    }
+
+    OBJ *r = room_get(obj_id);
+    if (!r) {
+        http_respond_text(wc->stream, 404, "Not Found",
+                          "object not found\n");
+        return;
+    }
+
+    char *value = malloc(body_len + 1);
+    if (!value) {
+        room_put(r);
+        http_respond_text(wc->stream, 500, "Internal Server Error",
+                          "out of memory\n");
+        return;
+    }
+    memcpy(value, body, body_len);
+    value[body_len] = '\0';
+
+    int rc = obj_prop_set(r, prop_name, value);
+    free(value);
+    room_put(r);
+
+    if (rc == OBJ_ERR_PROTECTED) {
+        http_respond_text(wc->stream, 403, "Forbidden",
+                          "protected property\n");
+        return;
+    }
+    if (rc != OBJ_OK) {
+        http_respond_text(wc->stream, 500, "Internal Server Error",
+                          "failed to set property\n");
+        return;
+    }
+
+    http_respond_text(wc->stream, 200, "OK", "OK\n");
+
+    if (target->cl)
+        telnetclient_printf(target->cl, "Property %s.%s updated.\n",
+                            obj_id, prop_name);
+}
+
+/****************************************************************
  * HTTP request dispatch
  ****************************************************************/
 
@@ -392,20 +575,38 @@ process_request(struct web_client *wc, int hdr_end)
 		return;
 	}
 
+	/* split path from query string */
+	char *qs = strchr(path, '?');
+	if (qs)
+		*qs++ = '\0';
+
 	if (strcmp(method, "GET") == 0) {
-		if (strcmp(path, "/events") == 0)
+		if (strcmp(path, "/events") == 0) {
 			handle_events(wc);
-		else
+		} else if (strcmp(path, "/edit") == 0 ||
+		           strcmp(path, "/view") == 0) {
+			serve_file(wc->stream, "/editor.html");
+		} else if (strcmp(path, "/prop") == 0) {
+			handle_prop_get(wc, qs);
+		} else {
 			serve_file(wc->stream, path);
+		}
 		return;
 	}
 
-	if (strcmp(method, "POST") == 0 && strcmp(path, "/cmd") == 0) {
+	if (strcmp(method, "POST") == 0) {
 		int total = hdr_end + content_length;
 		if (wc->reqlen < total)
 			return; /* need more body data */
-		handle_cmd(wc, wc->reqbuf + hdr_end, content_length);
-		return;
+		if (strcmp(path, "/cmd") == 0) {
+			handle_cmd(wc, wc->reqbuf + hdr_end, content_length);
+			return;
+		}
+		if (strcmp(path, "/prop") == 0) {
+			handle_prop_post(wc, qs,
+			                 wc->reqbuf + hdr_end, content_length);
+			return;
+		}
 	}
 
 	net_writef(wc->stream,

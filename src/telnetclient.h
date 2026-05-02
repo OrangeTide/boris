@@ -45,4 +45,5 @@ void telnetclient_set_state_free(DESCRIPTOR_DATA *cl, void (*fn)(DESCRIPTOR_DATA
 void telnetclient_set_buffered(DESCRIPTOR_DATA *cl);
 void telnetclient_clear_buffered(DESCRIPTOR_DATA *cl);
 void telnetclient_flush(DESCRIPTOR_DATA *cl);
+int telnetclient_send_sse(DESCRIPTOR_DATA *cl, int cmd, const char *msg);
 #endif

@@ -93,6 +93,8 @@ static const struct command_table {
 	{ "resist", command_do_resist },
 	{ "charset", command_do_charset },
 	{ "chartest", command_do_chartest },
+	{ "@edit", command_do_edit },
+	{ "@view", command_do_view },
 };
 
 /**

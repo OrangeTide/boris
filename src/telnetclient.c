@@ -1163,6 +1163,16 @@ telnetclient_flush(DESCRIPTOR_DATA *cl)
 		cl->ops->flush(cl);
 }
 
+int
+telnetclient_send_sse(DESCRIPTOR_DATA *cl, int cmd, const char *msg)
+{
+	if (!cl || cl->type != CLIENT_TYPE_WEB || !cl->client_ctx)
+		return -1;
+	telnetclient_flush(cl);
+	struct web_client *wc = cl->client_ctx;
+	return sse_write(wc, cmd, msg);
+}
+
 /* telnetclient_set_encoding sets the character encoding for the client. */
 void
 telnetclient_set_encoding(DESCRIPTOR_DATA *cl, struct charset *cs)

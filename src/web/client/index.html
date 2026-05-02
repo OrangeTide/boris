@@ -49,39 +49,111 @@
     var sid = '', connected = false,
         view = document.getElementById('game-view'),
         inp = document.getElementById('game-input'),
-        pending = null;
+        pending = null,
+        cmdHist = [],
+        histIdx = -1;
 
     inp.focus();
 
+    function escHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    var pal16 = ['#000','#c00','#0a0','#aa0','#00c','#a0a','#0aa','#ccc',
+                 '#555','#f55','#5f5','#ff5','#55f','#f5f','#5ff','#fff'];
+
+    function palRgb(n) {
+      if (n < 16) return pal16[n];
+      if (n >= 232) { var v = (n - 232) * 10 + 8; return 'rgb('+v+','+v+','+v+')'; }
+      n -= 16;
+      var r = n/36|0, g = (n%36)/6|0, b = n%6;
+      return 'rgb('+(r?r*40+55:0)+','+(g?g*40+55:0)+','+(b?b*40+55:0)+')';
+    }
+
+    function ansi2html(s) {
+      var out = '', i = 0, fg = null, bg = null, bold = false, italic = false, ul = 0;
+      function mkSpan() {
+        var st = [];
+        if (fg) st.push('color:'+fg);
+        if (bg) st.push('background:'+bg);
+        if (bold) st.push('font-weight:bold');
+        if (italic) st.push('font-style:italic');
+        if (ul) st.push('text-decoration:underline'+(ul===3?';text-decoration-style:wavy':''));
+        return st.length ? '<span style="'+st.join(';')+'">' : '<span>';
+      }
+      out += mkSpan();
+      while (i < s.length) {
+        var esc = s.indexOf('\x1b', i);
+        if (esc < 0) { out += escHtml(s.substring(i)); break; }
+        out += escHtml(s.substring(i, esc));
+        var m = s.substring(esc).match(/^\x1b\[([0-9;:]*)m/);
+        if (!m) { out += escHtml(s[esc]); i = esc + 1; continue; }
+        var parts = m[1].split(';');
+        for (var j = 0; j < parts.length; j++) {
+          var sub = parts[j].split(':'), c = +sub[0];
+          if (isNaN(c)) c = 0;
+          if (c === 0) { fg = bg = null; bold = false; italic = false; ul = 0; }
+          else if (c === 1) bold = true;
+          else if (c === 3) italic = true;
+          else if (c === 4) ul = sub.length > 1 ? +sub[1] : 1;
+          else if (c === 22) bold = false;
+          else if (c === 23) italic = false;
+          else if (c === 24) ul = 0;
+          else if (c >= 30 && c <= 37) fg = pal16[c - 30];
+          else if (c === 38 && parts[j+1] === '5') { fg = palRgb(+parts[j+2]); j += 2; }
+          else if (c === 38 && parts[j+1] === '2') { fg = 'rgb('+parts[j+2]+','+parts[j+3]+','+parts[j+4]+')'; j += 4; }
+          else if (c === 39) fg = null;
+          else if (c >= 40 && c <= 47) bg = pal16[c - 40];
+          else if (c === 48 && parts[j+1] === '5') { bg = palRgb(+parts[j+2]); j += 2; }
+          else if (c === 48 && parts[j+1] === '2') { bg = 'rgb('+parts[j+2]+','+parts[j+3]+','+parts[j+4]+')'; j += 4; }
+          else if (c === 49) bg = null;
+          else if (c >= 90 && c <= 97) fg = pal16[c - 82];
+          else if (c >= 100 && c <= 107) bg = pal16[c - 92];
+        }
+        out += '</span>' + mkSpan();
+        i = esc + m[0].length;
+      }
+      return out + '</span>';
+    }
+
     function appendLine(text, color) {
       var p = document.createElement('p');
-      p.textContent = text;
-      if (color) p.style.color = color;
+      if (color) {
+        p.textContent = text;
+        p.style.color = color;
+      } else {
+        p.innerHTML = ansi2html(text);
+      }
       view.appendChild(p);
+      trimScrollback();
       p.scrollIntoView();
     }
 
-    function appendOutput(text, color) {
+    function appendOutput(text) {
       var lines = text.split('\n');
       for (var i = 0; i < lines.length; i++) {
         var part = lines[i];
         var hasMore = i < lines.length - 1;
         if (pending) {
-          pending.textContent += part;
+          pending.innerHTML += ansi2html(part);
           if (hasMore) {
             pending.scrollIntoView();
             pending = null;
           }
         } else if (hasMore) {
-          appendLine(part, color);
+          appendLine(part);
         } else if (part.length > 0) {
           pending = document.createElement('p');
-          pending.textContent = part;
-          if (color) pending.style.color = color;
+          pending.innerHTML = ansi2html(part);
           view.appendChild(pending);
           pending.scrollIntoView();
         }
       }
+    }
+
+    function trimScrollback() {
+      while (view.childNodes.length > 1000)
+        view.removeChild(view.firstChild);
     }
 
     var src = new EventSource('/events');
@@ -90,35 +162,30 @@
       var c = e.data.charAt(0), s = e.data.substring(1);
 
       if (c >= 'A' && c <= 'Z') {
-        /* server commands */
         if (c === 'I') {
           sid = s;
+        } else if (c === 'E' || c === 'V') {
+          window.open(s, '_blank');
         } else {
           console.error('unknown server command: ' + c);
         }
       } else if (c === '+') {
-        /* input enabled */
         connected = true;
         inp.disabled = false;
         inp.focus();
       } else if (c === '-') {
-        /* input disabled */
         inp.disabled = true;
       } else if (c === '=') {
         /* status line (ignored for now) */
       } else if (c === '!') {
-        /* alert */
         appendLine(s, 'red');
       } else if (c === '^') {
-        /* reload */
         location.reload();
       } else if (c === '_') {
-        /* idle/ticket -- ignore */
         console.log('tick', s);
       } else if (c >= '0' && c <= '9') {
         /* status line updates -- ignore for now */
       } else if (c >= 'a' && c <= 'z') {
-        /* terminal messages */
         appendOutput(s);
       } else {
         appendOutput(e.data);
@@ -134,12 +201,28 @@
       }
     };
 
-    document.getElementById('game-input').addEventListener('keydown', function(e) {
-      if (e.key !== 'Enter') return;
-      var text = inp.value.trim();
-      if (!text || !sid) return;
-      inp.value = '';
-      fetch('/cmd', { method: 'POST', body: sid + ' ' + text });
+    inp.addEventListener('keydown', function(e) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (histIdx < 0) histIdx = cmdHist.length;
+        if (histIdx > 0) inp.value = cmdHist[--histIdx];
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (histIdx >= 0 && histIdx < cmdHist.length - 1) {
+          inp.value = cmdHist[++histIdx];
+        } else {
+          histIdx = -1;
+          inp.value = '';
+        }
+      } else if (e.key === 'Enter') {
+        var text = inp.value.trim();
+        if (!text || !sid) return;
+        cmdHist.push(text);
+        if (cmdHist.length > 50) cmdHist.shift();
+        histIdx = -1;
+        inp.value = '';
+        fetch('/cmd', { method: 'POST', body: sid + ' ' + text });
+      }
     });
 
     document.getElementById('help-link').addEventListener('click', function(e) {
