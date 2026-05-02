@@ -51,6 +51,8 @@
         inp = document.getElementById('game-input'),
         pending = null;
 
+    inp.focus();
+
     function appendLine(text, color) {
       var p = document.createElement('p');
       p.textContent = text;
