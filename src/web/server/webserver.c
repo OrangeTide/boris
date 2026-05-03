@@ -731,19 +731,12 @@ webserver_shutdown(void)
 		web_listener = NULL;
 	}
 
-	struct web_client *wc = webclient_first();
-	while (wc) {
-		struct web_client *next = wc->next;
-		if (wc->cl) {
-			telnetclient_webclient_destroy(wc->cl);
-			wc->cl = NULL;
-		}
-		if (wc->stream) {
+	struct web_client *wc;
+	while ((wc = webclient_first()) != NULL) {
+		if (wc->stream)
 			net_close(wc->stream);
-			wc->stream = NULL;
-		}
-		webclient_destroy(wc);
-		wc = next;
+		else
+			webclient_destroy(wc);
 	}
 
 	LOG_INFO("web server shut down");
