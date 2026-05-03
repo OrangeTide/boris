@@ -163,3 +163,4 @@ sync:kanban:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
       changes:
         - kanban/*.md
+        - scripts/kanban-sync.sh
