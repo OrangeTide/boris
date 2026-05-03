@@ -1,7 +1,7 @@
 SUBDIRS = \
 	thirdparty/lmdb thirdparty/mth thirdparty/tiny-aes \
 	log scrypt util help iox net passwd obj entity rpg combat database \
-	security muddb-tool daemonize coldfire machine
+	security muddb-tool daemonize coldfire machine verb
 
 LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
