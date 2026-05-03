@@ -1,6 +1,7 @@
 ---
 title: ColdFire VM ISA Completion
 status: backlog
+gitlab-sync:
 ---
 
 Remaining ColdFire instruction implementations.

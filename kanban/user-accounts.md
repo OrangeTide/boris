@@ -1,6 +1,7 @@
 ---
 title: User Accounts & Login
 status: backlog
+gitlab-sync:
 ---
 
 Complete user account schema and login flow. See doc/user-accounts.md.

@@ -1,10 +1,11 @@
 ---
 title: Web Client Game UI
 status: backlog
+gitlab-sync: OrangeTide/boris#11
 ---
 
 Real game interface beyond the current terminal-style SSE view.
-Input history, interaction panels, etc. GitLab #11.
+Input history, interaction panels, etc.
 
 - [ ] game UI layout and interaction logic
 - [ ] input history and command editing

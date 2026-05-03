@@ -1,6 +1,7 @@
 ---
 title: RPG GM Actions & Playbooks
 status: backlog
+gitlab-sync:
 ---
 
 RPG phases 6-7. Depends on rpg-teamwork.

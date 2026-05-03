@@ -1,6 +1,7 @@
 ---
 title: LociTerm Compatibility
 status: backlog
+gitlab-sync:
 ---
 
 LociTerm proxy compatibility. See https://lociterm.com/home/ops.html

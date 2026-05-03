@@ -1,6 +1,7 @@
 ---
 title: Menu & Freelist Fixes
 status: backlog
+gitlab-sync:
 ---
 
 Small fixes in menu and freelist data structures.

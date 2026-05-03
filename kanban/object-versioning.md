@@ -1,6 +1,7 @@
 ---
 title: Object Versioning
 status: backlog
+gitlab-sync: OrangeTide/boris#14
 ---
 
 Wikipedia-like edit history for the online object editor. Each save

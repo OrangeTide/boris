@@ -1,6 +1,7 @@
 ---
 title: Virtual Whiteboard
 status: backlog
+gitlab-sync:
 ---
 
 Collaborative drawing/editing tool.

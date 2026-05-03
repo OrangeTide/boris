@@ -16,6 +16,7 @@ stages:
   - release
   - docs
   - publish
+  - kanban
 
 .build-deps: &build-deps
   - apk update
@@ -149,3 +150,16 @@ pages:
       - public
   rules: # publish only on default branch
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
+sync:kanban:
+  stage: kanban
+  image: alpine
+  before_script:
+    - apk update
+    - apk add curl git sed
+  script:
+    - ./scripts/kanban-sync.sh
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+      changes:
+        - kanban/*.md

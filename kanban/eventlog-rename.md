@@ -1,6 +1,7 @@
 ---
 title: Eventlog Rename
 status: backlog
+gitlab-sync:
 ---
 
 Rename boris.log to boris.eventlog, use boris.log for log.c output.

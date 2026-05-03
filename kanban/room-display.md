@@ -1,6 +1,7 @@
 ---
 title: Room Display & Descriptions
 status: backlog
+gitlab-sync:
 ---
 
 Fill in missing room display features in show_room.
