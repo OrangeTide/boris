@@ -362,6 +362,54 @@ test_create_short_password()
     close_sse
 }
 
+test_clean_shutdown()
+{
+    # open several SSE connections, one with an active login
+    local sse_pids=""
+    local sse_files=""
+
+    for i in 1 2 3; do
+        local f="$TMPDIR/sse-shutdown-$i.txt"
+        > "$f"
+        curl -s -N "http://127.0.0.1:$WEB_PORT/events" > "$f" 2>/dev/null &
+        sse_pids="$sse_pids $!"
+        sse_files="$sse_files $f"
+    done
+
+    # wait for all connections to get session IDs
+    sleep 0.5
+
+    # log in on the first connection
+    local sid
+    sid="$(head -1 "$TMPDIR/sse-shutdown-1.txt" | sed 's/^data: I//')"
+    if [ -n "$sid" ]; then
+        curl -s -X POST -d "${sid} connect websmoke testpass99" \
+            "http://127.0.0.1:$WEB_PORT/cmd" >/dev/null
+        sleep 0.3
+    fi
+
+    # send SIGINT -- same as Ctrl-C
+    kill -INT "$SERVER_PID" 2>/dev/null
+    wait "$SERVER_PID" 2>/dev/null
+    local rc=$?
+
+    # clean up background curl processes
+    for p in $sse_pids; do
+        kill "$p" 2>/dev/null
+        wait "$p" 2>/dev/null
+    done
+
+    # 130 = killed by SIGINT (128+2), 0 = clean exit
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 130 ]; then
+        pass "clean shutdown with active web clients (exit=$rc)"
+    else
+        fail "clean shutdown with active web clients (exit=$rc)"
+    fi
+
+    # server is already gone; prevent cleanup() from trying to kill it
+    SERVER_PID=""
+}
+
 # --- main ---
 
 echo "%%%%%%%%%%%% START-TEST : web-smoke"
@@ -382,6 +430,7 @@ test_no_password_echo
 test_create_duplicate
 test_create_bad_name
 test_create_short_password
+test_clean_shutdown
 
 echo "%%%%%%%%%%%% END-TEST : $PASS passed, $FAIL failed (of $TOTAL)"
 
