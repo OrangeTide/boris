@@ -21,7 +21,14 @@ CARDS_CHANGED=0
 
 parse_frontmatter() {
     # extract a YAML frontmatter field value from a card
-    sed -n '/^---$/,/^---$/{ /^'"$1"':/{ s/^'"$1"': *//; p; q; } }' "$2"
+    # strips optional surrounding quotes from the value
+    sed -n '/^---$/,/^---$/{ /^'"$1"':/{ s/^'"$1"': *//; s/^"//; s/"$//; p; q; } }' "$2"
+}
+
+json_escape() {
+    # escape a string for embedding in JSON
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g' | \
+        awk '{ if (NR > 1) printf "\\n"; printf "%s", $0 }'
 }
 
 card_status_to_gitlab() {
@@ -60,13 +67,13 @@ sync_card() {
         # no issue -- create one
         description="$(sed '1,/^---$/d; /^---$/,$ { /^---$/d; }' "$card" | sed '/^$/d')"
         echo "create: ${slug} -> new issue"
+        esc_title="$(json_escape "$title")"
+        esc_desc="$(json_escape "$description")"
         response="$(curl -sf -X POST "${API}/issues" \
             -H "${AUTH_HEADER}" \
             -H "Content-Type: application/json" \
-            -d "$(printf '{"title": "%s", "description": "%s"}' \
-                "$title" \
-                "$(echo "$description" | sed 's/"/\\"/g; s/$/\\n/' | tr -d '\n')")")"
-        iid="$(echo "$response" | sed -n 's/.*"iid":\([0-9]*\).*/\1/p')"
+            -d "{\"title\": \"${esc_title}\", \"description\": \"${esc_desc}\"}")"
+        iid="$(echo "$response" | sed -n 's/.*"iid" *: *\([0-9]*\).*/\1/p' | head -1)"
         if [ -z "$iid" ]; then
             echo "error: failed to create issue for ${slug}"
             return 1
@@ -74,8 +81,8 @@ sync_card() {
         # extract project path from CI or default
         project_path="${CI_PROJECT_PATH:-OrangeTide/boris}"
         ref="${project_path}#${iid}"
-        # write ref back into card
-        sed -i "s/^gitlab-sync:$/gitlab-sync: ${ref}/" "$card"
+        # write ref back into card -- use | delimiter to avoid / in path
+        sed -i "s|^gitlab-sync:$|gitlab-sync: ${ref}|" "$card"
         CARDS_CHANGED=1
         echo "created: ${slug} -> ${ref}"
     fi
