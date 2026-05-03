@@ -1,7 +1,7 @@
 ---
 title: GMCP Protocol
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#27
 ---
 
 Generic MUD Communication Protocol. Structured data channel between

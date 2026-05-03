@@ -1,7 +1,7 @@
 ---
 title: Room Display & Descriptions
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#34
 ---
 
 Fill in missing room display features in show_room.

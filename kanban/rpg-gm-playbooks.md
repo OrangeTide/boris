@@ -1,7 +1,7 @@
 ---
 title: RPG GM Actions & Playbooks
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#35
 ---
 
 RPG phases 6-7. Depends on rpg-teamwork.

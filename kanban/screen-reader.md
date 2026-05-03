@@ -1,7 +1,7 @@
 ---
 title: Screen Reader Support
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#37
 ---
 
 Alternate descriptions for screen readers. ASCII maps and visual

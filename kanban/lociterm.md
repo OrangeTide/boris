@@ -1,7 +1,7 @@
 ---
 title: LociTerm Compatibility
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#28
 ---
 
 LociTerm proxy compatibility. See https://lociterm.com/home/ops.html

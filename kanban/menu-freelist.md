@@ -1,7 +1,7 @@
 ---
 title: Menu & Freelist Fixes
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#29
 ---
 
 Small fixes in menu and freelist data structures.

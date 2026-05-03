@@ -1,7 +1,7 @@
 ---
 title: MSSP Protocol
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#30
 ---
 
 MUD Server Status Protocol -- advertise server stats to MUD crawlers.
