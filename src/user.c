@@ -24,7 +24,10 @@
 
 #include "user.h"
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #include <ctype.h>
+#include <time.h>
 #include <mud.h>
 #include <boris.h>
 #define LOG_SUBSYSTEM "user"
@@ -54,8 +57,16 @@ struct user {
 	char *password_crypt;
 	char *email;
 	struct acs_info acs;
+	unsigned lockout;
+	char *lockout_text;
+	unsigned login_count; /* runtime only, not persisted */
+	unsigned total_logins;
+	time_t since;
+	struct login_record lastlogins[USER_LASTLOGINS_MAX];
+	unsigned lastlogins_count;
+	unsigned lastlogins_head;
 	REFCOUNT_TYPE REFCOUNT_NAME;
-	struct attr_list extra_values; /**< load an other values here. */
+	struct attr_list extra_values;
 };
 
 struct userdb_entry {
@@ -118,6 +129,8 @@ user_ll_free(struct user *u)
 	u->password_crypt = 0;
 	free(u->email);
 	u->email = 0;
+	free(u->lockout_text);
+	u->lockout_text = 0;
 	free(u);
 }
 
@@ -158,6 +171,14 @@ user_defaults(void)
 	u->email = NULL;
 	u->acs.level = USER_LEVEL_NEWUSER;
 	u->acs.flags = USER_FLAGS_NEWUSER;
+	u->lockout = 0;
+	u->lockout_text = NULL;
+	u->login_count = 0;
+	u->total_logins = 0;
+	u->since = 0;
+	memset(u->lastlogins, 0, sizeof(u->lastlogins));
+	u->lastlogins_count = 0;
+	u->lastlogins_head = 0;
 	LIST_INIT(&u->extra_values);
 	return u;
 }
@@ -209,6 +230,76 @@ user_cache_add(struct user *u)
 	user_get(u);
 
 	return 1; /**< success. */
+}
+
+static void
+lastlogins_parse(struct user *u, const char *str)
+{
+	unsigned i = 0;
+
+	while (*str && i < USER_LASTLOGINS_MAX) {
+		struct login_record *rec = &u->lastlogins[i];
+		char *end;
+
+		rec->time = (time_t)strtoll(str, &end, 10);
+		if (*end != ';') break;
+		str = end + 1;
+
+		const char *sep = strchr(str, ';');
+		if (!sep) break;
+		size_t len = (size_t)(sep - str);
+		if (len >= sizeof(rec->peer))
+			len = sizeof(rec->peer) - 1;
+		memcpy(rec->peer, str, len);
+		rec->peer[len] = '\0';
+		str = sep + 1;
+
+		rec->success = (int)strtol(str, &end, 10);
+		i++;
+		if (*end == '|')
+			str = end + 1;
+		else
+			break;
+	}
+
+	u->lastlogins_count = i;
+	u->lastlogins_head = i % USER_LASTLOGINS_MAX;
+}
+
+static int
+lastlogins_serialize(const struct user *u, char *buf, size_t bufsz)
+{
+	size_t off = 0;
+
+	if (u->lastlogins_count == 0) {
+		buf[0] = '\0';
+		return 1;
+	}
+
+	unsigned start;
+	if (u->lastlogins_count < USER_LASTLOGINS_MAX)
+		start = 0;
+	else
+		start = u->lastlogins_head;
+
+	for (unsigned i = 0; i < u->lastlogins_count; i++) {
+		unsigned idx = (start + i) % USER_LASTLOGINS_MAX;
+		const struct login_record *rec = &u->lastlogins[idx];
+		int n;
+
+		if (i > 0) {
+			if (off >= bufsz) return 0;
+			buf[off++] = '|';
+		}
+
+		n = snprintf(buf + off, bufsz - off, "%lld;%s;%d",
+		             (long long)rec->time, rec->peer, rec->success);
+		if (n < 0 || (size_t)n >= bufsz - off)
+			return 0;
+		off += (size_t)n;
+	}
+
+	return 1;
 }
 
 /** load a user by username. */
@@ -264,6 +355,29 @@ user_load_byname(const char *username, int id_already_exists)
 	if (val)
 		parse_uint("acs.flags", val, &u->acs.flags);
 
+	val = obj_prop_get(obj, "lockout");
+	if (val)
+		parse_uint("lockout", val, &u->lockout);
+
+	val = obj_prop_get(obj, "lockout.text");
+	if (val)
+		parse_str("lockout.text", val, &u->lockout_text);
+
+	val = obj_prop_get(obj, "totallogin");
+	if (val)
+		parse_uint("totallogin", val, &u->total_logins);
+
+	val = obj_prop_get(obj, "since");
+	if (val) {
+		long long t;
+		if (sscanf(val, "%lld", &t) == 1)
+			u->since = (time_t)t;
+	}
+
+	val = obj_prop_get(obj, "lastlogins");
+	if (val)
+		lastlogins_parse(u, val);
+
 	/* collect unknown fields into extra_values */
 	{
 		OBJ_ITER *it = obj_iter_begin(obj);
@@ -275,7 +389,12 @@ user_load_byname(const char *username, int id_already_exists)
 			    !strcasecmp(key, "pwcrypt") ||
 			    !strcasecmp(key, "email") ||
 			    !strcasecmp(key, "acs.level") ||
-			    !strcasecmp(key, "acs.flags"))
+			    !strcasecmp(key, "acs.flags") ||
+			    !strcasecmp(key, "lockout") ||
+			    !strcasecmp(key, "lockout.text") ||
+			    !strcasecmp(key, "totallogin") ||
+			    !strcasecmp(key, "since") ||
+			    !strcasecmp(key, "lastlogins"))
 				continue;
 			parse_attr(key, v, &u->extra_values);
 		}
@@ -379,6 +498,26 @@ user_write(const struct user *u)
 	obj_prop_set(obj, "acs.level", buf);
 	snprintf(buf, sizeof(buf), "0x%08x", u->acs.flags);
 	obj_prop_set(obj, "acs.flags", buf);
+
+	if (u->lockout) {
+		obj_prop_set(obj, "lockout", "1");
+		if (u->lockout_text)
+			obj_prop_set(obj, "lockout.text", u->lockout_text);
+	}
+
+	snprintf(buf, sizeof(buf), "%u", u->total_logins);
+	obj_prop_set(obj, "totallogin", buf);
+
+	if (u->since) {
+		snprintf(buf, sizeof(buf), "%lld", (long long)u->since);
+		obj_prop_set(obj, "since", buf);
+	}
+
+	if (u->lastlogins_count > 0) {
+		char llbuf[512];
+		if (lastlogins_serialize(u, llbuf, sizeof(llbuf)))
+			obj_prop_set(obj, "lastlogins", llbuf);
+	}
 
 	for (curr = LIST_TOP(u->extra_values); curr; curr = LIST_NEXT(curr, list)) {
 		obj_prop_set(obj, curr->name, curr->value);
@@ -536,6 +675,7 @@ user_create(const char *username, const char *password, const char *email)
 	u->username = strdup(username);
 	u->password_crypt = strdup(password_crypt);
 	u->email = strdup(email);
+	u->since = time(NULL);
 	LOG_DEBUG("new user password: %s\n", u->password_crypt);
 
 	user_cache_add(u);
@@ -682,6 +822,102 @@ user_save(struct user *u)
 	if (!u)
 		return 0;
 	return user_write(u);
+}
+
+int
+user_is_locked(struct user *u)
+{
+	return u ? (int)u->lockout : 0;
+}
+
+const char *
+user_lockout_text(struct user *u)
+{
+	return u ? u->lockout_text : NULL;
+}
+
+void
+user_lock(struct user *u, const char *reason)
+{
+	if (!u) return;
+	u->lockout = 1;
+	free(u->lockout_text);
+	u->lockout_text = reason ? strdup(reason) : NULL;
+}
+
+void
+user_unlock(struct user *u)
+{
+	if (!u) return;
+	u->lockout = 0;
+	free(u->lockout_text);
+	u->lockout_text = NULL;
+}
+
+void
+user_record_login(struct user *u, const char *peer, int success)
+{
+	struct login_record *rec;
+
+	if (!u) return;
+
+	rec = &u->lastlogins[u->lastlogins_head];
+	rec->time = time(NULL);
+	rec->success = success;
+	if (peer) {
+		strncpy(rec->peer, peer, sizeof(rec->peer) - 1);
+		rec->peer[sizeof(rec->peer) - 1] = '\0';
+	} else {
+		rec->peer[0] = '\0';
+	}
+
+	u->lastlogins_head = (u->lastlogins_head + 1) % USER_LASTLOGINS_MAX;
+	if (u->lastlogins_count < USER_LASTLOGINS_MAX)
+		u->lastlogins_count++;
+
+	if (success)
+		u->total_logins++;
+}
+
+const struct login_record *
+user_lastlogins(struct user *u, unsigned *count)
+{
+	if (!u) {
+		if (count) *count = 0;
+		return NULL;
+	}
+	if (count) *count = u->lastlogins_count;
+	return u->lastlogins;
+}
+
+void
+user_login_count_inc(struct user *u)
+{
+	if (u) u->login_count++;
+}
+
+void
+user_login_count_dec(struct user *u)
+{
+	if (u && u->login_count > 0) u->login_count--;
+}
+
+unsigned
+user_login_count(struct user *u)
+{
+	return u ? u->login_count : 0;
+}
+
+unsigned
+user_total_logins(struct user *u)
+{
+	return u ? u->total_logins : 0;
+}
+
+time_t
+user_since(struct user *u)
+{
+	return u ? u->since : 0;
 }
 
 /**
