@@ -167,7 +167,9 @@ telnetclient_on_data(net_event *e)
 		*end = 0; /* null terminate the string */
 		if (linelen > 0) {
 			if (cl->line_input) {
+				telnetclient_set_buffered(cl);
 				cl->line_input(cl, start);
+				telnetclient_clear_buffered(cl);
 			} else {
 				LOG_WARNING("Missing or invalid line input handler [fd=%ld %s]", (long)net_get_socket(e->stream), telnetclient_socket_name(cl));
 				telnetclient_printf(cl, "ERROR, missing or invalid line input handler: \"%.*s\"\n", linelen, start);
@@ -1044,9 +1046,8 @@ telnetclient_room_broadcast(const char *room_id, const char *msg)
 		}
 	}
 
-	webclient_lock();
 	for (struct web_client *wc = webclient_first(); wc; wc = wc->next) {
-		if (wc->state != WC_ACTIVE || !wc->cl)
+		if (wc->state != WC_SSE || !wc->cl)
 			continue;
 		struct character *ch = wc->cl->character;
 		const char *cur;
@@ -1060,7 +1061,6 @@ telnetclient_room_broadcast(const char *room_id, const char *msg)
 		if (strcmp(key, room_id) == 0)
 			telnetclient_puts(wc->cl, msg);
 	}
-	webclient_unlock();
 }
 
 /* telnetclient_webclient_new allocates and initializes a client backed by a web connection. */
@@ -1135,6 +1135,42 @@ telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl)
 
 	user_put(&cl->user);
 	free(cl);
+}
+
+/* telnetclient_set_buffered enables output buffering on the client. */
+void
+telnetclient_set_buffered(DESCRIPTOR_DATA *cl)
+{
+	if (cl)
+		cl->buffered = 1;
+}
+
+/* telnetclient_clear_buffered disables output buffering and flushes pending output. */
+void
+telnetclient_clear_buffered(DESCRIPTOR_DATA *cl)
+{
+	if (!cl)
+		return;
+	cl->buffered = 0;
+	telnetclient_flush(cl);
+}
+
+/* telnetclient_flush sends any buffered output to the client. */
+void
+telnetclient_flush(DESCRIPTOR_DATA *cl)
+{
+	if (cl && cl->ops && cl->ops->flush)
+		cl->ops->flush(cl);
+}
+
+int
+telnetclient_send_sse(DESCRIPTOR_DATA *cl, int cmd, const char *msg)
+{
+	if (!cl || cl->type != CLIENT_TYPE_WEB || !cl->client_ctx)
+		return -1;
+	telnetclient_flush(cl);
+	struct web_client *wc = cl->client_ctx;
+	return sse_write(wc, cmd, msg);
 }
 
 /* telnetclient_set_encoding sets the character encoding for the client. */

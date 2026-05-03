@@ -1,28 +1,43 @@
+/* webclient.h : web client connection state for SSE-based web server */
+/* Made by a machine. PUBLIC DOMAIN (CC0-1.0) */
+
 #ifndef WEBCLIENT_H_
 #define WEBCLIENT_H_
-#include "mud.h"
-#include "msgqueue.h"
-#include <mongoose.h>
 
-enum web_client_state { WC_NEW, WC_ACTIVE, WC_CLOSING };
+#include "mud.h"
+
+struct net_stream;
+
+enum web_client_state {
+	WC_HTTP,
+	WC_SSE,
+	WC_CLOSING,
+};
+
+#define WC_SESSION_LEN 32
+#define WC_REQBUF_SIZE 4096
+#define WC_OUTBUF_SIZE 4096
 
 struct web_client {
 	struct web_client *next;
-	struct mg_connection *ws_conn;
+	struct net_stream *stream;
 	DESCRIPTOR_DATA *cl;
-	struct msg_queue input_q;
-	struct msg_queue output_q;
 	enum web_client_state state;
+	char session[WC_SESSION_LEN + 1];
+	char reqbuf[WC_REQBUF_SIZE];
+	int reqlen;
+	char outbuf[WC_OUTBUF_SIZE];
+	int outlen;
 };
 
-struct web_client *webclient_new(struct mg_connection *c);
+struct web_client *webclient_new(struct net_stream *stream);
 void webclient_destroy(struct web_client *wc);
 struct web_client *webclient_first(void);
+struct web_client *webclient_find_session(const char *token);
 
-void webclient_set_wake_fd(int fd);
-int webclient_get_wake_fd(void);
+int sse_write(struct web_client *wc, int cmd, const char *msg);
+void webclient_flush(struct web_client *wc);
 
-void webclient_lock(void);
-void webclient_unlock(void);
+extern const struct client_ops web_client_ops;
 
-#endif
+#endif /* WEBCLIENT_H_ */

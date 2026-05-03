@@ -49,6 +49,7 @@ int net_stream_count(void);
 struct net_stream *net_new_stream(void);
 int net_listen(struct net_stream *s, int port);
 void net_close(struct net_stream *s);
+void net_close_when_done(struct net_stream *s);
 int net_write(struct net_stream *s, const void *data, int size);
 int net_writef(struct net_stream *s, const char *fmt, ...);
 

@@ -1,5 +1,5 @@
 SUBDIRS = \
-	thirdparty/lmdb thirdparty/mth thirdparty/mongoose thirdparty/tiny-aes \
+	thirdparty/lmdb thirdparty/mth thirdparty/tiny-aes \
 	log scrypt util help iox net passwd obj entity rpg combat database \
 	security muddb-tool daemonize coldfire machine
 
@@ -53,8 +53,8 @@ boris_SRCS = \
 	cmd/time.c \
 	cmd/yell.c \
 	cmd/charset.c \
+	cmd/edit.c \
 	worldclock/worldclock.c \
-	msgqueue.c \
 	web/server/webclient.c \
 	web/server/webserver.c \
 	machine/obj_program.c \
@@ -62,4 +62,4 @@ boris_SRCS = \
 	machine/program.c
 boris_LIBS = \
 	daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
-	database security machine coldfire lmdb mth mongoose tinyaes
+	database security machine coldfire lmdb mth tinyaes

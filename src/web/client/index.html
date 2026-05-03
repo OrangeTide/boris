@@ -5,231 +5,6 @@
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
   <link rel="stylesheet" href="assets/system.css" />
   <link rel="stylesheet" href="assets/layout.css" />
-  <!-- src="./js/main.js" -->
-  <script type="module">
-    let socket;
-
-    let slashCommands = {
-      "connect": { cmd: connect, usage: "/connect <host> [port] [secure=true]" },
-      "disconnect": { cmd: disconnect, usage: "/disconnect" },
-      "help": { cmd: help, usage: "/help" },
-    };
-
-    function notImpl() {
-      return;
-    }
-
-    function help() {
-      postToGameView("Slash Commands", "yellow");
-      for (let cmd in slashCommands) {
-        if (slashCommands[cmd].usage) {
-          postToGameView(`${cmd} - ${slashCommands[cmd].usage}`, "lightblue");
-        }
-      }
-    }
-
-    function connect(host, port, secure = true) {
-      if (secure == "false") { secure = false };
-
-      if (isSocketOpen(socket)) {
-        postToGameView(`Closing connection to ${socket.url}`);
-        socket.close();
-      }
-
-      try {
-        socket = new WebSocket(`${secure ? "wss" : "ws"}://${host}${port ? ":" + port : ""}`);
-      }
-      catch (e) {
-        postToGameView('Error: Incorrect server address (must be a ws(s):// url)', "red");
-        return;
-      }
-
-      let socketAttemptUrl = socket.url;
-      let timeoutHandle = setTimeout(() => {
-        postToGameView(`Connection to ${socketAttemptUrl} timed out`, "red");
-      }, 2000);
-
-      socket.addEventListener('open', (event) => {
-        clearTimeout(timeoutHandle);
-        postToGameView(`Connected to ${socket.url}`, "green");
-      })
-
-      socket.addEventListener('message', (event) => {
-        if (event.data) {
-          handleSocketRx(event.data);
-        }
-      });
-    };
-
-    function disconnect() {
-      if (isSocketOpen(socket)) {
-        postToGameView(`Closing connection to ${socket.url}`);
-        socket.close();
-      } else {
-        postToGameView("Not connected");
-      }
-    }
-
-    function isSocketOpen(socket) {
-      if (socket && socket.readyState === 1) {
-        return true;
-      }
-      return false;
-    };
-
-    function handleSocketRx(data) {
-      if (data.charAt(0) == '{') {
-        handleJsonRx(data);
-      }
-      else {
-        handleTextRx(data)
-      }
-    };
-
-    function handleJsonRx(data) {
-      let json_data;
-      try {
-        json_data = JSON.parse(data);
-      }
-      catch (e) {
-        console.error("Error in message from socket:", e.name, e.message);
-        console.log(data);
-        return;
-      }
-      const json_type = json_data?.type;
-      if ("Error" in json_data) {
-        postToGameView("Error: " + json_data["Error"], "red");
-      } else if (json_type === "error") {
-        postToGameView("Error: " + json_data["error"], "red");
-      } else if (json_type === "message") {
-        handleTextRx(json_data["message"]);
-      } else {
-        postToGameView("JSON: " + data, "lightblue");
-      }
-      console.log(`JSON message from ${socket.url}:\n` + JSON.stringify(json_data, null, 2));
-    };
-
-    function handleTextRx(text) {
-      let color;
-      if (text.charAt(0) != 0o33) {
-        color = "#FFFF99";
-      }
-      text = text.replace(/ /g,'\xA0');
-      postToGameView(text, color);
-    };
-
-    function sendToSocket(data) {
-      if (isSocketOpen(socket)) {
-        socket.send(data);
-      }
-      else {
-        postToGameView("Error: not connected", "red");
-      }
-    };
-
-    function postToGameView(data, color = "") {
-      if (data && data !== "") {
-        const p_elem = document.createElement("p");
-        const replaced_data = data.replace(/\r?\n/g, "<br>")
-                                  .replace(/<(?!br\s*\/?)[^>]+>/g,"");
-        p_elem.innerHTML = replaced_data;
-        if (color) {
-          p_elem.style.color = color;
-        }
-        document.getElementById("game-view").appendChild(p_elem);
-        p_elem.scrollIntoView();
-        return true;
-      }
-      return false;
-    };
-
-    function onClickConnectLast(event) {
-      event.target.blur();
-
-      connect("localhost:8080/ws", null, false);
-    };
-
-    function onClickHelp(event) {
-      event.target.blur();
-
-      postToGameView(">help");
-      help();
-    }
-
-    function hideConnectToDialog() {
-      const connect_to_dialog = document.getElementById("connect-to-dialog");
-      connect_to_dialog.style.display = "none";
-    }
-
-    function onClickConnectTo(event) {
-      const connect_to_dialog = document.getElementById("connect-to-dialog");
-      connect_to_dialog.focus();
-      connect_to_dialog.style.display = "flex";
-    }
-
-    function onClickConnectToCancel(event) {
-      hideConnectToDialog();
-    }
-
-    function onClickConnectToAccept(event) {
-      const connect_to_dialog = document.getElementById("connect-to-dialog");
-      const connect_to_host = document.getElementById("connect-to-host").value.trim();
-      const connect_to_port = document.getElementById("connect-to-port").value.trim();
-      const connect_to_ssl = document.getElementById("connect-to-ssl").checked;
-      connect(connect_to_host, +connect_to_port, connect_to_ssl);
-      hideConnectToDialog();
-    }
-
-    function handleGameInput(event) {
-      const input_elem = event.target;
-      const input = event.target.value.trim();
-
-      if (input !== "") {
-        input_elem.value = "";
-        postToGameView(">" + input);
-        if (input.charAt(0) == '/') {
-          const commandInput = input.slice(1);
-          let commandArgv = commandInput.split(/\s+/);
-          let command = commandArgv.shift();
-          console.log(command, commandArgv);
-          if (command in slashCommands) {
-            slashCommands[command].cmd(...commandArgv);
-          }
-        } else if (input == "help" && !isSocketOpen(socket)) {
-          help();
-        } else {
-          sendToSocket(input);
-        }
-      }
-    }
-
-    (function main() {
-      const game_input = document.getElementById("game-input");
-
-      game_input.addEventListener('keydown', (event) => {
-        const game_input_value = game_input.value.trim();
-        if (event.key === "Enter" && game_input_value !== "") {
-          handleGameInput(event);
-        }
-      });
-
-      const connect_last = document.getElementById("connect-last");
-      connect_last.addEventListener("click", onClickConnectLast);
-
-      const help_link = document.getElementById("help-link");
-      help_link.addEventListener("click", onClickHelp);
-
-      const connect_to_dialog = document.getElementById("connect-to-dialog");
-      connect_to_dialog.addEventListener("blur", hideConnectToDialog);
-      const connect_to = document.getElementById("connect-to");
-      const connect_to_cancel = document.getElementById("connect-to-cancel");
-      const connect_to_accept = document.getElementById("connect-to-accept");
-      connect_to.addEventListener("click", onClickConnectTo);
-      connect_to_cancel.addEventListener("click", onClickConnectToCancel);
-      connect_to_accept.addEventListener("click", onClickConnectToAccept);
-
-    })();
-  </script>
 </head>
 
 <body>
@@ -240,9 +15,7 @@
           <li role="menu-item" tabindex="0" aria-haspopup="true" class="padded-menu-item" id="system-menu">
             <strong>BorisMUD</strong>
             <ul role="menu">
-              <li role="menu-item"><a id="connect-last" href="#" onclick="this.blur()">Connect (localhost:8080/ws)</a></li>
-              <li role="menu-item"><a id="connect-to" href="#" onclick="this.blur()">Connect to...</a></li>
-              <li role="menu-item" class="divider"><a id="help-link" href="#" onclick="this.blur()">Help</a></li>
+              <li role="menu-item"><a id="help-link" href="#" onclick="this.blur()">Help</a></li>
               <li role="menu-item"><a href="https://orangetide.gitlab.io/boris/">About</a></li>
             </ul>
           </li>
@@ -250,27 +23,16 @@
       </div>
       <div id="right-header-items">
         <ul role="menu-bar">
-          <ul role="menu-bar">
-            <li role="menu-item" tabindex="0">
-              <a href="builder.html">
-                Builder
-              </a>
-            </li>
-            <li role="menu-item" tabindex="0">
-              <a href="https://gitlab.com/OrangeTide/boris">
-                GitLab
-              </a>
-            </li>
-          </ul>
+          <li role="menu-item" tabindex="0">
+            <a href="https://gitlab.com/OrangeTide/boris">GitLab</a>
+          </li>
         </ul>
       </div>
     </div>
   </header>
   <main id="main-container">
     <section id="game-container">
-      <div id="game-view">
-
-      </div>
+      <div id="game-view"></div>
       <div id="game-input-container">
         <span for="game-input" class="input-prompt">
           <input type="text" id="game-input" />
@@ -278,44 +40,196 @@
       </div>
     </section>
     <aside id="game-sidepanel">
-      <div id="status-pane">
-
-      </div>
-      <div id="map-pane">
-
-      </div>
+      <div id="status-pane"></div>
+      <div id="map-pane"></div>
     </aside>
-    <div id="connect-to-dialog" class="window modeless-float-320" onblur="console.log('blur')">
-      <div class="title-bar">
-        <button aria-label="Close" disabled class="hidden"></button>
-        <h1 class="title">Connect To...</h1>
-        <button aria-label="Resize" disabled class="hidden"></button>
-      </div>
-      <div class="separator"></div>
-
-      <div class="modeless-dialog">
-        <section class="field-row" style="justify-content: flex-start">
-          <label for="connect-to-host" class="modeless-text">Host</label>
-          <input id="connect-to-host" type="text" placeholder="" style="width:80%;">
-        </section>
-        <section class="field-row" style="justify-content: flex-start">
-          <label for="connect-to-port" class="modeless-text">Port</label>
-          <input id="connect-to-port" type="text" placeholder="" style="width:90px">
-        </section>
-        <section class="field-row" style="justify-content: flex-start">
-          <label for="connect-to-ssl" class="modeless-text">SSL</label>
-          <input id="connect-to-ssl" type="checkbox" name="ssl-checkbox" checked="true" />
-          <label for="connect-to-ssl" class="modeless-text"
-            style="top:-8px;margin-left:calc(15px + var(--checkbox-total-width));"></label>
-
-        </section>
-        <section class="field-row" style="justify-content: flex-end">
-          <button class="btn" id="connect-to-cancel">Cancel</button>
-          <button class="btn" id="connect-to-accept">Connect</button>
-        </section>
-      </div>
-    </div>
   </main>
+
+  <script>
+    var sid = '', connected = false,
+        view = document.getElementById('game-view'),
+        inp = document.getElementById('game-input'),
+        pending = null,
+        cmdHist = [],
+        histIdx = -1;
+
+    inp.focus();
+
+    function escHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    var pal16 = ['#000','#c00','#0a0','#aa0','#00c','#a0a','#0aa','#ccc',
+                 '#555','#f55','#5f5','#ff5','#55f','#f5f','#5ff','#fff'];
+
+    function palRgb(n) {
+      if (n < 16) return pal16[n];
+      if (n >= 232) { var v = (n - 232) * 10 + 8; return 'rgb('+v+','+v+','+v+')'; }
+      n -= 16;
+      var r = n/36|0, g = (n%36)/6|0, b = n%6;
+      return 'rgb('+(r?r*40+55:0)+','+(g?g*40+55:0)+','+(b?b*40+55:0)+')';
+    }
+
+    function ansi2html(s) {
+      var out = '', i = 0, fg = null, bg = null, bold = false, italic = false, ul = 0;
+      function mkSpan() {
+        var st = [];
+        if (fg) st.push('color:'+fg);
+        if (bg) st.push('background:'+bg);
+        if (bold) st.push('font-weight:bold');
+        if (italic) st.push('font-style:italic');
+        if (ul) st.push('text-decoration:underline'+(ul===3?';text-decoration-style:wavy':''));
+        return st.length ? '<span style="'+st.join(';')+'">' : '<span>';
+      }
+      out += mkSpan();
+      while (i < s.length) {
+        var esc = s.indexOf('\x1b', i);
+        if (esc < 0) { out += escHtml(s.substring(i)); break; }
+        out += escHtml(s.substring(i, esc));
+        var m = s.substring(esc).match(/^\x1b\[([0-9;:]*)m/);
+        if (!m) { out += escHtml(s[esc]); i = esc + 1; continue; }
+        var parts = m[1].split(';');
+        for (var j = 0; j < parts.length; j++) {
+          var sub = parts[j].split(':'), c = +sub[0];
+          if (isNaN(c)) c = 0;
+          if (c === 0) { fg = bg = null; bold = false; italic = false; ul = 0; }
+          else if (c === 1) bold = true;
+          else if (c === 3) italic = true;
+          else if (c === 4) ul = sub.length > 1 ? +sub[1] : 1;
+          else if (c === 22) bold = false;
+          else if (c === 23) italic = false;
+          else if (c === 24) ul = 0;
+          else if (c >= 30 && c <= 37) fg = pal16[c - 30];
+          else if (c === 38 && parts[j+1] === '5') { fg = palRgb(+parts[j+2]); j += 2; }
+          else if (c === 38 && parts[j+1] === '2') { fg = 'rgb('+parts[j+2]+','+parts[j+3]+','+parts[j+4]+')'; j += 4; }
+          else if (c === 39) fg = null;
+          else if (c >= 40 && c <= 47) bg = pal16[c - 40];
+          else if (c === 48 && parts[j+1] === '5') { bg = palRgb(+parts[j+2]); j += 2; }
+          else if (c === 48 && parts[j+1] === '2') { bg = 'rgb('+parts[j+2]+','+parts[j+3]+','+parts[j+4]+')'; j += 4; }
+          else if (c === 49) bg = null;
+          else if (c >= 90 && c <= 97) fg = pal16[c - 82];
+          else if (c >= 100 && c <= 107) bg = pal16[c - 92];
+        }
+        out += '</span>' + mkSpan();
+        i = esc + m[0].length;
+      }
+      return out + '</span>';
+    }
+
+    function appendLine(text, color) {
+      var p = document.createElement('p');
+      if (color) {
+        p.textContent = text;
+        p.style.color = color;
+      } else {
+        p.innerHTML = ansi2html(text);
+      }
+      view.appendChild(p);
+      trimScrollback();
+      p.scrollIntoView();
+    }
+
+    function appendOutput(text) {
+      var lines = text.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        var part = lines[i];
+        var hasMore = i < lines.length - 1;
+        if (pending) {
+          pending.innerHTML += ansi2html(part);
+          if (hasMore) {
+            pending.scrollIntoView();
+            pending = null;
+          }
+        } else if (hasMore) {
+          appendLine(part);
+        } else if (part.length > 0) {
+          pending = document.createElement('p');
+          pending.innerHTML = ansi2html(part);
+          view.appendChild(pending);
+          pending.scrollIntoView();
+        }
+      }
+    }
+
+    function trimScrollback() {
+      while (view.childNodes.length > 1000)
+        view.removeChild(view.firstChild);
+    }
+
+    var src = new EventSource('/events');
+
+    src.onmessage = function(e) {
+      var c = e.data.charAt(0), s = e.data.substring(1);
+
+      if (c >= 'A' && c <= 'Z') {
+        if (c === 'I') {
+          sid = s;
+        } else if (c === 'E' || c === 'V') {
+          window.open(s, '_blank');
+        } else {
+          console.error('unknown server command: ' + c);
+        }
+      } else if (c === '+') {
+        connected = true;
+        inp.disabled = false;
+        inp.focus();
+      } else if (c === '-') {
+        inp.disabled = true;
+      } else if (c === '=') {
+        /* status line (ignored for now) */
+      } else if (c === '!') {
+        appendLine(s, 'red');
+      } else if (c === '^') {
+        location.reload();
+      } else if (c === '_') {
+        console.log('tick', s);
+      } else if (c >= '0' && c <= '9') {
+        /* status line updates -- ignore for now */
+      } else if (c >= 'a' && c <= 'z') {
+        appendOutput(s);
+      } else {
+        appendOutput(e.data);
+      }
+    };
+
+    src.onerror = function() {
+      if (connected) {
+        pending = null;
+        appendLine('-- connection lost --', '#888');
+        connected = false;
+        inp.disabled = true;
+      }
+    };
+
+    inp.addEventListener('keydown', function(e) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (histIdx < 0) histIdx = cmdHist.length;
+        if (histIdx > 0) inp.value = cmdHist[--histIdx];
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (histIdx >= 0 && histIdx < cmdHist.length - 1) {
+          inp.value = cmdHist[++histIdx];
+        } else {
+          histIdx = -1;
+          inp.value = '';
+        }
+      } else if (e.key === 'Enter') {
+        var text = inp.value.trim();
+        if (!text || !sid) return;
+        cmdHist.push(text);
+        if (cmdHist.length > 50) cmdHist.shift();
+        histIdx = -1;
+        inp.value = '';
+        fetch('/cmd', { method: 'POST', body: sid + ' ' + text });
+      }
+    });
+
+    document.getElementById('help-link').addEventListener('click', function(e) {
+      e.preventDefault();
+      appendLine('BorisMUD web client -- type commands at the prompt.', 'yellow');
+    });
+  </script>
 </body>
 
 </html>

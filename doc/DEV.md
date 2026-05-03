@@ -20,7 +20,7 @@ Information for developers working on Boris MUD.
 | src/rpg/               | RPG attribute/skills helper functions                          |
 | src/combat/            | Combat session management and tick scheduler                   |
 | src/task/              | Command dispatch and processing                                |
-| src/web/server/        | WebSocket server (mongoose)                                    |
+| src/web/server/        | SSE web server (built-in, on net_stream)                       |
 | src/crypt/             | SHA1 hash and base-64 encoding                                 |
 | src/scrypt/            | scrypt key derivation for password hashing                     |
 | src/passwd/            | Password crypt utility (mkpass)                                |
@@ -31,7 +31,6 @@ Information for developers working on Boris MUD.
 | src/thirdparty/jsmn/   | Minimal JSON parser (zero-copy)                                |
 | src/thirdparty/lmdb/   | LMDB embedded key-value database                               |
 | src/thirdparty/mth/    | MUD Telopt Handler (TELNET protocol)                           |
-| src/thirdparty/mongoose/| HTTP/WebSocket server                                         |
 | src/thirdparty/tiny-aes/| AES-256 block cipher (public domain, Unlicense)               |
 | src/coldfire/          | ColdFire V4e CPU emulator                                      |
 | src/machine/           | Machine runtime (task lifecycle, fd table, ELF loader)         |
@@ -270,11 +269,11 @@ validation, and by user.c to load the user index.
 ## Architecture
 
 Boris MUD is a C99 multi-user dungeon server supporting both TELNET and
-WebSocket clients simultaneously.
+SSE web clients simultaneously.
 
 ### Connection Flow
 
-1. Client connects via TELNET (dyad) or WebSocket (mongoose)
+1. Client connects via TELNET (net_stream) or SSE web client (GET /events)
 2. TELNET connections go through MTH protocol negotiation (MSDP, TELOPT)
 3. Login state machine: username -> password -> account creation (if new)
    -> main menu
@@ -288,8 +287,8 @@ WebSocket clients simultaneously.
 - **Networking**: `src/iox/` -- I/O multiplexing for TELNET connections
 - **TELNET protocol**: `src/thirdparty/mth/` -- MTH (Mud Telopt Handler)
   for protocol negotiation
-- **Web server**: `src/web/server/webserver.c` (mongoose) + client assets
-  in `src/web/client/`
+- **Web server**: `src/web/server/webserver.c` (SSE on net_stream) + client
+  assets in `src/web/client/`
 - **User management**: `src/user.c` -- accounts, password auth (scrypt/SHA1),
   ref-counted user objects
 - **Database**: `src/obj/` (OBJ JSON objects) + `src/database/` (muddb LMDB
@@ -324,7 +323,6 @@ WebSocket clients simultaneously.
 In `src/thirdparty/`:
 - jsmn (JSON parser, zero-copy)
 - lmdb (embedded key-value database)
-- mongoose (HTTP/WebSocket server)
 - mth (MUD Telopt Handler, TELNET protocol)
 - tiny-aes (AES-256 block cipher, public domain)
 
