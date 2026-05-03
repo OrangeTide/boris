@@ -1,7 +1,7 @@
 ---
 title: PID File Cleanup
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#32
 ---
 
 boris.pid is not removed on exit.

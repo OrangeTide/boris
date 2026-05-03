@@ -1,7 +1,7 @@
 ---
 title: Communication & Aliases
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#25
 ---
 
 Wire remaining communication commands to character and channel

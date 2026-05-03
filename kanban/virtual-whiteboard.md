@@ -1,7 +1,7 @@
 ---
 title: Virtual Whiteboard
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#40
 ---
 
 Collaborative drawing/editing tool.

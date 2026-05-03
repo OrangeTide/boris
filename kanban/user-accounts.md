@@ -1,7 +1,7 @@
 ---
 title: User Accounts & Login
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#39
 ---
 
 Complete user account schema and login flow. See doc/user-accounts.md.

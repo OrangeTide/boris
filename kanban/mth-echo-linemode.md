@@ -1,7 +1,7 @@
 ---
 title: MTH Echo/Linemode Cleanup
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#31
 ---
 
 Replace dead dyad_write calls in #if 0 blocks with MTH-based

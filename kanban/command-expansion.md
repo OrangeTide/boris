@@ -1,7 +1,7 @@
 ---
 title: Command-Line Expansion
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#24
 ---
 
 Variables and command-line expansion in COMMAND.COM.
