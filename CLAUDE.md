@@ -38,6 +38,17 @@ Configuration: `boris.cfg` (server.port, webserver.port, channels, messages, new
 
 See [DEV.md](doc/DEV.md) for architecture, subsystems, code patterns, and build system internals.
 
+## Kanban Board
+
+Work items live in `kanban/` as one markdown file per card with YAML frontmatter (`title`, `status`). Status values: `backlog`, `active`, `done`.
+
+```sh
+grep -l 'status: backlog' kanban/*.md | sed 's|kanban/||;s|\.md||'   # list backlog cards
+grep -l 'status: active' kanban/*.md | sed 's|kanban/||;s|\.md||'    # list active cards
+```
+
+When starting work on a card, set `status: active`. When done, set `status: done` and check all task boxes. Commits that complete a card should also update the card's status.
+
 ## Secure Programming Principles
 
 See [SECURITY.md](doc/SECURITY.md) for full details.
