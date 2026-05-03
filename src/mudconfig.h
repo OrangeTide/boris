@@ -35,6 +35,7 @@ struct mud_config {
 	unsigned obj_cache_size; /* max unreferenced objects in LRU cache */
 	unsigned character_cache_size; /* max unreferenced characters in LRU cache */
 	unsigned rpg_enabled; /* feature gate for RPG subsystem commands */
+	unsigned invite_required; /* require invite code for new accounts */
 #ifdef CONFIG_LANDLOCK
 	unsigned security_landlock;
 #endif

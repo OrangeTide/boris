@@ -45,6 +45,7 @@
 #include <buf.h>
 #include <charset.h>
 #include <webclient.h>
+#include <weblogin.h>
 #include <wordwrap.h>
 
 #define OK (0)
@@ -266,7 +267,8 @@ telnetclient_on_close(net_event *e)
 	if (!client)
 		return;
 
-	LOG_TODO("Determine if connection was logged in first");
+	if (client->user)
+		user_login_count_dec(client->user);
 	eventlog_signoff(telnetclient_username(client), telnetclient_socket_name(client));
 
 	/* notify all joined channels before departing */
@@ -1091,7 +1093,7 @@ telnetclient_webclient_new(struct web_client *wc, const struct client_ops *ops)
 	telnetclient_channel_add(cl, channel_public(CHANNEL_SYS));
 
 	telnetclient_puts(cl, mud_config.msgfile_welcome);
-	menu_start_input(cl, &gamemenu_login);
+	weblogin_start(cl);
 
 	return cl;
 }
@@ -1103,6 +1105,8 @@ telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl)
 	if (!cl)
 		return;
 
+	if (cl->user)
+		user_login_count_dec(cl->user);
 	eventlog_signoff(telnetclient_username(cl), "web");
 
 	{
