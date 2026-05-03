@@ -24,6 +24,17 @@
 #define OK  (0)
 #define ERR (-1)
 
+static const char *
+my_strcasestr(const char *haystack, const char *needle)
+{
+    size_t nlen = strlen(needle);
+    for (; *haystack; haystack++) {
+        if (strncasecmp(haystack, needle, nlen) == 0)
+            return haystack;
+    }
+    return NULL;
+}
+
 static struct net_stream *web_listener;
 static const char *web_root = "./bin/www";
 
@@ -346,7 +357,7 @@ parse_method(const char *buf, char *method, int msz,
 	path[plen] = '\0';
 
 	*content_length = 0;
-	const char *cl = strcasestr(buf, "\r\nContent-Length:");
+	const char *cl = my_strcasestr(buf, "\r\nContent-Length:");
 	if (cl) {
 		cl += 17;
 		while (*cl == ' ')
