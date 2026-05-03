@@ -267,7 +267,8 @@ telnetclient_on_close(net_event *e)
 	if (!client)
 		return;
 
-	LOG_TODO("Determine if connection was logged in first");
+	if (client->user)
+		user_login_count_dec(client->user);
 	eventlog_signoff(telnetclient_username(client), telnetclient_socket_name(client));
 
 	/* notify all joined channels before departing */
@@ -1104,6 +1105,8 @@ telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl)
 	if (!cl)
 		return;
 
+	if (cl->user)
+		user_login_count_dec(cl->user);
 	eventlog_signoff(telnetclient_username(cl), "web");
 
 	{

@@ -43,13 +43,25 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 	assert(line != NULL);
 	assert(telnetclient_get_login_username(cl)[0] != '\0'); /* must have a valid username */
 
-	LOG_TODO("complete login process");
 	LOG_DEBUG("Login attempt: Username='%s'", telnetclient_get_login_username(cl));
 
 	u = user_lookup(telnetclient_get_login_username(cl));
 
 	if (u) {
 		LOG_INFO("User '%s' found!", telnetclient_get_login_username(cl));
+
+		if (user_is_locked(u)) {
+			const char *reason = user_lockout_text(u);
+			if (reason)
+				telnetclient_printf(cl, "Account locked: %s\n", reason);
+			else
+				telnetclient_puts(cl, "Your account has been locked.\n");
+			user_record_login(u, telnetclient_socket_name(cl), 0);
+			user_save(u);
+			menu_start_input(cl, &gamemenu_login);
+			return;
+		}
+
 		/* verify the password */
 		if (user_password_check(u, line)) {
 			telnetclient_setuser(cl, u);
@@ -62,12 +74,17 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 					telnetclient_set_encoding(cl, cs);
 			}
 
+			user_record_login(u, telnetclient_socket_name(cl), 1);
+			user_login_count_inc(u);
+			user_save(u);
 			eventlog_signon(telnetclient_get_login_username(cl), telnetclient_socket_name(cl));
 			telnetclient_printf(cl, "Hello, %s.\n\n", user_username(u));
 			menu_start_input(cl, &gamemenu_main);
 			return; /* success */
 		}
 
+		user_record_login(u, telnetclient_socket_name(cl), 0);
+		user_save(u);
 		telnetclient_puts(cl, mud_config.msgfile_badpassword);
 	} else {
 		telnetclient_puts(cl, mud_config.msgfile_noaccount);
@@ -133,5 +150,8 @@ signoff(void *p, long unused2, void *unused3)
 	(void)unused3;
 
 	DESCRIPTOR_DATA *cl = p;
+	struct user *u = telnetclient_user(cl);
+	if (u)
+		user_login_count_dec(u);
 	telnetclient_close(cl);
 }
