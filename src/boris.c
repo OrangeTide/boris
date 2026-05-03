@@ -476,6 +476,8 @@ main(int argc, char **argv)
 	eventlog_server_shutdown();
 	LOG_INFO("Server shutting down.");
 
+	webserver_shutdown();
+	telnetserver_shutdown();
 	net_shutdown();
 	iox_loop_free(g_loop);
 	g_loop = NULL;
