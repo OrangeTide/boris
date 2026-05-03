@@ -1,6 +1,7 @@
 ---
 title: Entity Round-Trip Tests
 status: backlog
+gitlab-sync: OrangeTide/boris#12
 ---
 
 Unit tests for room and character load/save round-trips through

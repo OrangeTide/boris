@@ -1,6 +1,7 @@
 ---
 title: Command-Line Expansion
 status: backlog
+gitlab-sync:
 ---
 
 Variables and command-line expansion in COMMAND.COM.

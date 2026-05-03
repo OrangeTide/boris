@@ -1,6 +1,7 @@
 ---
 title: Screen Reader Support
 status: backlog
+gitlab-sync:
 ---
 
 Alternate descriptions for screen readers. ASCII maps and visual

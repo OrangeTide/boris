@@ -1,6 +1,7 @@
 ---
 title: GMCP Protocol
 status: backlog
+gitlab-sync:
 ---
 
 Generic MUD Communication Protocol. Structured data channel between

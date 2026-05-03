@@ -1,6 +1,7 @@
 ---
 title: MSSP Protocol
 status: backlog
+gitlab-sync:
 ---
 
 MUD Server Status Protocol -- advertise server stats to MUD crawlers.

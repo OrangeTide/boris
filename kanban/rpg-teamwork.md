@@ -1,6 +1,7 @@
 ---
 title: RPG Teamwork & Fortune
 status: backlog
+gitlab-sync:
 ---
 
 RPG phases 4-5. Phases 1-3 done (dice, skills, positions, tags,

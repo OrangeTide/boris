@@ -1,6 +1,7 @@
 ---
 title: Communication & Aliases
 status: backlog
+gitlab-sync:
 ---
 
 Wire remaining communication commands to character and channel

@@ -1,6 +1,7 @@
 ---
 title: PID File Cleanup
 status: backlog
+gitlab-sync:
 ---
 
 boris.pid is not removed on exit.
