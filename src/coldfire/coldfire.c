@@ -86,6 +86,20 @@ static inline uint32_t fetch32(cf_cpu *cpu)
 #define SZ_WORD  2
 #define SZ_LONG  4
 
+/* MACSR register bits */
+#define MACSR_PAV3  (1 << 15)
+#define MACSR_PAV2  (1 << 14)
+#define MACSR_PAV1  (1 << 13)
+#define MACSR_PAV0  (1 << 12)
+#define MACSR_OMC   (1 << 7)
+#define MACSR_SU    (1 << 6)
+#define MACSR_FI    (1 << 5)
+#define MACSR_RT    (1 << 4)
+#define MACSR_N     (1 << 3)
+#define MACSR_Z     (1 << 2)
+#define MACSR_V     (1 << 1)
+#define MACSR_EV    (1 << 0)
+
 static inline int size_bytes(int sz)
 {
     return sz; /* SZ_BYTE=1, SZ_WORD=2, SZ_LONG=4 */
@@ -511,6 +525,34 @@ static void exec_group0(cf_cpu *cpu, uint16_t op)
                              val | (1u << bitnum)); break;
             }
         }
+        return;
+    }
+
+    /* FF1 Dx : 0000 0100 1100 0xxx (ISA_C) */
+    if ((op & 0xFFF8) == 0x04C0) {
+        int reg = op & 7;
+        uint32_t val = cpu->d[reg];
+        if (val == 0) {
+            cpu->d[reg] = 32;
+        } else {
+            int n = 0;
+            while (!(val & 0x80000000)) {
+                val <<= 1;
+                n++;
+            }
+            cpu->d[reg] = n;
+        }
+        return;
+    }
+
+    /* BYTEREV Dx : 0000 0010 1100 0xxx (ISA_C) */
+    if ((op & 0xFFF8) == 0x02C0) {
+        int reg = op & 7;
+        uint32_t val = cpu->d[reg];
+        cpu->d[reg] = ((val >> 24) & 0xFF) |
+                      ((val >> 8) & 0xFF00) |
+                      ((val << 8) & 0xFF0000) |
+                      ((val << 24) & 0xFF000000);
         return;
     }
 
@@ -1035,8 +1077,6 @@ static void exec_group4(cf_cpu *cpu, uint16_t op)
         return;
     }
 
-    /* TODO: FF1, BYTEREV (ISA_C) */
-
 illegal:
     cf_exception(cpu, CF_VEC_ILLEGAL);
 }
@@ -1368,14 +1408,125 @@ static void exec_groupA(cf_cpu *cpu, uint16_t op)
             write_ea(cpu, &loc, SZ_LONG, (uint32_t)val);
         }
         set_flags_move(cpu, (uint32_t)val, SZ_LONG);
-    } else {
-        /* Hypercall: intercept LINE_A before raising exception */
-        if (cpu->hypercall &&
-            cpu->hypercall(cpu, op, cpu->hypercall_ctx) == 0)
+    } else if (cpu->hypercall &&
+               cpu->hypercall(cpu, op, cpu->hypercall_ctx) == 0) {
+        return;
+    } else if (op & 0x0100) {
+        /* MOVE to/from EMAC registers: 1010 rrr 1 d s 000 nnn
+         *   rrr = 000-011 ACC0-3, 100 MACSR, 101 ACCEXT01,
+         *         110 MASK, 111 ACCEXT23
+         *   d = direction (1=read from EMAC, 0=write to EMAC)
+         *   s = 1 for MACSR->CCR special form
+         *   nnn = data register */
+        int emac_reg = (op >> 9) & 7;
+        int dir = (op >> 7) & 1;
+        int special = (op >> 6) & 1;
+        int rn = op & 7;
+
+        if (special && emac_reg == 4 && dir) {
+            /* MOVE MACSR,CCR -- copy N/Z/V to CCR, clear C */
+            cpu->sr = (cpu->sr & ~0x0F) |
+                      (cpu->macsr & (MACSR_N | MACSR_Z | MACSR_V));
             return;
-        /* EMAC instructions use line-A encoding */
-        /* TODO: Implement MAC.L, MSAC.L, MOVE ACC/MACSR/MASK */
-        cf_exception(cpu, CF_VEC_LINE_A);
+        }
+
+        if (dir) {
+            /* Read from EMAC register -> Dn */
+            uint32_t val;
+            switch (emac_reg) {
+            case 0: case 1: case 2: case 3:
+                val = (uint32_t)(cpu->acc[emac_reg] & 0xFFFFFFFF);
+                break;
+            case 4: val = cpu->macsr; break;
+            case 5: val = ((uint32_t)cpu->accext[1] << 8) |
+                           (uint32_t)cpu->accext[0]; break;
+            case 6: val = cpu->mask; break;
+            case 7: val = ((uint32_t)cpu->accext[3] << 8) |
+                           (uint32_t)cpu->accext[2]; break;
+            default: val = 0; break;
+            }
+            cpu->d[rn] = val;
+        } else {
+            /* Write Dn -> EMAC register */
+            uint32_t val = cpu->d[rn];
+            switch (emac_reg) {
+            case 0: case 1: case 2: case 3:
+                cpu->acc[emac_reg] = (int64_t)(int32_t)val;
+                break;
+            case 4: cpu->macsr = val; break;
+            case 5:
+                cpu->accext[0] = val & 0xFF;
+                cpu->accext[1] = (val >> 8) & 0xFF;
+                break;
+            case 6: cpu->mask = val; break;
+            case 7:
+                cpu->accext[2] = val & 0xFF;
+                cpu->accext[3] = (val >> 8) & 0xFF;
+                break;
+            }
+        }
+    } else {
+        /* MAC.L / MSAC.L: 1010 Rx a A Ul Ry + extension word
+         *   Rx[2:0] = bits 11-9, Rx addr flag = bit 6
+         *   Ry[2:0] = bits 2-0,  Ry addr flag = bit 3
+         *   ACC[0]  = bit 7
+         * Extension word: 0000 1 SF sub 000 ACC[1] 0000
+         *   SF  = bits 10-9 (scale: 00=none, 01=<<1, 11=>>1)
+         *   sub = bit 8 (0=MAC, 1=MSAC) */
+        int rx_num = (op >> 9) & 7;
+        int rx_is_addr = (op >> 6) & 1;
+        int ry_num = op & 7;
+        int ry_is_addr = (op >> 3) & 1;
+        int acc_lo = (op >> 7) & 1;
+        uint16_t ext = fetch16(cpu);
+        int sf = (ext >> 9) & 3;
+        int is_msac = (ext >> 8) & 1;
+        int acc_hi = (ext >> 4) & 1;
+        int acc_idx = (acc_hi << 1) | acc_lo;
+
+        uint32_t rx_val = rx_is_addr ? cpu->a[rx_num] : cpu->d[rx_num];
+        uint32_t ry_val = ry_is_addr ? cpu->a[ry_num] : cpu->d[ry_num];
+
+        int64_t product;
+        if (cpu->macsr & MACSR_SU)
+            product = (int64_t)(int32_t)rx_val * (int64_t)(int32_t)ry_val;
+        else
+            product = (int64_t)(uint64_t)rx_val * (uint64_t)ry_val;
+
+        if (sf == 1)
+            product <<= 1;
+        else if (sf == 3)
+            product >>= 1;
+
+        int64_t result;
+        if (is_msac)
+            result = cpu->acc[acc_idx] - product;
+        else
+            result = cpu->acc[acc_idx] + product;
+
+        /* 48-bit saturation if OMC set */
+        if (cpu->macsr & MACSR_OMC) {
+            int64_t max48 = ((int64_t)1 << 47) - 1;
+            int64_t min48 = -((int64_t)1 << 47);
+            if (result > max48) {
+                result = max48;
+                cpu->macsr |= MACSR_V;
+                cpu->macsr |= (MACSR_PAV0 << acc_idx);
+            } else if (result < min48) {
+                result = min48;
+                cpu->macsr |= MACSR_V;
+                cpu->macsr |= (MACSR_PAV0 << acc_idx);
+            }
+        }
+
+        cpu->acc[acc_idx] = result;
+
+        /* Update MACSR N/Z from result */
+        cpu->macsr &= ~(MACSR_N | MACSR_Z);
+        if (result == 0)
+            cpu->macsr |= MACSR_Z;
+        if (result < 0)
+            cpu->macsr |= MACSR_N;
     }
 }
 
