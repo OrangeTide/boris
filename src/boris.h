@@ -28,7 +28,7 @@
 /* major, minor and patch level for version. */
 #define BORIS_VERSION_MAJ 0
 #define BORIS_VERSION_MIN 7
-#define BORIS_VERSION_PAT 0
+#define BORIS_VERSION_PAT 1
 
 /* return values for most simple functions */
 #define OK (0)

@@ -12,6 +12,15 @@ test_hashtable_DIR := $(hashtable_DIR)
 test_hashtable_SRCS = test_hashtable.c
 test_hashtable_LIBS = log
 
+EXECUTABLES  += test_mcp
+TEST_TARGETS += test_mcp
+test_mcp_DIR := $(hashtable_DIR)
+test_mcp_SRCS = test_mcp.c
+test_mcp_LIBS = util log
+define test_mcp_TESTCMD
+$(test_mcp_RUN)
+endef
+
 EXECUTABLES += boris
 boris_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
 boris_SRCS = \
@@ -24,6 +33,7 @@ boris_SRCS = \
 	freelist.c \
 	game.c \
 	login.c \
+	mcp.c \
 	menu.c \
 	telnetclient.c \
 	user.c \

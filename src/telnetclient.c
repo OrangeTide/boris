@@ -47,6 +47,7 @@
 #include <webclient.h>
 #include <weblogin.h>
 #include <wordwrap.h>
+#include <mcp.h>
 
 #define OK (0)
 #define ERR (-1)
@@ -167,9 +168,12 @@ telnetclient_on_data(net_event *e)
 		size_t linelen = end - start;
 		*end = 0; /* null terminate the string */
 		if (linelen > 0) {
-			if (cl->line_input) {
+			const char *line = mcp_filter(cl, start);
+			if (!line) {
+				/* consumed as out-of-band MCP data */
+			} else if (cl->line_input) {
 				telnetclient_set_buffered(cl);
-				cl->line_input(cl, start);
+				cl->line_input(cl, line);
 				telnetclient_clear_buffered(cl);
 			} else {
 				LOG_WARNING("Missing or invalid line input handler [fd=%ld %s]", (long)net_get_socket(e->stream), telnetclient_socket_name(cl));
@@ -238,6 +242,8 @@ telnetclient_on_destroy(net_event *e)
 	client->prompt_string = NULL;
 
 	uninit_mth_socket(client);
+
+	mcp_free(client);
 
 	buf_free(client->linebuf);
 	client->linebuf = NULL;
@@ -570,6 +576,8 @@ telnetclient_newclient(struct telnetserver *server, struct net_stream *stream)
 	net_add_listener(stream, NET_EVENT_CLOSE, telnetclient_on_close, cl);
 
 	init_mth_socket(cl);
+
+	mcp_banner(cl);
 
 	telnetclient_puts(cl, mud_config.msgfile_welcome);
 
