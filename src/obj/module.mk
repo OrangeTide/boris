@@ -29,3 +29,9 @@ test_obj_cache_cas_LIBS = obj hashtable log smolvfs
 define test_obj_cache_cas_TESTCMD
 $(test_obj_cache_cas_RUN)
 endef
+
+# benchmark harness, not part of the test suite
+EXECUTABLES              += bench_obj_cache_cas
+bench_obj_cache_cas_DIR  := $(obj_DIR)
+bench_obj_cache_cas_SRCS  = bench_obj_cache_cas.c
+bench_obj_cache_cas_LIBS  = obj hashtable log smolvfs database lmdb

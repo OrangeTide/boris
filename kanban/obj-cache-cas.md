@@ -67,6 +67,40 @@ flush cycle. A blob written but not yet committed to a tree is
 unreachable after a crash, which is the same loss window as
 write-behind generally, and GC collects the orphan.
 
+## Measurements (2026-07-14)
+
+bench_obj_cache_cas, real data/muddb contents (21 objects, 4076
+bytes JSON), 500 puts total in each config, same edit sequence for
+both backends. LMDB is one fsynced transaction per put; CAS is one
+blob write per put plus a fsynced ref commit per touched domain per
+round.
+
+| config           | CAS time | LMDB time | CAS depot growth | LMDB growth |
+|------------------|----------|-----------|------------------|-------------|
+| commit per edit  |  9851 ms |   2204 ms | 3.32 MB          | 0           |
+| 5 edits/commit   |  3182 ms |   1542 ms | 1.25 MB          | 0           |
+| 20 edits/commit  |  1437 ms |   1398 ms | 0.74 MB          | 0           |
+
+Import of the full database: 62 ms, 35 CAS files, 30 KB apparent.
+GC after churn: 27-141 ms, removed 0 objects in every config
+(expected: history stays reachable via the ref log).
+
+Findings:
+
+- Batching works as designed. At 20 edits per commit, CAS reaches
+  time parity with LMDB (1437 vs 1398 ms) and depot growth per put
+  drops 4.4x vs commit-per-edit. Commit frequency, not edit count,
+  is the dominant cost (ref commit fsync + tree level rewrites).
+- Depot growth is unbounded and linear in commits, ~1.5 KB per edit
+  at best batching for ~200 byte objects (tree/htree objects
+  dominate; blobs are small). LMDB storage stayed flat at 53 KB
+  through every run via page reuse. Without snapshot log pruning
+  (upstream feature, does not exist), a busy server's depot grows
+  forever; GC cannot help because it reclaims only never-committed
+  orphans.
+- On-disk usage runs ~4x apparent size from 4 KB block rounding on
+  small loose objects; cas-pack rollup would mitigate.
+
 ## Tasks
 
 - [x] decide id mapping: cas-tree htree paths (see Decision above);
@@ -86,8 +120,9 @@ write-behind generally, and GC collects the orphan.
       log, so committed history is never collected; GC reclaims only
       never-committed orphans. Reclaiming superseded history would
       need log pruning, an upstream smolvfs feature.
-- [ ] measure under real session load: bytes written per flush, depot
-      growth rate, GC cost; compare against muddb
+- [x] measure against real muddb data: bench_obj_cache_cas imports
+      the live database (21 objects, 4KB JSON) into both backends and
+      drives an identical 500-put edit workload (see Measurements)
 - [ ] go/no-go writeup: keep as optional backend, promote, or drop
 
 Related: object-versioning card (CAS snapshots would give diff/history
