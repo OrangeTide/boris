@@ -45,6 +45,11 @@ struct mud_config {
 	unsigned daemonize;
 	char *pid_file;
 	char *image_path;
+	char *db_backend; /* object store backend: "muddb" or "cas" */
+	char *cas_path; /* CAS depot directory */
+	char *cas_ref; /* CAS ref name for the world snapshot */
+	unsigned cas_retain; /* keep last N snapshots; 0 keeps all */
+	unsigned cas_commit_seconds; /* periodic commit interval */
 };
 
 typedef struct mud_config MUD_CONFIG;

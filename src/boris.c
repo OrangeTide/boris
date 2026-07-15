@@ -40,6 +40,7 @@
 #include <debug.h>
 #include <iox_loop.h>
 #include <iox_signal.h>
+#include <iox_timer.h>
 #include <net.h>
 #include <user.h>
 #include <game.h>
@@ -106,6 +107,16 @@ static void
 sh_quit(struct iox_loop *loop, int signo UNUSED, void *arg UNUSED)
 {
 	iox_loop_stop(loop);
+}
+
+/* periodic flush + commit for the CAS object backend. one-shot
+ * timer, re-armed on every firing. */
+static void
+obj_commit_timer(struct iox_loop *loop, void *arg UNUSED)
+{
+	obj_commit();
+	iox_timer_add(loop, (int)mud_config.cas_commit_seconds * 1000,
+		obj_commit_timer, NULL);
 }
 
 static void
@@ -386,8 +397,26 @@ main(int argc, char **argv)
 
 	atexit(channel_shutdown);
 
-	if (obj_initialize(mud_db, mud_config.obj_cache_size)) {
-		LOG_ERROR("could not load object cache");
+	if (strcmp(mud_config.db_backend, "cas") == 0) {
+		if (obj_initialize_cas(mud_config.cas_path,
+			mud_config.cas_ref, mud_config.obj_cache_size,
+			mud_config.cas_retain)) {
+			LOG_ERROR("could not load object cache");
+			return EXIT_FAILURE;
+		}
+
+		if (mud_config.cas_commit_seconds > 0)
+			iox_timer_add(g_loop,
+				(int)mud_config.cas_commit_seconds * 1000,
+				obj_commit_timer, NULL);
+	} else if (strcmp(mud_config.db_backend, "muddb") == 0) {
+		if (obj_initialize(mud_db, mud_config.obj_cache_size)) {
+			LOG_ERROR("could not load object cache");
+			return EXIT_FAILURE;
+		}
+	} else {
+		LOG_ERROR("unknown database.backend \"%s\""
+			" (use muddb or cas)", mud_config.db_backend);
 		return EXIT_FAILURE;
 	}
 

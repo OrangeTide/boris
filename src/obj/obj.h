@@ -52,8 +52,12 @@ OBJ_ITER *obj_iter_begin(OBJ *obj);
 int obj_iter_next(OBJ_ITER *it, const char **key, const char **value);
 void obj_iter_end(OBJ_ITER *it);
 
-/* global object cache backed by muddb */
+/* global object cache: muddb (default) or CAS backend */
 int obj_initialize(struct muddb *db, unsigned cache_size);
+int obj_initialize_cas(const char *depot_path, const char *ref,
+	unsigned cache_size, unsigned retain);
+/* flush dirty objects and commit the CAS tree; no-op on muddb */
+void obj_commit(void);
 void obj_shutdown(void);
 OBJ *obj_get(const char *id);
 void obj_release(OBJ *obj);

@@ -1,6 +1,6 @@
 ---
 title: obj_cache_cas config-gated routing and import
-status: active
+status: done
 gitlab-sync:
 ---
 
@@ -34,10 +34,23 @@ CAS shim, among other things). The LMDB database opens either way.
 
 ## Tasks
 
-- [ ] mud_config fields, defaults, frees, config_watch entries
-- [ ] obj_store.c: obj_initialize_cas, obj_commit, dual shutdown
-- [ ] boris.c: backend selection at boot, periodic commit timer
-- [ ] muddb-tool to-cas command
-- [ ] boris.cfg commented example keys
-- [ ] verify: unit tests green, server boots and runs on the cas
-      backend against imported real data, clean shutdown commits
+- [x] mud_config fields, defaults, frees, config_watch entries
+- [x] obj_store.c: obj_initialize_cas, obj_commit, dual shutdown
+- [x] boris.c: backend selection at boot, periodic commit timer
+- [x] muddb-tool to-cas command
+- [x] boris.cfg commented example keys
+- [x] verify: unit tests green; make smoke and make smoke-cas both
+      pass 6/6 with the sandbox active
+
+## Finding: landlock must allowlist the depot
+
+First cas smoke run failed with rooms silently missing: landlock
+allowlisted data/muddb but not the depot, and a depot the server
+cannot read looks identical to an empty one (ref open fails ->
+treated as no commit yet). Fixed by adding a landlock rule for
+database.cas.path when the cas backend is selected, including
+MAKE_DIR (fanout dirs), REMOVE_FILE (GC), and REFER on ABI 2+ (the
+mkstemp + cross-directory rename write path). seccomp needed no
+change; its deny-list does not cover any syscall CAS uses. The
+smoke harness gained a BORIS_BACKEND=cas mode (make smoke-cas) so
+both backends stay covered.

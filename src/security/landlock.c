@@ -170,6 +170,22 @@ security_landlock_apply(void)
 	if (ret < 0)
 		goto fail;
 
+	/* CAS depot (cas object store backend) -- additionally needs
+	 * fanout directory creation, unlink for GC, and REFER (ABI 2+)
+	 * for the mkstemp + cross-directory rename write path */
+	if (strcmp(mud_config.db_backend, "cas") == 0) {
+		uint64_t fs_cas = fs_readwrite | LL_FS_MAKE_DIR |
+		                  LL_FS_REMOVE_FILE;
+
+		if (abi >= 2)
+			fs_cas |= LL_FS_REFER;
+
+		ret = add_path_rule(ruleset_fd, mud_config.cas_path,
+		                    fs_cas, handled);
+		if (ret < 0)
+			goto fail;
+	}
+
 	/* read-only data directories */
 	add_path_rule(ruleset_fd, "data/help", fs_read, handled);
 	add_path_rule(ruleset_fd, "data/text", fs_read, handled);
