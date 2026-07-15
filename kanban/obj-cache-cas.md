@@ -94,10 +94,18 @@ Findings:
 - Depot growth is unbounded and linear in commits, ~1.5 KB per edit
   at best batching for ~200 byte objects (tree/htree objects
   dominate; blobs are small). LMDB storage stayed flat at 53 KB
-  through every run via page reuse. Without snapshot log pruning
-  (upstream feature, does not exist), a busy server's depot grows
-  forever; GC cannot help because it reclaims only never-committed
-  orphans.
+  through every run via page reuse. GC cannot help because it
+  reclaims only never-committed orphans.
+- Path forward (upstream smolvfs): sparse/incomplete references.
+  Today mark_tree treats a missing tree as a hard error and
+  cas_tree_gc aborts, so partial state is illegal. The extension is
+  (1) sparse-tolerant marking (missing object = boundary, skip),
+  (2) a ref log truncation op (keep last N entries), and (3) a
+  fsck mode aware of pruned history. With "keep last N snapshots"
+  retention, depot size converges to live world + N x churn instead
+  of growing forever. This aligns with SHOAL's partial-state GC
+  design element. Go/no-go for promoting the backend hinges on this
+  upstream work.
 - On-disk usage runs ~4x apparent size from 4 KB block rounding on
   small loose objects; cas-pack rollup would mitigate.
 
