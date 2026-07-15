@@ -77,12 +77,16 @@ Current test suites:
 - `test_obj` -- OBJ mutable JSON objects
 - `test_obj_cache` -- OBJ cache layer
 - `test_muddb` -- LMDB persistence layer
+- `test_obj_cache_cas` -- CAS object store shim (smolvfs bridge)
+- `test_cas`, `test_cas_tree` -- vendored smolvfs CAS and tree layers
 - `test_hashtable` -- hash table (uint and string keyed)
 
 `make smoke` starts the server in a temporary directory and exercises telnet
 login flows via expect. Requires `expect` (`apt install expect` on
 Debian/Ubuntu, `apk add expect` on Alpine). Test cases: connect and quit,
-bad credentials rejection, new user creation and login.
+bad credentials rejection, new user creation and login. `make smoke-cas`
+runs the same suite with the cas object store backend (imports the sample
+world into a depot via `muddb-tool to-cas` first).
 
 For memory checking, `make smoke-valgrind` is as above and wrapped in
 [Valgrind][1].
@@ -233,6 +237,10 @@ its own domain:
 Domain constants are defined in boris.h. Domains are created on first write
 (auto-vivify) -- read operations on a missing domain return NULL/empty rather
 than an error.
+
+The `objs` domain can alternatively be served by the CAS backend
+(`src/obj/obj_cache_cas.c`, selected with `database.backend = cas`); the
+other domains always use muddb. See the Configuration section below.
 
 ### API
 
@@ -425,6 +433,18 @@ Server configuration is in `boris.cfg`. Key settings:
 | `eventlog.filename`  | `boris.log`                              | Event log output file            |
 | `newuser.allowed`    | 1                                        | Allow new account creation       |
 | `newuser.room`       | `tower-entrance`                         | Starting room for new characters |
+| `database.backend`   | `muddb`                                  | Object store backend: `muddb` or `cas` |
+| `database.cas.path`  | `data/casdb`                             | Depot directory (cas backend)    |
+| `database.cas.ref`   | `world`                                  | Snapshot reference name (cas backend) |
+| `database.cas.retain` | 0                                       | Keep last N snapshots, 0 = all (cas backend) |
+| `database.cas.commit_seconds` | 60                              | Automatic commit interval (cas backend) |
+
+The `database.*` keys select the backend for the `objs` domain only; users,
+characters, and invites always use muddb. Admin-facing setup and migration
+instructions are in the README under "Object Store Backends". When the cas
+backend is selected, the landlock sandbox (`src/security/landlock.c`) adds a
+rule for `database.cas.path`; a depot outside the allowlist fails silently,
+reading as an empty world.
 
 
 ## GitLab Merge Request Process

@@ -229,9 +229,11 @@ Available settings:
 
 ## Database Tools
 
-Boris stores game objects (rooms, characters, users) in an LMDB database
-(`data/muddb/`). The `muddb-tool` utility exports and imports this data as
-plain-text JSON files organized by domain.
+Boris stores game data (rooms, characters, users) in an LMDB database
+(`data/muddb/`) by default. The `muddb-tool` utility exports and imports
+this data as plain-text JSON files organized by domain. World objects can
+optionally be moved to a content-addressed store instead, see
+[Object Store Backends](#object-store-backends).
 
 ### Export
 
@@ -290,6 +292,57 @@ sample/
 Each `.json` file contains a single JSON object. The filename (minus `.json`)
 is the database key.
 
+### Object Store Backends
+
+World objects (the `objs` domain: rooms, exits, machine programs) can be
+served by one of two backends, selected with `database.backend` in
+`boris.cfg`:
+
+- **muddb** (default): the LMDB database at `data/muddb/`, described above.
+- **cas**: a content-addressed depot (smolvfs). Every commit is an
+  immutable snapshot, so the depot keeps a history of world states.
+
+User accounts, characters, and invites always live in LMDB regardless of
+this setting, so `data/muddb/` is required either way.
+
+Configuration keys:
+
+| Setting                       | Default      | Description                                        |
+|-------------------------------|--------------|----------------------------------------------------|
+| `database.backend`            | `muddb`      | Object store backend: `muddb` or `cas`             |
+| `database.cas.path`           | `data/casdb` | Depot directory for the cas backend                |
+| `database.cas.ref`            | `world`      | Named snapshot reference inside the depot          |
+| `database.cas.retain`         | 0            | Keep the last N snapshots; 0 keeps all history     |
+| `database.cas.commit_seconds` | 60           | Interval between automatic snapshot commits        |
+
+To switch an existing MUD to the cas backend, stop the server, import the
+objects into a depot, and enable the backend in `boris.cfg`:
+
+```sh
+./bin/muddb-tool to-cas data/muddb data/casdb
+```
+
+```
+database.backend	=	cas
+database.cas.path	=	data/casdb
+database.cas.retain	=	8
+```
+
+Notes for operating the cas backend:
+
+- Object edits are saved to the depot as they happen, but only become part
+  of a snapshot at the next commit. Commits run every
+  `database.cas.commit_seconds` and once more at clean shutdown. After a
+  crash, the world reverts to the last committed snapshot, losing at most
+  one commit interval of edits.
+- With `database.cas.retain = 0` the depot grows without bound, because
+  every snapshot is kept forever. Set it to a small number (for example 8)
+  to prune old snapshots automatically; the depot then converges to a
+  bounded size.
+- There is currently no cas-to-muddb export. Keep your LMDB data (or a
+  JSON export of it) until you are confident in the cutover, and back up
+  the depot as described below.
+
 ### Backup and Restore
 
 The server runs unattended on hobby hardware, so regular backups are
@@ -333,6 +386,22 @@ To restore, stop the server and replace the database directory:
 rm -rf data/muddb
 cp -r /path/to/backup/muddb data/muddb
 ```
+
+**CAS depot copy (cas backend only)**
+
+Both methods above cover only the LMDB database. When
+`database.backend = cas`, world objects live in the depot directory and
+must be backed up separately with a plain file copy:
+
+```sh
+cp -a data/casdb /path/to/backup/casdb
+```
+
+Depot files are immutable once written and the snapshot reference is
+updated by atomic rename, so copying while the server runs is safe. The
+only files that can disappear during a live copy are old snapshots pruned
+by `database.cas.retain`. To restore, stop the server and copy the depot
+back into place.
 
 **Automated daily backup (cron)**
 
