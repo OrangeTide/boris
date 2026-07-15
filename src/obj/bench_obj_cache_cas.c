@@ -166,9 +166,12 @@ main(int argc, char **argv)
 {
 	if (argc < 3) {
 		fprintf(stderr,
-			"usage: %s <muddb-path> <workdir> [rounds] [edits]\n"
+			"usage: %s <muddb-path> <workdir> [rounds] [edits]"
+			" [keep_n]\n"
 			"muddb-path must be a scratch COPY of the database:"
-			" the benchmark writes to it.\n",
+			" the benchmark writes to it.\n"
+			"keep_n > 0 enables retention (auto GC every 16"
+			" commits, keep last keep_n snapshots).\n",
 			argv[0]);
 		return EXIT_FAILURE;
 	}
@@ -177,6 +180,7 @@ main(int argc, char **argv)
 	const char *workdir = argv[2];
 	int rounds = (argc > 3) ? atoi(argv[3]) : DEFAULT_ROUNDS;
 	int edits = (argc > 4) ? atoi(argv[4]) : DEFAULT_EDITS;
+	int keep_n = (argc > 5) ? atoi(argv[5]) : 0;
 
 	MUDDB *db = muddb_open(dbpath, 0);
 
@@ -230,8 +234,14 @@ main(int argc, char **argv)
 
 	for (int d = 0; domains[d]; d++) {
 		cache[d] = obj_cache_cas_new(ct, "world", domains[d], 64);
-		/* explicit GC below; keep churn timing clean */
-		obj_cache_cas_gc_policy(cache[d], 0, 0);
+		if (keep_n > 0) {
+			/* retention mode: realistic auto GC cadence */
+			obj_cache_cas_gc_policy(cache[d], 16, 0);
+			obj_cache_cas_retention(cache[d], keep_n, 0);
+		} else {
+			/* explicit GC below; keep churn timing clean */
+			obj_cache_cas_gc_policy(cache[d], 0, 0);
+		}
 	}
 
 	double t0 = now_ms();
@@ -280,8 +290,12 @@ main(int argc, char **argv)
 	double t_cas_churn = now_ms() - t0;
 	struct dirstat cas1 = dir_stat(depot);
 
-	printf("== CAS churn (%d rounds, commit per touched domain) ==\n",
-		rounds);
+	if (keep_n > 0)
+		printf("== CAS churn (%d rounds, retention keep %d,"
+			" auto GC every 16 commits) ==\n", rounds, keep_n);
+	else
+		printf("== CAS churn (%d rounds, commit per touched"
+			" domain) ==\n", rounds);
 	printf("time: %.1f ms total, %.2f ms/round\n",
 		t_cas_churn, t_cas_churn / rounds);
 	printf("depot: %ld files (+%ld), %lld bytes (+%lld),"
@@ -295,15 +309,20 @@ main(int argc, char **argv)
 
 	/* --- CAS GC ------------------------------------------------ */
 	int removed = 0;
+	int dropped = 0;
 
 	t0 = now_ms();
+	if (keep_n > 0)
+		cas_tree_log_truncate(ct, "world", keep_n, 0, &dropped);
 	obj_cache_cas_gc(cache[0], 0, &removed);
 
 	double t_gc = now_ms() - t0;
 	struct dirstat cas2 = dir_stat(depot);
 
-	printf("== CAS gc (grace 0) ==\n");
-	printf("time: %.1f ms, removed: %d objects\n", t_gc, removed);
+	printf("== CAS gc (grace 0%s) ==\n",
+		keep_n > 0 ? ", after final truncate" : "");
+	printf("time: %.1f ms, pruned: %d log entries, removed: %d"
+		" objects\n", t_gc, dropped, removed);
 	printf("depot after gc: %ld files, %lld bytes apparent,"
 		" %lld on disk\n",
 		cas2.files, cas2.bytes, cas2.disk);

@@ -51,6 +51,8 @@ struct cas_bridge {
 	unsigned gc_every;		/* auto GC after this many commits */
 	time_t gc_grace;
 	unsigned commits_since_gc;
+	int keep_count;			/* retention: log entries to keep */
+	time_t keep_age;		/* retention: max snapshot age */
 };
 
 /* view of the pending list used while rebuilding trees */
@@ -476,6 +478,21 @@ obj_cache_cas_commit(OBJ_CACHE *c, const char *comment)
 	if (b->gc_every && ++b->commits_since_gc >= b->gc_every) {
 		b->commits_since_gc = 0;
 
+		if (b->keep_count > 0 || b->keep_age > 0) {
+			time_t since = b->keep_age > 0
+				? time(NULL) - b->keep_age : 0;
+			int dropped = 0;
+
+			rc = cas_tree_log_truncate(b->ct, b->ref,
+				b->keep_count, since, &dropped);
+			if (rc != CAS_OK && rc != CAS_ENOTFOUND)
+				LOG_ERROR("log truncate \"%s\": %s", b->ref,
+					cas_strerror(rc));
+			else if (dropped > 0)
+				LOG_INFO("pruned %d snapshots from \"%s\"",
+					dropped, b->ref);
+		}
+
 		int removed = 0;
 
 		rc = cas_tree_gc(b->ct, b->gc_grace, NULL, NULL, &removed);
@@ -526,6 +543,20 @@ obj_cache_cas_gc_policy(OBJ_CACHE *c, unsigned every_commits, time_t grace)
 	b->gc_every = every_commits;
 	b->gc_grace = grace;
 	b->commits_since_gc = 0;
+}
+
+void
+obj_cache_cas_retention(OBJ_CACHE *c, int keep_count, time_t keep_age)
+{
+	if (!c)
+		return;
+
+	struct cas_bridge *b = obj_cache_ctx(c);
+
+	if (!b)
+		return;
+	b->keep_count = keep_count;
+	b->keep_age = keep_age;
 }
 
 /****************************************************************

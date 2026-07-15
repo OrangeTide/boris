@@ -75,6 +75,25 @@ void obj_cache_cas_gc_policy(OBJ_CACHE *c, unsigned every_commits,
 	time_t grace);
 
 /*
+ * Configure history retention. When enabled, each automatic GC first
+ * prunes the ref's snapshot log with cas_tree_log_truncate: an entry
+ * survives if it is among the last keep_count entries (keep_count > 0)
+ * or younger than keep_age seconds (keep_age > 0); the newest entry
+ * always survives. The sweep then reclaims objects only the pruned
+ * snapshots reached.
+ *
+ * keep_age is a duration, converted to an absolute cutoff at each
+ * sweep. Passing 0 for both disables pruning.
+ *
+ * Retention discards committed history permanently, so it is
+ * DISABLED by default: without this call the depot keeps every
+ * snapshot forever. Siblings sharing the ref share the history;
+ * retention configured on any one of them prunes for all.
+ */
+void obj_cache_cas_retention(OBJ_CACHE *c, int keep_count,
+	time_t keep_age);
+
+/*
  * Free the cache and its backend state. Does not flush or commit;
  * call obj_cache_flush_all and obj_cache_cas_commit first if the
  * buffered state matters.

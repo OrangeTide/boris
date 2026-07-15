@@ -396,6 +396,65 @@ test_gc_threshold(void)
 	free_tree(ct);
 }
 
+static int
+count_log_entry(const char *hash, int64_t time_s, int32_t time_ns,
+	const char *comment, void *ctx)
+{
+	(void)hash;
+	(void)time_s;
+	(void)time_ns;
+	(void)comment;
+	(*(int *)ctx)++;
+	return 0;
+}
+
+static void
+test_retention(void)
+{
+	struct cas_tree *ct = make_tree("retain");
+	OBJ_CACHE *c = obj_cache_cas_new(ct, "world", "objs", 4);
+
+	obj_cache_cas_gc_policy(c, 1, 0);	/* GC every commit */
+	obj_cache_cas_retention(c, 2, 0);	/* keep last 2 snapshots */
+
+	put_json(c, "a", "{\"name\":\"v1\"}");
+	obj_cache_cas_commit(c, "v1");
+
+	char root1[CAS_HASH_HEX + 1];
+
+	cas_tree_ref_read(ct, "world", root1);
+
+	for (int i = 2; i <= 5; i++) {
+		char json[64];
+
+		snprintf(json, sizeof(json), "{\"name\":\"v%d\"}", i);
+		put_json(c, "a", json);
+		obj_cache_cas_commit(c, "vN");
+	}
+
+	/* the v1 snapshot fell outside the retention window */
+	check("pruned root collected",
+		cas_exists(cas_tree_cas(ct), root1) == 0);
+
+	int entries = 0;
+
+	cas_tree_log_read(ct, "world", count_log_entry, &entries);
+	check("log kept 2 entries", entries == 2);
+
+	/* the current world is intact */
+	OBJ *o = obj_cache_get(c, "a");
+
+	check("current object survives retention", o != NULL);
+	if (o) {
+		char *v = obj_prop_get(o, "name");
+		check("current value is newest", v && strcmp(v, "v5") == 0);
+		obj_cache_release(c, o);
+	}
+
+	obj_cache_cas_free(c);
+	free_tree(ct);
+}
+
 int
 main(void)
 {
@@ -412,6 +471,7 @@ main(void)
 	test_dirty_flush_commit();
 	test_gc_explicit();
 	test_gc_threshold();
+	test_retention();
 
 	cleanup_tmpdir();
 
