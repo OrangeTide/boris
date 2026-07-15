@@ -71,8 +71,8 @@ write-behind generally, and GC collects the orphan.
 
 - [x] decide id mapping: cas-tree htree paths (see Decision above);
       real keys are strings and path-shaped, cas-omap fits only chars
-- [ ] decide how boris consumes smolvfs: vendor .c files vs link
-      libvfs.a from external checkout
+- [x] decide how boris consumes smolvfs: vendored release v0.1.0
+      CAS modules into src/thirdparty/smolvfs (see UPSTREAM there)
 - [ ] obj_cache_cas.c implementing obj_cache_ops over smolvfs:
       path walk for load, blob write plus buffered path->hash
       updates for save, tree COW rebuild and ref commit per flush
