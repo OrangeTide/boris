@@ -23,14 +23,27 @@ struct cas_tree;
  * each commit rebuilds from the ref's current root, so sequential
  * commits from sibling caches do not clobber each other.
  *
- * Cross-domain %parent resolution is not implemented yet; %parent
- * values always resolve within the same cache.
- *
  * For large domains, set CAS_TREE_USE_HTREE on the cas_tree before
  * creating caches so directory levels get O(1) lookup.
  */
 OBJ_CACHE *obj_cache_cas_new(struct cas_tree *ct, const char *ref,
 	const char *domain, unsigned max_unreferenced);
+
+/*
+ * Register a sibling cache keyed by a domain prefix, like
+ * obj_cache_muddb_link_parent. When a %parent value starts with
+ * "<domain>/", prototype lookup dispatches to that cache with the
+ * remainder as the id.
+ *
+ * Unlike the muddb bridge, an unmatched prefix is not an error:
+ * same-domain keys legitimately contain slashes here, so any
+ * %parent that does not start with a linked domain resolves as an
+ * id in the same cache. A linked domain name therefore shadows
+ * same-domain keys under that prefix; do not link a domain whose
+ * name collides with a top-level key component.
+ */
+int obj_cache_cas_link_parent(OBJ_CACHE *c, const char *domain,
+	OBJ_CACHE *parent_cache);
 
 /*
  * Store an object under a key, like muddb_put. This is how new

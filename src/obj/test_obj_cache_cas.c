@@ -396,6 +396,76 @@ test_gc_threshold(void)
 	free_tree(ct);
 }
 
+static void
+test_parent_links(void)
+{
+	struct cas_tree *ct = make_tree("parent");
+	OBJ_CACHE *objs = obj_cache_cas_new(ct, "world", "objs", 8);
+	OBJ_CACHE *chars = obj_cache_cas_new(ct, "world", "chars", 8);
+
+	check("link objs into chars",
+		obj_cache_cas_link_parent(chars, "objs", objs)
+			== OBJ_CACHE_OK);
+
+	put_json(objs, "templates/goblin",
+		"{\"name\":\"goblin\",\"speed\":\"fast\"}");
+	put_json(objs, "programs/base", "{\"color\":\"green\"}");
+	put_json(objs, "rooms/church",
+		"{\"%parent\":\"programs/base\",\"name\":\"church\"}");
+	obj_cache_cas_commit(objs, "seed objs");
+
+	put_json(chars, "1",
+		"{\"%parent\":\"objs/templates/goblin\","
+		"\"name\":\"grik\"}");
+	put_json(chars, "2",
+		"{\"%parent\":\"objs/templates/goblin\","
+		"\"!speed\":\"1\"}");
+	obj_cache_cas_commit(chars, "seed chars");
+
+	/* prototype chain crosses into the linked objs cache */
+	OBJ *o = obj_cache_get(chars, "1");
+
+	check("char loads", o != NULL);
+	if (o) {
+		char *v = obj_cache_prop_resolve(chars, o, "speed");
+
+		check("speed inherited across domains",
+			v && strcmp(v, "fast") == 0);
+		free(v);
+		v = obj_cache_prop_resolve(chars, o, "name");
+		check("own property wins", v && strcmp(v, "grik") == 0);
+		free(v);
+		obj_cache_release(chars, o);
+	}
+
+	/* a local tombstone stops the cross-domain walk */
+	o = obj_cache_get(chars, "2");
+	check("tombstoned char loads", o != NULL);
+	if (o) {
+		char *v = obj_cache_prop_resolve(chars, o, "speed");
+
+		check("tombstone blocks inheritance", v == NULL);
+		free(v);
+		obj_cache_release(chars, o);
+	}
+
+	/* a slashed %parent with an unlinked prefix stays same-domain */
+	o = obj_cache_get(objs, "rooms/church");
+	check("room loads", o != NULL);
+	if (o) {
+		char *v = obj_cache_prop_resolve(objs, o, "color");
+
+		check("slashed same-domain parent resolves",
+			v && strcmp(v, "green") == 0);
+		free(v);
+		obj_cache_release(objs, o);
+	}
+
+	obj_cache_cas_free(objs);
+	obj_cache_cas_free(chars);
+	free_tree(ct);
+}
+
 static int
 count_log_entry(const char *hash, int64_t time_s, int32_t time_ns,
 	const char *comment, void *ctx)
@@ -472,6 +542,7 @@ main(void)
 	test_gc_explicit();
 	test_gc_threshold();
 	test_retention();
+	test_parent_links();
 
 	cleanup_tmpdir();
 

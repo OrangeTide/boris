@@ -1,6 +1,6 @@
 ---
 title: obj_cache_cas cross-domain %parent parity
-status: active
+status: done
 gitlab-sync:
 ---
 
@@ -24,10 +24,11 @@ vs rooms/programs today: no collision).
 
 ## Tasks
 
-- [ ] obj_cache_cas_link_parent(c, domain, parent_cache), links
+- [x] obj_cache_cas_link_parent(c, domain, parent_cache), links
       freed in obj_cache_cas_free
-- [ ] resolve_parent_cache op: linked prefix -> sibling cache,
+- [x] resolve_parent_cache op: linked prefix -> sibling cache,
       otherwise same-cache id (slashes allowed)
-- [ ] unit tests: cross-domain chain resolves via
+- [x] unit tests: cross-domain chain resolves via
       obj_cache_prop_resolve, slashed same-domain %parent still
-      works, tombstones respected across the boundary
+      works, tombstones respected across the boundary (58 checks,
+      valgrind clean)

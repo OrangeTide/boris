@@ -34,6 +34,14 @@
 #define GC_DEFAULT_EVERY 16
 #define GC_DEFAULT_GRACE 3600
 
+#define MAX_PARENT_LINKS 8
+
+struct parent_link {
+	char *domain;		/* matches "<domain>/" prefix of %parent */
+	size_t domain_len;
+	OBJ_CACHE *cache;
+};
+
 /* one buffered save: a blob already in CAS, not yet linked in a tree */
 struct pending {
 	struct pending *next;
@@ -53,6 +61,8 @@ struct cas_bridge {
 	unsigned commits_since_gc;
 	int keep_count;			/* retention: log entries to keep */
 	time_t keep_age;		/* retention: max snapshot age */
+	struct parent_link links[MAX_PARENT_LINKS];
+	int link_count;
 };
 
 /* view of the pending list used while rebuilding trees */
@@ -263,6 +273,64 @@ bridge_save(void *ctx, const char *id, OBJ *obj)
 		return OBJ_CACHE_ERR;
 	}
 	return pending_upsert(b, id, hash);
+}
+
+/****************************************************************
+ * Prototype chain: cross-domain %parent
+ ****************************************************************/
+
+/*
+ * Dispatch "%parent" values of the form "<linked-domain>/<id>" to the
+ * sibling cache registered for that domain. Anything else, including
+ * slashed paths that do not start with a linked domain, is an id in
+ * this cache (return NULL per the walker contract). Same-domain keys
+ * contain slashes here, so an unmatched prefix is not an error.
+ */
+static OBJ_CACHE *
+bridge_resolve_parent(void *ctx, const char *parent_ref,
+	const char **out_id)
+{
+	struct cas_bridge *b = ctx;
+	const char *slash = strchr(parent_ref, '/');
+
+	if (!slash)
+		return NULL;
+
+	size_t dlen = (size_t)(slash - parent_ref);
+
+	for (int i = 0; i < b->link_count; i++) {
+		if (b->links[i].domain_len == dlen
+			&& memcmp(b->links[i].domain, parent_ref, dlen)
+				== 0) {
+			*out_id = slash + 1;
+			return b->links[i].cache;
+		}
+	}
+	return NULL;
+}
+
+int
+obj_cache_cas_link_parent(OBJ_CACHE *c, const char *domain,
+	OBJ_CACHE *parent_cache)
+{
+	if (!c || !domain || !parent_cache)
+		return OBJ_CACHE_ERR;
+
+	struct cas_bridge *b = obj_cache_ctx(c);
+
+	if (!b)
+		return OBJ_CACHE_ERR;
+	if (b->link_count >= MAX_PARENT_LINKS) {
+		LOG_ERROR("too many parent links");
+		return OBJ_CACHE_ERR;
+	}
+	b->links[b->link_count].domain = strdup(domain);
+	if (!b->links[b->link_count].domain)
+		return OBJ_CACHE_ERR;
+	b->links[b->link_count].domain_len = strlen(domain);
+	b->links[b->link_count].cache = parent_cache;
+	b->link_count++;
+	return OBJ_CACHE_OK;
 }
 
 /****************************************************************
@@ -586,6 +654,7 @@ obj_cache_cas_new(struct cas_tree *ct, const char *ref,
 	struct obj_cache_ops ops = {
 		.load = bridge_load,
 		.save = bridge_save,
+		.resolve_parent_cache = bridge_resolve_parent,
 	};
 	OBJ_CACHE *c = obj_cache_new(max_unreferenced, &ops, b);
 
@@ -635,6 +704,8 @@ obj_cache_cas_free(OBJ_CACHE *c)
 	obj_cache_free(c);
 	if (b) {
 		pending_clear(b);
+		for (int i = 0; i < b->link_count; i++)
+			free(b->links[i].domain);
 		free(b->ref);
 		free(b->domain);
 		free(b);
