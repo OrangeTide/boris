@@ -156,6 +156,49 @@ test_put_commit_get(void)
 	free_tree(ct);
 }
 
+/* invalid keys are rejected at save time and never reach the pending
+ * list, so a later commit is not poisoned by them */
+static void
+test_key_validation(void)
+{
+	struct cas_tree *ct = make_tree("keyval");
+	OBJ_CACHE *c = obj_cache_cas_new(ct, "world", "objs", 4);
+	const char *json = "{\"name\":\"x\"}";
+
+	check("empty key rejected",
+		put_json(c, "", json) == OBJ_CACHE_ERR);
+	check("empty component rejected",
+		put_json(c, "rooms//church", json) == OBJ_CACHE_ERR);
+	check("leading slash rejected",
+		put_json(c, "/church", json) == OBJ_CACHE_ERR);
+	check("trailing slash rejected",
+		put_json(c, "church/", json) == OBJ_CACHE_ERR);
+
+	char big[OBJ_PATH_MAX + 16];
+
+	memset(big, 'a', sizeof(big) - 1);
+	big[sizeof(big) - 1] = '\0';
+	check("oversized component rejected",
+		put_json(c, big, json) == OBJ_CACHE_ERR);
+
+	/* path over OBJ_PATH_MAX built from valid-length components */
+	for (size_t i = 100; i < sizeof(big) - 1; i += 100)
+		big[i] = '/';
+	check("oversized path rejected",
+		put_json(c, big, json) == OBJ_CACHE_ERR);
+
+	check("nothing pending after rejections",
+		obj_cache_cas_pending(c) == 0);
+
+	check("valid key still accepted",
+		put_json(c, "rooms/church", json) == OBJ_CACHE_OK);
+	check("commit not poisoned",
+		obj_cache_cas_commit(c, "keyval") == OBJ_CACHE_OK);
+
+	obj_cache_cas_free(c);
+	free_tree(ct);
+}
+
 static void
 test_nested_keys(void)
 {
@@ -535,6 +578,7 @@ main(void)
 
 	test_empty_store();
 	test_put_commit_get();
+	test_key_validation();
 	test_nested_keys();
 	test_update_and_history();
 	test_sibling_domains_share_ref();

@@ -239,6 +239,31 @@ bridge_load(void *ctx, const char *id)
  * Save path
  ****************************************************************/
 
+/* Reject ids the commit-time tree rebuild would reject: empty path
+ * components and components over CAS_TREE_NAME_MAX, plus full paths
+ * the load side could not read back (OBJ_PATH_MAX). Checking here
+ * keeps a bad key out of the pending list, where it would otherwise
+ * fail every subsequent commit. */
+static int
+valid_save_id(struct cas_bridge *b, const char *id)
+{
+	const char *p = id;
+
+	if (b->domain_len + 1 + strlen(id) >= OBJ_PATH_MAX)
+		return 0;
+
+	for (;;) {
+		const char *slash = strchr(p, '/');
+		size_t clen = slash ? (size_t)(slash - p) : strlen(p);
+
+		if (clen == 0 || clen > CAS_TREE_NAME_MAX)
+			return 0;
+		if (!slash)
+			return 1;
+		p = slash + 1;
+	}
+}
+
 static int
 bridge_save(void *ctx, const char *id, OBJ *obj)
 {
@@ -247,13 +272,24 @@ bridge_save(void *ctx, const char *id, OBJ *obj)
 	char *buf = stackbuf;
 	size_t bufsz = sizeof(stackbuf);
 	size_t json_len = 0;
+
+	if (!valid_save_id(b, id)) {
+		LOG_ERROR("invalid key \"%s/%s\"", b->domain, id);
+		return OBJ_CACHE_ERR;
+	}
+
 	int result = obj_get_json(obj, buf, bufsz, &json_len);
 
 	while (result == OBJ_ERR_NOMEM) {
 		bufsz *= 2;
-		buf = (buf == stackbuf) ? malloc(bufsz) : realloc(buf, bufsz);
-		if (!buf)
+		char *nbuf = (buf == stackbuf) ? malloc(bufsz)
+			: realloc(buf, bufsz);
+		if (!nbuf) {
+			if (buf != stackbuf)
+				free(buf);
 			return OBJ_CACHE_ERR;
+		}
+		buf = nbuf;
 		result = obj_get_json(obj, buf, bufsz, &json_len);
 	}
 	if (result != OBJ_OK) {

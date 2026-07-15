@@ -50,6 +50,13 @@ int obj_cache_cas_link_parent(OBJ_CACHE *c, const char *domain,
  * objects enter the backend (obj_cache itself only loads on miss).
  * The blob is written to CAS immediately and buffered for the next
  * commit; a subsequent obj_cache_get sees it before the commit.
+ *
+ * Keys are validated before anything is written: every slash-separated
+ * component must be non-empty and at most CAS_TREE_NAME_MAX bytes, and
+ * "<domain>/<key>" must fit in OBJ_PATH_MAX. An invalid key fails the
+ * save without poisoning the pending list (a bad entry there would
+ * fail every subsequent commit). The same validation applies to saves
+ * driven by dirty-object eviction and flush.
  */
 int obj_cache_cas_put(OBJ_CACHE *c, const char *id, OBJ *obj);
 
