@@ -80,8 +80,12 @@ write-behind generally, and GC collects the orphan.
       only orphaned blobs, recoverable by GC). Includes
       obj_cache_cas_put for object creation and unit tests
       (valgrind clean). cas_tree_ref_commit wired for the root.
-- [ ] wire up cas_tree_gc with a grace period (provided by
-      cas-tree; needs a call site, e.g. after commit or periodic)
+- [x] wire up cas_tree_gc: threshold-based auto GC in commit (default
+      every 16 commits, 3600s grace) plus obj_cache_cas_gc for manual
+      runs. Note: cas_tree_gc marks from every ref's full snapshot
+      log, so committed history is never collected; GC reclaims only
+      never-committed orphans. Reclaiming superseded history would
+      need log pruning, an upstream smolvfs feature.
 - [ ] measure under real session load: bytes written per flush, depot
       growth rate, GC cost; compare against muddb
 - [ ] go/no-go writeup: keep as optional backend, promote, or drop

@@ -315,6 +315,87 @@ test_dirty_flush_commit(void)
 	free_tree(ct);
 }
 
+static void
+test_gc_explicit(void)
+{
+	struct cas_tree *ct = make_tree("gc");
+	OBJ_CACHE *c = obj_cache_cas_new(ct, "world", "objs", 4);
+
+	obj_cache_cas_gc_policy(c, 0, 0);	/* manual GC only */
+
+	/* an orphan: a blob in CAS that no commit ever links */
+	char orphan[CAS_HASH_HEX + 1];
+
+	check("orphan blob written",
+		cas_put(cas_tree_cas(ct), "orphan", 6, orphan) == CAS_OK);
+
+	put_json(c, "rooms/church", "{\"name\":\"church\"}");
+	obj_cache_cas_commit(c, "first");
+
+	char root1[CAS_HASH_HEX + 1];
+
+	cas_tree_ref_read(ct, "world", root1);
+
+	put_json(c, "rooms/church", "{\"name\":\"redone\"}");
+	obj_cache_cas_commit(c, "second");
+
+	int removed = -1;
+
+	check("gc ok", obj_cache_cas_gc(c, 0, &removed) == OBJ_CACHE_OK);
+	check("gc removed something", removed >= 1);
+	check("orphan is gone",
+		cas_exists(cas_tree_cas(ct), orphan) == 0);
+
+	/* committed data survives */
+	OBJ *o = obj_cache_get(c, "rooms/church");
+
+	check("current object survives gc", o != NULL);
+	if (o)
+		obj_cache_release(c, o);
+
+	/* superseded snapshots are in the ref log, so they survive too */
+	struct cas_tree_entry e;
+
+	check("old snapshot survives gc",
+		cas_tree_lookup(ct, root1, "objs", &e) == CAS_OK);
+
+	obj_cache_cas_free(c);
+	free_tree(ct);
+}
+
+static void
+test_gc_threshold(void)
+{
+	struct cas_tree *ct = make_tree("gcauto");
+	OBJ_CACHE *c = obj_cache_cas_new(ct, "world", "objs", 4);
+
+	obj_cache_cas_gc_policy(c, 2, 0);	/* GC every 2nd commit */
+
+	char orphan[CAS_HASH_HEX + 1];
+
+	cas_put(cas_tree_cas(ct), "orphan2", 7, orphan);
+
+	put_json(c, "a", "{\"name\":\"a\"}");
+	obj_cache_cas_commit(c, NULL);
+	check("orphan survives first commit",
+		cas_exists(cas_tree_cas(ct), orphan) != 0);
+
+	put_json(c, "b", "{\"name\":\"b\"}");
+	obj_cache_cas_commit(c, NULL);
+	check("threshold gc collected the orphan",
+		cas_exists(cas_tree_cas(ct), orphan) == 0);
+
+	/* committed objects still readable after auto gc */
+	OBJ *o = obj_cache_get(c, "a");
+
+	check("object survives auto gc", o != NULL);
+	if (o)
+		obj_cache_release(c, o);
+
+	obj_cache_cas_free(c);
+	free_tree(ct);
+}
+
 int
 main(void)
 {
@@ -329,6 +410,8 @@ main(void)
 	test_update_and_history();
 	test_sibling_domains_share_ref();
 	test_dirty_flush_commit();
+	test_gc_explicit();
+	test_gc_threshold();
 
 	cleanup_tmpdir();
 

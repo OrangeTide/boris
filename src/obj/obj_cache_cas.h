@@ -3,6 +3,8 @@
 
 #include "obj_cache.h"
 
+#include <time.h>
+
 struct cas_tree;
 
 /*
@@ -47,6 +49,30 @@ int obj_cache_cas_commit(OBJ_CACHE *c, const char *comment);
 
 /* Number of buffered saves not yet committed. */
 unsigned obj_cache_cas_pending(OBJ_CACHE *c);
+
+/*
+ * Run mark-and-sweep GC on the underlying store now. Marking covers
+ * every ref's full snapshot log, so committed history is never
+ * collected; only objects no commit ever linked are reclaimed
+ * (orphaned blobs from crashed or abandoned saves, trees from failed
+ * rebuilds). Unreachable objects younger than grace seconds are
+ * spared. grace must exceed the longest time a save may sit
+ * uncommitted anywhere: a sibling cache's buffered blob is
+ * unreachable until that cache commits, and a zero-grace GC would
+ * delete it. Pass grace 0 only when nothing is pending on any cache
+ * sharing the store. removed may be NULL.
+ */
+int obj_cache_cas_gc(OBJ_CACHE *c, time_t grace, int *removed);
+
+/*
+ * Configure threshold-based automatic GC: after every_commits
+ * successful commits from this cache, obj_cache_cas_commit runs GC
+ * with the given grace. every_commits 0 disables. Default policy is
+ * every 16 commits with a 3600 second grace. A GC failure is logged
+ * but does not fail the commit that triggered it.
+ */
+void obj_cache_cas_gc_policy(OBJ_CACHE *c, unsigned every_commits,
+	time_t grace);
 
 /*
  * Free the cache and its backend state. Does not flush or commit;

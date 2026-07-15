@@ -28,6 +28,12 @@
 
 #define SAVE_BUFSZ 4096
 
+/* default automatic GC policy: sweep after this many commits, sparing
+ * unreachable objects younger than the grace period so sibling
+ * caches' buffered (not yet committed) blobs survive */
+#define GC_DEFAULT_EVERY 16
+#define GC_DEFAULT_GRACE 3600
+
 /* one buffered save: a blob already in CAS, not yet linked in a tree */
 struct pending {
 	struct pending *next;
@@ -42,6 +48,9 @@ struct cas_bridge {
 	size_t domain_len;
 	struct pending *pending;
 	unsigned pending_count;
+	unsigned gc_every;		/* auto GC after this many commits */
+	time_t gc_grace;
+	unsigned commits_since_gc;
 };
 
 /* view of the pending list used while rebuilding trees */
@@ -463,7 +472,60 @@ obj_cache_cas_commit(OBJ_CACHE *c, const char *comment)
 	}
 
 	pending_clear(b);
+
+	if (b->gc_every && ++b->commits_since_gc >= b->gc_every) {
+		b->commits_since_gc = 0;
+
+		int removed = 0;
+
+		rc = cas_tree_gc(b->ct, b->gc_grace, NULL, NULL, &removed);
+		if (rc != CAS_OK)
+			LOG_ERROR("auto gc: %s", cas_strerror(rc));
+		else if (removed > 0)
+			LOG_INFO("auto gc removed %d unreachable objects",
+				removed);
+		/* the commit itself succeeded either way */
+	}
 	return OBJ_CACHE_OK;
+}
+
+/****************************************************************
+ * Garbage collection
+ ****************************************************************/
+
+int
+obj_cache_cas_gc(OBJ_CACHE *c, time_t grace, int *removed)
+{
+	if (!c)
+		return OBJ_CACHE_ERR;
+
+	struct cas_bridge *b = obj_cache_ctx(c);
+
+	if (!b)
+		return OBJ_CACHE_ERR;
+
+	int rc = cas_tree_gc(b->ct, grace, NULL, NULL, removed);
+
+	if (rc != CAS_OK) {
+		LOG_ERROR("gc: %s", cas_strerror(rc));
+		return OBJ_CACHE_ERR;
+	}
+	return OBJ_CACHE_OK;
+}
+
+void
+obj_cache_cas_gc_policy(OBJ_CACHE *c, unsigned every_commits, time_t grace)
+{
+	if (!c)
+		return;
+
+	struct cas_bridge *b = obj_cache_ctx(c);
+
+	if (!b)
+		return;
+	b->gc_every = every_commits;
+	b->gc_grace = grace;
+	b->commits_since_gc = 0;
 }
 
 /****************************************************************
@@ -487,6 +549,8 @@ obj_cache_cas_new(struct cas_tree *ct, const char *ref,
 	if (!b->ref || !b->domain)
 		goto fail;
 	b->domain_len = strlen(domain);
+	b->gc_every = GC_DEFAULT_EVERY;
+	b->gc_grace = GC_DEFAULT_GRACE;
 
 	struct obj_cache_ops ops = {
 		.load = bridge_load,
