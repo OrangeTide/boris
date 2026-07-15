@@ -73,13 +73,15 @@ write-behind generally, and GC collects the orphan.
       real keys are strings and path-shaped, cas-omap fits only chars
 - [x] decide how boris consumes smolvfs: vendored release v0.1.0
       CAS modules into src/thirdparty/smolvfs (see UPSTREAM there)
-- [ ] obj_cache_cas.c implementing obj_cache_ops over smolvfs:
+- [x] obj_cache_cas.c implementing obj_cache_ops over smolvfs:
       path walk for load, blob write plus buffered path->hash
       updates for save, tree COW rebuild and ref commit per flush
       cycle (blobs first, then tree levels, then ref; crash leaves
-      only orphaned blobs, recoverable by GC)
-- [ ] wire up cas_tree_ref_commit for the snapshot root and
-      cas_tree_gc with a grace period (both provided by cas-tree)
+      only orphaned blobs, recoverable by GC). Includes
+      obj_cache_cas_put for object creation and unit tests
+      (valgrind clean). cas_tree_ref_commit wired for the root.
+- [ ] wire up cas_tree_gc with a grace period (provided by
+      cas-tree; needs a call site, e.g. after commit or periodic)
 - [ ] measure under real session load: bytes written per flush, depot
       growth rate, GC cost; compare against muddb
 - [ ] go/no-go writeup: keep as optional backend, promote, or drop

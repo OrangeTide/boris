@@ -14,7 +14,7 @@ PROJECT_CPPFLAGS += \
 	-Isrc/worldclock -Isrc/web/server \
 	-Isrc/thirdparty/jsmn \
 	-Isrc/thirdparty/lmdb -Isrc/thirdparty/mth \
-	-Isrc/thirdparty/tiny-aes \
+	-Isrc/thirdparty/tiny-aes -Isrc/thirdparty/smolvfs \
 	-Isrc/scrypt -Isrc/log -Isrc/util -Isrc/help \
 	-Isrc/iox -Isrc/net -Isrc/passwd \
 	-Isrc/obj -Isrc/entity -Isrc/rpg -Isrc/database \
