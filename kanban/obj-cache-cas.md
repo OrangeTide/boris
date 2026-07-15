@@ -1,6 +1,6 @@
 ---
 title: obj_cache CAS backend experiment (smolvfs)
-status: active
+status: done
 gitlab-sync:
 ---
 
@@ -109,6 +109,47 @@ Findings:
 - On-disk usage runs ~4x apparent size from 4 KB block rounding on
   small loose objects; cas-pack rollup would mitigate.
 
+## Go/No-Go (2026-07-14)
+
+Verdict: GO as an optional, non-default backend. muddb/LMDB stays
+the default. Promotion to default is deferred, gated on upstream
+smolvfs work. Nothing routes live traffic to CAS yet.
+
+Why keep it:
+
+- Performance is a non-issue when flushes are batched. At 20 edits
+  per commit the benchmark shows time parity with LMDB, and the
+  write-behind obj_cache already batches naturally.
+- It delivers what LMDB structurally cannot: whole-world snapshots
+  (one hash per commit), rollback, diff between any two snapshots,
+  and a replication substrate for multi-server sync. The
+  object-versioning card gets its history mechanism for free.
+- The cost is contained: the shim is ~600 lines behind the existing
+  obj_cache_ops interface, fully unit tested (46 checks, valgrind
+  clean), with a committed benchmark for regression measurement.
+
+Why not promote yet:
+
+- Depot growth is unbounded: linear in commits, with GC structurally
+  unable to reclaim superseded history (every ref log entry stays
+  reachable). LMDB stayed flat through every benchmark run. A busy
+  server cannot run on this as-is.
+- Cross-domain %parent resolution is not implemented in the CAS
+  shim (obj_cache_muddb has it; entity->template chains need it).
+
+Conditions to revisit promotion:
+
+1. Upstream smolvfs sparse references + history pruning lands
+   (feature request filed: smolvfs doc/feature-requests/
+   feature-1-sparse-refs-history-pruning.md) and is re-vendored.
+2. Retention policy added to obj_cache_cas: truncate ref log to N
+   snapshots before GC.
+3. Re-run bench_obj_cache_cas to confirm depot size converges under
+   retention.
+4. Cross-domain %parent parity with obj_cache_muddb.
+5. Config-gated live routing (boris.cfg selects backend) and a
+   muddb->CAS import path for cutover.
+
 ## Tasks
 
 - [x] decide id mapping: cas-tree htree paths (see Decision above);
@@ -131,7 +172,8 @@ Findings:
 - [x] measure against real muddb data: bench_obj_cache_cas imports
       the live database (21 objects, 4KB JSON) into both backends and
       drives an identical 500-put edit workload (see Measurements)
-- [ ] go/no-go writeup: keep as optional backend, promote, or drop
+- [x] go/no-go writeup: GO as optional backend, promotion deferred
+      pending upstream sparse refs + history pruning (see Go/No-Go)
 
 Related: object-versioning card (CAS snapshots would give diff/history
 for free if this backend is adopted).
