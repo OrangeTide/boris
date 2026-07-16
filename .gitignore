@@ -7,6 +7,8 @@ gmon.out
 .*.swp
 junk*/
 /OLD
+/REF
+/JUNK
 
 *.o
 *.a
