@@ -198,7 +198,20 @@ if [ "$CARDS_CHANGED" -eq 1 ]; then
     git config user.email "${GITLAB_USER_EMAIL:-ci@boris}"
     git config user.name "${GITLAB_USER_NAME:-kanban-sync}"
     git add kanban/*.md
-    git commit -m "kanban: populate gitlab-sync refs [skip ci]"
-    git push "https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" \
-        "HEAD:${CI_COMMIT_REF_NAME}"
+    if ! git commit -m "kanban: populate gitlab-sync refs [skip ci]"; then
+        echo "FATAL: failed to commit gitlab-sync refs." >&2
+        exit 1
+    fi
+    if ! git push "https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" \
+            "HEAD:${CI_COMMIT_REF_NAME}"; then
+        echo "FATAL: gitlab-sync refs were committed but the push to" \
+             "'${CI_COMMIT_REF_NAME}' failed." >&2
+        echo "       The GitLab issues exist, but their refs are NOT persisted in" \
+             "the repo." >&2
+        echo "       Fix the push (commonly: allow the CI token to push to the" \
+             "protected branch) and re-run this job. The title-lookup guard will" >&2
+        echo "       re-link the existing issues instead of creating duplicates." >&2
+        exit 1
+    fi
+    echo "pushed gitlab-sync refs to ${CI_COMMIT_REF_NAME}"
 fi
