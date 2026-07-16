@@ -74,24 +74,54 @@ cards rather than growing one card into a catch-all.
 ## GitLab sync
 
 Each card carries a `gitlab-sync` field that links it to a GitLab work item.
-Sync is **one-way and status-only**: card status drives the GitLab issue
-state. Card contents are never synced in either direction.
+Sync is **one-way**: the card drives the GitLab issue. For a linked card, CI
+syncs both its status and its title. CI does not sync the card body after it
+creates the issue.
 
-| `gitlab-sync` value       | Behavior                                          |
-|---------------------------|---------------------------------------------------|
-| `OrangeTide/boris#123`    | Linked to an existing issue. Status is synced.    |
-| *(empty)*                 | CI creates a new issue and writes the ref back.   |
-| `none`                    | Explicitly opted out. Never synced.               |
+| `gitlab-sync` value       | Behavior                                                    |
+|---------------------------|-------------------------------------------------------------|
+| `OrangeTide/boris#123`    | Links to an existing issue. CI syncs status and title.      |
+| *(empty)*                 | CI links to an existing issue by title, else creates one.   |
+| `none`                    | Explicitly opted out. CI never touches it.                  |
 
 Status mapping when a card changes:
 
 - `done` -> CI closes the GitLab issue.
 - `active` or `backlog` -> CI reopens the GitLab issue.
 
-The sync runs through `scripts/kanban-sync.sh` in the `sync:kanban` CI job.
-It triggers only on pushes to the default branch that modify `kanban/*.md`.
-New issues that CI creates are committed back with `[skip ci]` in the commit
-message so the write-back does not re-trigger the pipeline.
+### The issue id is the stable key
 
-The script requires `GITLAB_TOKEN` (the CI job token works) and
+CI addresses a linked card by its issue id, never by its title. This is what
+makes a card **safe to rename**: rename a card that already has a
+`gitlab-sync` ref and CI retitles that same issue. Do not rename a card that
+has no ref yet: with no id to key on, CI matches by title, misses the old
+issue, and creates a duplicate. Link the card first (let CI populate the ref),
+then rename.
+
+### Creating and re-linking
+
+For a card with an empty `gitlab-sync` field, CI searches existing issues,
+both open and closed, for an exact title match. On a match it links the card
+to that issue and picks the lowest number; otherwise it creates a new issue.
+This title lookup keeps the sync idempotent. A card whose ref was lost, for
+example when a force-push rewound the write-back commit, re-links to its
+existing issue instead of spawning a duplicate.
+
+When CI creates or links an issue, it writes the ref back into the card and
+commits with `[skip ci]` so the write-back does not re-trigger the pipeline.
+
+### Write-back to a protected branch
+
+CI pushes the write-back commit to the default branch. If that branch is
+protected and the `sync:kanban` job cannot push to it, GitLab rejects the
+push. The job logs a warning and still succeeds; it does not fail the
+pipeline. The refs do not persist that run, but nothing duplicates: the title
+lookup re-links the issues on the next run. To persist refs automatically,
+allow the job's identity to push to the protected branch.
+
+### Job details
+
+The sync runs through `scripts/kanban-sync.sh` in the `sync:kanban` CI job. It
+triggers only on pushes to the default branch that modify `kanban/*.md` or the
+script itself. The script requires `GITLAB_TOKEN` (the CI job token works) and
 `CI_PROJECT_ID`, both provided by the CI environment.
