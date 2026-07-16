@@ -2,8 +2,10 @@
 # kanban-sync.sh -- sync kanban/ card status to GitLab work items
 #
 # For each kanban/*.md card:
-#   - has gitlab-sync ref  -> sync status (done=close, active/backlog=reopen)
-#   - has gitlab-sync:     -> create new issue, write ref back into card
+#   - has gitlab-sync ref  -> sync status and title by issue id (a card with a
+#                             ref can be renamed; the id is the stable key)
+#   - has gitlab-sync:     -> re-link to an existing issue by title, else create,
+#                             then write the ref back into the card
 #   - has gitlab-sync: none -> skip
 #
 # Requires: GITLAB_TOKEN (CI_JOB_TOKEN works in CI), CI_PROJECT_ID
@@ -139,14 +141,18 @@ sync_card() {
     fi
 
     if [ -n "$sync_ref" ]; then
-        # existing issue -- sync status
+        # existing issue -- the ref is the stable key, so sync status AND title.
+        # This is what makes a card rename safe: once the front matter carries an
+        # issue id we address the issue by number, never by title, so a retitled
+        # card updates its existing issue instead of spawning a new one.
         iid="$(echo "$sync_ref" | sed 's/.*#//')"
         state_event="$(card_status_to_gitlab "$status")"
-        echo "sync: ${slug} -> #${iid} (${state_event})"
+        esc_title="$(json_escape "$title")"
+        echo "sync: ${slug} -> #${iid} (${state_event}, title)"
         curl -sf -X PUT "${API}/issues/${iid}" \
             -H "${AUTH_HEADER}" \
             -H "Content-Type: application/json" \
-            -d "{\"state_event\": \"${state_event}\"}" \
+            -d "{\"state_event\": \"${state_event}\", \"title\": \"${esc_title}\"}" \
             >/dev/null
     else
         # no ref yet -- re-link to an existing issue if one matches by title,
