@@ -78,6 +78,7 @@ Current test suites:
 - `test_obj_cache` -- OBJ cache layer
 - `test_muddb` -- LMDB persistence layer
 - `test_hashtable` -- hash table (uint and string keyed)
+- `test_mcp` -- MUD Client Protocol parsing, negotiation, simpleedit
 
 `make smoke` starts the server in a temporary directory and exercises telnet
 login flows via expect. Requires `expect` (`apt install expect` on
@@ -291,6 +292,10 @@ SSE web clients simultaneously.
 - **Networking**: `src/iox/` -- I/O multiplexing for TELNET connections
 - **TELNET protocol**: `src/thirdparty/mth/` -- MTH (Mud Telopt Handler)
   for protocol negotiation
+- **MUD Client Protocol**: `src/mcp.c` -- MCP 2.1 out-of-band messages on
+  the telnet line stream. Supports the `dns-org-mud-moo-simpleedit`
+  package so capable clients edit server text in a local editor
+  (used by `@edit` for telnet clients; web clients use the SSE editor)
 - **Web server**: `src/web/server/webserver.c` (SSE on net_stream) + client
   assets in `src/web/client/`
 - **User management**: `src/user.c` -- accounts, password auth (scrypt/SHA1),

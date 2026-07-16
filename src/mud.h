@@ -23,9 +23,12 @@ struct client_ops {
 	void (*destroy)(DESCRIPTOR_DATA *cl);
 };
 
+struct mcp;
+
 struct descriptor_data {
 	struct net_stream *stream;
 	struct mth_data *mth;
+	struct mcp *mcp; /**< MUD Client Protocol state (telnet clients) */
 	LIST_ENTRY(DESCRIPTOR_DATA) list;
 	enum client_type { CLIENT_TYPE_USER = 1, CLIENT_TYPE_WEB } type;
 	const struct client_ops *ops;
