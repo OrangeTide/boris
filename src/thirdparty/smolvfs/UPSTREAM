@@ -1,0 +1,16 @@
+repo:   https://github.com/OrangeTide/smolvfs
+tag:    v0.2.0
+date:   2026-07-15
+
+Vendored files: cas.c cas.h cas-codec.c cas-codec.h cas-pack.c
+cas-pack.h cas-tree.c cas-tree.h test.h test_cas.c test_cas_tree.c
+PRUNING.md LICENSE-MIT LICENSE-BSD-2-CLAUSE-PATENT
+
+Only the CAS modules are vendored (content-addressable store, codec
+table, packfiles, tree layer). The VFS layer (vfs.c, vfs-snap.c),
+cas-omap, castool, and the optional miniz DEFLATE codec are not used
+by boris and are omitted.
+
+v0.2.0 adds sparse references and history pruning (PRUNING.md):
+cas_tree_log_truncate bounds a ref's snapshot log, and cas_tree_gc
+marking treats missing objects as boundaries instead of errors.

@@ -14,7 +14,7 @@ PROJECT_CPPFLAGS += \
 	-Isrc/worldclock -Isrc/web/server \
 	-Isrc/thirdparty/jsmn \
 	-Isrc/thirdparty/lmdb -Isrc/thirdparty/mth \
-	-Isrc/thirdparty/tiny-aes \
+	-Isrc/thirdparty/tiny-aes -Isrc/thirdparty/smolvfs \
 	-Isrc/scrypt -Isrc/log -Isrc/util -Isrc/help \
 	-Isrc/iox -Isrc/net -Isrc/passwd \
 	-Isrc/obj -Isrc/entity -Isrc/rpg -Isrc/database \
@@ -74,9 +74,12 @@ endif
 
 # --- Smoke tests -------------------------------------------------------------
 
-.PHONY: smoke smoke-valgrind smoke-web
+.PHONY: smoke smoke-cas smoke-valgrind smoke-web
 smoke: install
 	@src/tests/test_smoke.sh
+
+smoke-cas: install
+	@BORIS_BACKEND=cas src/tests/test_smoke.sh
 
 smoke-valgrind: install
 	@USE_VALGRIND=1 src/tests/test_smoke.sh

@@ -29,6 +29,10 @@
 
 #include "muddb.h"
 #include "obj.h"
+#include "obj_cache_cas.h"
+
+#include <cas.h>
+#include <cas-tree.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -51,13 +55,16 @@ usage(const char *argv0)
 		"Usage:\n"
 		"    %s export <dbpath> <outdir> [domain ...]\n"
 		"    %s import <dbpath> <indir>  [domain ...]\n"
+		"    %s to-cas <dbpath> <depot> [ref] [domain ...]\n"
 		"\n"
 		"Export writes each LMDB domain as a directory of .json files.\n"
 		"Import reads .json files back into the database.\n"
+		"To-cas imports LMDB domains into a CAS depot (default ref\n"
+		"\"world\") for the cas object store backend.\n"
 		"\n"
-		"If no domains are given, export dumps all domains and import\n"
-		"imports all directories found under <indir>.\n",
-		argv0, argv0);
+		"If no domains are given, all domains are used (import scans\n"
+		"directories found under <indir>).\n",
+		argv0, argv0, argv0);
 }
 
 /* --- file I/O helpers --------------------------------------------------- */
@@ -456,6 +463,116 @@ cmd_import(const char *dbpath, const char *indir,
 	return 0;
 }
 
+/* --- to-cas ------------------------------------------------------------- */
+
+/* import one muddb domain into a CAS-backed cache; buffered saves are
+ * committed by the caller. */
+static int
+to_cas_domain(MUDDB *db, OBJ_CACHE *cache, const char *domain)
+{
+	MUDDB_ITER *it;
+	const char *key;
+	int count = 0;
+
+	it = muddb_iter_begin(db, domain);
+	if (!it) {
+		LOG_ERROR("could not iterate domain \"%s\"", domain);
+		return -1;
+	}
+
+	while ((key = muddb_iter_next(it))) {
+		OBJ *obj = muddb_iter_value(it);
+
+		if (!obj) {
+			LOG_ERROR("could not read %s/%s", domain, key);
+			continue;
+		}
+
+		if (obj_cache_cas_put(cache, key, obj) != OBJ_CACHE_OK)
+			LOG_ERROR("could not store %s/%s", domain, key);
+		else
+			count++;
+
+		obj_free(obj);
+	}
+
+	muddb_iter_end(it);
+	printf("  %s: %d objects\n", domain, count);
+	return 0;
+}
+
+/* import one domain into the depot and commit it */
+static int
+to_cas_one(MUDDB *db, struct cas_tree *ct, const char *ref,
+           const char *domain)
+{
+	OBJ_CACHE *cache = obj_cache_cas_new(ct, ref, domain, 16);
+	int rc = 0;
+
+	if (!cache) {
+		LOG_ERROR("could not create cache for \"%s\"", domain);
+		return 1;
+	}
+
+	if (to_cas_domain(db, cache, domain) != 0)
+		rc = 1;
+	else if (obj_cache_cas_commit(cache, "muddb-tool to-cas")
+		!= OBJ_CACHE_OK) {
+		LOG_ERROR("commit failed for \"%s\"", domain);
+		rc = 1;
+	}
+
+	obj_cache_cas_free(cache);
+	return rc;
+}
+
+static int
+cmd_to_cas(const char *dbpath, const char *depot, const char *ref,
+           int argc, char **argv)
+{
+	MUDDB *db;
+	struct cas *store;
+	struct cas_tree *ct;
+	int rc = 0;
+
+	db = muddb_open(dbpath, 0);
+	if (!db) {
+		LOG_ERROR("could not open database at %s", dbpath);
+		return 1;
+	}
+
+	store = cas_new(depot);
+	ct = store ? cas_tree_new(store) : NULL;
+	if (!ct) {
+		LOG_ERROR("could not create CAS depot at %s", depot);
+		cas_free(store);
+		muddb_close(db);
+		return 1;
+	}
+	cas_tree_set_flags(ct, CAS_TREE_USE_HTREE);
+
+	printf("Importing %s -> %s (ref %s)\n", dbpath, depot, ref);
+
+	if (argc == 0) {
+		const char **dp;
+
+		for (dp = known_domains; *dp; dp++)
+			if (to_cas_one(db, ct, ref, *dp) != 0)
+				rc = 1;
+	} else {
+		int i;
+
+		for (i = 0; i < argc; i++)
+			if (to_cas_one(db, ct, ref, argv[i]) != 0)
+				rc = 1;
+	}
+
+	cas_tree_free(ct);
+	cas_free(store);
+	muddb_close(db);
+	return rc;
+}
+
 /* --- main --------------------------------------------------------------- */
 
 int
@@ -474,6 +591,10 @@ main(int argc, char **argv)
 	} else if (strcmp(argv[1], "import") == 0) {
 		return cmd_import(argv[2], argv[3],
 			argc - 4, argv + 4);
+	} else if (strcmp(argv[1], "to-cas") == 0) {
+		return cmd_to_cas(argv[2], argv[3],
+			argc > 4 ? argv[4] : "world",
+			argc > 5 ? argc - 5 : 0, argv + 5);
 	} else {
 		fprintf(stderr, "Unknown command: %s\n", argv[1]);
 		usage(argv[0]);

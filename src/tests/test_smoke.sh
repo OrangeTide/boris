@@ -19,6 +19,8 @@ TOTAL=0
 TMPDIR=""
 SERVER_PID=""
 USE_VALGRIND="${USE_VALGRIND:-0}"
+# object store backend to smoke: muddb (default) or cas
+BORIS_BACKEND="${BORIS_BACKEND:-muddb}"
 VALGRIND_EXIT=0
 
 cleanup()
@@ -117,6 +119,22 @@ setup_testenv()
 	webserver.port	=	0
 	form.newuser.filename	=	data/forms/newuser.form
 	EOF
+
+	if [ "$BORIS_BACKEND" = "cas" ]; then
+		echo "smoke: using cas object store backend"
+		if ! "$MUDDB_TOOL" to-cas "$TMPDIR/data/muddb" \
+			"$TMPDIR/data/casdb" >"$TMPDIR/to-cas.log" 2>&1; then
+			cat "$TMPDIR/to-cas.log" >&2
+			die "muddb-tool to-cas failed"
+		fi
+		cat >> "$TMPDIR/boris.cfg" <<-EOF
+		database.backend	=	cas
+		database.cas.path	=	data/casdb
+		database.cas.ref	=	world
+		database.cas.retain	=	8
+		database.cas.commit_seconds	=	2
+		EOF
+	fi
 }
 
 start_server()

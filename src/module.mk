@@ -1,5 +1,6 @@
 SUBDIRS = \
 	thirdparty/lmdb thirdparty/mth thirdparty/tiny-aes \
+	thirdparty/smolvfs \
 	log scrypt util help iox net passwd obj entity rpg combat database \
 	security muddb-tool daemonize coldfire machine verb
 
