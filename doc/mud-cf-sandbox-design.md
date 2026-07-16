@@ -1,119 +1,141 @@
 # MUD ColdFire Sandbox -- Design Doc
 
 ::: aside
-**Status: DRAFT.** This document describes v1 -- the first forward-compatible
-ABI freeze -- but several v1 items are still being finalized (see **Open
-Items**). v0 (the throwaway proof-of-concept) has a much smaller scope;
-v1 is what gets the freeze discipline.
+**Status: EXPERIMENTAL. PRE-FREEZE.** Nothing here is released. There is
+no installed base, no distributed binaries, and no ABI stability of any
+kind. Every hypercall ID, register convention, record layout, and
+memory-map address in this document is subject to change without notice.
+Do not build anything that depends on the current shapes surviving.
+
+An earlier draft of this document declared a frozen v1 ABI. That was
+premature. We adopted freeze discipline before the load-bearing
+architecture (unprivileged execution, the multicore write model,
+credit accounting, and the capability model) was built and proven. This
+revision removes the freeze and the versioning machinery that served it.
+The freeze line gets drawn later, once the gate list in **Roadmap** is
+met and the design has survived a real workload.
 :::
 
 ## Introduction
 
-This document describes a script sandbox for the boris MUD server
-built on a ColdFire V4e CPU emulator (~2200 LOC). Each
-script, NPC, or area runs in its own emulator instance with private
-RAM. Guest code communicates with the host through LINE_A opcodes
-(0xAxxx), which trap into a fixed set of 22 hypercalls -- the v1
-frozen ABI. Isolation comes from user-mode trapping, bus callback
-bounds checking, seccomp on the host process, and credit-budget
-preemption, not from language-level guarantees.
+This document describes a script sandbox for the boris MUD server built
+on a ColdFire V4e CPU emulator (~2200 LOC). Each script, NPC, or area
+runs in its own emulator instance with private RAM. Guest code
+communicates with the host through LINE_A opcodes (0xAxxx), which trap
+into a small set of hypercalls. Isolation comes from unprivileged guest
+execution, bus-callback bounds checking that faults on violation,
+seccomp on the host process, and credit-budget preemption, not from
+language-level guarantees.
 
 There is no ambient filesystem. A task starts with a set of directory
 file descriptors in its fd table, and that fd table is the entire
 security boundary. HC_OPENAT takes a dirfd, a path, and intent flags
-(O_BLOB, O_OBJECT, O_MSGCHAN, etc.) and returns a capability-scoped
-fd. Parents delegate narrowed capabilities to children at spawn time.
-There is no mechanism by which a task can manufacture a dirfd it was
-not granted.
+(O_BLOB, O_OBJECT, O_MSGCHAN, etc.) and returns a capability-scoped fd.
+Parents delegate narrowed capabilities to children at spawn time. There
+is no mechanism by which a task can manufacture a dirfd it was not
+granted.
 
-Tasks communicate through QNX-style synchronous message passing.
-HC_MSG_SEND blocks the caller until the receiver replies or a timeout
-expires. Reply handles are 64-bit random tokens in a global hash
-table -- delegatable to helper tasks, with a single reaper for
-timeout expiry. Message passing is also how tasks reach typed domains
-(user:, area:) that have no direct hypercalls in v1: a trusted
-service task owns the domain and accepts requests on a message
-channel.
+Tasks communicate through synchronous message passing (send, receive,
+reply). HC_MSG_SEND blocks the caller until the receiver replies or a
+timeout expires. This is not just an IPC convenience. It is the concurrency
+model: the target platform is multicore, tasks run in parallel on
+separate cores, and message passing is how a task reaches shared state
+without touching another task's memory. Persistent domains that a task
+cannot write directly (see **Object Writes**) are reached by sending to
+the trusted service task that owns the domain.
 
-The scheduler charges one credit per CF instruction and a weighted
-cost per hypercall from a tunable host-side table. Three thresholds
-govern execution: a per-quantum budget (preemption), a lifetime
-counter (accounting), and a lifetime cap (kill runaways). The
-scheduler runs single-threaded on one RPi5 core with cooperative
-yielding and forced preemption -- the same mechanism Erlang/BEAM uses
-under the name "reductions."
+The scheduler charges credits per unit of work and preempts on budget.
+It is designed for a multicore host from the start: per-core runqueues
+with work stealing, not a single scheduler thread. Because each task's
+guest state lives in a private RAM block with its own bus callbacks,
+tasks running on different cores share no mutable guest state and need
+no cross-core synchronization on the execution hot path. This is the
+central reason the per-instance emulator approach was chosen.
 
-Task state snapshots are a memcpy of the CPU registers plus the RAM
-block. Write that to disk and the script hibernates across server
-reboots. The syspage address is frozen so guest pointers stay valid
-on restore; in-flight message sends are unblocked with -EINTR. This
-is the key practical advantage over Wasm, where runtime-internal
-state (stack, locals) is not part of the spec and cannot be
-portably serialized.
+Task state snapshots let a script hibernate across server reboots. The
+snapshot is not simply the CPU plus RAM. Substantial task state lives
+host-side (the fd table, the capability table, the tmp ramdisk). The
+snapshot format must capture all of it. See **Snapshot / Restore** for
+the real state inventory and why this is deferred until the architecture
+settles.
 
-## Release Plan
+## Roadmap
 
-- **v0 -- proof-of-concept (DONE).** Throwaway ABI. End-to-end wire-up:
-  boot the emulator under the host, dispatch hypercalls, load ELF
-  binaries, run scripts to completion. Extended beyond the original
-  scope to include persistent sandbox instances, unified handle system,
-  cooperative verb dispatch, termination, interface checking, and a
-  cross-compiler SDK with examples. No capability model, no syspage,
-  no ABI versioning, no credits. Programs built for v0 get discarded
-  when v1 lands. See **v0 Implementation** below for details.
-- **v1 -- first frozen ABI.** Everything described in this document.
-  Freeze discipline applies: IDs never reassigned, register conventions
-  never change, structured records append-only. Forward-compatible from
-  here on.
-- **v2 -- deferred from v1.** Root-bounded `..` in paths, selective-peek
-  message channel semantics if we find we need them, typed hypercalls for
-  non-obj domains (`user:`, `area:`, ...), multi-core scheduler, GDB
-  stub, multi-thread-per-task.
-- **v3 -- unplanned re-architecture.** Optimistically never.
+We track two phases, not a version ladder. Everything is **pre-freeze**
+until the gate list below is met, at which point the guest-visible ABI
+becomes **frozen** and forward-compatibility discipline begins. Drawing
+the freeze line earlier is what this revision undoes.
 
-## v0 Implementation
+### Pre-freeze (now)
 
-v0 was intended as a minimal proof-of-concept but grew to cover the
-core execution model. The following subsystems are implemented and
-tested (unit tests + smoke tests).
+The ABI is mutable. IDs get reassigned, register conventions change,
+records get reshaped, whenever the design improves. Programs are rebuilt
+from the same tree as the host, so there is no compatibility boundary to
+protect and no versioning machinery to carry. The work is to build and
+prove the load-bearing subsystems, in breakable code, in the order that
+retires the most risk.
+
+### Frozen (later, gated)
+
+The freeze line is drawn only when all of the following are true, and
+have survived a real workload rather than existing on paper:
+
+1. **Unprivileged execution works.** The guest runs in user mode, the
+   supervisor vector table and syspage live in host-controlled memory,
+   and the S-bit transition is clean. Privileged instructions trap.
+2. **The multicore write model is proven under load.** Parallel readers
+   and single-writer-per-domain (see **Object Writes**) stay coherent
+   and perform on the target hardware.
+3. **Credit accounting is real.** Per-instruction and per-hypercall
+   charging, per-quantum preemption, and the lifetime runaway kill all
+   exist and are exercised.
+4. **The capability model is real.** dirfd-scoped access with intent
+   flags and delegation, not the two hardcoded prefixes the current
+   prototype recognizes.
+
+At the freeze, and not before, we introduce the program-versioning
+story (a single monotonic version compared at load, nothing more
+elaborate until independently-distributed binaries actually exist) and
+the append-only record discipline. Until then, none of that machinery
+is worth carrying.
+
+### Deferred past the freeze
+
+Root-bounded `..` in paths, selective-peek message channel semantics if
+we find we need them, typed hypercalls for non-obj domains (`user:`,
+`area:`), a GDB stub, multi-thread-per-task, and the
+program-distribution / symbol-versioning story. None of these block the
+freeze; all are cheaper to add after the core is stable.
+
+## Current Prototype
+
+A working prototype exists and is unit- and smoke-tested. It implements
+the execution wiring end to end but almost none of the security model.
+Treat every ID and convention here as scratch: the frozen ABI will not
+match it.
 
 ### Hypercalls implemented
 
 HC_ABORT (0), HC_TRAP (1), HC_YIELD (2), HC_SLEEP (3), HC_EXIT (4),
 HC_PRINT (5), HC_OPEN (6), HC_CLOSE (7), HC_WAIT (8), HC_MSG_POST (19).
 
-HC_WAIT replaces HC_SLEEP for guest code. It implements a
-WaitForMultipleObjects-style wait: `hc_wait(ncount, handles, timeout_ms)`.
-The CRT wraps `hc_sleep(ms)` as `hc_wait(0, NULL, ms)`. HC_SLEEP remains
-as a host-side legacy path.
+These IDs are prototype-only and collide with the intended ABI shape.
+HC_OPEN here recognizes only the literal prefixes `verb:` and `event:`.
+There is no dirfd, no capability, no blob or object domain, no filesystem.
 
-### Script objects
+### Execution model
 
-Script objects live in the obj cache under `SCRIPT_ROOTDIR "scripts"`
-(defined in `boris.h`), accessed via `obj_get()` / `obj_release()` like
-rooms under `ROOM_ROOTDIR`. The `script.c` / `script.h` wrappers
-(`script_get`, `script_release`, `script_ram_size`, `script_interface`)
-enforce a schema on top of OBJ.
+The guest currently runs in **supervisor mode**. This is a known defect,
+not a design choice: `cf_reset()` sets the S bit and `machine_start()`
+never clears it, so the guest can execute privileged instructions
+(MOVEC, move-to-SR, STOP, RTE). Nothing escapes the RAM sandbox because
+the bus callbacks bound every access, but the unprivileged-execution
+isolation layer is absent. Fixing this is gate item 1.
 
-Script object properties:
-
-| Property    | Required | Description                             |
-|-------------|----------|-----------------------------------------|
-| `elf.path`  | yes      | Path to ELF binary                      |
-| `ram.size`  | no       | RAM allocation in bytes (default 65536) |
-| `interface` | no       | Comma-separated supported interfaces    |
-
-Sample data lives in `sample/objs/scripts/` (imported into the "objs"
-LMDB domain alongside rooms).
-
-### Object reference system
-
-`objref.c` / `objref.h` provide domain-qualified reference parsing and
-hierarchical path resolution. Property values can include a domain
-prefix (`script:exits/random-portal`); without a prefix, the domain
-is inferred from context (exit properties default to `rooms`, script
-properties default to `scripts`). Paths support `../` relative
-resolution and are normalized before lookup.
+Bus callbacks currently **succeed silently on out-of-range access**:
+reads return zero, writes are dropped. The intended behavior is to raise
+an access-error exception so a stray access kills the task instead of
+running on garbage. Fixing this is part of gate item 1's work.
 
 ### Task state machine
 
@@ -124,180 +146,114 @@ INIT --> READY <--> BUSY --> DEAD
   +--------------------------------+
 ```
 
-- **INIT**: CRT runs -- zeroes .bss, opens verb/event handles via
-  HC_OPEN, calls `main()` if present. First HC_WAIT transitions to
-  READY.
+- **INIT**: CRT runs, zeroes .bss, opens verb/event handles, calls
+  `main()` if present. First HC_WAIT transitions to READY.
 - **READY**: parked, host may dispatch verbs/events.
-- **BUSY**: handler executing. May call HC_WAIT internally (e.g.,
-  sleep in a loop).
+- **BUSY**: handler executing. May call HC_WAIT internally.
 - **SLEEPING**: waiting for a timeout before returning to READY.
 - **DEAD**: exited or force-killed.
 
-Inspired by Palm OS PilotMain: events are delivered as normal function
-calls when the sandbox is in a known quiescent state (parked in
-HC_WAIT). No async interruption, no reentrancy.
+Events are delivered as normal function calls when the sandbox is in a
+known quiescent state (parked in HC_WAIT). No async interruption, no
+reentrancy. Inspired by Palm OS PilotMain.
 
 ### Unified handle system
 
 File descriptors, verbs, and events share a single `uint16_t` handle
-space. Every open handle is a `struct sandbox_file` in the task's fd
-table (256 entries). Handle types: `SF_IO`, `SF_VERB`, `SF_EVENT`.
-HC_CLOSE returns a kind enum (`KIND_IO`, `KIND_VERB`, `KIND_EVENT`) so
-the CRT can perform type-specific cleanup.
-
-Fds 0/1/2 (stdin/stdout/stderr) are opened as SF_IO at task creation.
-HC_OPEN parses domain-prefixed names (`"verb:go"`, `"event:term"`) to
-create SF_VERB/SF_EVENT entries at the next available fd. The host
-finds verbs by searching the fd table for SF_VERB entries with matching
-names -- no ELF symbol scanning, no verb table in sandbox RAM.
+space. Every open handle is a `struct machine_file` in the task's fd
+table. Handle types: MF_IO, MF_VERB, MF_EVENT. HC_CLOSE returns a kind
+enum so the CRT can perform type-specific cleanup. Fds 0/1/2 are opened
+as MF_IO at task creation.
 
 ### Verb dispatch
 
-`sandbox_task_find_verb(t, name)` searches the fd table for a matching
-SF_VERB entry. `sandbox_task_write_context(t, fd, verb, room_id,
-player_id, direction)` writes a context block at 0x0800 in guest RAM
-(big-endian, with string pointers into the block). The host sets PC to
-the handler's address and resumes execution with an instruction cap.
-
-`obj_program_dispatch_verb(obj_id, verb, player_id, direction)` is
-the external entry point, called from `do_move()` in `cmd/move.c` when
-an exit's destination has domain prefix `script:`.
-
-### Cooperative termination
-
-On room evict: if the sandbox has an `event:term` handle and is in
-READY state, the host dispatches it as a normal event with an
-instruction cap. If the handler calls HC_EXIT, clean shutdown. If it
-exceeds the cap, or `event:term` is not registered, or the sandbox is
-not READY: force-kill. Analogous to SIGTERM/SIGKILL.
-
-### Interface checking
-
-A script object declares compatibility via its `interface` property
-(e.g., `"exit"`). After the sandbox reaches READY, the host inspects
-the fd table for required SF_VERB entries. The `exit` interface
-requires `verb:go` and `verb:look`. Missing verbs produce a warning.
+The host finds verbs by searching the fd table for MF_VERB entries with
+matching names. A context block is written at a fixed guest address
+before dispatch, the host sets PC to the handler, and execution resumes
+under an instruction cap. Verb dispatch currently runs **inline on the
+command path** (`obj_program_dispatch_verb` from `do_move`). That does
+not compose with the scheduler and is temporary.
 
 ### Room lifecycle integration
 
-Machine instances are tied to the obj cache, not to boot. Callbacks
-registered via `obj_set_load_cb()` / `obj_set_evict_cb()` in
-`obj_program_init()`:
-
-- **On obj load**: if the object has a `program.continuous` property,
-  look up the program object, load the ELF, create a machine instance.
-- **On obj evict**: initiate termination sequence, free the machine.
-- **At boot with no users**: no objects loaded, no machines running.
-
-A tick timer (`iox_timer`) drives periodic execution of sleeping
-sandboxes and continuous scripts (e.g., the fountain animation).
-
-### CRT and SDK
-
-The cross-compiler SDK (`sdk/machine/`) provides:
-
-- `include/machine.h`: hypercall wrappers (`hc_yield`, `hc_wait`,
-  `hc_open`, `hc_close`, `hc_exit`, `hc_print`), `VERB_HANDLER` /
-  `EVENT_HANDLER` macros, `struct verb_context` with `VERB_CONTEXT`
-  accessor macro.
-- `lib/crt0.S`: `_start` zeroes .bss, iterates `.data.verb_regs`
-  section calling HC_OPEN for each entry, populates dispatch table,
-  calls `main()`, enters HC_WAIT dispatch loop.
-- `lib/machine.ld`: linker script collecting `.data.verb_regs` section.
-
-Examples: `anim/fountain.c` (continuous animation script),
-`exits/random-portal.c` (verb script with `go` and `look` handlers,
-declares `exit` interface).
+Machine instances are tied to the obj cache. On obj load, a
+`program.continuous` property triggers ELF load and instance creation;
+on obj evict, the termination sequence runs and the instance is freed.
+A tick timer drives sleeping and continuous scripts.
 
 ### Files
 
-Host-side:
-
-- `src/machine/machine.c`, `machine.h` -- task lifecycle, hypercalls,
-  handle system, verb dispatch, context block.
-- `src/machine/obj_program.c`, `obj_program.h` -- obj/program
-  integration, attach/detach, verb dispatch entry point, tick timer.
-- `src/machine/program.c`, `program.h` -- program object access wrappers.
-- `src/machine/objref.c`, `objref.h` -- object reference parsing and
-  path resolution.
-- `src/machine/test_machine.c` -- unit tests.
-- `src/coldfire/coldfire.c`, `coldfire.h` -- ColdFire V4e emulator.
-- `src/coldfire/elf_loader.c`, `elf_loader.h` -- ELF loader.
-
-Guest-side (sdk/machine/):
-
-- `include/machine.h` -- SDK header.
-- `lib/crt0.S` -- CRT with verb registration and dispatch loop.
-- `lib/machine.ld` -- linker script.
-- `anim/fountain.c` -- continuous script example.
-- `exits/random-portal.c` -- verb script example.
+Host-side: `src/machine/{machine,obj_program,program,objref}.c`,
+`src/coldfire/{coldfire,elf_loader}.c`. Guest SDK: `sdk/machine/`.
 
 ## Goal
 
-Embed the ColdFire V4e CPU emulator (`coldfire.{c,h}`, ~2200 LOC) as
-the script sandbox for a MUD server. Each connected
-script/area/NPC runs in its own CF VM instance, scheduled cooperatively
-by the host with credit-budget preemption.
+Embed the ColdFire V4e emulator as the script sandbox. Each connected
+script/area/NPC runs in its own CF VM instance, scheduled by the host
+across multiple cores with credit-budget preemption.
 
-Rejected alternatives: Q3VM (limited tools; cumbersome instruction indices),
-Wasm (heavyweight; validation guarantees not needed), LuaJIT (sandboxing
-weaknesses), pure Lua (no preemption).
+Rejected alternatives: Q3VM (limited tools, cumbersome instruction
+indices), Wasm (heavyweight, validation guarantees not needed), LuaJIT
+(sandboxing weaknesses), pure Lua (no preemption).
 
 ## Why ColdFire
 
-- **Tooling.** `m68k-linux-gnu-gcc` 14, binutils, gdb, newlib, libstdc++,
-  Ada (gnat), Fortran (gfortran), [FreePascal][1]. Seven GCC-frontend
-  languages have been validated producing correct bare-metal ColdFire
-  binaries (see **Guest Language Support**). The m68k backend handles
-  code generation; the practical barrier is each language's runtime
-  requirements, not the compiler.
-- **FFI ergonomics.** LINE_A opcodes (0xAxxx, ~4096 slots) trap to a host
-  hypercall handler with full register access. No i32-only marshaling.
-- **Isolation.** Per-instance `cf_cpu` + bus callbacks bound to a private
-  RAM block. Equivalent to wasm3's per-instance pattern.
-- **Preemption.** `cf_run(cpu, count)` returns after `count` instructions.
-  No timer interrupts needed.
-- **Debuggability.** GDB remote serial protocol is ~300-500 LOC bolted
-  onto coldfire.c. Live-debug a running script from a developer laptop.
+- **Tooling.** `m68k-linux-gnu-gcc`, binutils, gdb, newlib. The m68k
+  backend is mature. C is the baseline target; other GCC frontends are
+  feasible (see **Guest Language Support**) but not required to ship.
+- **FFI ergonomics.** LINE_A opcodes (0xAxxx, ~4096 slots) trap to a
+  host hypercall handler with full register access. No i32-only
+  marshaling.
+- **Isolation.** Per-instance `cf_cpu` plus bus callbacks bound to a
+  private RAM block. No shared mutable guest state between instances,
+  which is what makes the multicore scheduler cheap.
+- **Preemption.** `cf_run(cpu, count)` returns after `count`
+  instructions. No timer interrupts needed.
+- **Debuggability.** A GDB remote-serial stub is a few hundred LOC
+  bolted onto coldfire.c (deferred).
 - **Retro flavor.** Builders can write 68k assembly if they want to.
 
-Host: Raspberry Pi 5, quad-core, 3 cores idle. Interpretation overhead
-(50-200M emulated insns/sec/core) is irrelevant.
+Host: Raspberry Pi 5, quad-core. Interpretation overhead
+(50-200M emulated insns/sec/core) is comfortable, and the spare cores
+are the point: the scheduler is meant to use them.
 
 ## Trust Model
 
-Builders are semi-trusted (granted a builder-access bit). Threats are runaway
-loops, memory exhaustion, accidental sandbox escape via emulator bugs.
-Defense in depth:
+Builders are semi-trusted (granted a builder-access bit). Threats are
+runaway loops, memory exhaustion, and accidental sandbox escape via
+emulator bugs. Defense in depth:
 
-1. CF user-mode (CF_SR_S clear) traps privileged instructions.
-2. Bus callbacks reject out-of-range addresses.
-3. Credit budget caps CPU per task per quantum; `MAX_TASKS_PER_TICK`
-   bounds the tick as a whole.
-4. Per-task RAM cap (start at 64KB, tune).
-5. Run MUD as dedicated unprivileged user.
-6. seccomp profile on the MUD process -- even an emulator escape can't
-   make syscalls outside an allowlist.
-7. [AFL][2]-fuzz coldfire.c against random instruction streams before
+1. **Unprivileged guest execution.** The guest runs with CF_SR_S clear.
+   Privileged instructions trap to the host. (Not yet implemented; gate
+   item 1.)
+2. **Bus callbacks fault on out-of-range access.** An access outside
+   the task's RAM raises an access error and kills the task, rather than
+   silently reading zero. (Currently silent; part of gate item 1.)
+3. **Credit budget** caps CPU per task per quantum; a per-tick cap
+   bounds the tick as a whole; a lifetime cap kills runaways.
+4. **Per-task RAM cap** (start at 64KB, tune).
+5. **Dedicated unprivileged host user.**
+6. **seccomp profile** on the MUD process, so even an emulator escape
+   cannot make syscalls outside an allowlist.
+7. **AFL-fuzz** coldfire.c against random instruction streams before
    exposing to builders.
+
+Layers 1 and 2 are the ones the earlier draft named first but did not
+build. They are the top of the pre-freeze work list.
 
 ## Terminology
 
-- **program** (`program_t`) -- an ELF blob plus metadata. Owned by muddb or
-  content-addressable storage, thawed from storage on demand. A program is
-  inert code; you need one to create a VM state. Multiple tasks can share a
-  program; if the loader marks text RO, that RAM region can be COW-shared
-  across tasks running the same program.
+- **program** (`program_t`) -- an ELF blob plus metadata. Inert code.
+  Owned by muddb, thawed on demand. Multiple tasks can share a program;
+  read-only text can be COW-shared across tasks.
 - **vm state** (`vm_state_t`) -- CPU + registers + RAM + bus callback
-  table. One per task. May reference a program's text region via COW.
-- **task** (`task_t`) -- a running instance. Owns a `vm_state_t`, an fd
-  table, a private `tmp:` ramdisk, and references to persistent domains
-  it holds caps for. A program can be instantiated into N independent
-  tasks; they share no state beyond (optional) COW text.
+  table. One per task.
+- **task** (`task_t`) -- a running instance. Owns a vm state, an fd
+  table, a private `tmp:` ramdisk, and capabilities for the persistent
+  domains it may touch. The scheduler operates on tasks.
 
-The scheduler operates on tasks, not programs. The word "script"
-survives only as informal shorthand for "a program someone wrote for
-the MUD."
+"Script" survives only as informal shorthand for "a program someone
+wrote for the MUD."
 
 ## Per-Task State
 
@@ -306,7 +262,7 @@ typedef enum {
     TASK_RUNNABLE,
     TASK_BLOCKED,    /* waiting on message send/recv/reply */
     TASK_SLEEPING,   /* wake at wake_tick */
-    TASK_DEBUGGING,  /* gdb breakpoint */
+    TASK_DEBUGGING,  /* gdb breakpoint (deferred) */
     TASK_DEAD,
 } task_state_t;
 
@@ -318,157 +274,110 @@ typedef struct task {
     uint32_t      priority;          /* MLFQ level */
     uint64_t      credits_used;      /* lifetime */
     uint64_t      wake_tick;
-    uint32_t      blocked_on;        /* reply handle or message channel fd */
-    fd_table_t    fds;               /* caps; see Capabilities section */
+    uint32_t      blocked_on;        /* reply handle or channel fd */
+    fd_table_t    fds;               /* caps; see Capabilities */
     uint8_t      *tmp_ram;           /* tmp: ramdisk, reaped in task_free */
     uint32_t      tmp_size;
+    uint32_t      home_core;         /* scheduler affinity hint */
     struct task  *next;              /* runqueue link */
 } task_t;
 ```
 
 Per-task overhead ~65 KB (RAM dominates). 1000 tasks ~ 64 MB.
-Comfortable on RPi5.
 
 ## Hypercall ABI
 
+::: aside
+**Unstable.** The IDs, register assignments, and record layouts in this
+section will change before the freeze. They are documented to pin down
+the intended *shape*, not to be built against.
+:::
+
 Hypercalls are LINE_A opcodes (`0xAxxx`). The low 12 bits carry a flat
-enum of hypercall IDs -- no reserved ranges, no domain grouping in the
-opword. The opword for HC ID `n` is `0xA000 | n`. See **ABI Versioning**
-for how clients declare which IDs they use.
+enum of hypercall IDs. The opword for HC ID `n` is `0xA000 | n`.
 
-Return values and fd/errno results are `int16_t` throughout. File
-descriptors are non-negative; errors are negated errno values. Per-task
-fd cap is 127.
+Return values and fd/errno results are `int16_t`. File descriptors are
+non-negative; errors are negated errno values. The per-task fd table and
+its cap are a single number to be fixed with the capability work; the
+prototype's 256-entry table and the earlier draft's stated cap of 127
+must be reconciled to one value.
 
-### v1 frozen set
+### Intended set
 
-The table below is the v1 ABI freeze. Per the freeze policy in **ABI
-Versioning**, these IDs never get reassigned and their register
-conventions never change. New hypercalls are appended at higher IDs.
-Removing or changing a frozen ID requires an `abi_major` bump.
+| ID | Name              | Summary                       |
+|----|-------------------|-------------------------------|
+| 0  | HC_ABORT          | immediate task death          |
+| 1  | HC_TRAP           | debug trap                    |
+| 2  | HC_YIELD          | voluntary preemption          |
+| 3  | HC_SLEEP          | sleep for N ticks             |
+| 4  | HC_EXIT           | clean exit                    |
+| 5  | HC_PRINT          | debug output                  |
+| 6  | HC_SPAWN          | create child task             |
+| 7  | HC_OPENAT         | open fd from dirfd + path     |
+| 8  | HC_CLOSE          | close fd                      |
+| 9  | HC_READ           | read bytes (blob only)        |
+| 10 | HC_WRITE          | write bytes (blob only)       |
+| 11 | HC_READDIR        | directory listing             |
+| 12 | HC_STAT           | stat fd                       |
+| 13 | HC_UNLINK         | remove entry (ACL-gated)      |
+| 14 | HC_OBJ_PROP_GET   | get object property           |
+| 15 | HC_OBJ_PROP_PUT   | request object property write |
+| 16 | HC_OBJ_PROP_LIST  | list object properties        |
+| 17 | HC_SELECT         | wait on multiple fds          |
+| 18 | HC_MSG_SEND       | synchronous RPC send          |
+| 19 | HC_MSG_POST       | fire-and-forget message       |
+| 20 | HC_MSG_RECV       | receive on message channel    |
+| 21 | HC_MSG_REPLY      | reply to received message     |
 
-| ID | Opword | Name              | Summary                       |
-|----|--------|-------------------|-------------------------------|
-| 0  | 0xA000 | HC_ABORT          | immediate task death          |
-| 1  | 0xA001 | HC_TRAP           | debug trap                    |
-| 2  | 0xA002 | HC_YIELD          | voluntary preemption          |
-| 3  | 0xA003 | HC_SLEEP          | sleep for N ticks             |
-| 4  | 0xA004 | HC_EXIT           | clean exit                    |
-| 5  | 0xA005 | HC_PRINT          | debug output                  |
-| 6  | 0xA006 | HC_SPAWN          | create child task             |
-| 7  | 0xA007 | HC_OPENAT         | open fd from dirfd + path     |
-| 8  | 0xA008 | HC_CLOSE          | close fd                      |
-| 9  | 0xA009 | HC_READ           | read bytes (blob only)        |
-| 10 | 0xA00A | HC_WRITE          | write bytes (blob only)       |
-| 11 | 0xA00B | HC_READDIR        | directory listing             |
-| 12 | 0xA00C | HC_STAT           | stat fd                       |
-| 13 | 0xA00D | HC_UNLINK         | remove entry (ACL-gated)      |
-| 14 | 0xA00E | HC_OBJ_PROP_GET   | get object property           |
-| 15 | 0xA00F | HC_OBJ_PROP_PUT   | set object property           |
-| 16 | 0xA010 | HC_OBJ_PROP_LIST  | list object properties        |
-| 17 | 0xA011 | HC_SELECT         | wait on multiple fds          |
-| 18 | 0xA012 | HC_MSG_SEND       | synchronous RPC send          |
-| 19 | 0xA013 | HC_MSG_POST       | fire-and-forget message       |
-| 20 | 0xA014 | HC_MSG_RECV       | receive on message channel    |
-| 21 | 0xA015 | HC_MSG_REPLY      | reply to received message     |
+**One multiplexing primitive, not two.** The prototype has HC_WAIT
+(WaitForMultipleObjects shape); this table lists HC_SELECT (fd-bitmask
+shape). We ship exactly one. The choice is open, but carrying both is
+churn and only one survives to the freeze.
 
-Groups: sentinel/debug (0--1), task lifecycle (2--4), debug output (5),
-spawn (6), FS universal (7--8), blob I/O (9--10), FS metadata (11--13),
-object properties (14--16), multiplexing (17), messaging (18--21).
+**HC_ABORT at ID 0.** ID 0 = abort is a useful convention: guest
+`panic()` and unrecoverable asserts map to it, and it reads clearly in
+logs. Note the earlier rationale ("default-zeroed state dispatched as a
+hypercall triggers abort") does not hold: hypercall dispatch is only
+reached through a 0xAxxx opword, and zeroed guest memory decodes as
+0x0000 (ORI.B), not LINE_A. A wild jump into zeroed RAM faults through
+the normal exception path, not through HC_ABORT. Keep ID 0 = abort for
+the convention, not for that reason.
 
-**HC_ABORT at ID 0** is deliberate: a LINE_A opcode whose low 12 bits
-are zero means "something went catastrophically wrong." Default-zeroed
-registers dispatched as a hypercall trigger abort rather than an
-arbitrary operation. Immediate task death, no cleanup, host logs a
-fatal. Guest code uses it for `panic()` / unrecoverable asserts.
-
-**HC_TRAP at ID 1** is a debug trap. The task enters `TASK_DEBUGGING`
-and waits for an attached debugger. If none is attached (or wiz
-permission isn't granted), the host treats it as HC_ABORT. `d0`
-carries an application-supplied trap code for the debugger to read.
-Reserved for asserts, breakpoints synthesized by the guest (distinct
-from the GDB stub's `illegal`-instruction breakpoint patching), and
-similar diagnostic stops.
+**HC_TRAP at ID 1.** Debug trap. The task enters TASK_DEBUGGING and
+waits for a debugger. If none is attached, treated as HC_ABORT.
 
 ### Register convention
 
-Hypercall register assignments follow the 68k architecture's natural
-data/address split: integer and size arguments fill d0, d1, d2, d3
-in declaration order; pointer arguments fill a0, a1, a2 in
-declaration order. Every hypercall returns its result in d0. The two
-sequences are independent -- a call taking two pointers and one
-integer uses a0, a1, d0 regardless of how the arguments are ordered
-in the C prototype.
+Integer and size arguments fill d0, d1, d2, d3 in declaration order;
+pointer arguments fill a0, a1, a2 in declaration order. Every hypercall
+returns its result in d0. The two sequences are independent.
 
-This matches the register-parameter convention that
-`m68k-linux-gnu-gcc` generates with `__attribute__((regparm))`.
-Aligning with the compiler's output has three consequences:
+This matches what `m68k-linux-gnu-gcc` generates for register-parameter
+calls, so each hypercall is expressible as a plain C prototype and the
+`mud.h` header is the authoritative ABI description. **The prototype is
+normative; any register table in this doc is a derived quick-reference.**
 
-1. **Each hypercall IS a C prototype.** `HC_OPENAT` is
-   `int mud_openat(int dirfd, const char *path, int flags)`. The
-   register assignments add nothing the prototype doesn't already
-   say -- `dirfd` is `int` so it goes in d0, `path` is a pointer so
-   it goes in a0, `flags` is `int` so it goes in d1. Return in d0.
-2. **Debug wrappers are trivial.** A host-side shim for any hypercall
-   is a C function with the same prototype and a register-parameter
-   annotation. The compiler places arguments in exactly the registers
-   the guest expects.
-3. **ABI documentation is the header file.** The `mud.h` guest header
-   carries C prototypes; the register table below is a redundant
-   quick-reference. If a prototype and the table ever disagree, the
-   prototype wins.
+The earlier draft carried two register tables that disagreed (a
+type-grouped "full map" and an interleaved per-call listing). To avoid
+that, this revision keeps only the rule above and the C prototypes. When
+we need a table, it is generated from the prototypes, not hand-written
+alongside them.
 
-Caller-saved registers are d0, d1, a0, a1. Hypercalls may clobber
-these. All other registers (d2--d7, a2--a6) are callee-saved per the
-standard m68k convention. In practice, arguments passed via d2/d3/a2
-are consumed by the hypercall and should be treated as clobbered by
-the caller.
+64-bit values (reply handles) are passed by pointer, never by register
+pair. Widening a pointed-to type later changes no register conventions.
 
-64-bit values (e.g., reply handles) are passed by pointer, not by
-register pair. This avoids d0:d1 pairing awkwardness and keeps the
-upgrade path clean -- widening a pointed-to type from `uint64_t` to
-a 128-bit struct changes no register conventions (see **Reply handle
-sizing** in the Messaging section).
+### Guest-side shim
 
-#### Full register map
-
+```c
+#define MUD_HC(id)  __asm__ volatile (".short 0xA000 | " #id ::: "memory")
+static inline void mud_yield(void) { MUD_HC(HC_YIELD); }
+static inline void mud_abort(void) { MUD_HC(HC_ABORT); __builtin_unreachable(); }
 ```
-HC_ABORT(0):          (no args)                                              -> (no return)
-HC_TRAP(1):           d0=trap_code                                           -> (no return)
-HC_YIELD(2):          (no args)                                              -> (no return)
-HC_SLEEP(3):          d0=ticks                                               -> (no return)
-HC_EXIT(4):           d0=status                                              -> (no return)
-HC_PRINT(5):          d0=len, a0=str                                         -> d0=0/-errno
-HC_SPAWN(6):          d0=prog_fd, d1=cap_count, a0=cap_array                 -> d0=task_id/-errno
-HC_OPENAT(7):         d0=dirfd, d1=flags, a0=path                            -> d0=fd/-errno
-HC_CLOSE(8):          d0=fd                                                  -> d0=0/-errno
-HC_READ(9):           d0=fd, d1=count, a0=buf                                -> d0=n/-errno
-HC_WRITE(10):         d0=fd, d1=count, a0=buf                                -> d0=n/-errno
-HC_READDIR(11):       d0=fd, d1=buf_cap, a0=buf, a1=&count                   -> d0=0/-errno
-HC_STAT(12):          d0=fd, a0=stat_buf                                     -> d0=0/-errno
-HC_UNLINK(13):        d0=dirfd, a0=path                                      -> d0=0/-errno
-HC_OBJ_PROP_GET(14):  d0=fd, d1=flags, d2=buf_cap, a0=key, a1=buf, a2=&len  -> d0=0/-errno
-HC_OBJ_PROP_PUT(15):  d0=fd, d1=flags, d2=data_len, a0=key, a1=data         -> d0=0/-errno
-HC_OBJ_PROP_LIST(16): d0=fd, d1=buf_cap, a0=path, a1=buf, a2=&count         -> d0=0/-errno
-HC_SELECT(17):        d0=fd_bitmask, d1=timeout, a0=fd_array                 -> d0=index/-errno
-HC_MSG_SEND(18):      d0=target_fd, d1=msg_len, d2=reply_cap, d3=timeout,
-                      a0=msg, a1=reply_buf, a2=&reply_len                    -> d0=status/-errno
-HC_MSG_POST(19):      d0=target_fd, d1=msg_len, a0=msg                      -> d0=0/-errno
-HC_MSG_RECV(20):      d0=ch_fd, d1=buf_cap, d2=timeout,
-                      a0=buf, a1=&reply_handle, a2=&recv_len                 -> d0=0/-errno
-HC_MSG_REPLY(21):     d0=status, d1=reply_len,
-                      a0=reply_buf, a1=&reply_handle                         -> d0=0/-errno
-```
-
-HC_MSG_RECV and HC_MSG_REPLY share a1=&reply_handle by design. After
-receiving a message, the guest transitions to reply without moving
-the handle pointer between registers.
 
 ### Capability-flag model
 
 HC_OPENAT flags in `d1` express the caller's intent and become the
-capability on the returned fd. The flags are orthogonal: a 2-bit
-access-mode enum plus independent family bits.
+capability on the returned fd.
 
 ```c
 /* access mode: 2-bit enum in bits [1:0] */
@@ -479,11 +388,11 @@ access-mode enum plus independent family bits.
 #define O_RDWR       0x3
 
 /* family bits: exactly one must be set */
-#define O_BLOB       (1UL << 2)   /* 0x04 */
-#define O_OBJECT     (1UL << 3)   /* 0x08 */
-#define O_DIRECTORY  (1UL << 4)   /* 0x10 */
-#define O_PROGRAM    (1UL << 5)   /* 0x20 */
-#define O_MSGCHAN    (1UL << 6)   /* 0x40 */
+#define O_BLOB       (1UL << 2)
+#define O_OBJECT     (1UL << 3)
+#define O_DIRECTORY  (1UL << 4)
+#define O_PROGRAM    (1UL << 5)
+#define O_MSGCHAN    (1UL << 6)
 
 /* blob-only modifiers (rejected unless O_BLOB is set) */
 #define O_BLOB_CREAT  (1UL << 8)
@@ -492,339 +401,223 @@ access-mode enum plus independent family bits.
 #define O_BLOB_APPEND (1UL << 11)
 ```
 
-`O_ACC_NONE` is only valid with `O_PROGRAM` -- it produces a
-spawn-only capability (the task can launch the program but cannot read
-its bytes). Any other family with `O_ACC_NONE` returns `-EINVAL`.
-
-`O_DIRECTORY` -- required to obtain a dirfd for use with HC_OPENAT,
-HC_READDIR, HC_UNLINK. Without it, resolving to a prefix returns
-`-ENOTDIR`; with it, resolving to a leaf returns `-EISDIR`.
-
-`O_PROGRAM` -- required to obtain an fd that HC_SPAWN will accept.
-Capability equivalent of the Unix x-bit, expressed at open-intent
-time. Host validates the `NT_MUD_ABI` note at open time, so
-unloadable programs fail fast.
-
-`O_OBJECT` -- enables the HC_OBJ_PROP_* hypercalls on the returned
-fd. Only valid for fds opened from typed obj-domain dirfds.
-
-`O_MSGCHAN` -- opens a message channel for HC_MSG_RECV. See
-**Messaging** below.
-
-(Open: whether blob domains carry an on-disk x-bit that `O_PROGRAM`
-checks against, or whether `O_PROGRAM` only validates the ELF header
-and ABI note at open time. Either works; decision deferred.)
+`O_ACC_NONE` is only valid with `O_PROGRAM` (spawn-only capability).
+`O_DIRECTORY` is required to obtain a dirfd. `O_PROGRAM` is required to
+obtain an fd HC_SPAWN will accept. `O_OBJECT` enables the
+HC_OBJ_PROP_* hypercalls. `O_MSGCHAN` opens a message channel.
 
 ### HC_OPENAT path resolution
 
-```
-HC_OPENAT: d0=dirfd, a0=path, d1=flags -> d0=fd or -errno
-```
+Path is relative to the dirfd's bound prefix.
 
-Path is relative to the dirfd's bound prefix. Resolution rules:
-
-- NULL, empty string, `"."`, and a leading `"/"` all mean root of
-  the dirfd's prefix scope.
-- `".."` is rejected (`-EINVAL`). Dirfds are prefix-scoped; path
-  traversal is the usual way these APIs leak authority. A task wanting
-  a parent view must be given a dirfd to the parent explicitly.
+- NULL, empty, `"."`, and a leading `"/"` mean root of the dirfd's scope.
+- `".."` is rejected (`-EINVAL`). Dirfds are prefix-scoped. A task
+  wanting a parent view must be granted a dirfd to the parent.
 - `"//"` collapses to `"/"`.
 
-### Property path syntax
-
-Object properties use dot-separated paths. HC_OBJ_PROP_GET,
-HC_OBJ_PROP_PUT, and HC_OBJ_PROP_LIST accept a property path in the
-key argument. Sub-objects can also be opened as handles via HC_OPENAT
-with O_OBJECT on an existing object fd.
-
-```
-path       = component ("." component)*
-component  = unquoted | quoted
-unquoted   = [^."\\[:cntrl:]]+
-quoted     = '"' (escape | normal)* '"'
-escape     = '\"' | '\\'
-normal     = [^"\\]
-```
-
-Examples: `name`, `stats.hp`, `"key with spaces"."nested.key"`.
-
-### Blob vs. typed
-
-HC_READ / HC_WRITE apply only to blob-domain fds (`tmp:`, `bin:`).
-HC_OBJ_PROP_GET / HC_OBJ_PROP_PUT / HC_OBJ_PROP_LIST apply only to
-object-domain fds (fds opened with O_OBJECT from an obj: dirfd).
-HC_READDIR works on both blob directories and object fds. On blob
-directories it lists files; on object fds it lists **contents**
-(sub-objects within the object). HC_OBJ_PROP_LIST, by contrast,
-enumerates the properties of an object at the current level. The
-distinction -- children vs properties -- is part of the v0
-proof-of-concept; the final semantics may shift in v2. HC_STAT and
-HC_UNLINK work on both blob and object fds but HC_UNLINK is ACL-gated
-on typed domains.
+Any attempt to make the colon-prefix parser "smart" (walking paths,
+inferring a default drive, normalizing `..`) reintroduces ambient
+authority and should be stopped at review. The colon syntax is UI
+convenience; the dirfd is the authority.
 
 ### Object property hypercalls
 
 ```
-HC_OBJ_PROP_GET:  d0=fd, a0=key, d1=flags, a1=buf, d2=buf_cap,
-                  a2=out_len_ptr -> d0=0 or -errno
-HC_OBJ_PROP_PUT:  d0=fd, a0=key, d1=flags, a1=data, d2=data_len
-                  -> d0=0 or -errno
-HC_OBJ_PROP_LIST: d0=fd, a0=path_or_null, a1=buf, d1=buf_cap,
-                  a2=out_count_ptr -> d0=0 or -errno
+HC_OBJ_PROP_GET:  read a single property value into a buffer.
+                  -ERANGE + required length if buffer too small.
+HC_OBJ_PROP_PUT:  request a property write (see Object Writes).
+HC_OBJ_PROP_LIST: enumerate child keys under a path.
 ```
 
-HC_OBJ_PROP_GET reads a single property value into `buf`. If the
-buffer is too small, returns `-ERANGE` and writes the required length
-to `*out_len_ptr` so the caller can retry with a larger buffer.
-`MUD_OPROP_LEN_ONLY` flag in `d1` skips the copy and only writes the
-length -- useful for probing size before allocating.
+Property paths are dot-separated with optional quoting:
+`name`, `stats.hp`, `"key with spaces"."nested.key"`.
 
-HC_OBJ_PROP_PUT writes a property value. Data format is the
-property's native serialization (JSON string for strings, binary for
-binary properties).
+## Object Writes
 
-HC_OBJ_PROP_LIST enumerates child keys under `path_or_null` (NULL
-means root). Returns NUL-separated key names in `buf` and writes the
-count to `*out_count_ptr`. Same `-ERANGE` semantics as
-HC_OBJ_PROP_GET.
+This is the section the multicore target most changes, and it replaces
+the earlier "implicit transactions, commit on yield" model.
 
-Object access uses implicit transactions: the first write in a
-quantum opens a write transaction, which commits when the task
-yields, sleeps, or is preempted. No explicit begin/commit hypercalls.
+The persistent store is LMDB. LMDB permits **exactly one write
+transaction at a time per environment**, with any number of concurrent
+MVCC readers. On a multicore scheduler, an implicit "first write opens a
+transaction that commits on preemption" model does not work: two tasks
+on two cores cannot both hold an open write transaction, and holding one
+across a scheduling quantum serializes every writing task behind one
+lock for the length of its quantum. The scheduler's parallelism would
+evaporate for exactly the workloads that write.
 
-### Messaging (QNX-style synchronous)
+The model instead is **single writer per domain**:
 
-Message passing follows the QNX MsgSend/MsgReceive/MsgReply pattern:
-synchronous RPC with reply handles.
+- **Reads are direct and parallel.** Guest tasks read object properties
+  through short-lived MVCC read transactions. LMDB parallelizes these
+  across cores with no contention. HC_OBJ_PROP_GET and HC_OBJ_PROP_LIST
+  resolve this way.
+- **Writes go through the domain's owner task.** Each writable domain
+  (`area:`, `world:`, and so on) has one trusted service task that holds
+  the write transaction for that domain. A guest that wants to mutate a
+  property sends a message to that owner. HC_OBJ_PROP_PUT is, for
+  non-private domains, sugar over a message send to the owner: the guest
+  expresses a write, the libc turns it into an RPC, the owner validates,
+  applies, and replies.
+- **Private domains are exempt.** `tmp:` is per-task RAM with no sharing
+  and no transaction. A task's own scratch storage needs none of this.
 
-```
-HC_MSG_SEND:  d0=target_fd, a0=msg, d1=msg_len, a1=reply_buf,
-              d2=reply_cap, a2=&reply_len, d3=timeout_ticks
-              -> d0=status or -errno
-HC_MSG_POST:  d0=target_fd, a0=msg, d1=msg_len
-              -> d0=0 or -errno
-HC_MSG_RECV:  d0=ch_fd, a0=buf, d1=buf_cap, a1=&reply_handle,
-              a2=&recv_len, d2=timeout_ticks
-              -> d0=0 or -errno
-HC_MSG_REPLY: d0=status, a0=reply_buf, d1=reply_len,
-              a1=&reply_handle -> d0=0 or -errno
-```
+This makes messaging load-bearing rather than optional, and it is why
+routing typed-domain access through service tasks (which the earlier
+draft treated as a stopgap for "domains without direct hypercalls") is
+actually the concurrency architecture. One owner per domain is a clean
+serialization point that matches LMDB's single-writer constraint instead
+of fighting it.
 
-**HC_MSG_SEND** is a blocking RPC. The caller blocks until the
-receiver calls HC_MSG_REPLY or the timeout expires. The reply lands
-in `reply_buf`. The returned `status` is the value the receiver
-passed to HC_MSG_REPLY's `d0`.
-
-**HC_MSG_POST** is fire-and-forget. The message is queued on the
-target's message channel; the sender does not block. No reply
-expected.
-
-**HC_MSG_RECV** blocks on a message channel fd (opened with
-O_MSGCHAN) until a message arrives or the timeout expires. On return,
-`*reply_handle` is a 64-bit opaque token the receiver must pass to
-HC_MSG_REPLY. For HC_MSG_POST messages, `*reply_handle` is zero (no
-reply expected). HC_MSG_RECV and HC_MSG_REPLY share a1=&reply_handle
--- after receiving, the guest transitions to reply without moving the
-handle pointer between registers.
-
-**HC_MSG_REPLY** sends a reply to a pending HC_MSG_SEND caller,
-unblocking it. The reply handle is consumed on use.
-
-#### Reply handle table
-
-Reply handles are 64-bit random tokens stored in a global
-(system-wide) hash table, not in per-task state. Three reasons for a
-global table:
-
-1. **Delegatable.** A receiver can pass the reply handle to a helper
-   task via messaging; the helper replies on behalf of the original
-   receiver. Per-task tables can't express this without a forwarding
-   layer.
-2. **Arbitrary routing.** The reply travels back through whichever
-   task holds the handle, not necessarily the one that received the
-   message. This lets service tasks fan out work.
-3. **Simpler timeout.** A single reaper scans one table (30--300s
-   configurable timeout) and unblocks senders with `-ETIMEDOUT`.
-   Per-task tables need per-task reapers or a cross-task sweep.
-
-#### Reply handle sizing
-
-v0 and v1 use 64-bit handles. For sandboxed builders with
-credit-limited guesses, 64 bits of randomness is sufficient -- an
-attacker running at full credit budget cannot brute-force a handle
-before the reaper expires it.
-
-The ABI is designed so upgrading to 128-bit handles requires only a
-header change, recompile, and `abi_minor` bump. Handles are always
-passed by pointer (a1=&reply_handle), never in a register pair, so
-widening the pointed-to type from `uint64_t` to a 128-bit struct
-changes no register conventions. Programs built against the 64-bit
-header continue to work until they encounter a handle that doesn't
-fit, at which point the version check catches the mismatch.
-
-**Example: globalchat SAY.** A player's task sends
-`HC_MSG_SEND(globalchat_fd, "SAY Hello", 9, reply_buf, ...)`. The
-globalchat service receives via HC_MSG_RECV, broadcasts the text to
-all subscribers, and replies with a status code via HC_MSG_REPLY.
-
-**Example: objmover transfer.** An NPC task sends
-`HC_MSG_SEND(objmover_fd, transfer_request, len, ...)`. The objmover
-service validates, moves the object between rooms, and replies with
-success/failure.
-
-### HC_SELECT
-
-```
-HC_SELECT: d0=fd_bitmask (32 bits), a0=32-entry int16_t array,
-           d1=timeout_ticks -> d0=index of ready fd or -errno
-```
-
-Waits for any of the specified fds to become ready. The 32-bit
-bitmask in `d0` selects which entries in the `int16_t` array are
-active. Entry `i` is checked if bit `i` of `d0` is set. Returns the
-index of the first ready fd, or `-ETIMEDOUT`.
-
-This covers the "wait on message channel OR timer OR multiple services"
-pattern without polling. There is no edge-triggered mode -- a ready
-fd stays ready until consumed.
-
-### Syspage, not hypercalls
-
-Tick counter, task id, argv, and other introspective state live in
-the **syspage** and are read as plain memory. There is no
-`HC_GET_TICK`.
-
-### Guest-side shim
-
-```c
-#define MUD_HC(id)  __asm__ volatile (".short 0xA000 | " #id ::: "memory")
-static inline void mud_yield(void) { MUD_HC(HC_YIELD); }
-static inline void mud_abort(void) { MUD_HC(HC_ABORT); __builtin_unreachable(); }
-```
+Write visibility and atomicity are defined by the owner: a write is
+visible to other tasks once the owner commits, and the owner batches or
+serializes as it sees fit. Guests do not observe partial writes and do
+not depend on commit-on-yield timing.
 
 ## Scheduler
 
-Single-threaded scheduler on one MUD core. Other 2-3 RPi5 cores remain
-free for MUD I/O, persistence, etc. (Multi-core scheduler is a v2
-feature -- keep v1 simple.)
+Multicore from the start. Per-core runqueues with work stealing across
+the MUD's worker cores. A task has a home-core affinity hint but may be
+stolen. Because task guest state is per-instance and unshared, a task
+can run on any core without guest-visible effect; only host-side shared
+structures (the reply-handle table, the sleep structure, per-domain
+owners) need synchronization, and those are off the per-instruction hot
+path.
 
 ### Credits: the unit of CPU accounting
 
-A **credit** is an abstract unit of work charged to a task. One cheap
-CF instruction costs 1 credit; a hypercall carries a larger weight
-from a `credit_cost[hc_id]` table. The weight approximates "how much
-does this actually cost the server to service," not just instruction
-count.
+A **credit** is an abstract unit of work charged to a task. One cheap CF
+instruction costs 1 credit; a hypercall carries a larger weight from a
+host-side `credit_cost[hc_id]` table. The weight approximates "how much
+does this cost the server to service."
 
-The `credit_cost[]` table lives host-side, loaded from configuration
-(e.g., `boris.cfg`), and is explicitly *not* part of the ABI -- weights
-can change across host versions without affecting program
-compatibility. Programs can't inspect or depend on specific weights;
-they only know that expensive calls cost more than cheap ones.
+The `credit_cost[]` table lives host-side, loaded from configuration,
+and is explicitly not part of the ABI. Programs cannot inspect or depend
+on specific weights.
 
-Charging happens in two places. `cf_run` increments a credit counter
-by 1 per plain CF instruction executed. The hypercall dispatch handler
-adds `credit_cost[hc_id]` to the same counter before returning to
-`cf_run`. The scheduler reads the accumulated total on each quantum
-return (`rc.spent` in the pseudocode below -- raw cycles plus hypercall
-weights).
+Charging happens in two places. `cf_run` increments the credit counter
+by 1 per plain CF instruction. The hypercall dispatch handler adds
+`credit_cost[hc_id]` before returning. Three thresholds use the same
+unit:
 
-Three thresholds use the same unit:
-
-- **`CREDIT_BUDGET`** -- credits per quantum before the scheduler
-  preempts the task. Preemption is not a kill; the task goes back on
-  the runqueue.
-- **`credits_used`** -- lifetime counter in `task_t`. Advances every
-  quantum by the credits spent that quantum.
+- **`CREDIT_BUDGET`** -- credits per quantum before preemption.
+  Preemption returns the task to a runqueue; it is not a kill.
+- **`credits_used`** -- lifetime counter in `task_t`.
 - **`CREDIT_LIMIT_TOTAL`** -- lifetime cap. Crossing it kills the task.
-  The runaway-loop backstop.
+  The runaway backstop.
 
-Using a weighted unit rather than raw instruction count means a task
-that spams expensive hypercalls pays in proportion to the work it
-creates for the host, not just the bytes of guest code it executes.
-
-::: aside
-Erlang/BEAM uses the same mechanism under the name "reductions" and
-has run production telecom switches on it for decades. We borrow the
-pattern and define credits as our own unit, free of the BEAM-specific
-connotations.
-:::
+Note the current prototype implements none of this: `cf_cpu.cycles` is
+incremented and read nowhere, and the tick loop runs a flat instruction
+count per task with no budget carried across ticks. Credits are gate
+item 3.
 
 ```
-sched_tick():
-    while runqueue not empty and tick_budget > 0:
-        t = dequeue runqueue
+sched_tick(core):
+    while local_runqueue not empty and tick_budget > 0:
+        t = dequeue local_runqueue (or steal from a busy core)
         rc = cf_run(&t->vm.cpu, CREDIT_BUDGET)
         t->credits_used += rc.spent
         if t->vm.cpu.fault: kill(t); continue
         if t->credits_used >= CREDIT_LIMIT_TOTAL: kill(t); continue
         switch t->state:
-            RUNNABLE:   enqueue runqueue (round-robin)
-            SLEEPING:   insert sleep_heap by wake_tick
+            RUNNABLE:   enqueue (round-robin)
+            SLEEPING:   insert into sleep structure by wake_tick
             BLOCKED:    leave on message/reply waitlist
             DEAD:       task_free(t)
-    drain sleep_heap entries with wake_tick <= now into runqueue
+    drain sleep entries with wake_tick <= now into runqueues
 ```
 
-Constants (start values, measure and tune):
+Start values (measure and tune): `CREDIT_BUDGET` = 10000,
+per-tick task cap = 256, `CREDIT_LIMIT_TOTAL` = 1<<30.
 
-- `CREDIT_BUDGET` = 10000 credits/quantum
-- `MAX_TASKS_PER_TICK` = 256
-- `CREDIT_LIMIT_TOTAL` = 1<<30 credits (kill runaways)
+## Messaging (synchronous send/receive/reply)
 
-Hypercalls return a status code from the dispatch handler indicating
-what state to put the task into (yield -> runnable, sleep -> sleeping,
-msg_recv/msg_send -> blocked, exit -> dead).
+The send/receive/reply shape is inspired by microkernel message passing,
+but the implementation is our own. Do not read the names below as any
+particular kernel's semantics.
+
+```
+HC_MSG_SEND:  blocking RPC. Caller blocks until the receiver replies or
+              the timeout expires. Reply lands in the caller's buffer.
+HC_MSG_POST:  fire-and-forget. Queued on the target channel; no reply.
+HC_MSG_RECV:  block on a message channel until a message arrives.
+HC_MSG_REPLY: reply to a pending sender, unblocking it.
+```
+
+Message sends may optionally carry an fd in the payload, SCM_RIGHTS
+style: the sender's fd is resolved at send time and the receiver gets a
+new fd in its own table. Revocation is close. A builder can write a
+service task that accepts a cap to a caller's `local:`, works on it, and
+the caller revokes by closing, with no ambient trust between them.
+
+### Reply handles
+
+A reply handle is a token the receiver passes to HC_MSG_REPLY to unblock
+the original sender. Handles are 64-bit random tokens in a system-wide
+hash table, not per-task state. Two properties drive this:
+
+1. **Concurrency-safe.** On a multicore host, sender and receiver may
+   run on different cores. A shared table with proper synchronization is
+   the handoff point; a bare task pointer is not safe to pass around.
+2. **Delegatable and unforgeable.** A receiver can hand the reply handle
+   to a helper task, which replies on the original receiver's behalf.
+   Because the handle travels through message payloads as a plain value,
+   it is a bearer token: it must be unguessable, or a task could forge a
+   reply to a transaction it never received and unblock an arbitrary
+   sender with a chosen status. 64 bits of randomness, against a
+   credit-limited guesser and a reaper that expires handles, is
+   sufficient. The randomization is justified by delegation, not by core
+   count.
+
+A single reaper scans the table (30-300s configurable) and unblocks
+timed-out senders with `-ETIMEDOUT`.
+
+Open question: whether reply delegation is needed at freeze time at all.
+If it is not, the bearer-token requirement goes away and handles can be
+validated table slots instead of random tokens. Decide this with the
+messaging work rather than assuming the more general design.
 
 ## Capabilities and Filesystem
 
-The VM has no ambient `open()`. There is no root filesystem, no `cwd`,
-no resolver that walks from `/`. All access goes through typed
-hypercalls that take a dirfd, and a task can only name a dirfd that
-appears in its fd table.
+The VM has no ambient `open()`. No root filesystem, no `cwd`, no resolver
+that walks from `/`. All access goes through typed hypercalls that take a
+dirfd, and a task can only name a dirfd in its fd table.
 
-At task creation the host populates the fd table with a set of
-**initial capabilities** -- one dirfd per domain the task is permitted
-to touch. That fd table is the entire security boundary. If a dirfd
-wasn't granted, the domain is unreachable; there is no side channel
-through which a task can manufacture one.
+At task creation the host populates the fd table with a set of initial
+capabilities, one dirfd per domain the task may touch. That fd table is
+the entire security boundary.
 
 ### Typed domains vs blob domains
 
-muddb domains are typed interfaces, not generic filesystems. Each
-domain speaks a specific record type via the interface in
-`src/<domain>/<domain>.h`: `user:` returns user records, `obj:` returns
-JSON objects, and so on. Only two domains are byte-level blob stores:
+muddb domains are typed interfaces, not generic filesystems. Two domains
+are byte-level blob stores:
 
-- `tmp:` -- RAM, per-task.
-- `bin:` -- muddb-backed persistent blob store for programs, source,
-  and build artifacts. The compromise that lets `fread`/`fwrite` exist:
-  not every domain can back it, but `bin:` can.
+- `tmp:` -- RAM, per-task, private.
+- `bin:` -- muddb-backed persistent blob store for programs, source, and
+  build artifacts. The one place `fread`/`fwrite` semantics exist.
 
-A dirfd carries a *domain type tag* along with the domain handle and
-key prefix. The blob hypercalls (HC_READ, HC_WRITE) only accept
-blob-domain fds; the host returns `-EINVAL` otherwise. Object domains
-(`obj:`) use the HC_OBJ_PROP_* hypercalls on fds opened with
-O_OBJECT. Other typed domains (`user:`, `area:`, etc.) have no
-guest-reachable hypercalls in v1 -- scripts reach those interfaces
-via messaging to trusted service tasks (see **Messaging** in the
-Hypercall ABI section).
+A dirfd carries a domain type tag. Blob hypercalls (HC_READ, HC_WRITE)
+accept only blob-domain fds. Object domains use HC_OBJ_PROP_* on
+O_OBJECT fds. Other typed domains are reached through messaging to their
+owner tasks.
 
-### Drive prefixes are a UI convenience; dirfds are the capability
+### Standard domains
 
-Guest code refers to domains by colon-prefixed name: `local:quests/dragon`,
-`tmp:scratch.log`, `bin:npc/guard.prg`. The guest libc (`mud.h`) parses
-the prefix, looks it up in the env block, and issues the appropriate
-hypercall for that domain. The colon syntax is ergonomic for builders;
-it carries no authority. Any attempt to "make the parser smart" --
-walking paths, inferring a default drive, normalizing `..` -- is
-reintroducing ambient authority and should be stopped at review.
+| Prefix     | Type    | Lifetime           | Backing          | Notes                                    |
+|------------|---------|--------------------|------------------|------------------------------------------|
+| `tmp:`     | blob    | task               | RAM              | Private per-task. Reaped on exit.        |
+| `bin:`     | blob    | persistent         | muddb            | Programs, source, build artifacts.       |
+| `obj:`     | object  | persistent         | muddb            | Read direct; write via owner.            |
+| `session:` | typed   | user session       | muddb (volatile) | Shared across tasks in the session.      |
+| `local:`   | typed   | owner (persistent) | muddb            | Per-player persistent storage.           |
+| `area:`    | typed   | persistent         | muddb            | The task's home zone. Usually RO.        |
+| `world:`   | typed   | persistent         | muddb            | Shared world state. Privileged tasks.    |
+| `service:` | msgchan | persistent         | host             | Well-known channels (globalchat, etc.).  |
 
 ### Capability discovery via env block
 
 The syspage contains an env block (NUL-separated `KEY=value` pairs,
-double-NUL terminated) that maps well-known names to fd numbers.
-Discovery follows a getenv-style API:
+double-NUL terminated) that maps well-known names to fd numbers:
 
 ```
 DIR_tmp=0
@@ -834,384 +627,173 @@ MSGCHAN_self=7
 PROG_guard=9
 ```
 
-Prefixes encode the family: `DIR_` for directories, `OBJ_` for
-object handles, `MSGCHAN_` for message channels, `PROG_` for
-program fds.
-The guest libc provides `mud_getenv(key)` to parse the env block.
-This replaces the earlier `cap_entry[]` struct -- the env block is
-just bytes in the syspage, no structured record to version.
-
-### Standard domains
-
-| Prefix     | Type    | Lifetime           | Backing          | Notes                                       |
-|------------|---------|--------------------| -----------------|---------------------------------------------|
-| `tmp:`     | blob    | task               | RAM              | Private per-task. Reaped on task exit.       |
-| `bin:`     | blob    | persistent         | muddb            | Programs, source, build artifacts.           |
-| `obj:`     | object  | persistent         | muddb            | Object properties via HC_OBJ_PROP_*.         |
-| `session:` | (typed) | user session       | muddb (volatile) | Shared across tasks in the same session.     |
-| `local:`   | (typed) | owner (persistent) | muddb            | Per-player persistent storage.               |
-| `area:`    | (typed) | persistent         | muddb            | The task's home zone. Usually RO.            |
-| `world:`   | (typed) | persistent         | muddb            | Shared world state. Privileged tasks only.   |
-| `service:` | msgchan | persistent         | host             | Well-known message channels (globalchat, etc.). |
-
-Two tasks spawned from the same program by the same user in the same
-session each get a private `tmp:` and a shared `session:`. `tmp:`
-isolation is absolute -- there is no hypercall by which one task can
-name another task's `tmp:`.
-
-### muddb domain resolution
-
-A dirfd binds a domain handle plus a key prefix.
-`HC_OPENAT(dirfd, "quests/dragon", flags)` on a blob dirfd resolves
-to the key `<prefix>quests/dragon` within the domain. `HC_READDIR`
-is a cursor scan over the prefix. `..` is rejected at the host --
-dirfds are prefix-scoped, and path traversal is the usual way these
-APIs leak authority. A task wanting a parent view must be given a
-dirfd to the parent explicitly.
-
-### `tmp:` implementation
-
-A small heap attached to `task_t`, mapped into a fixed region of guest
-RAM. The guest linker script exposes `_tmp_begin` and `_tmp_end`
-symbols over that region so both the guest libc's `tmp:` driver and
-external tooling (ptrace, the gdb stub) can locate it without host
-cooperation. Classic, easy, inspectable.
-
-Freed in `task_free()`. No persistence plumbing until the task-snapshot
-design lands, at which point `tmp:` follows whatever policy tasks follow.
+`DIR_` for directories, `OBJ_` for object handles, `MSGCHAN_` for
+channels, `PROG_` for program fds. The guest libc provides
+`mud_getenv(key)`. The env block is just bytes in the syspage, no
+structured record to version.
 
 ### Capability delegation
 
-HC_SPAWN takes a program fd (opened from `bin:` or any other blob
-dirfd that holds a valid `.prg`) plus a list of `(dirfd, flags)` pairs
-the parent grants to the child. The host validates every dirfd against
-the parent's fd table, clamps flags (a child never gets more
-permission than the parent), and installs them as the child's initial
-caps. A parent holding `local:` RW can give its child `local:` RO, or
-can open a subdirectory dirfd and hand that over instead -- narrowing
-by attenuation.
+HC_SPAWN takes a program fd plus a list of `(dirfd, flags)` pairs the
+parent grants the child. The host validates every dirfd against the
+parent's fd table, clamps flags (a child never gets more than the
+parent), and installs them as the child's initial caps. Narrowing by
+attenuation: a parent holding `local:` RW can hand the child `local:` RO
+or a subdirectory dirfd.
 
-Message sends (HC_MSG_SEND, HC_MSG_REPLY) may optionally carry an fd
-in the message payload in the same shape as `SCM_RIGHTS`: the
-sender's fd is resolved at send time, the receiver gets a new fd in
-its own table on receive. Revocation = close. This is where the
-capability model earns its keep: a builder can write a service task
-that accepts a cap to a caller's `local:`, works on it, and the
-caller revokes by closing -- without any ambient trust between them.
+## Snapshot / Restore
 
-### Snapshot interaction
+The earlier draft claimed the snapshot is `memcpy(cf_cpu) + memcpy(RAM)`.
+That is wrong, and correcting it is why snapshotting is deferred until
+the architecture settles rather than specified now.
 
-A guest-visible fd is an integer; the host-side cap table maps it to
-`(domain handle, prefix, type, flags)`. On restore, the host
-re-resolves each cap by name. Domains that still exist return with
-the same fd; domains that were deleted mid-hibernation (e.g., the
-owner of a `local:` was removed) come back as a closed fd that returns
-`-EBADF` on use. Guests handle this the same way they handle any
-other revocation.
+Task state is spread across several places, only two of which are the
+CPU and guest RAM:
 
-## ABI Versioning
+- **CPU registers** -- in `cf_cpu`, but that struct also holds host
+  function pointers (`read8`, `hypercall`, `bus_ctx`, `hypercall_ctx`)
+  that are meaningless after a reload and must be rebuilt, not restored.
+- **Guest RAM** -- the RAM block, straightforward to serialize.
+- **fd table** -- `struct machine_file` entries, host-side, holding
+  types, strdup'd verb names, and host callback pointers. Not in guest
+  RAM.
+- **Capability table** -- the `(domain handle, prefix, type, flags)`
+  backing each guest fd integer. Host-side. On restore, re-resolved by
+  name: domains that still exist return the same fd, deleted domains
+  return a closed fd that yields `-EBADF` on use.
+- **tmp ramdisk** -- per-task heap, host-side, freed in `task_free`.
+- **In-flight messaging** -- a task blocked in HC_MSG_SEND is waiting on
+  a reply handle in the system-wide table, not on its own state. On
+  restore, stale handles are expired and the sender is unblocked with
+  `-EINTR`; the sender must retry.
 
-Every `.prg` carries a PT_NOTE of type `NT_MUD_ABI` with the following
-shape:
-
-```c
-struct mud_abi_note {
-    uint16_t abi_major;      /* breaking changes */
-    uint16_t abi_minor;      /* additive changes */
-    uint16_t abi_patch;      /* doc/clarification only */
-    uint16_t base_byte;      /* bitmap offset in bytes into the global HC space */
-    uint16_t n_bytes;        /* bitmap length in bytes */
-    uint8_t  bitmap[];       /* zero-padded up to a 4-byte boundary */
-};
-```
-
-`base_byte` and `n_bytes` describe a byte-aligned window into the
-global flat HC-ID space. A program using only high-numbered hypercalls
-can start its window well into the space: `base_byte = 40, n_bytes = 6`
-means "bits represent HC IDs 320..367, nothing below." Host
-compatibility check:
-
-```c
-for (i = 0; i < prog->n_bytes; i++) {
-    size_t host_idx = prog->base_byte + i;
-    uint8_t host_byte = (host_idx < host_n_bytes) ? host_bitmap[host_idx] : 0;
-    if ((host_byte & prog->bitmap[i]) != prog->bitmap[i]) return FAIL;
-}
-```
-
-Bitmap storage is zero-padded up to a 4-byte boundary so the loop can
-be unrolled into `uint32_t` compares later if profiling justifies it
-(or a Duff's device). Byte-aligned `base_byte` and `n_bytes` keep the
-check shift-free; the 0-7 bit waste is negligible.
-
-**Freeze policy.** Once shipped:
-
-- An HC ID never gets reassigned.
-- An HC's register convention never changes.
-- Structured records (stat, dirent) are append-only in existing
-  layouts; new fields go on the end, old offsets never move.
-- Breaking any of the above requires an `abi_major` bump.
-
-`abi_major` mismatch = hard refusal at load. Bitmap-superset pass +
-`abi_major` match = accepted even across `abi_minor`/`abi_patch`
-differences.
+A real snapshot serializes all of the above and rebuilds the host-side
+pointers on restore. The syspage is recreated at its fixed address with
+the layout the guest was built against, so guest-held pointers into
+argv/environ stay valid. This is genuinely useful (a quest script
+surviving a reboot is something Wasm cannot easily match, since its
+runtime-internal state is not part of the spec), but it is not a memcpy,
+and it is not worth building until the fd table, cap table, and tmp
+policy are stable.
 
 ## Syspage
 
-Read-only page at fixed guest address `0x00001000`, mapped by the host
-bus callbacks as readable but not writable by the VM. Distinct region
-from task RAM and from `tmp:`. The name follows QNX's System Page
-conventions -- a kernel-maintained shared page with live data and
-fast-path helpers.
+Read-only page at a fixed guest address, mapped readable but not
+writable by the VM. Distinct from task RAM and from `tmp:`.
 
 ### Layout
 
 ```
-0x00001000  syspage_header  { layout_major, layout_minor, size }
-0x00001010  live data       task_id, owner_id, session_id,
-                            current_tick, argc, argv_ptr, ulimits,
-                            env_block_ptr, env_block_len
-0x00001???  env block       NUL-separated KEY=value pairs (double-NUL terminated)
-0x00001???  text area       versioned helper code
+syspage_header  { layout_major, layout_minor, size }
+live data       task_id, owner_id, session_id, current_tick,
+                argc, argv_ptr, ulimits, env_block_ptr, env_block_len
+env block       NUL-separated KEY=value pairs (double-NUL terminated)
 ```
 
-Header carries `{layout_major, layout_minor, size}`. Guest crt0 checks
-these at task entry and refuses to run if the major is wrong.
-Append-only discipline within a major -- old offsets never move.
+Host updates live data in place; the guest reads it as plain loads. No
+hypercall is needed to ask the tick. `current_tick` is a single global
+monotonic counter (not per-core), so a plain guest load of it is always
+meaningful under the multicore scheduler.
 
-### Live data
-
-Host updates these in place; guest reads them as plain loads. No
-hypercall is needed to ask what tick it is.
-
-- `task_id`, `owner_id`, `session_id`
-- `current_tick` -- incremented by the scheduler
-- `argc`, `argv_ptr` -- pointers into syspage string table
-- ulimits -- RAM cap, credit budget, etc.
-- `env_block_ptr`, `env_block_len` -- pointer and length of the env
-  block within the syspage. The env block is NUL-separated
-  `KEY=value` pairs, double-NUL terminated (see **Capability
-  discovery via env block** above).
-
-`HC_GET_TICK` is gone. The tick is `*(uint64_t *)0x00001018` (or
-wherever the layout puts it).
-
-### Text area
-
-Small helpers the host compiles per-build and ships as part of the
-syspage. Exported as versioned symbols using an ELF-symbol-versioning
-scheme (see **Loader** below).
-
-Example helpers:
-
-- `mud_domain_parse(path, &fd_out, &tail_out)` -- walks a
-  `"local:foo/bar"` string, looks up the matching fd in the env block,
-  and returns the fd plus the tail path.
-- `mud_getenv(key)` -- scans the env block for `key` and returns the
-  value pointer, or NULL.
-- `mud_tick()` -- one-instruction load from the live-data area;
-  exported as a function so its address is stable across layout shifts.
-- formatters, simple helpers -- as the need arises.
-
-The win is that upgrading the host can improve these without any
-program rebuild. Builders link against versioned symbols; the loader
-resolves them at program load.
-
-### Hibernate/restore
-
-Syspage address is frozen. On restore, the host recreates the syspage
-at `0x00001000` with the same layout-major the guest was built
-against. Guest-held pointers into argv/environ stay valid. If a host
-upgrade has bumped the layout-major, restore fails with a clear error
-and the task is either migrated through a rebuild or retired.
-
-## Snapshot / Restore
-
-`memcpy(&dst->cpu, &src->cpu, sizeof(cf_cpu))` plus `memcpy` of the RAM
-block. That's the entire snapshot. Write it to disk -> script hibernates
-across MUD restarts. A builder's quest script survives a server reboot
-mid-execution. **Wasm cannot easily match this** -- runtime-internal
-state (stack, locals) isn't part of the .wasm spec.
-
-In-flight HC_MSG_SEND calls pose a snapshot complication: the task is
-blocked waiting for a reply handle that exists in the system-wide hash
-table, not in the task's own state. On restore, stale reply handles
-are expired and the sender is unblocked with `-EINTR`. The sender
-must be prepared to retry.
+The earlier draft's "text area" of host-shipped helper code, exported
+through an ELF-symbol-versioning scheme (a renamed `.gnu.version_r`,
+GOT patching at load), is dropped for now. That machinery buys "upgrade
+host helpers without rebuilding programs," which only matters once
+programs ship separately from the host. Pre-freeze, helpers are plain
+static library code linked into each program, or fixed syspage
+addresses. The symbol-versioning story returns with the
+program-distribution story, after the freeze, if it is needed at all.
 
 ## Loader
 
-ELF loader for big-endian 32-bit M68K. Responsibilities on load:
+ELF loader for big-endian 32-bit M68K:
 
 1. Parse `PT_LOAD` segments and copy them into task RAM.
-2. Locate the `NT_MUD_ABI` note and run the version / bitmap check
-   (see **ABI Versioning**). Hard-fail on mismatch.
-3. Resolve syspage symbol imports. Walk the program's `.mud.symver_r`
-   section (our rename of GNU's `.gnu.version_r` -- same data shape,
-   our section name since we are not a GNU/Linux environment). For
-   every required `(symbol, version)` pair, look up the matching
-   syspage export and patch the GOT entry. If any required version is
-   absent, fail the load with a clear error naming the missing symbol.
-4. Set PC to the entry point.
+2. Set PC to the entry point.
+3. Reject anything with non-LOAD segments that touch executable memory.
 
-PT_LOAD segments for the program itself are plain copies -- no
-relocation, no dynamic loading of external objects. The symbol-version
-machinery exists solely to bind syspage imports. This is the minimum
-dynamic-linking surface we can get away with; everything else
-statically links into the `.prg`.
+Program versioning is deferred to the freeze. Pre-freeze there is no
+version note to check: the host and every program build from one tree.
+When the freeze lands, the loader gains a single monotonic version check
+(refuse on mismatch) and nothing more elaborate until independently
+distributed binaries exist to justify it.
 
-Reject anything with non-LOAD segments that touch executable memory.
+The context block the host writes before verb dispatch currently lands
+at a fixed guest address. The linker script must reserve that region and
+the host must validate the program does not occupy it, so dispatch does
+not clobber guest code or data.
 
-### Toolchain note
+## GDB Stub (deferred)
 
-Binutils emits `.gnu.version_r` / `.gnu.version_d` by default. Our
-`prg-finalize` post-processing tool (which also attaches the
-`NT_MUD_ABI` note) renames those sections to `.mud.symver_r` /
-`.mud.symver_d`. Builders compile and link normally; the finalization
-step produces the `.prg` the loader expects.
-
-## GDB Stub (v2 feature)
-
-m68k remote serial protocol. Commands: `g`/`G` (registers), `m`/`M`
-(memory), `c`/`s` (continue/step), `Z0`/`z0` (sw breakpoint).
-
-Breakpoint = patch instruction with `illegal` (0x4AFC), trap into stub,
-swap original back on continue. Park task in `TASK_DEBUGGING` so
-the scheduler skips it while a developer is poking around.
-
-Listen on a Unix socket per-task, gated by wiz permission.
+m68k remote serial protocol. Breakpoints via `illegal` (0x4AFC) patching,
+park the task in TASK_DEBUGGING so the scheduler skips it. Unix socket
+per task, gated by wiz permission. Not needed before the freeze.
 
 ## Guest Language Support
 
-### Compiled languages (GCC frontends)
+C is the baseline and the only language the guest SDK targets today.
+Other GCC frontends have been shown to cross-compile to bare-metal
+ColdFire in experiments (C++ with `-fno-exceptions -fno-rtti` is
+byte-identical to C; Fortran via `ISO_C_BINDING` needs only a `_start`
+shim; Ada, Modula-2 need small runtime ports). This is evidence that the
+toolchain is not a dead end, not a commitment to support them. Adding a
+language means providing an entry-point shim that works with the syspage
+and env block, not porting a whole runtime.
 
-Seven GCC-frontend languages have been cross-compiled and validated on
-the ColdFire V4e emulator, all passing identical test suites (recursive
-Fibonacci, Euclidean GCD, summation, bitwise manipulation, Newton's
-method square root). The m68k backend handles code generation; the real
-variable is each language's runtime requirements in a bare-metal
-environment.
-
-**Tier 1 -- production-ready.** C is the baseline. C++ with
-`-fno-exceptions -fno-rtti` produces byte-identical binaries -- it is
-C with nicer syntax, zero runtime cost. Fortran via `ISO_C_BINDING`
-needs only a C shim for `_start` and produces dramatically fewer
-instructions than C (484 vs 1,528 in testing) thanks to stricter
-aliasing guarantees (`intent(in)` parameters cannot overlap) and GCC's
-interprocedural scalar replacement (`.isra`) transforms. A builder
-writing compute-heavy scripts in Fortran gets more work done per
-credit -- the credit model naturally rewards efficient guest code
-regardless of source language.
-
-**Tier 2 -- usable with a small runtime port.** Ada with `-gnatp`
-(suppress runtime checks) compiles through `gcc` directly and produces
-code within 6% of C (1,616 instructions). It needs a C shim for entry
-and a `last_chance_handler` for unrecoverable errors -- a natural fit
-for HC_ABORT. Modula-2 needs M2RTS module-registration stubs and a
-`_ctor`/`_init` calling convention, but GM2 (GCC 13) produces clean
-ColdFire code. Both languages are realistic once the guest SDK
-stabilizes.
-
-**Tier 3 -- significant runtime gaps.** D with `-fno-druntime`
-compiles but loses float support entirely -- float-to-integer
-conversion calls runtime functions that don't exist bare-metal.
-Integer-only workarounds are possible but costly (2,466 instructions
-vs 1,528 for C on the same test suite). Objective-C and Objective-C++
-without `libobjc` have no objects, no message passing, no
-`@interface` -- the test binaries are byte-identical to C because no
-ObjC features can be used. These are not practically useful without
-porting their respective runtimes.
-
-Instruction counts from bare-metal testing (identical algorithms,
-same emulator, `-O2`):
-
-| Language       | Instructions | Runtime needs                            |
-|----------------|-------------|------------------------------------------|
-| Fortran        |         484 | C shim for `_start`                      |
-| Modula-2       |      1,251* | M2RTS stubs, `_ctor`/`_init` shim        |
-| C              |       1,528 | none (baseline)                          |
-| C++            |       1,528 | `-fno-exceptions -fno-rtti`              |
-| Ada            |       1,616 | C shim, `-gnatp`                         |
-| D              |       2,466 | `object.d` stub, no floats               |
-
-\* Modula-2 ran 3/5 tests natively; 2/5 hardcoded in C shim due to
-module export limitations. ObjC/ObjC++ omitted -- byte-identical to C
-(no ObjC features usable without `libobjc`).
-
-The v0/v1 guest SDK (`mud.h`) targets C. C++ and Fortran are viable
-from day one with minimal additional tooling (a `-fno-exceptions` flag
-and a `_start` shim respectively). Ada and Modula-2 are realistic
-stretch goals. Supporting a new compiled language means providing an
-entry-point shim that works with the syspage and env block -- not
-porting an entire language runtime.
-
-### Interpreted language VMs as CF guests
-
-Doubly-sandboxed: the language's own VM enforces type/GC discipline,
-the CF emulator catches anything that escapes.
-
-- **Lua 5.4** -- ~24 KLOC portable C, needs only newlib + a tiny shim.
-  Stub `os.*` with hypercalls.
-- **MicroPython** -- similar story, larger footprint.
-- **QuickJS** -- ~70 KLOC, runs on freestanding targets. Gives you
-  TypeScript-via-`tsc`-strip-types-then-run-on-QuickJS-on-CF.
-- **mruby**, **Wren**, **Janet**, **Forth** ([ATLAST][3]) -- all viable.
-
-TypeScript itself has no native m68k backend; QuickJS-on-CF is the
-pragmatic path.
+Interpreted VMs can run as CF guests (doubly sandboxed: the language VM
+enforces its own discipline, the emulator catches escapes). Lua 5.4
+(~24 KLOC + newlib) is the most likely first, with QuickJS as the path
+to TypeScript. None of this is on the critical path.
 
 ## What We Give Up vs Wasm
 
-- Load-time validation guarantees (don't need them -- semi-trusted
-  builders, runtime traps are fine).
-- FP determinism across hosts (don't need it; if ever needed, drop in
-  SoftFloat).
-- Spec stability and adversarial audit pedigree (the real cost -- we are
-  the sole maintainer of the sandbox; mitigate with seccomp + fuzzing).
-- Portable artifacts (don't need it -- single-host MUD).
-- Industry plugin-runtime momentum (irrelevant).
+- Load-time validation guarantees (runtime traps suffice for
+  semi-trusted builders).
+- FP determinism across hosts (single host; drop in SoftFloat if ever
+  needed).
+- Spec stability and adversarial audit pedigree (the real cost; we are
+  the sole maintainer, mitigated by seccomp and fuzzing).
+- Portable artifacts (single-host MUD).
 
-## Open Items
+## Pre-Freeze Work List
 
-- [x] **v0 scope**: boot emulator, dispatch hypercalls, load ELF, run
-      scripts. Extended to include persistent instances, unified handles,
-      verb dispatch, termination, interface checking, CRT/SDK.
-- [ ] Populate `credit_cost[hc_id]` weight table; tune `CREDIT_BUDGET`
-      and per-task RAM cap against a real workload.
-- [ ] Write seccomp profile.
-- [ ] AFL-fuzz coldfire.c (one afternoon).
-- [ ] Decide whether blob domains carry an on-disk x-bit that
-      `O_PROGRAM` checks against, or whether `O_PROGRAM` only
-      validates the ELF + `NT_MUD_ABI` note at open time.
-- [ ] ACL / permission model for HC_UNLINK and HC_OBJ_PROP_PUT on
-      shared muddb domains. Who may write to `area:`? Who may delete
-      from `bin:`?
-- [ ] Reply handle reaper: configurable timeout range (30--300s),
-      system-wide hash table sizing, snapshot/restore expiry semantics.
-- [ ] Persistence format for task snapshots (and `tmp:` policy within).
-- [ ] Builder docs: writing a program in C, C++, Fortran, Pascal, or
-      68k asm; language-specific runtime requirements; where to find
-      newlib; what the hypercall shim looks like.
-- [ ] v2: typed hypercalls for non-obj domains (`user:`, `area:`, ...).
-- [ ] v2: GDB stub.
-- [ ] v2: multi-core scheduler (work-stealing across MUD cores).
+In priority order, by risk retired. Detailed cards live in `kanban/`.
+
+1. **Unprivileged execution + faulting bus** (gate item 1). Run the
+   guest in user mode, place the supervisor vector table and syspage in
+   host-controlled memory, make out-of-range bus access raise an access
+   error. This is foundational; everything else sits on it.
+2. **Single-writer-per-domain write model** (gate item 2). Prove
+   parallel MVCC readers plus one owner task per writable domain, under
+   real multicore load. This most shapes the eventual ABI.
+3. **Credits and the multicore scheduler** (gate item 3). Per-core
+   runqueues, work stealing, per-instruction and per-hypercall charging,
+   preemption, the lifetime runaway kill.
+4. **Capability / dirfd model** (gate item 4). Replace the two hardcoded
+   `verb:`/`event:` prefixes with dirfd-scoped access, intent flags, and
+   delegation.
+5. **Scheduler-integrated verb dispatch.** Move dispatch off the inline
+   command path onto the scheduler.
+6. **Pick one multiplexing primitive** (HC_WAIT or HC_SELECT).
+7. **Snapshot format** once the fd table, cap table, and tmp policy are
+   stable.
+
+Deferred until the freeze or later: program versioning, symbol-versioned
+syspage helpers, GDB stub, typed hypercalls for non-obj domains,
+multi-thread-per-task.
 
 ## Estimated Effort
 
-- Scheduler + hypercall dispatch: ~400 LOC host C.
-- Messaging (send/recv/reply, reply handle table, reaper): ~400 LOC.
-- Object property hypercalls (get/put/list, implicit txn): ~300 LOC.
-- HC_SELECT + fd multiplexing: ~150 LOC.
-- Capability model + env block + HC_OPENAT flag validation: ~200 LOC.
-- Guest-side `mud.h` shim: ~300 LOC.
-- ELF loader + ABI note check: ~200 LOC.
-- Syspage setup + helpers: ~150 LOC.
-- GDB stub (v2): ~400 LOC.
-- AFL fuzzing harness: ~50 LOC + an afternoon of triage.
+Rough host-C estimates, to be revised as the spikes land:
 
-Total v1: ~2100 LOC, roughly two weeks of focused work on top of the
-existing emulator. v0 (subset of scheduler + dispatch + loader) is
-3--4 days.
+- Unprivileged execution + faulting bus + syspage/vector layout: ~250 LOC.
+- Single-writer-per-domain write model + owner tasks: ~400 LOC.
+- Credits + multicore scheduler: ~500 LOC.
+- Capability model + env block + HC_OPENAT flag validation: ~300 LOC.
+- Messaging (send/recv/reply, reply table, reaper): ~400 LOC.
+- Object property read path + PUT-as-RPC sugar: ~250 LOC.
+- ELF loader (done) + monotonic version check at freeze: ~50 LOC.
+- Guest `mud.h` shim: ~300 LOC.
 
 [1]: https://wiki.freepascal.org/m68k
 [2]: https://lcamtuf.coredump.cx/afl/

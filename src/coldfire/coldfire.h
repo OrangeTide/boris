@@ -6,6 +6,120 @@
 #define COLDFIRE_H
 
 #include <stdint.h>
+#include <string.h>
+
+/****************************************************************
+ * Trace event types
+ ****************************************************************/
+
+enum cf_trace_type {
+    CF_TR_NONE = 0,
+    CF_TR_ILLEGAL,
+    CF_TR_ACCESS_ERROR,
+    CF_TR_ADDRESS_ERROR,
+    CF_TR_ZERO_DIVIDE,
+    CF_TR_PRIVILEGE,
+    CF_TR_FORMAT_ERROR,
+    CF_TR_LINE_A,
+    CF_TR_LINE_F,
+    CF_TR_TRAP,
+    CF_TR_BUS_READ,
+    CF_TR_BUS_WRITE,
+    CF_TR_DOUBLE_FAULT,
+};
+
+/****************************************************************
+ * Trace event record
+ ****************************************************************/
+
+#define CF_TRACE_NOTE_SIZE 48
+
+typedef struct cf_trace_event {
+    uint32_t pc;
+    uint32_t addr;
+    uint16_t opword;
+    uint8_t  type;
+    uint8_t  _pad;
+    char     note[CF_TRACE_NOTE_SIZE];
+} cf_trace_event_t;
+
+/****************************************************************
+ * Trace ring buffer
+ ****************************************************************/
+
+#define CF_TRACE_CAPACITY 64
+
+typedef struct cf_trace {
+    cf_trace_event_t events[CF_TRACE_CAPACITY];
+    uint32_t head;
+    uint32_t total;
+} cf_trace_t;
+
+/****************************************************************
+ * Trace inline operations
+ ****************************************************************/
+
+static inline void
+cf_trace_init(cf_trace_t *t)
+{
+    memset(t, 0, sizeof(*t));
+}
+
+static inline void
+cf_trace_push(cf_trace_t *t, uint8_t type, uint32_t pc,
+              uint16_t opword, uint32_t addr, const char *note)
+{
+    cf_trace_event_t *ev = &t->events[t->head & (CF_TRACE_CAPACITY - 1)];
+    ev->type = type;
+    ev->pc = pc;
+    ev->opword = opword;
+    ev->addr = addr;
+    if (note) {
+        size_t n = strlen(note);
+        if (n >= CF_TRACE_NOTE_SIZE)
+            n = CF_TRACE_NOTE_SIZE - 1;
+        memcpy(ev->note, note, n);
+        ev->note[n] = '\0';
+    } else {
+        ev->note[0] = '\0';
+    }
+    t->head++;
+    t->total++;
+}
+
+static inline uint32_t
+cf_trace_count(const cf_trace_t *t)
+{
+    uint32_t n = t->head;
+    return n < CF_TRACE_CAPACITY ? n : CF_TRACE_CAPACITY;
+}
+
+static inline int
+cf_trace_overflowed(const cf_trace_t *t)
+{
+    return t->total > CF_TRACE_CAPACITY;
+}
+
+static inline const cf_trace_event_t *
+cf_trace_peek(const cf_trace_t *t, uint32_t i)
+{
+    uint32_t n = cf_trace_count(t);
+    if (i >= n)
+        return NULL;
+    uint32_t start;
+    if (t->head <= CF_TRACE_CAPACITY)
+        start = 0;
+    else
+        start = t->head;
+    return &t->events[(start + i) & (CF_TRACE_CAPACITY - 1)];
+}
+
+static inline void
+cf_trace_clear(cf_trace_t *t)
+{
+    t->head = 0;
+    t->total = 0;
+}
 
 /****************************************************************
  * Types
@@ -46,6 +160,9 @@ typedef struct cf_cpu {
     int      halted;        /* HALT/STOP flag */
     uint64_t cycles;        /* instruction counter */
     int      fault;         /* set on bus/address error */
+    uint8_t  fault_status;  /* FS bits for access error frame */
+    int      in_exception;  /* double-fault detection */
+    cf_trace_t trace;       /* diagnostic event ring buffer */
 
     /* Memory bus callbacks */
     cf_read_fn  read8, read16, read32;
