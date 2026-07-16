@@ -1,5 +1,5 @@
-# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.4.3]
-# updated: 25 Apr 2026
+# modular-make -- A modular GNUmakefile for C, C++, D, Fortran, Objective-C, Objective-C++, Pascal, Modula-2, and Assembly projects [v1.7.0]
+# updated: 09 Jul 2026
 # Requires GNU Make 4.0 or later (uses $(file) function).
 #
 # ============================================================================
@@ -80,6 +80,31 @@
 # _DIR (the build system prepends _DIR automatically).  Wildcards are
 # supported (e.g. *.c), expanded via $(wildcard).
 #
+# IMPORTANT -- always reference the per-target <name>_DIR (assigned with
+# := so it is frozen at include time), never a shared variable, when a
+# value is expanded lazily.  A common convention is:
+#
+#   ROOT := $(dir $(lastword $(MAKEFILE_LIST)))
+#   foo_DIR := $(ROOT)
+#
+# That is safe only because foo_DIR captures ROOT immediately with :=.
+# The shared ROOT itself is reassigned by every module.mk, so the last
+# one included wins.  Any lazy (=) reference to $(ROOT) reads that final
+# value, not the one from your module.  This bites two places in
+# particular:
+#
+#   foo_EXPORTED_CPPFLAGS = -I$(ROOT)          # WRONG -- resolves late
+#   foo_EXPORTED_CPPFLAGS = -I$(foo_DIR)       # right -- frozen per target
+#
+# and generation recipes, whose prerequisites and commands also expand
+# late:
+#
+#   $(BUILDDIR)/$(ROOT)msg.c : $(ROOT)msg.idl       # WRONG
+#   $(BUILDDIR)/$(foo_DIR)msg.c : $(foo_DIR)msg.idl # right
+#
+# A single-directory project never exposes this because there is only
+# one ROOT; it surfaces only once a second module.mk reassigns it.
+#
 # Sources may use any supported extension (.c, .cc, .cpp, .d, .m, .mm,
 # .f, .f90, .S, .asm, .pas, .mod) and can be freely mixed:
 #
@@ -103,6 +128,26 @@
 #                     instead of the source tree.  The module.mk must
 #                     provide a rule to create each generated file.
 #                     Wildcards and platform suffixes are supported.
+#   <name>_GENERATED_HDRS  Header files produced by code generators
+#                     (e.g. the .h emitted alongside a .c by bin2c or an
+#                     IDL compiler).  Paths are relative to BUILDDIR/<name>_DIR,
+#                     so they live in the build tree, not the source tree.
+#                     Declaring a header here makes the build system:
+#                       - create its output directory,
+#                       - order it before every object that may #include it
+#                         (this target's own objects and, transitively, those
+#                         of any target listing this one in _LIBS), so clean
+#                         builds never compile a consumer before the header
+#                         exists,
+#                       - add its build directory to the include path for
+#                         this target and its dependents (no manual -I), and
+#                         - clean it.
+#                     The module.mk still supplies the rule that creates the
+#                     header.  Change detection uses the .dep files, so edits
+#                     to a generated header rebuild its consumers; the rule
+#                     must give the header a recipe make can re-stat (a grouped
+#                     target on GNU Make 4.3+, or a per-output recipe on 4.0).
+#                     Platform suffixes are supported.
 #   <name>_EXTRA_OBJS  Additional pre-built .o files to link (not compiled
 #                     or cleaned by this build system).
 #   <name>_LDFLAGS   Linker flags           (executables and shared libs)
@@ -143,6 +188,18 @@
 #     mylib_SRCS.Darwin  = macos/platform.c
 #     mylib_LDLIBS.Linux = -lm -ldl
 #     mylib_CFLAGS.Linux.x86_64 = -msse4.2
+#
+#   <name>_PKGS      External packages (executables and shared libs).
+#                     Each token is resolved once to compile/link flags
+#                     and folded into the target's CPPFLAGS (--cflags)
+#                     and LDLIBS (--libs).  A token in KNOWN_PKGS uses
+#                     the built-in PKG_<token>_* table (works without
+#                     pkg-config, e.g. on macOS/Windows); any other
+#                     token goes through `pkg-config <token>`.  Package
+#                     link flags on a library propagate to executables
+#                     that link it.
+#
+#     game_PKGS = sdl3 gl m
 #
 #   <name>_TESTCMD   Shell commands to test the target, written with
 #                     define/endef.  Each line runs as a separate
@@ -239,6 +296,31 @@
 # just like a normal source file.  The module.mk must supply the rule
 # that creates the generated file.
 #
+# Example -- a generator that emits a paired source and header (e.g. an IDL
+# compiler producing proto.c + proto.h that other modules #include):
+#
+#   LIBRARIES += proto
+#   proto_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
+#   proto_GENERATED_SRCS = proto.c
+#   proto_GENERATED_HDRS = proto.h
+#
+#   # GNU Make 4.3+ (grouped target: one recipe, both outputs, re-stat both):
+#   $(BUILDDIR)/$(proto_DIR)proto.c $(BUILDDIR)/$(proto_DIR)proto.h &: \
+#   		$(proto_DIR)proto.idl
+#   	my-idl-codegen $< -o $(BUILDDIR)/$(proto_DIR)
+#
+#   # GNU Make 4.0-4.2 equivalent (give the header its own recipe so make
+#   # re-stats it; a bare "proto.h : proto.c" with no recipe would not
+#   # rebuild consumers when only the header changes):
+#   #   $(BUILDDIR)/$(proto_DIR)proto.c : $(proto_DIR)proto.idl
+#   #   	my-idl-codegen $< -o $(BUILDDIR)/$(proto_DIR)
+#   #   $(BUILDDIR)/$(proto_DIR)proto.h : $(BUILDDIR)/$(proto_DIR)proto.c ; @touch -c $@
+#
+# Any target with proto in its _LIBS can now #include "proto.h" with no
+# manual -I and no order-only prerequisites: the header's build directory is
+# put on the include path automatically and ordered ahead of the objects that
+# use it, on the first build and on rebuilds.
+#
 # ============================================================================
 # RECURSIVE MODULE DISCOVERY
 # ============================================================================
@@ -258,11 +340,18 @@
 #
 # The compile commands for C, C++, Objective-C, Objective-C++, D,
 # Fortran, preprocessed assembly (.S), and Modula-2 emit GCC-style
-# dependency files (.dep) via -MMD -MF.  These are included at the
+# dependency files (.dep) via -MMD -MP -MF.  These are included at the
 # bottom of this makefile so that changes to headers trigger
 # recompilation of the affected objects.  On a clean build the .dep
 # files do not yet exist; the -include directive silently ignores the
 # missing files.
+#
+# -MP adds a phony target for each header prerequisite.  Without it, a
+# header that a .dep file still references but that no longer exists (a
+# renamed include, or a generated header removed by 'make clean') would
+# make the depend stage fail with "No rule to make target 'foo.h'".  With
+# -MP the stale reference is treated as an out-of-date phony instead, so
+# the object rebuilds rather than the build aborting.
 #
 # NASM assembly and Pascal do not generate dependency files.
 # Some compilers produce side-effect files (FPC emits .ppu unit
@@ -376,6 +465,11 @@
 #   ARFLAGS     Archiver flags                     (default: rvD)
 #   MKDIR_P     Directory creation command          (default: mkdir -p)
 #   RMDIR       Directory removal command           (default: rmdir)
+#   V           Verbose output.  V=1 prints full command lines.
+#               Default (quiet) prints short tags (CC, LD, AR, etc.).
+#               Recommended: V=1 for CI/CD pipelines.
+#   COLOR       Terminal color for quiet-mode tags.  Auto-detected by
+#               default.  Set COLOR=0 to disable, COLOR=1 to force on.
 #
 #   DEBUG       If set, enable debug build flags (-Og -g
 #               -fno-omit-frame-pointer).
@@ -405,9 +499,56 @@
 #
 # ============================================================================
 
+# --- Minimum supported GNU Make ----------------------------------------------
+# modular-make uses the $(file) function (config.h and the compile_commands.json
+# sidecars), which requires GNU Make 4.0.  Fail early with a clear message
+# rather than emitting confusing errors deeper in the build.  filter-out keeps
+# this correct for any future major version >= 4 (and >= 10).
+ifeq ($(filter-out 0 1 2 3,$(firstword $(subst ., ,$(MAKE_VERSION)))),)
+$(error modular-make requires GNU Make 4.0 or later, but this is GNU Make "$(MAKE_VERSION)".  Please upgrade.)
+endif
+
 # --- Optional .env for local configuration ----------------------------------
 # Variables like USE_CLANG, RELEASE, RELEASE_MARCH, etc.  See env.example.
 -include .env
+
+# --- Verbose / quiet mode ----------------------------------------------------
+# V=1 shows full command lines (recommended for CI/CD).
+# Default shows short summaries (CC, LD, AR, etc.).
+# COLOR=1 forces color, COLOR=0 disables, unset auto-detects terminal.
+ifneq ($(V),1)
+  ifdef COLOR
+    ifneq ($(COLOR),0)
+      _USE_COLOR := 1
+    endif
+  else
+    _USE_COLOR := $(shell test -t 2 && echo 1)
+  endif
+  ifdef _USE_COLOR
+    _c_tag  := \033[32m
+    _c_link := \033[36m
+    _c_ar   := \033[33m
+    _c_rst  := \033[0m
+  endif
+  _Q := @
+  _ar_redir := >/dev/null 2>&1
+  _fpc_redir := >/dev/null
+  _quiet.cc     = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'CC' '$<';
+  _quiet.cxx    = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'CXX' '$<';
+  _quiet.gdc    = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'GDC' '$<';
+  _quiet.objc   = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'OBJC' '$<';
+  _quiet.objcxx = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'OBJCXX' '$<';
+  _quiet.fc     = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'FC' '$<';
+  _quiet.as     = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'AS' '$<';
+  _quiet.nasm   = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'NASM' '$<';
+  _quiet.fpc    = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'FPC' '$<';
+  _quiet.gm2    = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'GM2' '$<';
+  _quiet.ld     = @printf '  $(_c_link)%-8s$(_c_rst) %s\n' 'LD' '$@';
+  _quiet.ar     = @printf '  $(_c_ar)%-8s$(_c_rst) %s\n' 'AR' '$@';
+  _quiet.so     = @printf '  $(_c_link)%-8s$(_c_rst) %s\n' 'LDSO' '$@';
+  _quiet.strip  = @printf '  $(_c_ar)%-8s$(_c_rst) %s\n' 'STRIP' '$@';
+  _quiet.gen    = @printf '  $(_c_tag)%-8s$(_c_rst) %s\n' 'GEN' '$@';
+endif
 
 # --- Flags ------------------------------------------------------------------
 
@@ -502,9 +643,9 @@ endif
 # filename next to the binary.  Enabled for RELEASE; harmless if absent.
 ifdef RELEASE
   define _split_debug
-	$(OBJCOPY) --only-keep-debug $@ $@.debug
-	$(STRIP) --strip-debug --strip-unneeded $@
-	$(OBJCOPY) --add-gnu-debuglink=$@.debug $@
+	$(_quiet.strip)$(OBJCOPY) --only-keep-debug $@ $@.debug
+	$(_Q)$(STRIP) --strip-debug --strip-unneeded $@
+	$(_Q)$(OBJCOPY) --add-gnu-debuglink=$@.debug $@
   endef
 endif
 
@@ -520,6 +661,29 @@ endif
 # PROJECT_FFLAGS :=
 # PROJECT_GM2FLAGS :=
 
+# Package flags (<name>_PKGS).  A target lists package tokens in _PKGS;
+# each token is resolved to compile and link flags once and folded into
+# the target's CPPFLAGS (--cflags) and LDLIBS (--libs).  Resolution:
+#
+#   * A token in KNOWN_PKGS uses the built-in PKG_<token>_CFLAGS /
+#     PKG_<token>_LDLIBS table below (platform suffixes supported).  No
+#     pkg-config is invoked, so these work on systems without it.
+#   * Any other token is passed to `pkg-config --cflags/--libs <token>`.
+#
+# The table is deliberately limited to stable, path-free system libraries.
+# Extend it from a module.mk by appending to KNOWN_PKGS and defining the
+# matching PKG_<token>_LDLIBS (and PKG_<token>_CFLAGS if needed); a plain
+# assignment there overrides the defaults below.
+KNOWN_PKGS ?= m gl dl rt pthread
+
+PKG_m_LDLIBS.Linux        ?= -lm
+PKG_gl_LDLIBS.Linux       ?= -lGL
+PKG_gl_LDLIBS.Darwin      ?= -framework OpenGL
+PKG_gl_LDLIBS.Windows_NT  ?= -lopengl32
+PKG_dl_LDLIBS.Linux       ?= -ldl
+PKG_rt_LDLIBS.Linux       ?= -lrt
+PKG_pthread_LDLIBS.Linux  ?= -lpthread
+
 # Set .RECIPEPREFIX explicitly so $(.RECIPEPREFIX) can be referenced
 .RECIPEPREFIX :=	
 
@@ -533,21 +697,21 @@ endef
 EXTENSIONS := c cc cpp d m mm f f90 S asm pas mod
 
 # Command Macros
-link.c      = $(if $(CXX_MODE),$(CXX),$(CC)) -o $@ $(_BUILD_MODE_LDFLAGS) $(PROJECT_LDFLAGS) $(LDFLAGS) $(if $(LIBDIR),-L$(LIBDIR)) $^ $(PROJECT_LDLIBS) $(LDLIBS)
-link.a      = $(RM) $@.tmp && $(AR) $(ARFLAGS) $@.tmp $(filter %.o,$^) && mv -f $@.tmp $@
-link.so     = $(if $(CXX_MODE),$(CXX),$(CC)) -shared -o $@ $(_BUILD_MODE_LDFLAGS) $(PROJECT_LDFLAGS) $(LDFLAGS) $^ $(PROJECT_LDLIBS) $(LDLIBS)
-compile.c   = $(CC) -c -o $@ $< -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CFLAGS) $(PROJECT_CPPFLAGS) $(CFLAGS) $(CPPFLAGS)
-compile.cc  = $(CXX) -c -o $@ $< -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CXXFLAGS) $(PROJECT_CPPFLAGS) $(CXXFLAGS) $(CPPFLAGS)
-compile.cpp = $(CXX) -c -o $@ $< -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CXXFLAGS) $(PROJECT_CPPFLAGS) $(CXXFLAGS) $(CPPFLAGS)
-compile.d   = $(GDC) -c -o $@ $< -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_DFLAGS) $(PROJECT_CPPFLAGS) $(DFLAGS)
-compile.m   = $(CC) -c -o $@ $< -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CFLAGS) $(PROJECT_CPPFLAGS) $(CFLAGS) $(CPPFLAGS)
-compile.mm  = $(CXX) -c -o $@ $< -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CXXFLAGS) $(PROJECT_CPPFLAGS) $(CXXFLAGS) $(CPPFLAGS)
-compile.f   = $(FC) -c -o $@ $< -cpp -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_FFLAGS) $(PROJECT_CPPFLAGS) $(FFLAGS)
-compile.f90 = $(FC) -c -o $@ $< -cpp -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_FFLAGS) $(PROJECT_CPPFLAGS) $(FFLAGS)
-compile.S   = $(CC) -c -o $@ $< -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CFLAGS) $(PROJECT_CPPFLAGS) $(ASFLAGS) $(CPPFLAGS)
-compile.asm = $(NASM) -f $(NASM_FMT) -o $@ $(NASMFLAGS) $<
-compile.pas = $(FPC) -Cn -FE$(@D) -FU$(@D) $(FPCFLAGS) $<
-compile.mod = $(GM2) -c -o $@ $< -fcpp -MMD -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_GM2FLAGS) $(PROJECT_CPPFLAGS) $(GM2FLAGS)
+link.c      = $(_quiet.ld)$(if $(CXX_MODE),$(CXX),$(CC)) -o $@ $(_BUILD_MODE_LDFLAGS) $(PROJECT_LDFLAGS) $(LDFLAGS) $(if $(LIBDIR),-L$(LIBDIR)) $^ $(PROJECT_LDLIBS) $(LDLIBS)
+link.a      = $(_quiet.ar)$(RM) $@.tmp && $(AR) $(ARFLAGS) $@.tmp $(filter %.o,$^) $(_ar_redir) && mv -f $@.tmp $@
+link.so     = $(_quiet.so)$(if $(CXX_MODE),$(CXX),$(CC)) -shared -o $@ $(_BUILD_MODE_LDFLAGS) $(PROJECT_LDFLAGS) $(LDFLAGS) $^ $(PROJECT_LDLIBS) $(LDLIBS)
+compile.c   = $(_quiet.cc)$(CC) -c -o $@ $< -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CFLAGS) $(PROJECT_CPPFLAGS) $(CFLAGS) $(CPPFLAGS)
+compile.cc  = $(_quiet.cxx)$(CXX) -c -o $@ $< -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CXXFLAGS) $(PROJECT_CPPFLAGS) $(CXXFLAGS) $(CPPFLAGS)
+compile.cpp = $(_quiet.cxx)$(CXX) -c -o $@ $< -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CXXFLAGS) $(PROJECT_CPPFLAGS) $(CXXFLAGS) $(CPPFLAGS)
+compile.d   = $(_quiet.gdc)$(GDC) -c -o $@ $< -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_DFLAGS) $(PROJECT_CPPFLAGS) $(DFLAGS)
+compile.m   = $(_quiet.objc)$(CC) -c -o $@ $< -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CFLAGS) $(PROJECT_CPPFLAGS) $(CFLAGS) $(CPPFLAGS)
+compile.mm  = $(_quiet.objcxx)$(CXX) -c -o $@ $< -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CXXFLAGS) $(PROJECT_CPPFLAGS) $(CXXFLAGS) $(CPPFLAGS)
+compile.f   = $(_quiet.fc)$(FC) -c -o $@ $< -cpp -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_FFLAGS) $(PROJECT_CPPFLAGS) $(FFLAGS)
+compile.f90 = $(_quiet.fc)$(FC) -c -o $@ $< -cpp -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_FFLAGS) $(PROJECT_CPPFLAGS) $(FFLAGS)
+compile.S   = $(_quiet.as)$(CC) -c -o $@ $< -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_CFLAGS) $(PROJECT_CPPFLAGS) $(ASFLAGS) $(CPPFLAGS)
+compile.asm = $(_quiet.nasm)$(NASM) -f $(NASM_FMT) -o $@ $(NASMFLAGS) $<
+compile.pas = $(_quiet.fpc)$(FPC) -Cn -FE$(@D) -FU$(@D) $(FPCFLAGS) $< $(_fpc_redir)
+compile.mod = $(_quiet.gm2)$(GM2) -c -o $@ $< -fcpp -MMD -MP -MF $(@:.o=.dep) $(_BUILD_MODE_CFLAGS) $(_BUILD_MODE_CPPFLAGS) $(PROJECT_GM2FLAGS) $(PROJECT_CPPFLAGS) $(GM2FLAGS)
 
 # Compilation database (compile_commands.json) support.
 # Extensions whose compile commands use GCC-style "-c -o" invocation and
@@ -697,8 +861,8 @@ $(eval $(value _load_modules))
 _target_platform_suffixes = .$(_TARGET_OS) .$(_TARGET_ARCH) .$(_TARGET_OS).$(_TARGET_ARCH)
 _merge_one = $(foreach s,$2,$(eval $1_$3 += $($1_$3$s)))
 
-_platform_vars = SRCS GENERATED_SRCS CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDLIBS \
-  ASFLAGS DFLAGS FFLAGS NASMFLAGS FPCFLAGS GM2FLAGS EXTRA_OBJS LIBS \
+_platform_vars = SRCS GENERATED_SRCS GENERATED_HDRS CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDLIBS \
+  ASFLAGS DFLAGS FFLAGS NASMFLAGS FPCFLAGS GM2FLAGS EXTRA_OBJS LIBS PKGS \
   EXPORTED_CPPFLAGS EXPORTED_CFLAGS EXPORTED_CXXFLAGS EXPORTED_LDFLAGS EXPORTED_LDLIBS
 
 define _merge_platform_vars
@@ -717,6 +881,38 @@ $(foreach t,$(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS),$(eval $(call _merge_plat
 # Inject -DCONFIG_FOO=1 for every enabled option.
 PROJECT_CPPFLAGS += $(foreach c,$(filter CONFIG_%,$(.VARIABLES)),$(if $(filter y,$($c)),-D$c=1))
 
+### Package (PKGS) resolution ###
+
+# Merge platform suffixes into the built-in package table (PKG_<t>_CFLAGS,
+# PKG_<t>_LDLIBS), the same append mechanism used for per-target vars.
+$(foreach t,$(KNOWN_PKGS),$(foreach V,CFLAGS LDLIBS,\
+  $(call _merge_one,PKG_$t,$(_target_platform_suffixes),$V)))
+
+# Resolve every package token referenced by any target exactly once, into
+# cached _pkg_cflags_<t> / _pkg_ldlibs_<t> variables.  Known tokens use the
+# table; unknown tokens fall back to pkg-config.
+_have_pkgconfig := $(shell command -v pkg-config 2>/dev/null)
+_referenced_pkgs = $(sort $(foreach t,$(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS),$($t_PKGS)))
+define _resolve_pkg
+ifneq ($(filter $1,$(KNOWN_PKGS)),)
+_pkg_cflags_$1 := $(PKG_$1_CFLAGS)
+_pkg_ldlibs_$1 := $(PKG_$1_LDLIBS)
+else ifeq ($(_have_pkgconfig),)
+$$(warning PKGS: pkg-config not found, cannot resolve '$1' (add it to KNOWN_PKGS with a PKG_$1_LDLIBS entry))
+else
+_pkg_cflags_$1 := $$(shell pkg-config --cflags $1)
+_pkg_ldlibs_$1 := $$(shell pkg-config --libs $1)
+endif
+endef
+$(foreach p,$(_referenced_pkgs),$(eval $(call _resolve_pkg,$p)))
+
+# get_pkgs_cflags: compile flags for a target's own packages (its objects).
+# get_pkgs_ldlibs: link flags for a target's packages plus those of every
+# transitive _LIBS dependency (a static lib's package libs must reach the
+# final link line, like EXPORTED_LDLIBS).
+get_pkgs_cflags = $(strip $(foreach p,$($1_PKGS),$(_pkg_cflags_$p)))
+get_pkgs_ldlibs = $(strip $(foreach p,$(sort $($1_PKGS) $(foreach L,$(call get_all_libs,$1),$($L_PKGS))),$(_pkg_ldlibs_$p)))
+
 ### Rules ###
 
 # get_srcs: expand _SRCS relative to _DIR; abspath normalizes ../ so
@@ -724,6 +920,20 @@ PROJECT_CPPFLAGS += $(foreach c,$(filter CONFIG_%,$(.VARIABLES)),$(if $(filter y
 get_srcs     = $(patsubst $(CURDIR)/%,%,$(abspath $(wildcard $(addprefix $($1_DIR),$($1_SRCS)))))
 # get_gen_srcs: expand _GENERATED_SRCS relative to BUILDDIR/_DIR
 get_gen_srcs = $(patsubst $(CURDIR)/%,%,$(abspath $(addprefix $(BUILDDIR)/$($1_DIR),$($1_GENERATED_SRCS))))
+# get_gen_hdrs: expand _GENERATED_HDRS relative to BUILDDIR/_DIR.  Generated
+# headers live in the build tree (mirroring the module dir), never the source
+# tree.  Resolved exactly like get_gen_srcs so a module.mk generation rule
+# targets the same path for both its .c and .h outputs.
+get_gen_hdrs = $(patsubst $(CURDIR)/%,%,$(abspath $(addprefix $(BUILDDIR)/$($1_DIR),$($1_GENERATED_HDRS))))
+# get_all_gen_hdrs: generated headers of target $1 plus those of every target
+# it depends on (transitively via _LIBS).  Used as order-only prerequisites so
+# a clean build creates each generated header before compiling any object that
+# may #include it.
+get_all_gen_hdrs = $(strip $(call get_gen_hdrs,$1) $(foreach L,$(call get_all_libs,$1),$(call get_gen_hdrs,$L)))
+# get_gen_hdr_incs: -I flags for the build dirs holding generated headers of
+# target $1 and its transitive _LIBS, so an #include of a generated header
+# resolves without the module.mk spelling out -I$(BUILDDIR)/... by hand.
+get_gen_hdr_incs = $(strip $(foreach L,$1 $(call get_all_libs,$1),$(if $($L_GENERATED_HDRS),-I$(BUILDDIR)/$($L_DIR))))
 # get_objs: map source files to object files (works for any extension)
 get_objs     = $(strip $(foreach X,$(EXTENSIONS),$(patsubst %.$X,$(BUILDDIR)/%.o,$(filter %.$X,$(call get_srcs,$1)))))
 # get_gen_objs: map generated sources (already under BUILDDIR) to .o files
@@ -741,13 +951,19 @@ get_lib_file = $(if $(filter $1,$(LIBRARIES)),$(call get_lib,$1),$(call get_so,$
 # get_all_libs($1) returns all direct and indirect _LIBS for target $1,
 # in topological order (dependents before dependencies) so that the
 # linker resolves symbols correctly with static archives.
-_expand_libs = $(if $1,$(eval _libs_depth += x)$(if $(word 100,$(_libs_depth)),$(error circular _LIBS dependency detected: $1))$(foreach L,$1,$L $(call _expand_libs,$($L_LIBS))))
+# _expand_libs(list,ancestors) walks direct and indirect _LIBS depth-first.
+# A true cycle is a lib that reappears in its own ancestor chain ($2); a lib
+# shared by sibling branches (a diamond) is not a cycle and must not error.
+# The path is threaded as an argument rather than kept in a mutable global,
+# so there is no arbitrary depth cap and the logic is portable across make
+# versions (including the GNU Make 3.81 shipped on macOS).
+_expand_libs = $(foreach L,$1,$(if $(filter $L,$2),$(error circular _LIBS dependency detected: $L (via$2)),$L $(call _expand_libs,$($L_LIBS),$2 $L)))
 # _uniq_last: keep last occurrence of each word (preserves topological order
 # so that dependencies appear after their dependents for static linking).
 _rev = $(if $1,$(call _rev,$(wordlist 2,$(words $1),$1)) $(firstword $1))
 _uniq_first = $(if $1,$(firstword $1) $(call _uniq_first,$(filter-out $(firstword $1),$1)))
 _uniq_last = $(call _rev,$(call _uniq_first,$(call _rev,$1)))
-get_all_libs = $(eval _libs_depth :=)$(call _uniq_last,$(call _expand_libs,$($1_LIBS)))
+get_all_libs = $(call _uniq_last,$(call _expand_libs,$($1_LIBS)))
 
 # Collect exported flags from all transitive _LIBS dependencies.
 get_exported_cppflags = $(strip $(foreach L,$(call get_all_libs,$1),$($L_EXPORTED_CPPFLAGS)))
@@ -761,9 +977,9 @@ needs_cxx = $(or $(filter %.cc %.cpp %.mm,$(call get_srcs,$1) $(call get_gen_src
 
 # _all_dirs: every directory that contains a build artifact (used by clean-all)
 _all_dirs = $(sort $(dir \
-  $(foreach p,$(EXECUTABLES),$(BINDIR)/$p$(EXTENSION.exe) $(call get_all_objs,$p)) \
-  $(foreach l,$(LIBRARIES),$(call get_lib,$l) $(call get_all_objs,$l)) \
-  $(foreach s,$(SHARED_LIBS),$(call get_so,$s) $(call get_all_objs,$s))))
+  $(foreach p,$(EXECUTABLES),$(BINDIR)/$p$(EXTENSION.exe) $(call get_all_objs,$p) $(call get_gen_hdrs,$p)) \
+  $(foreach l,$(LIBRARIES),$(call get_lib,$l) $(call get_all_objs,$l) $(call get_gen_hdrs,$l)) \
+  $(foreach s,$(SHARED_LIBS),$(call get_so,$s) $(call get_all_objs,$s) $(call get_gen_hdrs,$s))))
 
 .SECONDEXPANSION:
 
@@ -771,7 +987,8 @@ _all_dirs = $(sort $(dir \
 # generation rules do not need order-only directory prerequisites
 # (secondary expansion is not available in module.mk files).
 _all_gen_srcs := $(foreach t,$(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS),$(call get_gen_srcs,$t))
-$(_all_gen_srcs) : | $$(@D)/
+_all_gen_hdrs := $(foreach t,$(EXECUTABLES) $(LIBRARIES) $(SHARED_LIBS),$(call get_gen_hdrs,$t))
+$(_all_gen_srcs) $(_all_gen_hdrs) : | $$(@D)/
 
 all :: $$(EXECUTABLES) compile_commands.json
 clean : $$(addprefix clean_,$$(EXECUTABLES) $$(LIBRARIES) $$(SHARED_LIBS))
@@ -822,7 +1039,7 @@ show-% :
 	@echo ${$*}
 
 # Create directories
-%/ : ; $(MKDIR_P) $@
+%/ : ; $(_Q)$(MKDIR_P) $@
 .PRECIOUS : %/
 
 # Per-library rules: compile objects and pack into a static archive.
@@ -832,7 +1049,8 @@ $(call get_lib,$1) : $$(call get_all_objs,$1) $$($1_EXTRA_OBJS) $(foreach d,$($1
 	$$(link.a)
 $(call get_all_objs,$1) : CFLAGS=$$($1_CFLAGS) $(call get_exported_cflags,$1)
 $(call get_all_objs,$1) : CXXFLAGS=$$($1_CXXFLAGS) $(call get_exported_cxxflags,$1)
-$(call get_all_objs,$1) : CPPFLAGS=$$($1_CPPFLAGS) $(call get_exported_cppflags,$1)
+$(call get_all_objs,$1) : CPPFLAGS=$$($1_CPPFLAGS) $(call get_exported_cppflags,$1) $(call get_pkgs_cflags,$1) $(call get_gen_hdr_incs,$1)
+$(if $(call get_all_gen_hdrs,$1),$(call get_all_objs,$1) : | $(call get_all_gen_hdrs,$1))
 $(call get_all_objs,$1) : DFLAGS=$$($1_DFLAGS)
 $(call get_all_objs,$1) : FFLAGS=$$($1_FFLAGS)
 $(call get_all_objs,$1) : ASFLAGS=$$($1_ASFLAGS)
@@ -840,7 +1058,7 @@ $(call get_all_objs,$1) : NASMFLAGS=$$($1_NASMFLAGS)
 $(call get_all_objs,$1) : FPCFLAGS=$$($1_FPCFLAGS)
 $(call get_all_objs,$1) : GM2FLAGS=$$($1_GM2FLAGS)
 clean_$1 :
-	$$(RM) $$(call get_all_objs,$1) $$(patsubst %.o,%.dep,$$(call get_all_objs,$1)) $$(patsubst %.o,%.cmd.json,$$(call get_all_objs,$1)) $$(call get_side_effects,$1) $$(call get_gen_srcs,$1)
+	$$(RM) $$(call get_all_objs,$1) $$(patsubst %.o,%.dep,$$(call get_all_objs,$1)) $$(patsubst %.o,%.cmd.json,$$(call get_all_objs,$1)) $$(call get_side_effects,$1) $$(call get_gen_srcs,$1) $$(call get_gen_hdrs,$1)
 	$$(RM) $(call get_lib,$1)
 endef
 $(foreach l,$(LIBRARIES),$(eval $(call library_rules,$l)))
@@ -852,10 +1070,11 @@ $(call get_so,$1) : $$(call get_all_objs,$1) $$($1_EXTRA_OBJS) $(foreach d,$($1_
 	$$(link.so)
 $(call get_so,$1) : CXX_MODE=$(if $(call needs_cxx,$1),1)
 $(call get_so,$1) : LDFLAGS=$$($1_LDFLAGS) $(call get_exported_ldflags,$1)
-$(call get_so,$1) : LDLIBS=$$($1_LDLIBS) $(call get_exported_ldlibs,$1)
+$(call get_so,$1) : LDLIBS=$$($1_LDLIBS) $(call get_exported_ldlibs,$1) $(call get_pkgs_ldlibs,$1)
 $(call get_all_objs,$1) : CFLAGS=-fPIC $$($1_CFLAGS) $(call get_exported_cflags,$1)
 $(call get_all_objs,$1) : CXXFLAGS=-fPIC $$($1_CXXFLAGS) $(call get_exported_cxxflags,$1)
-$(call get_all_objs,$1) : CPPFLAGS=$$($1_CPPFLAGS) $(call get_exported_cppflags,$1)
+$(call get_all_objs,$1) : CPPFLAGS=$$($1_CPPFLAGS) $(call get_exported_cppflags,$1) $(call get_pkgs_cflags,$1) $(call get_gen_hdr_incs,$1)
+$(if $(call get_all_gen_hdrs,$1),$(call get_all_objs,$1) : | $(call get_all_gen_hdrs,$1))
 $(call get_all_objs,$1) : DFLAGS=-fPIC $$($1_DFLAGS)
 $(call get_all_objs,$1) : FFLAGS=-fPIC $$($1_FFLAGS)
 $(call get_all_objs,$1) : ASFLAGS=-fPIC $$($1_ASFLAGS)
@@ -863,7 +1082,7 @@ $(call get_all_objs,$1) : NASMFLAGS=$$($1_NASMFLAGS)
 $(call get_all_objs,$1) : FPCFLAGS=-Cg $$($1_FPCFLAGS)
 $(call get_all_objs,$1) : GM2FLAGS=-fPIC $$($1_GM2FLAGS)
 clean_$1 :
-	$$(RM) $$(call get_all_objs,$1) $$(patsubst %.o,%.dep,$$(call get_all_objs,$1)) $$(patsubst %.o,%.cmd.json,$$(call get_all_objs,$1)) $$(call get_side_effects,$1) $$(call get_gen_srcs,$1)
+	$$(RM) $$(call get_all_objs,$1) $$(patsubst %.o,%.dep,$$(call get_all_objs,$1)) $$(patsubst %.o,%.cmd.json,$$(call get_all_objs,$1)) $$(call get_side_effects,$1) $$(call get_gen_srcs,$1) $$(call get_gen_hdrs,$1)
 	$$(RM) $(call get_so,$1)
 endef
 $(foreach s,$(SHARED_LIBS),$(eval $(call shared_library_rules,$s)))
@@ -881,10 +1100,11 @@ $(BINDIR)/$1$(EXTENSION.exe) : $$(call get_all_objs,$1) $$($1_EXTRA_OBJS) $(fore
 	$$(_split_debug)
 $(BINDIR)/$1$(EXTENSION.exe) : CXX_MODE=$(if $(call needs_cxx,$1),1)
 $(BINDIR)/$1$(EXTENSION.exe) : LDFLAGS=$$($1_LDFLAGS) $(call get_exported_ldflags,$1)
-$(BINDIR)/$1$(EXTENSION.exe) : LDLIBS=$$($1_LDLIBS) $(call get_exported_ldlibs,$1)
+$(BINDIR)/$1$(EXTENSION.exe) : LDLIBS=$$($1_LDLIBS) $(call get_exported_ldlibs,$1) $(call get_pkgs_ldlibs,$1)
 $(call get_all_objs,$1) : CFLAGS=$$($1_CFLAGS) $(call get_exported_cflags,$1)
 $(call get_all_objs,$1) : CXXFLAGS=$$($1_CXXFLAGS) $(call get_exported_cxxflags,$1)
-$(call get_all_objs,$1) : CPPFLAGS=$$($1_CPPFLAGS) $(call get_exported_cppflags,$1)
+$(call get_all_objs,$1) : CPPFLAGS=$$($1_CPPFLAGS) $(call get_exported_cppflags,$1) $(call get_pkgs_cflags,$1) $(call get_gen_hdr_incs,$1)
+$(if $(call get_all_gen_hdrs,$1),$(call get_all_objs,$1) : | $(call get_all_gen_hdrs,$1))
 $(call get_all_objs,$1) : DFLAGS=$$($1_DFLAGS)
 $(call get_all_objs,$1) : FFLAGS=$$($1_FFLAGS)
 $(call get_all_objs,$1) : ASFLAGS=$$($1_ASFLAGS)
@@ -892,7 +1112,7 @@ $(call get_all_objs,$1) : NASMFLAGS=$$($1_NASMFLAGS)
 $(call get_all_objs,$1) : FPCFLAGS=$$($1_FPCFLAGS)
 $(call get_all_objs,$1) : GM2FLAGS=$$($1_GM2FLAGS)
 clean_$1 :
-	$$(RM) $$(call get_all_objs,$1) $$(patsubst %.o,%.dep,$$(call get_all_objs,$1)) $$(patsubst %.o,%.cmd.json,$$(call get_all_objs,$1)) $$(call get_side_effects,$1) $$(call get_gen_srcs,$1)
+	$$(RM) $$(call get_all_objs,$1) $$(patsubst %.o,%.dep,$$(call get_all_objs,$1)) $$(patsubst %.o,%.cmd.json,$$(call get_all_objs,$1)) $$(call get_side_effects,$1) $$(call get_gen_srcs,$1) $$(call get_gen_hdrs,$1)
 	$$(RM) $(BINDIR)/$1$(EXTENSION.exe) $(BINDIR)/$1$(EXTENSION.exe).debug$(if $(findstring emscripten,$(TARGET_TRIPLET)), $(BINDIR)/$1.js $(BINDIR)/$1.wasm $(BINDIR)/$1.data)
 endef
 $(foreach p,$(EXECUTABLES),$(eval $(call project_rules,$p)))
