@@ -1,7 +1,7 @@
 ---
 title: ColdFire VM ISA Completion
 status: backlog
-gitlab-sync: OrangeTide/boris#23
+gitlab-sync: OrangeTide/boris#22
 ---
 
 Remaining ColdFire instruction implementations.
