@@ -1,7 +1,7 @@
 ---
 title: Sandbox Single-Writer-Per-Domain Write Model
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#53
 ---
 
 Gate item 2 for freezing the sandbox ABI. This most shapes the eventual

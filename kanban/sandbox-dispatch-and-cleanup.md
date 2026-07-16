@@ -1,7 +1,7 @@
 ---
 title: Sandbox Scheduler-Integrated Dispatch + ABI Cleanup
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#52
 ---
 
 Follow-on cleanups once the gate items land. See

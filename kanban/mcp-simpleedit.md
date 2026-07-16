@@ -1,7 +1,7 @@
 ---
 title: MCP Client-Side Editing
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#49
 ---
 
 Implement the MUD Client Protocol (MCP 2.1) so telnet clients can edit

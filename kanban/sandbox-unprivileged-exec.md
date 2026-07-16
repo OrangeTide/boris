@@ -1,7 +1,7 @@
 ---
 title: Sandbox Unprivileged Execution + Faulting Bus
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#57
 ---
 
 Gate item 1 for freezing the sandbox ABI. Foundational: everything else
