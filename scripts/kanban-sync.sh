@@ -202,16 +202,21 @@ if [ "$CARDS_CHANGED" -eq 1 ]; then
         echo "FATAL: failed to commit gitlab-sync refs." >&2
         exit 1
     fi
-    if ! git push "https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" \
+    if git push "https://oauth2:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" \
             "HEAD:${CI_COMMIT_REF_NAME}"; then
-        echo "FATAL: gitlab-sync refs were committed but the push to" \
+        echo "pushed gitlab-sync refs to ${CI_COMMIT_REF_NAME}"
+    else
+        # The kanban-sync job runs with Developer rights, which cannot push to a
+        # protected branch. Warn but do not fail: the refs are not persisted this
+        # run, yet the title-lookup guard re-links the existing issues next run
+        # instead of creating duplicates. To persist refs, allow this job's
+        # identity to push to '${CI_COMMIT_REF_NAME}'.
+        echo "WARNING: gitlab-sync refs were committed but the push to" \
              "'${CI_COMMIT_REF_NAME}' failed." >&2
-        echo "       The GitLab issues exist, but their refs are NOT persisted in" \
-             "the repo." >&2
-        echo "       Fix the push (commonly: allow the CI token to push to the" \
-             "protected branch) and re-run this job. The title-lookup guard will" >&2
-        echo "       re-link the existing issues instead of creating duplicates." >&2
-        exit 1
+        echo "         The GitLab issues exist, but their refs are NOT persisted" \
+             "in the repo this run (commonly: the CI user cannot push to the" >&2
+        echo "         protected branch). Not failing the job -- the title-lookup" \
+             "guard re-links the existing issues on the next run rather than" >&2
+        echo "         creating duplicates." >&2
     fi
-    echo "pushed gitlab-sync refs to ${CI_COMMIT_REF_NAME}"
 fi
