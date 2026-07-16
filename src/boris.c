@@ -23,6 +23,7 @@
  */
 
 #include "boris.h"
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -405,10 +406,20 @@ main(int argc, char **argv)
 			return EXIT_FAILURE;
 		}
 
+		if (mud_config.cas_commit_seconds > INT_MAX / 1000) {
+			LOG_WARNING("database.cas.commit_seconds too large,"
+				" clamping to %d", INT_MAX / 1000);
+			mud_config.cas_commit_seconds = INT_MAX / 1000;
+		}
+
 		if (mud_config.cas_commit_seconds > 0)
 			iox_timer_add(g_loop,
 				(int)mud_config.cas_commit_seconds * 1000,
 				obj_commit_timer, NULL);
+		else
+			LOG_WARNING("database.cas.commit_seconds is 0:"
+				" objects commit only at shutdown; a crash"
+				" loses all changes since boot");
 	} else if (strcmp(mud_config.db_backend, "muddb") == 0) {
 		if (obj_initialize(mud_db, mud_config.obj_cache_size)) {
 			LOG_ERROR("could not load object cache");

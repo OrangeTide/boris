@@ -501,6 +501,31 @@ to_cas_domain(MUDDB *db, OBJ_CACHE *cache, const char *domain)
 	return 0;
 }
 
+/* import one domain into the depot and commit it */
+static int
+to_cas_one(MUDDB *db, struct cas_tree *ct, const char *ref,
+           const char *domain)
+{
+	OBJ_CACHE *cache = obj_cache_cas_new(ct, ref, domain, 16);
+	int rc = 0;
+
+	if (!cache) {
+		LOG_ERROR("could not create cache for \"%s\"", domain);
+		return 1;
+	}
+
+	if (to_cas_domain(db, cache, domain) != 0)
+		rc = 1;
+	else if (obj_cache_cas_commit(cache, "muddb-tool to-cas")
+		!= OBJ_CACHE_OK) {
+		LOG_ERROR("commit failed for \"%s\"", domain);
+		rc = 1;
+	}
+
+	obj_cache_cas_free(cache);
+	return rc;
+}
+
 static int
 cmd_to_cas(const char *dbpath, const char *depot, const char *ref,
            int argc, char **argv)
@@ -508,7 +533,6 @@ cmd_to_cas(const char *dbpath, const char *depot, const char *ref,
 	MUDDB *db;
 	struct cas *store;
 	struct cas_tree *ct;
-	const char **dp;
 	int rc = 0;
 
 	db = muddb_open(dbpath, 0);
@@ -530,35 +554,17 @@ cmd_to_cas(const char *dbpath, const char *depot, const char *ref,
 	printf("Importing %s -> %s (ref %s)\n", dbpath, depot, ref);
 
 	if (argc == 0) {
-		dp = known_domains;
+		const char **dp;
+
+		for (dp = known_domains; *dp; dp++)
+			if (to_cas_one(db, ct, ref, *dp) != 0)
+				rc = 1;
 	} else {
-		static const char *given[16];
 		int i;
 
-		for (i = 0; i < argc && i < 15; i++)
-			given[i] = argv[i];
-		given[i] = NULL;
-		dp = given;
-	}
-
-	for (; *dp; dp++) {
-		OBJ_CACHE *cache = obj_cache_cas_new(ct, ref, *dp, 16);
-
-		if (!cache) {
-			LOG_ERROR("could not create cache for \"%s\"", *dp);
-			rc = 1;
-			continue;
-		}
-
-		if (to_cas_domain(db, cache, *dp) != 0)
-			rc = 1;
-		else if (obj_cache_cas_commit(cache, "muddb-tool to-cas")
-			!= OBJ_CACHE_OK) {
-			LOG_ERROR("commit failed for \"%s\"", *dp);
-			rc = 1;
-		}
-
-		obj_cache_cas_free(cache);
+		for (i = 0; i < argc; i++)
+			if (to_cas_one(db, ct, ref, argv[i]) != 0)
+				rc = 1;
 	}
 
 	cas_tree_free(ct);

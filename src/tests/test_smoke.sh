@@ -122,9 +122,11 @@ setup_testenv()
 
 	if [ "$BORIS_BACKEND" = "cas" ]; then
 		echo "smoke: using cas object store backend"
-		"$MUDDB_TOOL" to-cas "$TMPDIR/data/muddb" \
-			"$TMPDIR/data/casdb" >/dev/null 2>&1 \
-			|| die "muddb-tool to-cas failed"
+		if ! "$MUDDB_TOOL" to-cas "$TMPDIR/data/muddb" \
+			"$TMPDIR/data/casdb" >"$TMPDIR/to-cas.log" 2>&1; then
+			cat "$TMPDIR/to-cas.log" >&2
+			die "muddb-tool to-cas failed"
+		fi
 		cat >> "$TMPDIR/boris.cfg" <<-EOF
 		database.backend	=	cas
 		database.cas.path	=	data/casdb
