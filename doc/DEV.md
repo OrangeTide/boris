@@ -2,6 +2,44 @@
 
 Information for developers working on Boris MUD.
 
+## Building and Running
+
+Build requires GNU Make 4.2.1+, GCC or Clang. On Debian/Ubuntu install
+`build-essential zlib1g-dev`.
+
+```sh
+make -j                    # Build (parallel, default GCC)
+make -j USE_CLANG=1        # Build with Clang
+make install               # Build and install web client to bin/www/
+make clean                 # Remove build objects
+make distclean             # Remove all build artifacts including binaries
+```
+
+Output binaries: `bin/boris`, `bin/mkpass`, `bin/muddb-tool`.
+
+```sh
+make tests                 # Run unit tests (obj, muddb, hashtable)
+make tests-valgrind        # Run unit tests under valgrind (leak check)
+make smoke                 # Run smoke tests (requires expect)
+make release               # Build + package release tarball
+make deploy                # Build + package + deploy (needs DEPLOY_DEST)
+```
+
+Local configuration (deploy destination, etc.) goes in `.env` (see
+`doc/env.example`). The Makefile reads it automatically via `-include .env`.
+
+Run the server:
+
+```sh
+./bin/boris                # Start server (telnet on 4444, web on 8080)
+```
+
+Configuration lives in `boris.cfg` (server.port, webserver.port, channels,
+messages, new user settings).
+
+The build system internals are described under [Build System](#build-system)
+below.
+
 ## Project Layout
 
 | Directory              | Description                                                    |
