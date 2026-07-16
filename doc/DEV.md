@@ -494,4 +494,13 @@ See work item #13 for the version policy. Any major MR should increment at
 least the patch number in `boris.h` (`BORIS_VERSION_PAT`). Multiple MRs
 merged in the same cycle share a single bump.
 
+### Kanban board
+
+Work items are tracked as Markdown cards in `kanban/`, one file per card,
+versioned with the repository. When you start a card set its `status` to
+`active`; when you finish, set it to `done` in the same commit that completes
+the work. Card status syncs one-way to GitLab issues via CI. See
+[KANBAN.md](KANBAN.md) for the card format, status values, and GitLab sync
+details.
+
 [1] https://valgrind.org Valgrind
