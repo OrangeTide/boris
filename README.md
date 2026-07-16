@@ -87,9 +87,11 @@ To specify a cross-compiler directly:
 make -j$(nproc) CC=arm-linux-gnueabihf-gcc
 ```
 
-Build output is `bin/boris`, `bin/mkpass`, and `bin/muddb-tool`. Object files go to
-`build/<triplet>/` (e.g. `build/x86_64-linux-gnu/`) so cross-compiled
-object files don't clobber native ones.
+Build output binaries are `boris`, `mkpass`, and `muddb-tool` under
+`_out/<triplet>/bin/` (e.g. `_out/x86_64-linux-gnu/bin/`). Object files go to
+`_build/<triplet>/`, so cross-compiled objects and binaries don't clobber
+native ones. `make install` stages the binaries and web client into `bin/`
+for packaging and deployment.
 
 ### Install Web Client
 

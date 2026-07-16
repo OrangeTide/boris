@@ -95,7 +95,7 @@ Template (adapt the repo URL, default ref, and the file list):
 set -eu
 
 REPO="https://github.com/<owner>/<lib>.git"
-REF="${1:-master}"
+REF="${1:-main}"
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)

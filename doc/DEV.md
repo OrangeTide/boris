@@ -15,7 +15,10 @@ make clean                 # Remove build objects
 make distclean             # Remove all build artifacts including binaries
 ```
 
-Output binaries: `bin/boris`, `bin/mkpass`, `bin/muddb-tool`.
+Build output binaries are `boris`, `mkpass`, and `muddb-tool` under
+`_out/<triplet>/bin/`. `make install` stages them (and the web client) into
+`bin/`, which is where the `./bin/...` run and tool examples below expect
+them.
 
 ```sh
 make tests                 # Run unit tests (obj, muddb, hashtable)
@@ -496,14 +499,14 @@ Development happens on feature branches merged via GitLab merge requests (MRs).
 
 ### Workflow
 
-1. Create a branch from `master` for your work.
+1. Create a branch from `main` for your work.
 2. Make commits on the branch. Reference GitLab work items or issues in commit
    messages using `#<number>` (e.g. `Add room save tests (#12)`). GitLab
    automatically links the commit to the referenced item.
 3. Push the branch and open a merge request on GitLab.
 4. The MR title should be concise. The description should explain what changed
    and why, and list any work items it addresses.
-5. After review, merge into `master`. Use "Delete source branch" to keep the
+5. After review, merge into `main`. Use "Delete source branch" to keep the
    branch list clean.
 
 ### Commit messages
