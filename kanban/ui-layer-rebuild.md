@@ -1,7 +1,7 @@
 ---
 title: Interactive UI Layer Rebuild (menu/form)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#75
 ---
 
 Rebuild menu.c and form.c into one per-session, data-driven, type-safe UI

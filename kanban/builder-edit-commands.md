@@ -1,7 +1,7 @@
 ---
 title: Builder Edit Commands (@create/@link/@set/@destroy)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#68
 ---
 
 The `@`-command building layer that the menu OLC later calls into. Useful

@@ -1,7 +1,7 @@
 ---
 title: OLC Item and NPC Editors (oedit/medit)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#73
 ---
 
 Item (`oedit`) and NPC (`medit`) editors on the same pattern as `redit`,

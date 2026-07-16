@@ -1,7 +1,7 @@
 ---
 title: MXP Protocol (menus and links)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#72
 ---
 
 Enable MUD eXtensible Protocol for clickable menus and links on capable

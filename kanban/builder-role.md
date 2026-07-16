@@ -1,7 +1,7 @@
 ---
 title: Builder Role (ACS flag B)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#69
 ---
 
 Define the Builder role as ACS flag `B` (plus a minimum level) and enforce

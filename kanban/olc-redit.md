@@ -1,7 +1,7 @@
 ---
 title: OLC Room Editor (redit)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#74
 ---
 
 Menu-based room editor, the first and reference OLC surface. A step wizard

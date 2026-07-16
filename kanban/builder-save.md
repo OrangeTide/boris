@@ -1,7 +1,7 @@
 ---
 title: builder_save / room_create Primitive
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#70
 ---
 
 Single save choke point for all builder writes, plus a `room_create()`

@@ -1,7 +1,7 @@
 ---
 title: CI and Test Infrastructure for Builder Work
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#71
 ---
 
 Close CI gaps as the Builder/OLC work lands. Current `.gitlab-ci.yml` runs

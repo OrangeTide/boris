@@ -1,7 +1,7 @@
 ---
 title: Zone Model
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#77
 ---
 
 Light grouping unit for content. A zone is a small OBJ in `objs`
