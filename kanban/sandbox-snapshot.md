@@ -1,7 +1,7 @@
 ---
 title: Sandbox Snapshot / Restore
 status: backlog
-gitlab-sync: OrangeTide/boris#56
+gitlab-sync: OrangeTide/boris#47
 ---
 
 Deferred until the fd table, capability table, and tmp policy are stable

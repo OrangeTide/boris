@@ -1,7 +1,7 @@
 ---
 title: obj_cache_cas cross-domain %parent parity
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#58
 ---
 
 Bring cross-domain %parent resolution to the CAS backend, matching

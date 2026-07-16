@@ -1,7 +1,7 @@
 ---
 title: obj_cache_cas review follow-ups
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#60
 ---
 
 Remaining findings from the code review of the CAS backend work

@@ -1,7 +1,7 @@
 ---
 title: Sandbox Capability / dirfd Model
 status: backlog
-gitlab-sync: OrangeTide/boris#50
+gitlab-sync: OrangeTide/boris#41
 ---
 
 Gate item 4 for freezing the sandbox ABI. Replaces the two hardcoded

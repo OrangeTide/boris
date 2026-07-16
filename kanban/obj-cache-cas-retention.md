@@ -1,7 +1,7 @@
 ---
 title: obj_cache_cas retention policy (bounded depot)
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#59
 ---
 
 Wire smolvfs v0.2.0 history pruning into the CAS backend so depot

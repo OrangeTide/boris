@@ -1,7 +1,7 @@
 ---
 title: obj_cache CAS backend experiment (smolvfs)
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#62
 ---
 
 Experiment: implement a second obj_cache backend over smolvfs

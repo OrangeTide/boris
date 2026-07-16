@@ -1,7 +1,7 @@
 ---
 title: Sandbox ABI Freeze + Program Versioning
 status: backlog
-gitlab-sync: OrangeTide/boris#54
+gitlab-sync: OrangeTide/boris#45
 ---
 
 The freeze line, drawn only after gate items 1-4 are met AND have

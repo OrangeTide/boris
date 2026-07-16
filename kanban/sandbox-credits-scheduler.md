@@ -1,7 +1,7 @@
 ---
 title: Sandbox Credits + Multicore Scheduler
 status: backlog
-gitlab-sync: OrangeTide/boris#51
+gitlab-sync: OrangeTide/boris#42
 ---
 
 Gate item 3 for freezing the sandbox ABI. Provides the runaway backstop,

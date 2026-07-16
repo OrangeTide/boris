@@ -1,7 +1,7 @@
 ---
 title: Sandbox Synchronous Messaging
 status: backlog
-gitlab-sync: OrangeTide/boris#55
+gitlab-sync: OrangeTide/boris#46
 ---
 
 Messaging is load-bearing, not optional: it is the concurrency model and

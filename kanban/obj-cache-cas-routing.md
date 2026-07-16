@@ -1,7 +1,7 @@
 ---
 title: obj_cache_cas config-gated routing and import
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#61
 ---
 
 Config-gated backend selection for the object store plus a
