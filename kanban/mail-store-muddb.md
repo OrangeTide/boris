@@ -1,7 +1,7 @@
 ---
 title: Mail muddb backend
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#89
 ---
 
 Default `mailstore` implementation over muddb. See

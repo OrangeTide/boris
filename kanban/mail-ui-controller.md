@@ -1,7 +1,7 @@
 ---
 title: Mail UI controller (account menu + mailbox object)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#90
 ---
 
 The in-game access layer for mail and contacts: the account-menu entries and the

@@ -1,7 +1,7 @@
 ---
 title: Contacts extension bindings, presence, and UI
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#78
 ---
 
 Transport bindings, presence, and client UI for the contacts extension. See

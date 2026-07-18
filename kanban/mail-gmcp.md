@@ -1,7 +1,7 @@
 ---
 title: Mail GMCP binding (Mudlet)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#86
 ---
 
 GMCP transport binding for the mail feature, the path for Mudlet and other

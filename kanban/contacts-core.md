@@ -1,7 +1,7 @@
 ---
 title: Contacts extension core (address book, friends, blocks)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#79
 ---
 
 Optional server-side contact list: address book, friend requests, block list,

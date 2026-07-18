@@ -1,7 +1,7 @@
 ---
 title: Formal GMCP module spec format
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#80
 ---
 
 A formal, publishable specification format for the GMCP modules Boris defines,

@@ -1,7 +1,7 @@
 ---
 title: In-Game Mail core model and mailstore interface
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#84
 ---
 
 Foundation for the in-game mail feature. Transport-neutral operation set,

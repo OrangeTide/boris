@@ -1,7 +1,7 @@
 ---
 title: Mail client extensions (Birdie, Mudlet, Blightmud)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#82
 ---
 
 Client-side mail user agents over the mail bindings. See

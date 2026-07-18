@@ -1,7 +1,7 @@
 ---
 title: Mail HTTP/JSON binding and web MUA
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#87
 ---
 
 HTTP/JSON REST binding for the mail feature plus a mail user agent view in

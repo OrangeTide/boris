@@ -1,7 +1,7 @@
 ---
 title: Mail object attachments via escrow service
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#85
 ---
 
 Object attachments for mail, delegated to a hypothetical escrow service.

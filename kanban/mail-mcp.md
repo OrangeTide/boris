@@ -1,7 +1,7 @@
 ---
 title: Mail MCP 2.1 binding (Birdie)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#88
 ---
 
 MCP 2.1 transport binding for the mail feature, the near-term path for

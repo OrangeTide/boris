@@ -1,7 +1,7 @@
 ---
 title: Mail compose flow (text form + GMCP window)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#83
 ---
 
 The two compose paths that meet at one send, because GMCP cannot prompt. See

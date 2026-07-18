@@ -1,7 +1,7 @@
 ---
 title: Mail content-addressed backend (dedup + undo)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#81
 ---
 
 `mailstore` implementation over a content-addressed store (smolvfs or a
