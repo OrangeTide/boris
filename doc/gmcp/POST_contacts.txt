@@ -1,0 +1,163 @@
+Name
+
+    Post.Contacts
+
+Name String
+
+    "Post.Contacts 1"
+
+Status
+
+    Draft. Unpublished.
+
+Version
+
+    Last Modified: 2026-07-17
+    Revision: 1
+
+Number
+
+    2
+
+Dependencies
+
+    GMCP (telnet option 201).
+    Core.Supports negotiation.
+    No dependency on Post.Mail. Contacts is an optional companion to mail, not
+    the reverse.
+
+Overview
+
+    Post.Contacts is a GMCP module for a server-side contact list: an address
+    book, friend requests, presence, and a block list. This document is the
+    self-contained protocol definition: any server may implement it and any
+    client may consume it.
+
+    Storage is out of scope; a server decides where and how contact data is
+    stored. (The Boris MUD implementation and its other bindings are documented
+    separately in the Boris project.)
+
+    Model. Contacts are addressed by name: an OOC handle or a character name.
+    Each addressable identity is its own entry, so a person known through
+    several characters appears as several entries, and a client need not learn
+    that those characters share one account. Friendship is per identity; the
+    block list is account-level (blocking any entry blocks the whole account).
+    Metadata (name, note, groups, color, icon) is client-facing display only and
+    opaque to the server.
+
+Negotiation
+
+    The client advertises:
+
+        Core.Supports.Set [ "Post.Contacts 1" ]
+
+    The list is live: after the first List the server pushes Post.Contacts.Delta
+    events without further requests.
+
+Data Model
+
+    An entry:
+
+        {
+          "id": "c17",                owner-scoped entry id (not shareable)
+          "address": "Gandalf",       one identity
+          "kind": "character",        "character" | "handle"
+          "state": "confirmed",       confirmed|pending|incoming|denied|
+                                      blocked|none
+          "presence": "online",       online|away|idle|offline; only for
+                                      confirmed, visible contacts
+          "name": "...",              player-controlled display metadata,
+          "note": "...",              opaque to the server
+          "groups": ["guild"],
+          "color": "#5b8f3a",
+          "icon": "wizard"
+        }
+
+    Account settings: { "request_policy": "anyone"|"none" }.
+
+Messages: Client to Server
+
+    Post.Contacts.List { "state"?, "group"? }
+        Requests every auto-materialized entry, optionally filtered. Server
+        replies Post.Contacts.Entries. State buckets are client-side filters.
+
+    Post.Contacts.Add { "address", "kind"?, "name"?, "note"?, "groups"?,
+                         "color"?, "icon"? }
+        Adds a book-only entry (state none) for one identity. Server replies
+        Post.Contacts.Entry.
+
+    Post.Contacts.Update { "id", "name"?, "note"?, "groups"?, "color"?, "icon"? }
+        Edits display metadata. Server replies Post.Contacts.Entry.
+
+    Post.Contacts.Remove { "id" }
+        Clears metadata; an entry with a relationship persists. Server replies
+        Post.Contacts.Ok.
+
+    Post.Contacts.Request { "address", "note"? }
+        Sends a contact request to an OOC handle or character name. Server
+        replies Post.Contacts.Entry (state pending, or confirmed if it
+        completed an incoming request).
+
+    Post.Contacts.Accept { "id" }
+        Server replies Post.Contacts.Entry (state confirmed).
+
+    Post.Contacts.Decline { "id" }
+        Server replies Post.Contacts.Ok. The requester moves to denied.
+
+    Post.Contacts.Unfriend { "id", "block"? }
+        Drops the relationship; also blocks if block is true. Server replies
+        Post.Contacts.Ok.
+
+    Post.Contacts.Block { "id" } or { "address" }
+        Account-level block. Server replies Post.Contacts.Ok.
+
+    Post.Contacts.Unblock { "id" }
+        Server replies Post.Contacts.Ok.
+
+    Post.Contacts.Presence { "state", "visible"? }
+        Sets the owner's own presence (online|away|idle) and visibility.
+
+    Post.Contacts.Prefs { "request_policy"? }
+        Reads or sets account settings; omit the value to read. Server replies
+        Post.Contacts.Prefs.
+
+Messages: Server to Client
+
+    Post.Contacts.Entries { "seq", "entries": [entry...] }
+        The full contact list.
+
+    Post.Contacts.Entry { <entry> }
+        A single entry after Add, Update, Request, Accept.
+
+    Post.Contacts.Prefs { "request_policy" }
+        Current account settings.
+
+    Post.Contacts.Ok { "op", "id"? }
+        Acknowledges an operation with no richer reply.
+
+    Post.Contacts.Delta { "seq", "kind", "id", ... }
+        Server-initiated. kind is one of presence, request, accepted, removed,
+        denied, changed. seq lets a client detect a missed event and re-List. A
+        block, and an unfriend that also blocks, emit no delta to the other
+        party; a plain unfriend emits a removed delta to the other party.
+
+Errors
+
+    Post.Contacts.Error { "code", "message", "op"? }
+
+    Codes:
+        not_permitted   blocked, or a request_policy of none
+        not_found       unknown entry id, handle, or character name
+        rate_limited    request throttled
+        quota           a per-account cap was reached
+
+Issues
+
+    1. A "find a contact by known email or phone" convenience (opt-in, throttled,
+       CAPTCHA-gated) is a possible later addition, not in this revision.
+    2. Presence granularity beyond online/away/idle/offline (custom status text)
+       is out of scope for this revision.
+
+Revision History
+
+    Revision 1, 2026-07-17: initial draft (unpublished).
