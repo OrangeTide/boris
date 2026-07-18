@@ -9,25 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static int failures;
-
-#define FAIL(fmt, ...) do { \
-	fprintf(stderr, "FAIL %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__); \
-	failures++; \
-} while (0)
-
-#define OK(label) printf("ok   %s\n", (label))
-
-#define EXPECT(cond, label) do { \
-	if (!(cond)) FAIL("%s: expected (%s)", (label), #cond); \
-	else OK(label); \
-} while (0)
-
-#define EXPECT_EQ(actual, expected, label) do { \
-	if ((actual) != (expected)) \
-		FAIL("%s: got %d expected %d", (label), (int)(actual), (int)(expected)); \
-	else OK(label); \
-} while (0)
+#include "ctest.h"
 
 /* ------------------------------------------------------------------ */
 /* Embedded hello-world image (loads at 0x1000)                       */
@@ -799,6 +781,5 @@ main(void)
 
 	log_done();
 
-	printf("%s\n", failures ? "FAILED" : "PASSED");
-	return failures > 0 ? 1 : 0;
+	return ctest_report("test_machine");
 }

@@ -31,8 +31,7 @@
 #define BORIS_VERSION_PAT 1
 
 /* return values for most simple functions */
-#define OK (0)
-#define ERR (-1)
+#include "retcode.h"
 
 /******************************************************************************
  * Forward declarations
@@ -290,8 +289,6 @@ struct description_string {
 	char *long_str;
 };
 
-struct heapqueue_elm;
-
 /******************************************************************************
  * Global variables
  ******************************************************************************/
@@ -312,11 +309,6 @@ int parse_str(const char *name, const char *value, char **str_p);
 int parse_attr(const char *name, const char *value, struct attr_list *al);
 int value_set(const char *value, enum value_type type, void *p);
 const char *value_get(enum value_type type, void *p);
-
-int heapqueue_cancel(unsigned i, struct heapqueue_elm *ret);
-void heapqueue_enqueue(struct heapqueue_elm *elm);
-int heapqueue_dequeue(struct heapqueue_elm *ret);
-void heapqueue_test(void);
 
 void mud_config_init(void);
 void mud_config_shutdown(void);

@@ -7,26 +7,12 @@
 
 #include "position.c"
 #include "tag.c"
+#include "ctest.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-
-static int pass_count;
-static int fail_count;
-
-static inline void
-check(const char *description, bool e)
-{
-	if (e) {
-		LOG_INFO("%s: PASSED", description);
-		pass_count++;
-	} else {
-		LOG_ERROR("%s: FAILED", description);
-		fail_count++;
-	}
-}
 
 /* ------------------------------------------------------------------
  * Stubs for symbols tag.c references outside this unit.
@@ -245,8 +231,5 @@ main(void)
 	test_apply_ignores_non_prefix();
 	test_apply_clamps_difficulty_high();
 
-	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
-		pass_count, fail_count);
-
-	return fail_count ? EXIT_FAILURE : EXIT_SUCCESS;
+	return ctest_report("test_tag");
 }

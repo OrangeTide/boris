@@ -3,26 +3,12 @@
 #include "log.h"
 
 #include "dice.c"
+#include "ctest.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-
-static int pass_count;
-static int fail_count;
-
-static inline void
-check(const char *description, bool e)
-{
-	if (e) {
-		LOG_INFO("%s: PASSED", description);
-		pass_count++;
-	} else {
-		LOG_ERROR("%s: FAILED", description);
-		fail_count++;
-	}
-}
 
 /* scripted d6: returns values from a fixed array in order. */
 struct scripted {
@@ -166,8 +152,5 @@ main(void)
 	test_exploding_odd_sixes();
 	test_outcome();
 
-	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
-		pass_count, fail_count);
-
-	return fail_count ? EXIT_FAILURE : EXIT_SUCCESS;
+	return ctest_report("test_dice");
 }

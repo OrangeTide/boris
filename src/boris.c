@@ -307,16 +307,6 @@ main(int argc, char **argv)
 {
 	show_version();
 
-#ifndef NTEST
-	acs_test();
-	config_test();
-	bitmap_test();
-	freelist_test();
-	heapqueue_test();
-	sha1_test();
-	sha1crypt_test();
-#endif
-
 	srand((unsigned)time(NULL));
 
 	if (MKDIR("data") == -1 && errno != EEXIST) {

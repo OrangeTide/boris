@@ -10,26 +10,13 @@
  */
 
 #include "phaseq.h"
+#include "ctest.h"
 
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static int failures;
-
-#define FAIL(fmt, ...) do { \
-	fprintf(stderr, "FAIL %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__); \
-	failures++; \
-} while (0)
-
-#define OK(label) printf("ok   %s\n", (label))
-
-#define EXPECT(cond, label) do { \
-	if (!(cond)) FAIL("%s: expected (%s)", (label), #cond); \
-	else OK(label); \
-} while (0)
 
 /* ---- callback recording ---- */
 
@@ -277,10 +264,5 @@ main(void)
 	test_64bit_deadlines();
 	test_null_str();
 
-	if (failures) {
-		fprintf(stderr, "%d test(s) failed\n", failures);
-		return 1;
-	}
-	printf("all tests passed\n");
-	return 0;
+	return ctest_report("test_phaseq");
 }

@@ -3,6 +3,7 @@
 
 /* include the source directly for unit testing */
 #include "hashtable.c"
+#include "ctest.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,21 +11,6 @@
 #include <string.h>
 
 #include <log.h>
-
-static int pass_count;
-static int fail_count;
-
-static inline void
-check(const char *description, bool e)
-{
-	if (e) {
-		LOG_INFO("%s: PASSED", description);
-		pass_count++;
-	} else {
-		LOG_ERROR("%s: FAILED", description);
-		fail_count++;
-	}
-}
 
 /****************************************************************
  * ht_uint tests
@@ -312,8 +298,5 @@ main(void)
 	test_str_free_values();
 	test_str_delete_rehash();
 
-	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
-		pass_count, fail_count);
-
-	return fail_count ? EXIT_FAILURE : EXIT_SUCCESS;
+	return ctest_report("test_hashtable");
 }

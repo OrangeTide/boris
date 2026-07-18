@@ -1,8 +1,11 @@
 /* test_mcp.c : unit tests for mcp.c */
-/* PUBLIC DOMAIN (CC0-1.0) */
+/* Copyright (c) 2026 Jon Mayo
+ * Licensed under MIT-0 OR PUBLIC DOMAIN
+ */
 
 /* include the source directly for unit testing */
 #include "mcp.c"
+#include "ctest.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,21 +13,6 @@
 #include <string.h>
 
 #include <log.h>
-
-static int pass_count;
-static int fail_count;
-
-static inline void
-check(const char *description, bool e)
-{
-	if (e) {
-		LOG_INFO("%s: PASSED", description);
-		pass_count++;
-	} else {
-		LOG_ERROR("%s: FAILED", description);
-		fail_count++;
-	}
-}
 
 /****************************************************************
  * Stubs capturing output and applied edits
@@ -317,8 +305,5 @@ main(void)
 	test_simpleedit_set_rejected();
 	test_no_state();
 
-	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
-		pass_count, fail_count);
-
-	return fail_count ? EXIT_FAILURE : EXIT_SUCCESS;
+	return ctest_report("test_mcp");
 }

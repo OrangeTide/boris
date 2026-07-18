@@ -9,6 +9,7 @@
  * Licensed under MIT-0 OR PUBLIC DOMAIN
  */
 #include "combat.h"
+#include "ctest.h"
 
 #include "iox/iox_timer.h"
 
@@ -23,20 +24,6 @@ int  iox_timer_add(struct iox_loop *l, int ms, iox_timer_cb cb, void *a)
 	{ (void)l; (void)ms; (void)cb; (void)a; return -1; }
 void iox_timer_remove(struct iox_loop *l, int id)
 	{ (void)l; (void)id; }
-
-static int failures;
-
-#define FAIL(fmt, ...) do { \
-	fprintf(stderr, "FAIL %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__); \
-	failures++; \
-} while (0)
-
-#define OK(label) printf("ok   %s\n", (label))
-
-#define EXPECT(cond, label) do { \
-	if (!(cond)) FAIL("%s: expected (%s)", (label), #cond); \
-	else OK(label); \
-} while (0)
 
 #define MAX_FIRED 16
 #define MAX_TAG   16
@@ -170,10 +157,5 @@ main(void)
 	test_cancel_and_scrub();
 	test_independent_sessions();
 
-	if (failures) {
-		fprintf(stderr, "%d test(s) failed\n", failures);
-		return 1;
-	}
-	printf("all tests passed\n");
-	return 0;
+	return ctest_report("test_combat");
 }

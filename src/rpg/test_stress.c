@@ -4,26 +4,12 @@
 
 #include "boris.h"
 #include "stress.c"
+#include "ctest.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-
-static int pass_count;
-static int fail_count;
-
-static inline void
-check(const char *description, bool e)
-{
-	if (e) {
-		LOG_INFO("%s: PASSED", description);
-		pass_count++;
-	} else {
-		LOG_ERROR("%s: FAILED", description);
-		fail_count++;
-	}
-}
 
 /* ------------------------------------------------------------------
  * Stub character: a small (key,value) table. stress.c only uses
@@ -273,8 +259,5 @@ main(void)
 	test_resist_clear_on_double_six();
 	test_resist_zero_dice();
 
-	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
-		pass_count, fail_count);
-
-	return fail_count ? EXIT_FAILURE : EXIT_SUCCESS;
+	return ctest_report("test_stress");
 }

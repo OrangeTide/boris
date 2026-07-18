@@ -3,26 +3,12 @@
 
 /* include the source directly for unit testing */
 #include "obj.c"
+#include "ctest.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-
-static int pass_count;
-static int fail_count;
-
-static inline void
-check(const char *description, bool e)
-{
-	if (e) {
-		LOG_INFO("%s: PASSED", description);
-		pass_count++;
-	} else {
-		LOG_ERROR("%s: FAILED", description);
-		fail_count++;
-	}
-}
 
 /* output buffer for debug_dump */
 static char *dump_buf;
@@ -640,10 +626,7 @@ main(void)
 	test_prop_set_with_special_chars();
 	test_json_with_escapes();
 
-	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
-		pass_count, fail_count);
-
 	free(dump_buf);
 
-	return fail_count ? EXIT_FAILURE : EXIT_SUCCESS;
+	return ctest_report("test_obj");
 }

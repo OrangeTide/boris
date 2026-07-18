@@ -26,7 +26,9 @@
 #include <ctype.h>
 #include <stdlib.h>
 
+#ifndef LOG_SUBSYSTEM
 #define LOG_SUBSYSTEM "config"
+#endif
 #include "log.h"
 #include "debug.h"
 #include "util.h"
@@ -188,23 +190,3 @@ failure:
 	return 0; /* failure */
 }
 
-#ifndef NTEST
-/** test routine to dump a config option. */
-static int
-config_test_show(struct config *cfg UNUSED, void *extra UNUSED, const char *id, const char *value)
-{
-	printf("CONFIG SHOW: %s=%s\n", id, value);
-	return 1;
-}
-
-/** test the config system. */
-void
-config_test(void)
-{
-	struct config cfg;
-	config_setup(&cfg);
-	config_watch(&cfg, "s*er.*", config_test_show, 0);
-	config_load("test.cfg", &cfg);
-	config_free(&cfg);
-}
-#endif
