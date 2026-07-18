@@ -92,6 +92,15 @@ smoke-web: install
 .PHONY: tests
 tests: run-tests
 
+# --- check: build all unit-test binaries and total their pass/fail counts ----
+# The recipe is expanded at run time, so TEST_TARGETS (populated as every
+# module.mk loads) is complete here even though this file is the root module.
+
+.PHONY: check
+check:
+	@$(MAKE) --no-print-directory $(TEST_TARGETS)
+	@src/tests/run_unit_tests.sh $(foreach t,$(TEST_TARGETS),$($(t)_EXEC))
+
 # --- distclean ---------------------------------------------------------------
 
 .PHONY: distclean

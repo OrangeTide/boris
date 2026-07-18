@@ -13,23 +13,9 @@
 #include <ftw.h>
 
 #include <log.h>
-
-static int pass_count;
-static int fail_count;
+#include "ctest.h"
 
 static char tmpdir[] = "/tmp/test_muddb_XXXXXX";
-
-static inline void
-check(const char *description, bool e)
-{
-	if (e) {
-		LOG_INFO("%s: PASSED", description);
-		pass_count++;
-	} else {
-		LOG_ERROR("%s: FAILED", description);
-		fail_count++;
-	}
-}
 
 /* recursive remove for temp directory cleanup */
 static int
@@ -338,8 +324,5 @@ main(void)
 
 	cleanup_tmpdir();
 
-	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
-		pass_count, fail_count);
-
-	return fail_count ? EXIT_FAILURE : EXIT_SUCCESS;
+	return ctest_report("test_muddb");
 }

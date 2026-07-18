@@ -46,7 +46,4 @@ void config_free(struct config *cfg);
 void config_watch(struct config *cfg, const char *mask, int (*func)(struct config *cfg, void *extra, const char *id, const char *value ), void *extra);
 int config_load(const char *filename, struct config *cfg);
 
-#if !defined(NDEBUG) && !defined(NTEST)
-void config_test(void);
-#endif
 #endif

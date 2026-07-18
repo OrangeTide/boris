@@ -1,28 +1,9 @@
 #include "wordwrap.h"
+#include "ctest.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static int failures;
-
-#define FAIL(fmt, ...) do { \
-	fprintf(stderr, "FAIL %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__); \
-	failures++; \
-} while (0)
-
-#define OK(label) printf("ok   %s\n", (label))
-
-#define EXPECT(cond, label) do { \
-	if (!(cond)) FAIL("%s: expected (%s)", (label), #cond); \
-	else OK(label); \
-} while (0)
-
-#define EXPECT_INT(got, want, label) do { \
-	int g_ = (got), w_ = (want); \
-	if (g_ != w_) FAIL("%s: got %d want %d", (label), g_, w_); \
-	else OK(label); \
-} while (0)
 
 /* ---- wordify tests ---- */
 
@@ -345,10 +326,5 @@ main(void)
 
 	test_end_to_end();
 
-	if (failures) {
-		fprintf(stderr, "%d test(s) failed\n", failures);
-		return 1;
-	}
-	printf("all tests passed\n");
-	return 0;
+	return ctest_report("test_wordwrap");
 }

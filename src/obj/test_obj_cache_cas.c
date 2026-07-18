@@ -1,5 +1,7 @@
-/* unit test for obj_cache_cas.c */
-/* PUBLIC DOMAIN (CC0-1.0) */
+/* unit test for obj_cache_cas.c
+ * Copyright (c) 2026 Jon Mayo
+ * Licensed under MIT-0 OR PUBLIC DOMAIN
+ */
 #define _XOPEN_SOURCE 500
 #define _DEFAULT_SOURCE
 #define LOG_SUBSYSTEM "test_obj_cache_cas"
@@ -16,22 +18,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "ctest.h"
 
 static char tmpdir[] = "/tmp/test_obj_cache_cas_XXXXXX";
-
-static int pass_count, fail_count;
-
-static inline void
-check(const char *description, bool e)
-{
-	if (e) {
-		LOG_INFO("%s: PASSED", description);
-		pass_count++;
-	} else {
-		LOG_ERROR("%s: FAILED", description);
-		fail_count++;
-	}
-}
 
 static int
 rm_cb(const char *path, const struct stat *sb, int typeflag,
@@ -590,7 +579,5 @@ main(void)
 
 	cleanup_tmpdir();
 
-	LOG_INFO("%%%%%%%%%%%% END-TEST : %d passed, %d failed",
-		pass_count, fail_count);
-	return fail_count ? EXIT_FAILURE : EXIT_SUCCESS;
+	return ctest_report("test_obj_cache_cas");
 }

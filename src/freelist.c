@@ -24,7 +24,9 @@
  */
 #include "freelist.h"
 #include "list.h"
+#ifndef LOG_SUBSYSTEM
 #define LOG_SUBSYSTEM "freelist"
+#endif
 #include "log.h"
 #include "debug.h"
 #include <stdlib.h>
@@ -355,70 +357,3 @@ freelist_thwack(struct freelist *fl, unsigned ofs, unsigned count)
 	return 0; /* failure */
 }
 
-#ifndef NTEST
-/** test the freelist. */
-void
-freelist_test(void)
-{
-	struct freelist *fl;
-	unsigned n;
-	fl = freelist_new(fl, 0, 0);
-	fprintf(stderr, "::: Making some fragments :::\n");
-
-	for (n = 0; n < 60; n += 12) {
-		freelist_pool(fl, n, 6);
-	}
-
-	fprintf(stderr, "::: Filling in gaps :::\n");
-
-	for (n = 0; n < 60; n += 12) {
-		freelist_pool(fl, n + 6, 6);
-	}
-
-	fprintf(stderr, "::: Walking backwards :::\n");
-
-	for (n = 120; n > 60;) {
-		n -= 6;
-		freelist_pool(fl, n, 6);
-	}
-
-	freelist_dump(fl);
-
-	/* test freelist_alloc() */
-	fprintf(stderr, "::: Allocating :::\n");
-
-	for (n = 0; n < 60; n += 6) {
-		long ofs;
-		ofs = freelist_alloc(fl, 6);
-		TRACE("alloc: %lu+%u\n", ofs, 6);
-	}
-
-	freelist_dump(fl);
-
-	fprintf(stderr, "::: Allocating :::\n");
-
-	for (n = 0; n < 60; n += 6) {
-		long ofs;
-		ofs = freelist_alloc(fl, 6);
-		TRACE("alloc: %lu+%u\n", ofs, 6);
-	}
-
-	freelist_dump(fl);
-	fprintf(stderr, "<freelist should be empty>\n");
-
-	freelist_pool(fl, 1003, 1015);
-
-	freelist_dump(fl);
-
-	freelist_thwack(fl, 1007, 1005);
-
-	freelist_thwack(fl, 2012, 6);
-
-	freelist_thwack(fl, 1003, 4);
-
-	freelist_dump(fl);
-	fprintf(stderr, "<freelist should be empty>\n");
-
-	freelist_free(fl);
-}
-#endif

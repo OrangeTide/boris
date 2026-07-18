@@ -9,9 +9,13 @@ hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 hashtable_SRCS = hashtable.c
 
 EXECUTABLES        += test_hashtable
+TEST_TARGETS       += test_hashtable
 test_hashtable_DIR := $(hashtable_DIR)
 test_hashtable_SRCS = test_hashtable.c
 test_hashtable_LIBS = log
+define test_hashtable_TESTCMD
+$(test_hashtable_RUN)
+endef
 
 EXECUTABLES  += test_mcp
 TEST_TARGETS += test_mcp
@@ -20,6 +24,70 @@ test_mcp_SRCS = test_mcp.c
 test_mcp_LIBS = util log
 define test_mcp_TESTCMD
 $(test_mcp_RUN)
+endef
+
+# --- unit tests extracted from embedded #ifndef NTEST blocks -----------------
+
+EXECUTABLES  += test_freelist
+TEST_TARGETS += test_freelist
+test_freelist_DIR := $(hashtable_DIR)
+test_freelist_SRCS = test_freelist.c
+test_freelist_LIBS = log
+define test_freelist_TESTCMD
+$(test_freelist_RUN)
+endef
+
+EXECUTABLES  += test_acs
+TEST_TARGETS += test_acs
+test_acs_DIR := $(hashtable_DIR)
+test_acs_SRCS = test_acs.c
+test_acs_LIBS = log
+define test_acs_TESTCMD
+$(test_acs_RUN)
+endef
+
+EXECUTABLES  += test_config
+TEST_TARGETS += test_config
+test_config_DIR := $(hashtable_DIR)
+test_config_SRCS = test_config.c
+test_config_LIBS = util log
+define test_config_TESTCMD
+$(test_config_RUN)
+endef
+
+EXECUTABLES  += test_sha1
+TEST_TARGETS += test_sha1
+test_sha1_DIR := $(hashtable_DIR)
+test_sha1_SRCS = crypt/test_sha1.c
+define test_sha1_TESTCMD
+$(test_sha1_RUN)
+endef
+
+EXECUTABLES  += test_sha1crypt
+TEST_TARGETS += test_sha1crypt
+test_sha1crypt_DIR := $(hashtable_DIR)
+test_sha1crypt_SRCS = crypt/test_sha1crypt.c crypt/base64.c crypt/sha1.c
+test_sha1crypt_LIBS = util log
+define test_sha1crypt_TESTCMD
+$(test_sha1crypt_RUN)
+endef
+
+EXECUTABLES  += test_heapqueue
+TEST_TARGETS += test_heapqueue
+test_heapqueue_DIR := $(hashtable_DIR)
+test_heapqueue_SRCS = test_heapqueue.c
+test_heapqueue_LIBS = log
+define test_heapqueue_TESTCMD
+$(test_heapqueue_RUN)
+endef
+
+EXECUTABLES  += test_bitmap
+TEST_TARGETS += test_bitmap
+test_bitmap_DIR := $(hashtable_DIR)
+test_bitmap_SRCS = test_bitmap.c
+test_bitmap_LIBS = log
+define test_bitmap_TESTCMD
+$(test_bitmap_RUN)
 endef
 
 EXECUTABLES += boris

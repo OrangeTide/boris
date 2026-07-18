@@ -41,5 +41,4 @@
 
 int sha1crypt_makepass(char *buf, size_t max, const char *plaintext);
 int sha1crypt_checkpass(const char *crypttext, const char *plaintext);
-void sha1crypt_test(void);
 #endif

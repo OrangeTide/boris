@@ -11,15 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static int pass_count, fail_count;
-
-static inline void
-check(const char *desc, bool e)
-{
-	if (e) { LOG_INFO("%s: PASSED", desc); pass_count++; }
-	else   { LOG_ERROR("%s: FAILED", desc); fail_count++; }
-}
+#include "ctest.h"
 
 /* --- mock backend ---------------------------------------------------- */
 
@@ -195,6 +187,5 @@ main(void)
 	test_load_missing();
 	test_prop_resolve_inheritance();
 	test_save_marks_dirty();
-	printf("\n%d passed, %d failed\n", pass_count, fail_count);
-	return fail_count ? 1 : 0;
+	return ctest_report("test_entity");
 }

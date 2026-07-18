@@ -23,7 +23,9 @@
 #include <sys/random.h>
 #endif
 #include "base64.h"
+#ifndef LOG_SUBSYSTEM
 #define LOG_SUBSYSTEM "crypt"
+#endif
 #include "log.h"
 #include "debug.h"
 #include "sha1.h"
@@ -151,54 +153,3 @@ int sha1crypt_checkpass(const char *crypttext, const char *plaintext)
 	return strcmp(tmp, crypttext) == 0;
 }
 
-#ifndef NTEST
-#include "boris.h"
-
-/* example:
- * {SSHA}ZIb6984G1q5itn2VUoEb34Jxuq5LUntDZlwK */
-void sha1crypt_test(void)
-{
-	char buf[SHA1PASSWD_MAX];
-	int res;
-	char salt[SHA1CRYPT_GENSALT_LEN];
-	struct {
-		char *pass, *hash;
-	} examples[] = {
-		{ "secret", "{SSHA}2gDsLm/57U00KyShbiYsgvPIsQtzYWx0" },
-		{ "abcdef", "{SSHA}AZz7VpGpy0tnrooaGm++zs9zqgZiVHhbKEc=" },
-		{ "abcdef", "{SSHA}6Nrfz6LziwIo8HsSAkjm/nCeledLUntDZlw=" },
-		{ "abcdeg", "{SSHA}8Lqg317f9lLd0M3EnwIe7BHiH3liVHhbKEc="},
-	};
-	unsigned i;
-
-	/* generate salt. */
-	sha1crypt_gensalt(sizeof salt, salt);
-	HEXDUMP(salt, sizeof salt, "%s(): testing sha1crypt_gensalt() : salt=", __func__);
-
-	/* password creation and checking. - positive testing. */
-	sha1crypt_makepass(buf, sizeof buf, "abcdef");
-	printf("buf=\"%s\"\n", buf);
-	res = sha1crypt_checkpass(buf, "abcdef");
-	LOG_DEBUG("sha1crypt_checkpass() positive:%s (res=%d)", !res ? "FAILED" : "PASSED", res);
-
-	if (!res) {
-		LOG_ERROR("sha1crypt_checkpass() must succeed on positive test.");
-		exit(1);
-	}
-
-	/* checking - negative testing. */
-	res = sha1crypt_checkpass(buf, "abcdeg");
-	LOG_DEBUG("sha1crypt_checkpass() negative:%s (res=%d)", res ? "FAILED" : "PASSED", res);
-
-	if (res) {
-		LOG_ERROR("sha1crypt_checkpass() must fail on negative test.");
-		exit(1);
-	}
-
-	/* loop through all hardcoded examples. */
-	for (i = 0; i < NR(examples); i++) {
-		res = sha1crypt_checkpass(examples[i].hash, examples[i].pass);
-		LOG_DEBUG("Example %d:%s (res=%d) hash:%s", i + 1, !res ? "FAILED" : "PASSED", res, examples[i].hash);
-	}
-}
-#endif

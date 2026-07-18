@@ -1,9 +1,8 @@
 #include "charset.h"
+#include "ctest.h"
 
 #include <stdio.h>
 #include <string.h>
-
-static int failures;
 
 static void
 check_str(const char *label, const char *got, const char *want)
@@ -11,9 +10,9 @@ check_str(const char *label, const char *got, const char *want)
 	if (!got || strcmp(got, want) != 0) {
 		fprintf(stderr, "FAIL %s: got \"%s\" want \"%s\"\n",
 			label, got ? got : "(null)", want);
-		failures++;
+		ctest_fail++;
 	} else {
-		printf("ok   %s\n", label);
+		ctest_check(label, 1);
 	}
 }
 
@@ -31,9 +30,9 @@ check_bytes(const char *label, const char *got, int got_len,
 						i, (unsigned char)got[i], want[i]);
 			}
 		}
-		failures++;
+		ctest_fail++;
 	} else {
-		printf("ok   %s\n", label);
+		ctest_check(label, 1);
 	}
 }
 
@@ -42,9 +41,9 @@ check_int(const char *label, int got, int want)
 {
 	if (got != want) {
 		fprintf(stderr, "FAIL %s: got %d want %d\n", label, got, want);
-		failures++;
+		ctest_fail++;
 	} else {
-		printf("ok   %s\n", label);
+		ctest_check(label, 1);
 	}
 }
 
@@ -117,7 +116,7 @@ static void
 test_ascii_passthrough(void)
 {
 	struct charset *cs = charset_load("cp437");
-	if (!cs) { failures++; return; }
+	if (!cs) { ctest_fail++; return; }
 
 	char out[64];
 	int n;
@@ -137,7 +136,7 @@ static void
 test_cp437_to_utf8(void)
 {
 	struct charset *cs = charset_load("cp437");
-	if (!cs) { failures++; return; }
+	if (!cs) { ctest_fail++; return; }
 
 	char out[64];
 	int n;
@@ -164,7 +163,7 @@ static void
 test_cp437_from_utf8(void)
 {
 	struct charset *cs = charset_load("cp437");
-	if (!cs) { failures++; return; }
+	if (!cs) { ctest_fail++; return; }
 
 	char out[64];
 	int n;
@@ -191,7 +190,7 @@ static void
 test_latin1_roundtrip(void)
 {
 	struct charset *cs = charset_load("latin1");
-	if (!cs) { failures++; return; }
+	if (!cs) { ctest_fail++; return; }
 
 	char out1[64], out2[64];
 	int n;
@@ -213,7 +212,7 @@ static void
 test_cp1252_undefined(void)
 {
 	struct charset *cs = charset_load("cp1252");
-	if (!cs) { failures++; return; }
+	if (!cs) { ctest_fail++; return; }
 
 	char out[64];
 	int n;
@@ -238,7 +237,7 @@ static void
 test_mixed_string(void)
 {
 	struct charset *cs = charset_load("cp437");
-	if (!cs) { failures++; return; }
+	if (!cs) { ctest_fail++; return; }
 
 	char out[256];
 	int n;
@@ -262,7 +261,7 @@ static void
 test_empty_input(void)
 {
 	struct charset *cs = charset_load("cp437");
-	if (!cs) { failures++; return; }
+	if (!cs) { ctest_fail++; return; }
 
 	char out[64];
 	int n;
@@ -312,10 +311,5 @@ main(void)
 	test_charset_name_null();
 	test_shutdown();
 
-	if (failures) {
-		fprintf(stderr, "%d test(s) failed\n", failures);
-		return 1;
-	}
-	printf("all tests passed\n");
-	return 0;
+	return ctest_report("test_charset");
 }

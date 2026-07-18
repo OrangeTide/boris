@@ -7,6 +7,7 @@
  */
 
 #include "variables.h"
+#include "ctest.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -47,17 +48,15 @@ lookup_kv(void *user, const char *name)
 	return NULL;
 }
 
-static int failures;
-
 static void
 check_eq(const char *label, const char *got, const char *want)
 {
 	if (!got || strcmp(got, want) != 0) {
 		fprintf(stderr, "FAIL %s: got \"%s\" want \"%s\"\n",
 			label, got ? got : "(null)", want);
-		failures++;
+		ctest_fail++;
 	} else {
-		printf("ok   %s\n", label);
+		ctest_check(label, 1);
 	}
 }
 
@@ -166,7 +165,7 @@ main(void)
 		fb.data[fb.len] = '\0';
 		if (rc != 0) {
 			fprintf(stderr, "FAIL stream rc %d\n", rc);
-			failures++;
+			ctest_fail++;
 		}
 		check_eq("stream into stack buf", fb.data,
 			 "hi frodo, room=shire, rc=42");
@@ -178,16 +177,11 @@ main(void)
 					      abort_sink, NULL);
 		if (rc != 7) {
 			fprintf(stderr, "FAIL abort: rc=%d want 7\n", rc);
-			failures++;
+			ctest_fail++;
 		} else {
 			printf("ok   stream abort bubbles\n");
 		}
 	}
 
-	if (failures) {
-		fprintf(stderr, "%d test(s) failed\n", failures);
-		return 1;
-	}
-	printf("all tests passed\n");
-	return 0;
+	return ctest_report("test_variables");
 }

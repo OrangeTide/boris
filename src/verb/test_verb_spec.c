@@ -1,31 +1,13 @@
 /* test_verb_spec.c : tests for verb argument spec parsing and matching
- * PUBLIC DOMAIN (CC0-1.0) */
+ * Copyright (c) 2026 Jon Mayo
+ * Licensed under MIT-0 OR PUBLIC DOMAIN
+ */
 #include "verb_spec.h"
 
 #include <stdio.h>
 #include <string.h>
 
-static int failures;
-
-#define FAIL(fmt, ...) do { \
-	fprintf(stderr, "FAIL %s:%d " fmt "\n", \
-		__func__, __LINE__, ##__VA_ARGS__); \
-	failures++; \
-} while (0)
-
-#define OK(label) printf("ok   %s\n", (label))
-
-#define EXPECT(cond, label) do { \
-	if (!(cond)) FAIL("%s: expected (%s)", (label), #cond); \
-	else OK(label); \
-} while (0)
-
-#define EXPECT_EQ(actual, expected, label) do { \
-	if ((actual) != (expected)) \
-		FAIL("%s: got %d expected %d", (label), \
-			(int)(actual), (int)(expected)); \
-	else OK(label); \
-} while (0)
+#include "ctest.h"
 
 static int
 seg_eq(const struct verb_match *m, int idx, const char *expected)
@@ -340,6 +322,5 @@ main(void)
 	test_match_leftover_rejected();
 
 	printf("%%%%%%%%%%%% END-TEST test_verb_spec\n");
-	printf("%d failures\n", failures);
-	return failures ? 1 : 0;
+	return ctest_report("test_verb_spec");
 }

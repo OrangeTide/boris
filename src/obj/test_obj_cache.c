@@ -10,20 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static int pass_count, fail_count;
-
-static inline void
-check(const char *description, bool e)
-{
-	if (e) {
-		LOG_INFO("%s: PASSED", description);
-		pass_count++;
-	} else {
-		LOG_ERROR("%s: FAILED", description);
-		fail_count++;
-	}
-}
+#include "ctest.h"
 
 /* --- mock backend ---------------------------------------------------- */
 
@@ -314,6 +301,5 @@ main(void)
 	test_flush_all();
 	test_missing_key();
 
-	printf("PASS: %d  FAIL: %d\n", pass_count, fail_count);
-	return fail_count ? 1 : 0;
+	return ctest_report("test_obj_cache");
 }

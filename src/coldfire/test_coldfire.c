@@ -7,29 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static int failures;
-static int passes;
-
-#define FAIL(fmt, ...) do { \
-    fprintf(stderr, "FAIL %s:%d " fmt "\n", __func__, __LINE__, ##__VA_ARGS__); \
-    failures++; \
-} while (0)
-
-#define OK(label) do { printf("ok   %s\n", (label)); passes++; } while (0)
-
-#define EXPECT_EQ(actual, expected, label) do { \
-    if ((actual) != (expected)) \
-        FAIL("%s: got %u expected %u", (label), \
-             (unsigned)(actual), (unsigned)(expected)); \
-    else OK(label); \
-} while (0)
-
-#define EXPECT_EQ_X(actual, expected, label) do { \
-    if ((actual) != (expected)) \
-        FAIL("%s: got 0x%08x expected 0x%08x", (label), \
-             (unsigned)(actual), (unsigned)(expected)); \
-    else OK(label); \
-} while (0)
+#include "ctest.h"
 
 /****************************************************************
  * Flat 16 MB memory with big-endian bus callbacks
@@ -1042,6 +1020,5 @@ main(void)
     test_privilege_violation();
     test_zero_divide();
 
-    printf("\n%d passed, %d failed\n", passes, failures);
-    return failures > 0 ? 1 : 0;
+    return ctest_report("test_coldfire");
 }

@@ -26,7 +26,9 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <limits.h>
+#ifndef LOG_SUBSYSTEM
 #define LOG_SUBSYSTEM "acs"
+#endif
 #include <log.h>
 
 /** initializes acs_info to some values. */
@@ -104,20 +106,4 @@ parse_failure:
 	return 0;
 }
 
-#ifndef NTEST
-
-/** test routine for acs_info. */
-void
-acs_test(void)
-{
-	struct acs_info ai_test;
-
-	acs_init(&ai_test, 4, 0);
-
-	LOG_INFO("acs_check() %d", acs_check(&ai_test, "s6fA"));
-	LOG_INFO("acs_check() %d", acs_check(&ai_test, "s2"));
-	LOG_INFO("acs_check() %d", acs_check(&ai_test, "s2fA"));
-	LOG_INFO("acs_check() %d", acs_check(&ai_test, "s8|s2"));
-}
-#endif
 
