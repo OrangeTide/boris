@@ -1,0 +1,188 @@
+Name
+
+    Post.Mail
+
+Name String
+
+    "Post.Mail 1"
+
+Status
+
+    Draft. Unpublished.
+
+Version
+
+    Last Modified: 2026-07-17
+    Revision: 1
+
+Number
+
+    1
+
+Dependencies
+
+    GMCP (telnet option 201).
+    Core.Supports negotiation.
+    No hard dependency. Post.Contacts (module 2) is optional: it enables the
+    contacts-only receive mode, but mail addresses by name and works without it.
+
+Overview
+
+    Post.Mail is a GMCP module for in-game mail. This document is the
+    self-contained protocol definition: any server may implement it and any
+    client may consume it. It defines the client-to-server and server-to-client
+    messages, their payloads, and their semantics.
+
+    Storage is out of scope. A server decides where and how mailbox data and
+    per-mailbox metadata are stored; the protocol defines only the wire
+    interface. (The Boris MUD implementation, its storage layout, and its other
+    bindings are documented separately in the Boris project and are not part of
+    this spec.)
+
+    Model. A player has several mailboxes: one out-of-character (OOC) mailbox
+    for the account, plus one in-character (IC) mailbox per character. Every
+    operation names its target with a "mailbox" selector, "ooc" or a character
+    name the account owns. Mail is addressed by name: a character name for IC, a
+    public OOC handle for OOC. A server never exposes the account login name.
+
+Negotiation
+
+    The client advertises:
+
+        Core.Supports.Set [ "Post.Mail 1" ]
+
+    The server sends Post.Mail.* messages only after this.
+
+Data Model
+
+    A message header (the compact object returned by List):
+
+        {
+          "id": "42",                 string, opaque, stable per mailbox
+          "class": "ic",              "ic" | "ooc" (implied by the mailbox)
+          "from": "Gandalf",          character name (IC) or handle (OOC)
+          "to": ["Frodo"],            list of names/handles
+          "cc": [],
+          "subject": "...",
+          "date": 1752624000,         Unix epoch seconds
+          "flags": ["seen"],          subset of: seen, flagged, answered,
+                                      draft, deleted
+          "size": 1180,               body size in bytes
+          "attach": 0                 attachment count
+        }
+
+    A full message adds "in_reply_to" (a message id or null), "body" (UTF-8
+    text, within the server's configured maximum body size), and "attach" as a
+    list of attachment descriptors:
+
+        {
+          "name": "old map",
+          "desc": "a brittle parchment map of Moria",
+          "escrow": { "service": "default", "token": "esc_7Yb3",
+                      "expires": 1753228800 }
+        }
+
+    An attachment references an external escrow service that holds custody of a
+    game object; mail never carries the object itself. The escrow service is
+    outside this spec.
+
+    Per-mailbox settings: { "receive_mode": "open"|"contacts-only",
+    "signature": "..." }. Account settings: { "handle": "..." }.
+
+Messages: Client to Server
+
+    Post.Mail.Mailboxes
+        No payload. Enumerates the caller's mailboxes. Server replies
+        Post.Mail.Boxes.
+
+    Post.Mail.Stat { "mailbox" }
+        Server replies Post.Mail.Box.
+
+    Post.Mail.List { "mailbox", "since_modseq"?, "offset"?, "limit"?, "unseen"? }
+        Requests the header index or, with since_modseq, the delta since that
+        point. Server replies Post.Mail.Index.
+
+    Post.Mail.Fetch { "mailbox", "id", "part"? }
+        part is "full" (default), "header", or "body". Server replies
+        Post.Mail.Message.
+
+    Post.Mail.Flag { "mailbox", "id", "add": [flag...], "remove": [flag...] }
+        Server replies Post.Mail.Message with the updated header.
+
+    Post.Mail.Send { "mailbox", "to": [name...], "cc"?, "subject", "body",
+                      "attach"?, "in_reply_to"? }
+        Sends from the named mailbox, which fixes from and class. Server replies
+        Post.Mail.Sent, or Post.Mail.Error on an unknown, blocked, or
+        contacts-only-refused recipient.
+
+    Post.Mail.Delete { "mailbox", "id" }
+        Soft delete (sets the deleted flag). Server replies Post.Mail.Box.
+
+    Post.Mail.Expunge { "mailbox" }
+        Purges deleted messages. Server replies Post.Mail.Box.
+
+    Post.Mail.Undo { "mailbox" }
+        Single-step non-destructive undo of the mailbox's last change. Server
+        replies Post.Mail.Box, or Post.Mail.Error code "unsupported" where the
+        server keeps no history.
+
+    Post.Mail.Block { "name" } / Post.Mail.Unblock { "name" }
+        Account-level block list. Blocking a name blocks the whole account
+        behind it. Server replies Post.Mail.Ok.
+
+    Post.Mail.Prefs { "mailbox"?, "receive_mode"?, "signature"?, "handle"? }
+        Reads or sets settings. handle is account-level (no mailbox);
+        receive_mode and signature are per-mailbox (with mailbox). Omit value
+        fields to read. Server replies Post.Mail.Prefs.
+
+Messages: Server to Client
+
+    Post.Mail.Boxes { "mailboxes": [ { "mailbox", "kind", "label", "count",
+                                        "unseen", "receive_mode" } ... ] }
+        The caller's mailboxes; kind is "ooc" or "character".
+
+    Post.Mail.Box { "mailbox", "count", "unseen", "size", "modseq", "gen" }
+        Summary of one mailbox. Sent for Stat, Delete, Expunge, Undo.
+
+    Post.Mail.Index { "mailbox", "modseq", "gen", "messages": [header...],
+                       "removed"? }
+        Header index or delta. removed is present only for a delta.
+
+    Post.Mail.Message { "mailbox", <full message or header> }
+        A fetched message, or the updated header after Flag.
+
+    Post.Mail.Sent { "mailbox", "id" }
+        Acknowledges a Send.
+
+    Post.Mail.Prefs { "handle", "receive_mode"?, "signature"? }
+        Current settings; the per-mailbox fields are present only when a mailbox
+        was given.
+
+    Post.Mail.Ok { "op" }
+        Acknowledges Block/Unblock.
+
+    Post.Mail.Notify { "mailbox", "unseen",
+                        "latest": { "id", "from", "subject", "class" } }
+        Server-initiated. Pushed when a mailbox receives mail.
+
+Errors
+
+    Post.Mail.Error { "code", "message", "op"?, "mailbox"? }
+
+    Codes:
+        not_permitted   recipient blocked the sender's account, is in
+                        contacts-only mode without a relationship, or the
+                        mailbox is not owned by the account
+        not_found       unknown recipient, message id, or mailbox
+        too_large       body over the server's maximum
+        conflict        gen mismatch; client should re-list
+        unsupported     operation not available on this server (e.g. Undo)
+
+Issues
+
+    1. Should Post.Mail.Sent also carry the modseq so the sender's own copy can
+       be folded in without a follow-up List? Leaning yes; deferred.
+
+Revision History
+
+    Revision 1, 2026-07-17: initial draft (unpublished).
