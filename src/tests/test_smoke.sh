@@ -84,12 +84,23 @@ setup_testenv()
 {
 	TMPDIR="$(mktemp -d /tmp/boris-smoke.XXXXXX)"
 
-	# copy data files the server needs
+	# copy the static data files the server needs (text, forms, machine
+	# programs), then drop any object store that came along. The working
+	# tree's data/muddb is a developer's world of unknown provenance: it may
+	# hold edited or half-migrated state, and an LMDB file is not portable
+	# between 32-bit and 64-bit builds, so a cross-built server cannot even
+	# open one written natively. A smoke test must start from a world it
+	# built itself.
 	cp -a "$PROJECT_DIR/data" "$TMPDIR/data"
+	rm -rf "$TMPDIR/data/muddb" "$TMPDIR/data/casdb"
 
 	# initialize muddb with sample world data
 	mkdir -p "$TMPDIR/data/muddb"
-	"$MUDDB_TOOL" import "$TMPDIR/data/muddb" "$PROJECT_DIR/sample/" >/dev/null 2>&1
+	if ! "$MUDDB_TOOL" import "$TMPDIR/data/muddb" "$PROJECT_DIR/sample/" \
+		>"$TMPDIR/import.log" 2>&1; then
+		cat "$TMPDIR/import.log" >&2
+		die "muddb-tool import failed"
+	fi
 
 	# write a test config with our port
 	cat > "$TMPDIR/boris.cfg" <<-EOF

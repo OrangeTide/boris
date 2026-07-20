@@ -78,12 +78,22 @@ setup_testenv()
 {
     TMPDIR="$(mktemp -d /tmp/boris-web-smoke.XXXXXX)"
 
+    # copy the static data files, then drop any object store that came
+    # along. The working tree's data/muddb is a developer's world of unknown
+    # provenance, and an LMDB file is not portable between 32-bit and 64-bit
+    # builds, so a cross-built server cannot even open one written natively.
+    # A smoke test must start from a world it built itself.
     cp -a "$PROJECT_DIR/data" "$TMPDIR/data"
+    rm -rf "$TMPDIR/data/muddb" "$TMPDIR/data/casdb"
     mkdir -p "$TMPDIR/bin"
     cp -a "$PROJECT_DIR/bin/www" "$TMPDIR/bin/www"
 
     mkdir -p "$TMPDIR/data/muddb"
-    "$MUDDB_TOOL" import "$TMPDIR/data/muddb" "$PROJECT_DIR/sample/" >/dev/null 2>&1
+    if ! "$MUDDB_TOOL" import "$TMPDIR/data/muddb" "$PROJECT_DIR/sample/" \
+        >"$TMPDIR/import.log" 2>&1; then
+        cat "$TMPDIR/import.log" >&2
+        die "muddb-tool import failed"
+    fi
 
     cat > "$TMPDIR/boris.cfg" <<-EOF
 	server.name	=	WEBSMOKE
