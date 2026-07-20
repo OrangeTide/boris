@@ -1,8 +1,8 @@
 /* unit test for sha1crypt.c (salted SHA-1 password hashing) */
 #define LOG_SUBSYSTEM "test_sha1crypt"
 
-/* include the source directly for unit testing; base64.c and sha1.c are
- * linked separately (see module.mk). */
+/* include the source directly for unit testing; base64.c and sha1.c come from
+ * the crypt library (see module.mk). */
 #include "sha1crypt.c"
 
 #include "ctest.h"

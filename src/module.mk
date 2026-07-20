@@ -1,6 +1,7 @@
 SUBDIRS = \
 	thirdparty/lmdb thirdparty/mth thirdparty/tiny-aes \
 	thirdparty/smolvfs \
+	crypt \
 	log scrypt util help iox net passwd obj entity rpg combat database \
 	security muddb-tool daemonize coldfire machine verb
 
@@ -66,8 +67,8 @@ endef
 EXECUTABLES  += test_sha1crypt
 TEST_TARGETS += test_sha1crypt
 test_sha1crypt_DIR := $(hashtable_DIR)
-test_sha1crypt_SRCS = crypt/test_sha1crypt.c crypt/base64.c crypt/sha1.c
-test_sha1crypt_LIBS = util log
+test_sha1crypt_SRCS = crypt/test_sha1crypt.c
+test_sha1crypt_LIBS = crypt util log
 define test_sha1crypt_TESTCMD
 $(test_sha1crypt_RUN)
 endef
@@ -109,8 +110,6 @@ boris_SRCS = \
 	acs.c \
 	channel/channel.c \
 	character/character.c \
-	crypt/base64.c \
-	crypt/sha1.c \
 	crypt/sha1crypt.c \
 	room/room.c \
 	cmd/cmd.c \
@@ -142,5 +141,5 @@ boris_SRCS = \
 	machine/objref.c \
 	machine/program.c
 boris_LIBS = \
-	daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
+	crypt daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
 	database security machine coldfire lmdb mth tinyaes
