@@ -147,6 +147,8 @@ obj_cache_free(OBJ_CACHE *c)
 {
 	if (!c) return;
 	ht_str_free(&c->ht, free_entry_value);
+	if (c->ops.destroy)
+		c->ops.destroy(c->ctx);
 	free(c);
 }
 

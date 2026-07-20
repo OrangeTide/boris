@@ -71,6 +71,21 @@ bridge_resolve_parent(void *ctx, const char *parent_ref, const char **out_id)
 	return NULL;
 }
 
+/* free the bridge and its owned strings; called by obj_cache_free */
+static void
+bridge_destroy(void *ctx)
+{
+	struct bridge *b = ctx;
+	int i;
+
+	if (!b)
+		return;
+	for (i = 0; i < b->link_count; i++)
+		free(b->links[i].domain);
+	free(b->domain);
+	free(b);
+}
+
 OBJ_CACHE *
 obj_cache_muddb_new(MUDDB *db, const char *domain, unsigned max_unreferenced)
 {
@@ -84,19 +99,13 @@ obj_cache_muddb_new(MUDDB *db, const char *domain, unsigned max_unreferenced)
 		.load = bridge_load,
 		.save = bridge_save,
 		.resolve_parent_cache = bridge_resolve_parent,
+		.destroy = bridge_destroy,
 	};
 	OBJ_CACHE *c = obj_cache_new(max_unreferenced, &ops, b);
 	if (!c) { free(b->domain); free(b); return NULL; }
 	b->self = c;
 	return c;
 }
-
-/*
- * NOTE: bridge storage currently leaks on obj_cache_free because the
- * cache doesn't notify the ctx on teardown. For the global caches
- * created at boot this is fine (lives for the process lifetime).
- * If short-lived bridges are ever needed, add a destroy hook.
- */
 
 int
 obj_cache_muddb_link_parent(OBJ_CACHE *c, const char *domain,

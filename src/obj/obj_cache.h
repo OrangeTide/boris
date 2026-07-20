@@ -26,6 +26,10 @@ struct obj_cache_ops {
 	 * the same cache. */
 	OBJ_CACHE *(*resolve_parent_cache)(void *ctx, const char *parent_ref,
 		const char **out_id);
+
+	/* free the backend ctx; called once by obj_cache_free. May be NULL if
+	 * the ctx is not owned by the cache. */
+	void (*destroy)(void *ctx);
 };
 
 OBJ_CACHE *obj_cache_new(unsigned max_unreferenced,
