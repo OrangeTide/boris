@@ -314,8 +314,16 @@ union semun {
  * either.)
  */
 #ifndef MDB_USE_ROBUST
-/* Android currently lacks Robust Mutex support. So does glibc < 2.4. */
+/* Android currently lacks Robust Mutex support. So does glibc < 2.4.
+ *
+ * LOCAL PATCH: so does musl, whose pthread_mutexattr_setrobust() always
+ * returns ENOSYS even though it defines EOWNERDEAD. Without this,
+ * mdb_env_open() fails with "Function not implemented" on every musl
+ * build. musl exposes no identifying macro on purpose, so detect it as
+ * Linux without glibc, which also covers uclibc.
+ */
 # if defined(MDB_USE_POSIX_MUTEX) && (defined(__ANDROID__) || \
+	(defined(__linux__) && !defined(__GLIBC__)) || \
 	(defined(__GLIBC__) && GLIBC_VER < 0x020004))
 #  define MDB_USE_ROBUST	0
 # else
