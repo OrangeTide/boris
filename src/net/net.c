@@ -268,10 +268,8 @@ do_read(struct net_stream *s)
 /* ---------- fd callback ---------- */
 
 static void
-net_fd_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
+net_fd_process(struct net_stream *s, unsigned events)
 {
-	struct net_stream *s = arg;
-	(void)loop; (void)fd;
 	if (s->state == NET_STATE_LISTENING) {
 		if (events & IOX_READ) do_accept(s);
 		return;
@@ -284,6 +282,22 @@ net_fd_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
 	if (events & IOX_READ) {
 		do_read(s);
 	}
+}
+
+static void
+net_fd_cb(struct iox_loop *loop, int fd, unsigned events, void *arg)
+{
+	struct net_stream *s = arg;
+	(void)loop; (void)fd;
+	/* Treat the whole fd callback as one dispatch scope. A connection
+	 * closed from inside a data/accept callback is queued (deferred free)
+	 * while g_dispatch_depth > 0 and reclaimed only here, after we have
+	 * stopped touching s -- so do_read's post-dispatch `s->state` check
+	 * (and do_accept's loop) never read freed memory. */
+	g_dispatch_depth++;
+	net_fd_process(s, events);
+	if (--g_dispatch_depth == 0)
+		flush_pending_frees();
 }
 
 /* ---------- public API ---------- */
