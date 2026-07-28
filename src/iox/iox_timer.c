@@ -1,153 +1,205 @@
 /* iox_timer.c : I/O multiplexer -- one-shot timers via priority queue */
-/* Copyright (c) 2026 Jon Mayo
- * Licensed under MIT-0 OR PUBLIC DOMAIN */
 
 #include "iox_timer.h"
+#include "iox_internal.h"
+#include "iox_plat.h"
 
+#include <limits.h>
 #include <stdint.h>
-#include <time.h>
+#include <stdlib.h>
 
 #define IOX_MAX_TIMERS 16
 
 struct iox_timer_entry {
-	int64_t deadline_ns;
-	iox_timer_cb cb;
-	void *arg;
-	int id;
+    int64_t deadline_ns;
+    iox_timer_cb cb;
+    void *arg;
+    int id;
 };
 
-#define PQ_NAME		timer_pq
-#define PQ_ENTRY_TYPE	struct iox_timer_entry
-#define PQ_KEY(e)	((e).deadline_ns)
+#define PQ_NAME       timer_pq
+#define PQ_ENTRY_TYPE struct iox_timer_entry
+#define PQ_KEY(e)     ((e).deadline_ns)
 #define PQ_STATIC
 #define PQ_IMPLEMENTATION
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
 #include "pq.h"
-#pragma GCC diagnostic pop
 
-static struct timer_pq timers;
-static int next_id;
-static int initialized;
+struct iox_timers {
+    struct timer_pq pq;
+    int next_id;
+};
 
 static int64_t
 now_ns(void)
 {
-	struct timespec ts;
-
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    return (int64_t)iox_plat_mono_ns();
 }
 
-void
+static int
+id_in_use(struct iox_timers *t, int id)
+{
+    unsigned i;
+
+    for (i = 0; i < timer_pq_size(&t->pq); i++) {
+        struct iox_timer_entry *e = timer_pq_peek(&t->pq, i);
+
+        if (e && e->id == id)
+            return 1;
+    }
+    return 0;
+}
+
+/* Hand out a non-negative ID that no pending timer is using.
+ *
+ * next_id wraps at INT_MAX rather than overflowing. Wrapping can collide
+ * with a long-lived pending timer, so the in-use scan skips those. The
+ * queue is small, and the scan only ever runs after a wrap. */
+static int
+alloc_id(struct iox_timers *t)
+{
+    unsigned tries, limit;
+
+    limit = timer_pq_size(&t->pq) + 1;
+
+    for (tries = 0; tries < limit; tries++) {
+        int id = t->next_id;
+
+        t->next_id = (t->next_id == INT_MAX) ? 0 : t->next_id + 1;
+        if (!id_in_use(t, id))
+            return id;
+    }
+
+    return IOX_ERR;
+}
+
+int
 iox_timer_init(struct iox_loop *loop)
 {
-	(void)loop;
+    struct iox_timers *t;
 
-	if (initialized)
-		return;
-	timer_pq_init(&timers, IOX_MAX_TIMERS);
-	next_id = 0;
-	initialized = 1;
+    if (loop->timers)
+        return IOX_OK;
+
+    t = calloc(1, sizeof(*t));
+    if (!t)
+        return IOX_ERR;
+
+    if (!timer_pq_init(&t->pq, IOX_MAX_TIMERS)) {
+        free(t);
+        return IOX_ERR;
+    }
+
+    t->next_id = 0;
+    loop->timers = t;
+    return IOX_OK;
 }
 
 void
 iox_timer_shutdown(struct iox_loop *loop)
 {
-	(void)loop;
+    if (!loop->timers)
+        return;
 
-	if (!initialized)
-		return;
-	timer_pq_free(&timers);
-	initialized = 0;
+    timer_pq_free(&loop->timers->pq);
+    free(loop->timers);
+    loop->timers = NULL;
 }
 
 int
 iox_timer_add(struct iox_loop *loop, int ms, iox_timer_cb cb, void *arg)
 {
-	struct iox_timer_entry e;
+    struct iox_timers *t = loop->timers;
+    struct iox_timer_entry e;
 
-	(void)loop;
+    if (!t)
+        return IOX_ERR;
 
-	if (!initialized)
-		return -1;
+    if (ms < 0)
+        ms = 0;
 
-	e.deadline_ns = now_ns() + (int64_t)ms * 1000000LL;
-	e.cb = cb;
-	e.arg = arg;
-	e.id = next_id++;
+    e.deadline_ns = now_ns() + (int64_t)ms * 1000000LL;
+    e.cb = cb;
+    e.arg = arg;
+    e.id = alloc_id(t);
+    if (e.id < 0)
+        return IOX_ERR;
 
-	if (!timer_pq_enqueue(&timers, e)) {
-		/* queue full -- try to grow */
-		if (!timer_pq_resize(&timers, timers.max * 2))
-			return -1;
-		if (!timer_pq_enqueue(&timers, e))
-			return -1;
-	}
+    if (!timer_pq_enqueue(&t->pq, e)) {
+        /* queue full -- try to grow */
+        if (!timer_pq_resize(&t->pq, t->pq.max * 2))
+            return IOX_ERR;
+        if (!timer_pq_enqueue(&t->pq, e))
+            return IOX_ERR;
+    }
 
-	return e.id;
+    return e.id;
 }
 
 void
 iox_timer_remove(struct iox_loop *loop, int id)
 {
-	int idx;
-	struct iox_timer_entry probe;
+    struct iox_timers *t = loop->timers;
+    struct iox_timer_entry probe;
+    unsigned i;
 
-	(void)loop;
+    if (!t)
+        return;
 
-	if (!initialized)
-		return;
+    /* linear scan by ID -- fine for small timer counts */
+    for (i = 0; i < timer_pq_size(&t->pq); i++) {
+        struct iox_timer_entry *e = timer_pq_peek(&t->pq, i);
 
-	/* linear scan by ID -- fine for small timer counts */
-	for (idx = 0; idx < (int)timer_pq_size(&timers); idx++) {
-		struct iox_timer_entry *ep = timer_pq_peek(&timers, (unsigned)idx);
-
-		if (ep && ep->id == id) {
-			timer_pq_remove(&timers, (unsigned)idx, &probe);
-			return;
-		}
-	}
+        if (e && e->id == id) {
+            timer_pq_remove(&t->pq, i, &probe);
+            return;
+        }
+    }
 }
 
 int
 iox_timer_next_ms(struct iox_loop *loop)
 {
-	struct iox_timer_entry *top;
-	int64_t diff;
+    struct iox_timers *t = loop->timers;
+    struct iox_timer_entry *top;
+    int64_t diff;
 
-	(void)loop;
+    /* -1 here is poll()'s "block indefinitely", not IOX_ERR. With no
+     * timers pending there is no deadline to wake up for. */
+    if (!t)
+        return -1;
 
-	if (!initialized)
-		return -1;
+    top = timer_pq_top(&t->pq);
+    if (!top)
+        return -1;
 
-	top = timer_pq_top(&timers);
-	if (!top)
-		return -1;
-
-	diff = (top->deadline_ns - now_ns() + 999999LL) / 1000000LL;
-	if (diff < 0)
-		diff = 0;
-	if (diff > (int64_t)0x7FFFFFFF)
-		diff = 0x7FFFFFFF;
-	return (int)diff;
+    diff = (top->deadline_ns - now_ns() + 999999LL) / 1000000LL;
+    if (diff < 0)
+        diff = 0;
+    if (diff > (int64_t)0x7FFFFFFF)
+        diff = 0x7FFFFFFF;
+    return (int)diff;
 }
 
 void
 iox_timer_dispatch(struct iox_loop *loop)
 {
-	struct iox_timer_entry e;
-	int64_t t;
+    struct iox_timers *t = loop->timers;
+    struct iox_timer_entry e;
+    int64_t deadline;
 
-	if (!initialized)
-		return;
+    if (!t)
+        return;
 
-	t = now_ns();
+    /* Snapshot the cutoff before dispatching. A callback that re-arms
+     * with ms == 0 then lands past the cutoff and runs on the next
+     * iteration, rather than spinning inside this loop. */
+    deadline = now_ns();
 
-	while (timer_pq_top(&timers) &&
-	    timer_pq_top(&timers)->deadline_ns <= t) {
-		timer_pq_dequeue(&timers, &e);
-		if (e.cb)
-			e.cb(loop, e.arg);
-	}
+    while (timer_pq_top(&t->pq) &&
+        timer_pq_top(&t->pq)->deadline_ns <= deadline) {
+        if (!timer_pq_dequeue(&t->pq, &e))
+            break;
+        if (e.cb)
+            e.cb(loop, e.arg);
+    }
 }

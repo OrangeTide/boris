@@ -1,6 +1,4 @@
 /* iox_fd.h : I/O multiplexer -- file descriptor watchers */
-/* Copyright (c) 2026 Jon Mayo
- * Licensed under MIT-0 OR PUBLIC DOMAIN */
 
 #ifndef IOX_FD_H
 #define IOX_FD_H

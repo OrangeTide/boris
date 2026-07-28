@@ -1,0 +1,55 @@
+libiox is dual-licensed. Take whichever you prefer: MIT-0, or CC0-1.0
+(public domain dedication). You do not have to pick one publicly, and you
+do not owe attribution under either.
+
+SPDX-License-Identifier: MIT-0 OR CC0-1.0
+
+================================================================
+MIT No Attribution (MIT-0)
+================================================================
+
+Copyright (c) 2026 Jon Mayo
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+================================================================
+CC0 1.0 Universal (CC0-1.0) -- Public Domain Dedication
+================================================================
+
+To the extent possible under law, Jon Mayo has waived all copyright and
+related or neighboring rights to libiox. This work is published from the
+United States.
+
+The person who associated a work with this deed has dedicated the work to
+the public domain by waiving all of his or her rights to the work
+worldwide under copyright law, including all related and neighboring
+rights, to the extent allowed by law.
+
+You can copy, modify, distribute and perform the work, even for commercial
+purposes, all without asking permission.
+
+In no way are the patent or trademark rights of any person affected by
+CC0, nor are the rights that other persons may have in the work or in how
+the work is used, such as publicity or privacy rights.
+
+Unless expressly stated otherwise, the person who associated a work with
+this deed makes no warranties about the work, and disclaims liability for
+all uses of the work, to the fullest extent permitted by applicable law.
+
+When using or citing the work, you should not imply endorsement by the
+author or the affirmer.
+
+Full legal text: https://creativecommons.org/publicdomain/zero/1.0/legalcode

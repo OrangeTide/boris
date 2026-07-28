@@ -1,10 +1,14 @@
 /* pq.h - Priority Queue using a binary heap.
  *
- * Jon Mayo
- * PUBLIC DOMAIN or licensed under MIT-0.
+ * Copyright (c) 2026 Jon Mayo
+ * Licensed under MIT-0 OR CC0-1.0 (public domain)
  *
  * original: 19 Jun 2007
- * updated: 4 Apr 2026
+ * updated: 27 Jul 2026
+ *
+ * Vendored into libiox. This file gets copied between projects rather
+ * than tracked anywhere central, so libiox's copy is authoritative for
+ * libiox. Copies elsewhere may lag.
  *
  * STB-style single-header priority queue using a flattened binary heap.
  * Configurable as min-heap or max-heap via PQ_COMPARE.
