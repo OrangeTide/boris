@@ -22,7 +22,7 @@ PROJECT_CPPFLAGS += \
 PROJECT_LDFLAGS  += -pthread
 PROJECT_LDLIBS   += -pthread
 
-SUBDIRS = src
+SUBDIRS = src sdk/toolchain/skjegg
 
 # --- Install: stage binaries + web client into bin/ for packaging/deploy ------
 
