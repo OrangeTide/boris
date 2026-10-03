@@ -1,8 +1,16 @@
 # VM Migration Plan -- ColdFire to RV32/kobold
 
+> **Retired.** The pivot's first cut is complete: ColdFire is gone and the
+> RV32 + kobold sandbox is in place (phases 0-4, `coldfire-removal` through
+> `vm-guest-sdk` / `vm-toolchain-vendor`, all done). This document is kept
+> as the historical record of that work and is no longer maintained. The
+> only deferred follow-ups are the explicitly-later `vm-online-toolchain`
+> (in-server compile/link) and `vm-code-protection` cards. For the current
+> design see `doc/mud-vm-design.md`.
+
 The plan for retiring the ColdFire emulator and standing up the RV32 plus
-kobold sandbox described in `doc/mud-vm-design.md`. This document drives the
-`kanban/` cards for the work. Retire it once the pivot is complete.
+kobold sandbox described in `doc/mud-vm-design.md`. This document drove the
+`kanban/` cards for the work.
 
 ## Decisions
 

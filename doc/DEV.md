@@ -125,9 +125,7 @@ Current test suites:
 `make smoke` starts the server in a temporary directory and exercises telnet
 login flows via expect. Requires `expect` (`apt install expect` on
 Debian/Ubuntu, `apk add expect` on Alpine). Test cases: connect and quit,
-bad credentials rejection, new user creation and login. `make smoke-cas`
-runs the same suite with the cas object store backend (imports the sample
-world into a depot via `muddb-tool to-cas` first).
+bad credentials rejection, new user creation and login.
 
 For memory checking, `make smoke-valgrind` is as above and wrapped in
 [Valgrind][1].
@@ -279,9 +277,9 @@ Domain constants are defined in boris.h. Domains are created on first write
 (auto-vivify) -- read operations on a missing domain return NULL/empty rather
 than an error.
 
-The `objs` domain can alternatively be served by the CAS backend
-(`src/obj/obj_cache_cas.c`, selected with `database.backend = cas`); the
-other domains always use muddb. See the Configuration section below.
+A content-addressed store (`src/obj/obj_cache_cas.c`, smolvfs) exists only
+as an offline snapshot/export target reached through `muddb-tool to-cas`,
+not as a live backend; all live data uses muddb.
 
 ### API
 
@@ -393,9 +391,12 @@ initialization.
 ### Programmable Objects (RV32 VM)
 
 Objects can have programs attached that run inside an RV32 (RISC-V 32-bit)
-CPU emulator. Programs are RV32 ELF binaries, compiled offline from kobold
-or C. This subsystem is in development, replacing the earlier ColdFire
-sandbox. The full design is in `doc/mud-vm-design.md`; the migration is in
+CPU emulator. Programs are RV32 ELF binaries, compiled offline. The C
+toolchain (skjegg) is vendored under `sdk/toolchain/`; a kobold
+(Pascal-family) frontend is planned but not yet vendored. The runtime runs
+the ELFs regardless of source language. This subsystem is in development,
+replacing the earlier ColdFire sandbox. The full design is in
+`doc/mud-vm-design.md`; the migration record is in
 `doc/vm-migration-plan.md`. This section is a summary.
 
 **Architecture:**
@@ -439,18 +440,10 @@ Server configuration is in `boris.cfg`. Key settings:
 | `eventlog.filename`  | `boris.log`                              | Event log output file            |
 | `newuser.allowed`    | 1                                        | Allow new account creation       |
 | `newuser.room`       | `tower-entrance`                         | Starting room for new characters |
-| `database.backend`   | `muddb`                                  | Object store backend: `muddb` or `cas` |
-| `database.cas.path`  | `data/casdb`                             | Depot directory (cas backend)    |
-| `database.cas.ref`   | `world`                                  | Snapshot reference name (cas backend) |
-| `database.cas.retain` | 0                                       | Keep last N snapshots, 0 = all (cas backend) |
-| `database.cas.commit_seconds` | 60                              | Automatic commit interval (cas backend) |
 
-The `database.*` keys select the backend for the `objs` domain only; users,
-characters, and invites always use muddb. Admin-facing setup and migration
-instructions are in the README under "Object Store Backends". When the cas
-backend is selected, the landlock sandbox (`src/security/landlock.c`) adds a
-rule for `database.cas.path`; a depot outside the allowlist fails silently,
-reading as an empty world.
+All data uses the muddb (LMDB) store. CAS is an offline snapshot/export
+format only (see the README under "Object Store"); it is not a live
+backend and has no runtime configuration.
 
 
 ## GitLab Merge Request Process

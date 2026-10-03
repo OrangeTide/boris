@@ -38,10 +38,11 @@ is the concrete internal engineering design (schema, C API, integration).
   optional `contacts-only` receive mode. No hard dependency on contacts.
 - One semantic model, several transport bindings (MCP 2.1, GMCP, HTTP/JSON) over
   one identical JSON schema.
-- Backend-agnostic storage: muddb/OBJ (default), a content-addressed store
-  (smolvfs or a git-style tree), Maildir, mbox, or SQL.
-- Split immutable content from mutable metadata so a content-addressed backend
-  de-duplicates and supports a non-destructive undo.
+- Backend-agnostic storage: muddb/OBJ (default), Maildir, mbox, or SQL.
+- Split immutable content from mutable metadata so the backend can
+  de-duplicate (by content hash) and support a non-destructive undo. In the
+  muddb reference backend this is app-level content-hash keying, not a
+  separate store.
 - Live "new mail" notification without polling.
 - Implementable from a scripting language (Lua on Mudlet/Blightmud, Birdie's
   scripting VM): JSON-first, coarse-grained, no low-level assumptions.
@@ -60,7 +61,7 @@ server-side search, and history browsing beyond the single-step undo below.
   or a character (IC). A `mailbox` selector on every operation names which one.
 - Message id: an opaque, stable, per-mailbox string. Never reused or renumbered.
 - Content hash: the identity of a message's immutable content. Identical messages
-  share one hash, so a content-addressed backend stores them once.
+  share one hash, so a backend that keys content by hash stores them once.
 - modseq: a per-mailbox integer bumped on every change. Clients cache the last
   value and fetch only what changed since.
 - gen: a per-mailbox generation counter. It changes when history is rewritten
@@ -212,9 +213,12 @@ Notes:
 ### Undo
 
 `undo` reverts the named mailbox to its state before the last change, and is
-itself recorded so nothing is lost. On a content-addressed backend the mailbox is
-a chain of immutable generations with a `TOP` pointer, git-style. `undo` takes
-the generation below `TOP` and re-commits its tree as a new generation on top:
+itself recorded so nothing is lost. A history-capable backend keeps the mailbox
+as a chain of immutable generations with a `TOP` pointer, git-style. In the
+muddb reference backend each generation is an index record and content is kept
+in separate immutable content records keyed by hash; no live content-addressed
+store is involved. `undo` takes the generation below `TOP` and re-commits its
+tree as a new generation on top:
 
 ```
 before:  TOP: A -> B -> C -> ...
@@ -279,19 +283,28 @@ keeping object representation in `src/obj/` and persistence in `src/database/`.
 - Delivery writes the content record first (an orphan content record is
   collectable garbage; an index entry with no content is the failure to avoid),
   then updates the index and raises `notify`.
-- Plain muddb does not de-duplicate or support `undo`.
+- The base muddb backend keys `m:` content records by id and does not
+  de-duplicate or keep history; `undo` is NULL.
 
-### Content-addressed backend (smolvfs / git-style)
+### De-duplication and undo over muddb
 
-- Content OBJs are stored by content hash; identical content collapses to one
-  blob across mailboxes. Mail to a character and a copy retained by the sender in
-  another mailbox share the blob.
-- The index is a tree of references (hash plus id/flags/receipt-time); flag
-  changes rewrite a tree node, never the hashed content.
-- Each change appends a generation; `undo` works as above. Retention is
-  server-configurable: keep the newest N generations, retain N-1 and older for 90
-  days before compaction collects unreferenced blobs. Reuses the CAS store's
-  retention and GC design (see the `obj-cache-cas` card family).
+An optional enhancement to the muddb backend realizes de-duplication and
+`undo` without any separate store (see the `mail-dedup-undo` card):
+
+- Content records are keyed by their content hash instead of a per-message id,
+  so identical content collapses to one record across mailboxes. Mail to a
+  character and a copy the sender keeps in another mailbox share the record.
+- The index references content by hash plus id/flags/receipt-time; flag changes
+  rewrite an index entry, never the hashed content.
+- Each change appends a generation (an index record) with a `TOP` pointer;
+  `undo` works as above. Retention is server-configurable: keep the newest N
+  generations, retain N-1 and older for 90 days before pruning unreferenced
+  content records. This is muddb record pruning, not a content-addressed store.
+
+The content-addressed store (smolvfs CAS) is not a live mail backend. It is an
+offline snapshot/export format for the whole muddb world, reached through
+`muddb-tool to-cas`, which gives deduplicated historical backups of mail along
+with everything else; see the `world-backup-commands` card.
 
 Maildir, mbox, and SQL backends implement the same interface, one store per
 mailbox. A Maildir that folds flags into filenames keeps correctness but loses
@@ -456,7 +469,8 @@ Mail stands alone; contacts is parallel and optional.
    and a webmail view. Ships end-to-end with no contacts dependency.
 2. MCP binding and the Birdie MUA; GMCP binding (`POST_mail.txt`) and a Mudlet
    package.
-3. Content-addressed backend with de-duplication and `undo`; escrow attachments.
+3. De-duplication and `undo` over the muddb backend (content-hash keying plus a
+   generation chain); escrow attachments.
 4. `contacts-only` receive mode once the contacts extension exists. Blightmud
    plugin as a stretch.
 

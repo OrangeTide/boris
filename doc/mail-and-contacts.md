@@ -49,6 +49,6 @@ block list, send rate limits, and a per-mailbox `open` or `contacts-only` receiv
 mode, with no capability system and no hard dependency on contacts. The optional
 contacts extension adds an address book, friend requests, presence, and the
 shared block list. Storage is server-defined behind a per-mailbox `mailstore`
-interface; a content-addressed backend adds de-duplication and a non-destructive
-undo. The player reaches all of it from the account menu and from mailbox objects
+interface; the muddb backend can key content by hash to add de-duplication and a
+non-destructive undo. The player reaches all of it from the account menu and from mailbox objects
 in the world, as text on any client and as a windowed mail client under GMCP.

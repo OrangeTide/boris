@@ -226,8 +226,8 @@ out as such. Settled items are also listed in section 9.
   do. See section 3b.
   Caveat: menu and form drive the live new-user application and login
   flow, so this rework touches a user-facing path in production. It is
-  a net win but pays an added test cost. The `make smoke` /
-  `make smoke-cas` expect-based login tests are the regression net and
+  a net win but pays an added test cost. The `make smoke`
+  expect-based login tests are the regression net and
   must be extended to cover the newuser application end to end before
   and after the port.
 - **DECIDED: in-game world backup commands.** Builders and operators
@@ -265,9 +265,8 @@ These are process decisions, applied to every feature below.
   follow-ups.
 - **Better test infrastructure and CI where it is thin.** The current
   `.gitlab-ci.yml` runs build, unit, smoke, and valgrind on the default
-  branch and merge requests. Gaps to close as this work lands: run
-  `make smoke-cas` (cas backend is untested in CI), register each new
-  suite so it runs automatically, add an end-to-end OLC/wizard test
+  branch and merge requests. Gaps to close as this work lands: register
+  each new suite so it runs automatically, add an end-to-end OLC/wizard test
   harness (drive a build session, assert the saved OBJ), and consider an
   ARM cross-build job given the `.env` cross-compile hazard. Invest in
   shared test helpers (a scripted client driver) rather than
@@ -296,8 +295,8 @@ Close the gate before opening the door.
   command over the `muddb-tool` JSON-record format. Full snapshot /
   rollback / gc / diff are deferred to Phase 5; this phase just
   guarantees a builder's work can be captured and restored. NEW card.
-- **CI/test infra**: add `make smoke-cas` to `.gitlab-ci.yml` and wire
-  the new suites so they run on every MR (section 5).
+- **CI/test infra**: wire the new suites into `.gitlab-ci.yml` so they
+  run on every MR (section 5).
 
 ### Phase 1 — Command-driven building (bootstrap the world)
 
@@ -340,7 +339,7 @@ current modules, so this comes before the editors.
   freelist bridge/grow cases (`#29`), form close-out callback
   (form.c:306, part of `#39`).
 - **Port the login menu and newuser form** to the new layer.
-- **Testing gate**: extend `make smoke` / `make smoke-cas` to exercise
+- **Testing gate**: extend `make smoke` to exercise
   the newuser application and login flow end to end. These must pass
   unchanged in behavior across the port. This is the added test cost
   the rework incurs.
@@ -428,8 +427,8 @@ questions will accrue here as phases are cut into cards.
 - **Spec-first, test-backed working method.** Every feature gets a
   reviewed design spec in `doc/` before code, and ships unit/round-trip
   tests as acceptance criteria, not follow-ups. See section 5.
-- **Invest in test infrastructure and CI.** Add `make smoke-cas` and the
-  new suites to `.gitlab-ci.yml`, build an end-to-end OLC test harness,
+- **Invest in test infrastructure and CI.** Wire the new suites into
+  `.gitlab-ci.yml`, build an end-to-end OLC test harness,
   and consider an ARM cross-build job. See section 5.
 - **In-game world backup commands.** `@checkpoint <label>` and a world
   export/dump land in Phase 0 as a data-loss safety net; full
