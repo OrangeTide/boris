@@ -206,7 +206,42 @@ show_room(DESCRIPTOR_DATA *cl, OBJ *r)
 
 	// 7. List of entities
 	// 8. New Line (space)
-	// TODO: list other the entities in the room.
+	// List the other characters in the room, drawn from the room's
+	// persisted contents index so the listing is complete even for
+	// occupants that are not currently loaded.
+	{
+		const char *room_oid = obj_key(r);
+		const char *self_oid = rl.ch ? character_obj_id(rl.ch) : NULL;
+		OBJ_CONTENTS_ITER *it;
+		const char *member;
+		int listed = 0;
+
+		it = room_oid ? obj_contents_begin(room_oid) : NULL;
+		while (it && (member = obj_contents_next(it)) != NULL) {
+			OBJ *m;
+			const char *nm;
+
+			/* occupants are characters; skip items and the viewer */
+			if (strncmp(member, DOMAIN_CHARACTER "/",
+				sizeof(DOMAIN_CHARACTER "/") - 1))
+				continue;
+			if (self_oid && !strcmp(member, self_oid))
+				continue;
+
+			m = obj_get(member);
+			if (!m)
+				continue;
+			nm = obj_prop_get(m, "name.short");
+			telnetclient_printf(cl, "%s is here.\n", nm ? nm : member);
+			obj_release(m);
+			listed = 1;
+		}
+		if (it)
+			obj_contents_end(it);
+		if (listed)
+			telnetclient_puts(cl, "\n");
+	}
+
 	// show yourself as another entity.
 	if (show_pose(cl) > 0)
 		telnetclient_puts(cl, "\n");

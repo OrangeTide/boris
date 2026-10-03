@@ -25,529 +25,352 @@
 #include "character.h"
 #include "boris.h"
 #include "freelist.h"
-#include "hashtable.h"
 #include "muddb.h"
 #include "obj.h"
 
 #define LOG_SUBSYSTEM "character"
 #include "log.h"
 
-#include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * A character is an OBJ in the unified cache, keyed "chars/<id>" in the objs
+ * domain. struct character is a thin, per-reference handle over that OBJ: it
+ * pins the object (obj_get/obj_create) for its lifetime and releases it on
+ * character_put. Attributes are object properties; the location attribute
+ * "room.current" maps to the %location forward pointer and the contents index
+ * via obj_move/obj_location, with the "rooms/" prefix stripped or prepended so
+ * the bare-room-id contract the rest of the code relies on is preserved.
+ */
+
+/* the prototype every player character inherits from (see vm-object-model L6) */
+#define CHARACTER_PROTOTYPE DOMAIN_TEMPLATE "/pc"
+
+/* "rooms/" length, used to strip/prepend the room-object prefix */
+#define ROOM_PREFIX ROOM_ROOTDIR "/"
+#define ROOM_PREFIX_LEN (sizeof(ROOM_PREFIX) - 1)
+
 /******************************************************************************
  * Types
  ******************************************************************************/
 
+/*
+ * A per-reference handle over a character OBJ. ch->obj is a pinned reference
+ * owned by this handle; ch->obj_id is its cache id ("chars/<id>"). Two handles
+ * for the same id hold two pins over the same cached object, which is fine --
+ * each character_put releases one.
+ */
 struct character {
-	LIST_ENTRY(struct character) character_cache; /**< currently loaded characters. */
-	int dirty_fl;
-	int refcount;
-	/* part of the character saved to disk is below this line. */
-	unsigned id;
-	struct description_string name, desc;
-	char *owner, *controllers;
-	char *room_current; /**< id of the current room. */
-	char *room_home; /**< id of the home room used for certain kinds of resets. */
-	struct attr_list extra_values;
+	OBJ *obj;             /**< pinned backing object */
+	unsigned id;          /**< numeric identity */
+	char obj_id[24];      /**< "chars/<id>" cache key */
+	char *room_scratch;   /**< borrowed-return buffer for room.current */
+	struct attr_list extras_view; /**< transient non-builtin view */
 };
 
-LIST_HEAD(struct character_cache, struct character);
 /******************************************************************************
  * Globals
  ******************************************************************************/
-/**
- * definition of every attribute in character record.
- */
-static const struct {
-	char *name;
-	enum value_type type;
-	size_t ofs;
-} attrinfo[] = {
-	{"id", VALUE_TYPE_UINT, offsetof(struct character, id), },
-	{"name.short", VALUE_TYPE_STRING, offsetof(struct character, name.short_str), },
-	{"name.long", VALUE_TYPE_STRING, offsetof(struct character, name.long_str), },
-	{"desc.short", VALUE_TYPE_STRING, offsetof(struct character, desc.short_str), },
-	{"desc.long", VALUE_TYPE_STRING, offsetof(struct character, desc.long_str), },
-	{"owner", VALUE_TYPE_STRING, offsetof(struct character, owner), },
-	{"controllers", VALUE_TYPE_STRING, offsetof(struct character, controllers), },
-	{"room.current", VALUE_TYPE_STRING, offsetof(struct character, room_current), },
-	{"room.home", VALUE_TYPE_STRING, offsetof(struct character, room_home), },
+
+/* built-in attribute names, excluded from the extras view */
+static const char *const builtin_attrs[] = {
+	"id", "name.short", "name.long", "desc.short", "desc.long",
+	"owner", "controllers", "room.current", "room.home", NULL,
 };
 
-/** all loaded characters, keyed by id for O(1) lookup. */
-static struct ht_uint character_ht;
-
-/** LRU list of unreferenced characters (refcount == 0). head is most recent. */
-static struct character_cache character_lru;
-
-/** number of unreferenced characters sitting in the LRU. */
-static unsigned character_lru_count;
-
 static struct freelist *character_id_freelist;
+
 /******************************************************************************
  * Functions
  ******************************************************************************/
 
-/**
- * deallocate a character structure immediately.
- * removes from hash table and LRU list.
- */
-static void
-character_ll_free(struct character *ch)
+static int
+is_builtin(const char *name)
 {
-	unsigned i;
+	int i;
 
-	assert(ch != NULL);
-
-	if (!ch) return;
-
-	ht_uint_del(&character_ht, ch->id);
-	LIST_REMOVE(ch, character_cache);
-	LIST_ENTRY_INIT(ch, character_cache);
-	if (ch->refcount <= 0 && character_lru_count > 0)
-		character_lru_count--;
-
-	for (i = 0; i < NR(attrinfo); i++) {
-		if (attrinfo[i].type == VALUE_TYPE_STRING) {
-			char **strp = (char**)((char*)ch + attrinfo[i].ofs);
-			free(*strp);
-			*strp = NULL;
-		}
-	}
-
-	attr_list_free(&ch->extra_values);
-
-	free(ch);
+	for (i = 0; builtin_attrs[i]; i++)
+		if (!strcasecmp(name, builtin_attrs[i]))
+			return 1;
+	return 0;
 }
 
-/**
- * allocate an empty character.
- */
+/* allocate a handle wrapping an already-pinned object */
 static struct character *
-character_ll_alloc(void)
+handle_new(OBJ *obj, unsigned id)
 {
-	struct character *ret;
-	ret = calloc(1, sizeof * ret);
+	struct character *ch = calloc(1, sizeof *ch);
 
-	if (!ret) {
+	if (!ch) {
 		LOG_CRITICAL("out of memory");
+		return NULL;
 	}
-
-	return ret;
+	ch->obj = obj;
+	ch->id = id;
+	snprintf(ch->obj_id, sizeof ch->obj_id, "%s/%u", DOMAIN_CHARACTER, id);
+	LIST_INIT(&ch->extras_view);
+	return ch;
 }
 
-/**
- *
- */
 int
 character_attr_set(struct character *ch, const char *name, const char *value)
 {
-	unsigned i;
-	int res;
+	if (!ch || !name)
+		return 0;
 
-	assert(ch != NULL);
+	/* location is the %location forward pointer, written via obj_move. The
+	 * stored value is the full room object id; callers pass a bare room id. */
+	if (!strcasecmp(name, "room.current")) {
+		char container[OBJ_PATH_MAX];
 
-	if (!ch) return 0;
-
-	for (i = 0; i < NR(attrinfo); i++) {
-		if (!strcasecmp(name, attrinfo[i].name)) {
-			ch->dirty_fl = 1;
-			return value_set(value, attrinfo[i].type, (char*)ch + attrinfo[i].ofs);
+		if (value && *value) {
+			snprintf(container, sizeof container, "%s%s",
+				ROOM_PREFIX, value);
+			return obj_move(ch->obj_id, container) == OBJ_OK;
 		}
+		return obj_move(ch->obj_id, NULL) == OBJ_OK;
 	}
 
-	res = parse_attr(name, value, &ch->extra_values);
-
-	if (res) {
-		ch->dirty_fl = 1;
-	}
-
-	return res;
+	if (obj_prop_set(ch->obj, name, value) != OBJ_OK)
+		return 0;
+	obj_mark_dirty(ch->obj);
+	return 1;
 }
 
-/**
- *
- */
 const char *
 character_attr_get(struct character *ch, const char *name)
 {
-	unsigned i;
-	struct attr_entry *at;
+	if (!ch || !name)
+		return NULL;
 
-	assert(ch != NULL);
+	if (!strcasecmp(name, "room.current")) {
+		char *loc = obj_location(ch->obj_id);
+		const char *bare;
 
-	if (!ch) return NULL;
-
-	for (i = 0; i < NR(attrinfo); i++) {
-		if (!strcasecmp(name, attrinfo[i].name)) {
-			return value_get(attrinfo[i].type, (char*)ch + attrinfo[i].ofs);
-		}
+		free(ch->room_scratch);
+		ch->room_scratch = NULL;
+		if (!loc)
+			return NULL;
+		bare = loc;
+		if (!strncmp(loc, ROOM_PREFIX, ROOM_PREFIX_LEN))
+			bare = loc + ROOM_PREFIX_LEN;
+		ch->room_scratch = strdup(bare);
+		free(loc);
+		return ch->room_scratch;
 	}
 
-	at = attr_find(&ch->extra_values, name);
-
-	return at ? at->value : NULL;
+	return obj_prop_get(ch->obj, name);
 }
 
 struct attr_list *
 character_attrs_extras(struct character *ch)
 {
-	if (!ch) return NULL;
-	return &ch->extra_values;
+	OBJ_ITER *it;
+	const char *key, *value;
+
+	if (!ch)
+		return NULL;
+
+	/* rebuild the transient view from the object's non-builtin props */
+	attr_list_free(&ch->extras_view);
+	LIST_INIT(&ch->extras_view);
+
+	it = obj_iter_begin(ch->obj);
+	if (!it)
+		return &ch->extras_view;
+	while (obj_iter_next(it, &key, &value)) {
+		if (key[0] == '%' || key[0] == '!')
+			continue;               /* structural / tombstone */
+		if (is_builtin(key))
+			continue;
+		attr_add(&ch->extras_view, key, value);
+	}
+	obj_iter_end(it);
+
+	return &ch->extras_view;
 }
 
-static int
-character_validate(OBJ *obj, const char *key)
+OBJ *
+character_obj(struct character *ch)
 {
-	const char *val;
-	int ok = 1;
-
-	val = obj_prop_get(obj, "id");
-	if (!val) {
-		LOG_ERROR("character '%s': missing id", key);
-		ok = 0;
-	} else {
-		char *endptr;
-		unsigned long id = strtoul(val, &endptr, 10);
-		if (*endptr || id == 0) {
-			LOG_ERROR("character '%s': invalid id '%s'", key, val);
-			ok = 0;
-		} else if (strcmp(val, key)) {
-			LOG_ERROR("character '%s': id '%s' does not match key",
-				key, val);
-			ok = 0;
-		}
-	}
-
-	return ok;
+	return ch ? ch->obj : NULL;
 }
 
-/**
- * load a character from the database.
- */
-static struct character *
-character_load(unsigned character_id)
+const char *
+character_obj_id(struct character *ch)
 {
-	struct character *ch;
-	char numbuf[22];
-	OBJ *obj;
-
-	assert(character_id > 0);
-
-	if (character_id <= 0) return NULL;
-
-	snprintf(numbuf, sizeof numbuf, "%u", character_id);
-
-	obj = muddb_get(mud_db, DOMAIN_CHARACTER, numbuf);
-
-	if (!obj) {
-		LOG_ERROR("could not load character \"%u\"", character_id);
-		return NULL;
-	}
-
-	ch = character_ll_alloc();
-
-	if (!ch) {
-		obj_free(obj);
-		return NULL;
-	}
-
-	/* load all properties via character_attr_set */
-	{
-		OBJ_ITER *it = obj_iter_begin(obj);
-		const char *key, *value;
-
-		while (obj_iter_next(it, &key, &value)) {
-			if (!character_attr_set(ch, key, value)) {
-				LOG_ERROR("could not load character \"%u\"", character_id);
-				obj_iter_end(it);
-				character_ll_free(ch);
-				obj_free(obj);
-				return NULL;
-			}
-		}
-		obj_iter_end(it);
-	}
-
-	obj_free(obj);
-
-	if (character_id != ch->id) {
-		LOG_ERROR("could not load character \"%u\" (bad, missing or mismatched id)", character_id);
-		character_ll_free(ch);
-		return NULL;
-	}
-
-	return ch;
+	return ch ? ch->obj_id : NULL;
 }
 
-/**
- * save a character record, but only if the dirty_fl is set.
- */
 int
 character_save(struct character *ch)
 {
-	struct attr_entry *curr;
-	OBJ *obj;
-	char numbuf[22];
-	unsigned i;
-
-	assert(ch != NULL);
-
-	if (!ch->dirty_fl) return 1; /* already saved - don't do it again. */
-
-	snprintf(numbuf, sizeof numbuf, "%u", ch->id);
-
-	obj = obj_new(numbuf);
-
-	if (!obj) {
-		LOG_ERROR("could not save character \"%u\"", ch->id);
-		return 0; /* failure */
-	}
-
-	for (i = 0; i < NR(attrinfo); i++) {
-		void *base = ((char*)ch + attrinfo[i].ofs);
-
-		switch (attrinfo[i].type) {
-		case VALUE_TYPE_UINT:
-			snprintf(numbuf, sizeof numbuf, "%u", *(unsigned*)base);
-			obj_prop_set(obj, attrinfo[i].name, numbuf);
-			break;
-
-		case VALUE_TYPE_STRING:
-			if (*(char**)base)
-				obj_prop_set(obj, attrinfo[i].name, *(char**)base);
-			break;
-		}
-	}
-
-	for (curr = LIST_TOP(ch->extra_values); curr; curr = LIST_NEXT(curr, list)) {
-		obj_prop_set(obj, curr->name, curr->value);
-	}
-
-	if (!character_validate(obj, numbuf)) {
-		LOG_ERROR("refusing to write invalid character \"%u\"", ch->id);
-		obj_free(obj);
-		return 0; /* failure */
-	}
-
-	if (muddb_put(mud_db, DOMAIN_CHARACTER, numbuf, obj) != MUDDB_OK) {
-		LOG_ERROR("could not save character \"%u\"", ch->id);
-		obj_free(obj);
-		return 0; /* failure */
-	}
-
-	obj_free(obj);
-	ch->dirty_fl = 0;
-	LOG_INFO("saved character \"%u\"", ch->id);
-
-	return 1;
+	if (!ch)
+		return 0;
+	return obj_save(ch->obj_id) == OBJ_OK;
 }
 
-/** evict the oldest unreferenced character from the LRU tail. */
-static void
-character_lru_evict_one(void)
-{
-	struct character *tail;
-
-	for (tail = LIST_TOP(character_lru); tail; tail = LIST_NEXT(tail, character_cache)) {
-		if (!LIST_NEXT(tail, character_cache))
-			break;
-	}
-
-	if (tail) {
-		character_save(tail);
-		character_ll_free(tail);
-	}
-}
-
-/**
- * load character into cache, if not already loaded, then increase
- * reference count of character.
- */
 struct character *
 character_get(unsigned character_id)
 {
-	struct character *curr;
+	char idbuf[24];
+	OBJ *obj;
+	struct character *ch;
 
-	/* O(1) hash table lookup. */
-	curr = ht_uint_get(&character_ht, character_id);
+	if (character_id == 0)
+		return NULL;
 
-	if (!curr) {
-		/* not in the cache -- load from database. */
-		curr = character_load(character_id);
-		if (curr) {
-			ht_uint_set(&character_ht, character_id, curr);
-		}
-	}
-
-	if (curr) {
-		if (curr->refcount == 0 && character_lru_count > 0) {
-			/* moving from LRU to active -- remove from LRU list */
-			LIST_REMOVE(curr, character_cache);
-			LIST_ENTRY_INIT(curr, character_cache);
-			character_lru_count--;
-		}
-		curr->refcount++;
-	}
-
-	if (!curr) {
+	snprintf(idbuf, sizeof idbuf, "%s/%u", DOMAIN_CHARACTER, character_id);
+	obj = obj_get(idbuf);
+	if (!obj) {
 		LOG_WARNING("could not access character \"%u\"", character_id);
+		return NULL;
 	}
 
-	return curr;
+	ch = handle_new(obj, character_id);
+	if (!ch)
+		obj_release(obj);
+	return ch;
 }
 
-/**
- * reduce reference count of character.
- * when refcount hits zero the character moves to the LRU list instead of
- * being freed immediately. the LRU is capped by cache.character.size.
- */
 void
 character_put(struct character *ch)
 {
-	assert(ch != NULL);
+	if (!ch)
+		return;
 
-	ch->refcount--;
-
-	if (ch->refcount <= 0) {
-		character_save(ch);
-		/* move to head of LRU (most recently used) */
-		LIST_INSERT_HEAD(&character_lru, ch, character_cache);
-		character_lru_count++;
-
-		/* evict oldest if over the cap */
-		while (character_lru_count > mud_config.character_cache_size)
-			character_lru_evict_one();
-	}
+	character_save(ch);             /* durability point (e.g. logout) */
+	obj_release(ch->obj);
+	attr_list_free(&ch->extras_view);
+	free(ch->room_scratch);
+	free(ch);
 }
 
 struct character *
 character_new(void)
 {
-	struct character *ret;
+	char idbuf[32];
+	char numbuf[22];
 	long id;
+	OBJ *obj;
+	struct character *ch;
 
-	ret = character_ll_alloc();
-
-	if (!ret) return NULL;
-
-	/* allocate next entry from a pool. */
 	id = freelist_alloc(character_id_freelist, 1);
-
 	if (id < 0) {
 		LOG_CRITICAL("could not allocate new character id.");
-		free(ret);
 		return NULL;
 	}
 
-	ret->id = id;
+	snprintf(idbuf, sizeof idbuf, "%s/%ld", DOMAIN_CHARACTER, id);
+	obj = obj_create(idbuf);
+	if (!obj) {
+		LOG_ERROR("could not create character object \"%s\"", idbuf);
+		freelist_pool(character_id_freelist, (unsigned)id, 1);
+		return NULL;
+	}
 
-	/* save character immediately on creation. */
-	ret->dirty_fl = 1;
-	character_save(ret);
+	/* seed identity and the player-character prototype */
+	snprintf(numbuf, sizeof numbuf, "%ld", id);
+	obj_prop_set(obj, "id", numbuf);
+	obj_prop_set_internal(obj, "%parent", CHARACTER_PROTOTYPE);
+	obj_mark_dirty(obj);
 
-	/* insert into hash table and bump refcount. */
-	ht_uint_set(&character_ht, ret->id, ret);
-	ret->refcount++;
+	ch = handle_new(obj, (unsigned)id);
+	if (!ch) {
+		obj_release(obj);
+		return NULL;
+	}
 
-	return ret;
+	character_save(ch);             /* persist on creation */
+	return ch;
 }
 
-/**
- * preflight all of the characters by loading every one of them.
- */
-static int
-character_preflight(void)
+/* reserve the ids of existing character records so they are not reused. New
+ * records live as "chars/<id>" in the objs domain; legacy records are bare
+ * keys in the chars domain. A cross-source duplicate is expected, not an
+ * error, so the thwack result is ignored. */
+static void
+seed_freelist_from(const char *domain, int require_prefix)
 {
 	MUDDB_ITER *it;
-	const char *id;
+	const char *key;
+	const size_t plen = sizeof(DOMAIN_CHARACTER "/") - 1;
 
-	it = muddb_iter_begin(mud_db, DOMAIN_CHARACTER);
+	it = muddb_iter_begin(mud_db, domain);
+	if (!it)
+		return;
+	while ((key = muddb_iter_next(it))) {
+		const char *idstr = key;
+		unsigned long id;
+		char *endptr;
 
-	if (!it) {
-		/* no characters domain yet -- not an error on first run */
-		return 1;
-	}
-
-	{
-		unsigned load_count = 0, error_count = 0;
-
-		while ((id = muddb_iter_next(it))) {
-			struct character *ch;
-			unsigned character_id;
-			char *endptr;
-			OBJ *obj;
-
-			LOG_DEBUG("Found character: \"%s\"", id);
-
-			obj = muddb_iter_value(it);
-			if (!obj) {
-				LOG_ERROR("could not read character record \"%s\"", id);
-				error_count++;
-				continue;
-			}
-
-			if (!character_validate(obj, id)) {
-				obj_free(obj);
-				error_count++;
-				continue;
-			}
-			obj_free(obj);
-
-			character_id = strtoul(id, &endptr, 10);
-			if (*endptr) {
-				LOG_ERROR("character id \"%s\" is invalid", id);
-				error_count++;
-				continue;
-			}
-
-			ch = character_load(character_id);
-			if (!ch) {
-				LOG_ERROR("could not load character id \"%u\"", character_id);
-				error_count++;
-				continue;
-			}
-
-			if (ch->id != character_id) {
-				LOG_ERROR("bad or non-matching character id \"%u\"", character_id);
-				character_ll_free(ch);
-				error_count++;
-				continue;
-			}
-
-			if (!freelist_thwack(character_id_freelist, ch->id, 1)) {
-				LOG_ERROR("bad or duplicate character id \"%u\"", character_id);
-				character_ll_free(ch);
-				error_count++;
-				continue;
-			}
-
-			character_ll_free(ch);
-			load_count++;
+		if (require_prefix) {
+			if (strncmp(key, DOMAIN_CHARACTER "/", plen))
+				continue;       /* a non-character object */
+			idstr = key + plen;
 		}
-
-		muddb_iter_end(it);
-
-		if (error_count)
-			LOG_WARNING("Validated %u characters, %u errors",
-				load_count, error_count);
-		else
-			LOG_INFO("Validated %u characters", load_count);
+		id = strtoul(idstr, &endptr, 10);
+		if (*endptr || id == 0 || id > (unsigned long)ID_MAX) {
+			LOG_WARNING("character key \"%s\": unparseable id", key);
+			continue;
+		}
+		freelist_thwack(character_id_freelist, (unsigned)id, 1);
 	}
+	muddb_iter_end(it);
+}
 
-	return 1; /* success */
+/* seed a minimal prototype so %parent = templates/pc resolves (L6) */
+static void
+seed_prototype(void)
+{
+	OBJ *proto = obj_get(CHARACTER_PROTOTYPE);
+
+	if (proto) {
+		obj_release(proto);
+		return;                         /* already present */
+	}
+	proto = obj_create(CHARACTER_PROTOTYPE);
+	if (!proto) {
+		LOG_WARNING("could not seed prototype \"%s\"", CHARACTER_PROTOTYPE);
+		return;
+	}
+	obj_prop_set(proto, "name.short", "a person");
+	obj_mark_dirty(proto);
+	obj_save(CHARACTER_PROTOTYPE);
+	obj_release(proto);
+}
+
+/* ensure a reserved owner identity exists. These are stable non-player
+ * characters that admin content and agents can be owned by via @chown, so an
+ * object need not be owned by a real player. Seeded on every startup, so an
+ * existing database is retrofitted too. */
+static void
+seed_owner(const char *key, const char *name)
+{
+	OBJ *o = obj_get(key);
+
+	if (o) {
+		obj_release(o);
+		return;                         /* already present */
+	}
+	o = obj_create(key);
+	if (!o) {
+		LOG_WARNING("could not seed owner \"%s\"", key);
+		return;
+	}
+	obj_prop_set(o, "name.short", name);
+	obj_mark_dirty(o);
+	obj_save(key);
+	obj_release(o);
 }
 
 int
 character_initialize(void)
 {
 	LOG_INFO("Character sub-system loaded (" __FILE__ " compiled " __TIME__ " " __DATE__ ")");
-	LIST_INIT(&character_lru);
-	ht_uint_init(&character_ht, 64);
 
 	character_id_freelist = freelist_new(1, ID_MAX);
 	if (!character_id_freelist) {
@@ -555,11 +378,13 @@ character_initialize(void)
 		return -1;
 	}
 
-	/* load all characters to check and to configure pool space. */
-	if (!character_preflight()) {
-		LOG_CRITICAL("could not load characters!");
-		return -1;
-	}
+	/* reserve ids from both the new and legacy record layouts */
+	seed_freelist_from(DOMAIN_OBJS, 1);
+	seed_freelist_from(DOMAIN_CHARACTER, 0);
+
+	seed_prototype();
+	seed_owner("chars/system", "system");
+	seed_owner("chars/nobody", "nobody");
 
 	return 0;
 }
@@ -567,31 +392,10 @@ character_initialize(void)
 void
 character_shutdown(void)
 {
-	struct character *curr;
-	unsigned i;
-
 	LOG_INFO("Character sub-system shutting down...");
 
-	/* flush LRU list -- all unreferenced characters */
-	while ((curr = LIST_TOP(character_lru))) {
-		character_save(curr);
-		character_ll_free(curr);
-	}
-
-	/* scan hash table for any characters still held by reference */
-	for (i = 0; i < character_ht.capacity; i++) {
-		struct ht_uint_entry *e = &character_ht.buckets[i];
-		if (e->occupied) {
-			curr = e->value;
-			LOG_ERROR("character \"%u\" still in use at shutdown (refcount %d)",
-				curr->id, curr->refcount);
-			character_save(curr);
-		}
-	}
-
-	ht_uint_free(&character_ht);
-	character_lru_count = 0;
-
+	/* character objects are flushed by obj_shutdown (registered earlier, so
+	 * it runs after this atexit handler); nothing to save here. */
 	freelist_free(character_id_freelist);
 	character_id_freelist = NULL;
 

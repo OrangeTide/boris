@@ -60,7 +60,9 @@ help_cache_invalidate(void)
 	}
 }
 
-/** validate topic name -- alphanumeric, dash, underscore only. */
+/** validate topic name -- alphanumeric, dash, underscore, or a leading '@'
+ * for admin command topics. Slashes and dots stay disallowed, so a topic can
+ * never escape the help directory. */
 static int
 help_topic_valid(const char *topic)
 {
@@ -70,7 +72,8 @@ help_topic_valid(const char *topic)
 		return 0;
 
 	for (p = topic; *p; p++) {
-		if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_')
+		if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_'
+			&& *p != '@')
 			return 0;
 	}
 

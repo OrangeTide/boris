@@ -1,0 +1,11 @@
+View a room property in a read-only viewer.
+
+usage: @view <roomid> <property>
+
+Opens the named property of a room for viewing. The property must
+already exist on the room.
+
+Available only from the web client. See also @edit.
+
+Example:
+  @view tower-entrance desc.long    View the room's long description.

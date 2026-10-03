@@ -75,10 +75,9 @@ below.
 | src/thirdparty/lmdb/   | LMDB embedded key-value database                               |
 | src/thirdparty/mth/    | MUD Telopt Handler (TELNET protocol)                           |
 | src/thirdparty/tiny-aes/| AES-256 block cipher (public domain, Unlicense)               |
-| src/coldfire/          | ColdFire V4e CPU emulator                                      |
-| src/machine/           | Machine runtime (task lifecycle, fd table, ELF loader)         |
-| sdk/machine/           | SDK and source for machine programs (cross-compiled to m68k)   |
-| data/machine/          | Pre-built machine ELF binaries loaded at server startup        |
+| src/rv32/              | RV32 CPU emulator and ELF32 loader (in development)            |
+| src/vm/                | VM runtime: task lifecycle, host-call dispatch, verb dispatch (in development) |
+| sdk/vm/                | Guest SDK and source for RV32 programs (in development)        |
 | sample/                | Starter database for new MUDs (import with muddb-tool)         |
 
 ## Build System
@@ -391,75 +390,36 @@ In `src/security/`: seccomp and Landlock sandboxing, enabled at startup via
 `security_init()`.  Restricts syscalls and filesystem access after
 initialization.
 
-### ColdFire Machine Programs
+### Programmable Objects (RV32 VM)
 
-Objects can have ColdFire V4e programs attached that run inside a
-ColdFire V4e CPU emulator (`src/coldfire/`). Programs are standard ELF32
-big-endian m68k binaries, cross-compiled with `m68k-linux-gnu-gcc`.
+Objects can have programs attached that run inside an RV32 (RISC-V 32-bit)
+CPU emulator. Programs are RV32 ELF binaries, compiled offline from kobold
+or C. This subsystem is in development, replacing the earlier ColdFire
+sandbox. The full design is in `doc/mud-vm-design.md`; the migration is in
+`doc/vm-migration-plan.md`. This section is a summary.
 
 **Architecture:**
 
-- `src/coldfire/` -- instruction-level ColdFire V4e emulator.
-- `src/machine/machine.c` -- task lifecycle, memory image, fd table, ELF
-  loader, hypercall dispatch.
-- `src/machine/obj_program.c` -- glue between machine tasks and the game
-  loop. A periodic `iox_timer` tick runs each task for up to 4096
-  instructions, handles sleep/wake transitions, and re-schedules itself.
+- `src/rv32/` -- the RV32 CPU emulator core and ELF32 loader. Vendored from
+  a shared, self-contained core and owned by boris. It calls host function
+  pointers for memory access and an `ecall` handler for host calls.
+- `src/vm/` -- the VM runtime: per-task CPU and private memory image, the
+  cooperative scheduler on the event loop, the flat host-call table, and
+  verb and agent dispatch.
+- `sdk/vm/` -- the guest SDK: the C runtime start, the host-call stubs, the
+  event-loop runtime a verb program links, the linker script, and examples.
 
-**Memory layout** (per task):
+**Program vs verb.** A one-shot program supplies its own `main()`, runs to
+completion, and exits. A verb program (agent) does not supply `main()`; it
+links the shared event-loop runtime and supplies an event handler plus a
+dwell period, so it stays resident and reacts to events. The difference is
+a link-time choice, not a VM feature. Both use one flat host-call table.
 
-| Address       | Contents                                    |
-|---------------|---------------------------------------------|
-| 0x0000-0x03FF | Exception vector table (all point to halt)  |
-| 0x0400        | Halt stub (infinite loop)                   |
-| 0x1000+       | Program code and data (loaded from ELF)     |
-
-The linker script (`sdk/machine/lib/machine.ld`) places `.text` at 0x1000 with
-explicit `PHDRS` so the LOAD segment starts above the vector table.
-
-**Hypercalls** use LINE_A opcodes (0xAxxx). Arguments are passed in data and
-address registers:
-
-| Name        | Opcode | Registers              | Description              |
-|-------------|--------|------------------------|--------------------------|
-| HC_ABORT    | 0xA000 | --                     | Terminate immediately    |
-| HC_YIELD    | 0xA002 | --                     | Yield remaining time     |
-| HC_SLEEP    | 0xA003 | d0=ticks               | Sleep for N seconds      |
-| HC_EXIT     | 0xA004 | d0=status              | Exit with status code    |
-| HC_PRINT    | 0xA005 | d0=len, a0=buf         | Debug print (log only)   |
-| HC_MSG_POST | 0xA013 | d0=fd, d1=len, a0=buf  | Post message to room     |
-
-The fd table (`MACHINE_MAX_FILES` entries) maps integer file descriptors to
-message callbacks. `obj_program_attach()` opens fd 1 with a callback that
-broadcasts to all players in the room.
-
-**SDK** (`sdk/machine/`):
-
-- `include/machine_hc.h` -- inline assembly wrappers for each hypercall,
-  using GCC register constraints to place arguments in the correct registers.
-- `lib/machine.ld` -- linker script for the machine memory layout.
-- `lib/crt0.S` -- CRT startup code with verb registration and dispatch loop.
-- `Makefile` -- cross-compiles `.c` files to ELF binaries in `data/machine/`.
-
-To rebuild machine programs:
-
-```sh
-cd sdk/machine
-make            # builds data/machine/*.elf
-make disasm     # disassemble all programs
-make clean      # remove objects and ELFs
-```
-
-**Attaching to an object** (via obj cache callbacks):
-
-```c
-obj_program_attach("rooms/tower-entrance", image_fd,
-                   "anim/fountain", 64 * 1024, "exit");
-```
-
-Programs are attached automatically when an object with a
-`program.continuous` property enters the obj cache. The tick timer
-runs each machine task every second.
+**Host calls.** Guest code reaches the host through the RISC-V `ecall`
+instruction into a flat, name-bound table (object access, movement,
+messaging, tasks, and a renamed set of the traditional Linux calls). Calls
+resolve by name through the program's ELF import table. See
+`doc/mud-vm-design.md` for the set and the calling convention.
 
 ### Entry Point
 

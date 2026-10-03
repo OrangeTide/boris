@@ -178,6 +178,48 @@ test_save_marks_dirty(void)
 	mock_free(&m);
 }
 
+static void
+test_create(void)
+{
+	struct mock_backend m = {0};
+	struct obj_cache_ops ops = { .load = mock_load, .save = mock_save };
+	OBJ_CACHE *c = obj_cache_new(4, &ops, &m);
+	struct entity e;
+
+	int rc = entity_create(&e, c, "newmob", ENTITY_KIND_NPC,
+		"templates/goblin");
+	check("entity_create ok", rc == 0);
+	check("kind is NPC", e.kind == ENTITY_KIND_NPC);
+	check("id stored", e.id && strcmp(e.id, "newmob") == 0);
+	check("obj pinned", e.obj != NULL);
+	check("%kind written", obj_prop_get(e.obj, "%kind")
+		&& strcmp(obj_prop_get(e.obj, "%kind"), "npc") == 0);
+	check("%parent written", obj_prop_get(e.obj, "%parent")
+		&& strcmp(obj_prop_get(e.obj, "%parent"), "templates/goblin") == 0);
+
+	/* creating the same id again while it is live fails */
+	struct entity dup;
+	check("duplicate create (cached) fails",
+		entity_create(&dup, c, "newmob", ENTITY_KIND_NPC, NULL) == -1);
+
+	/* persist it, then confirm the record carries %kind */
+	entity_save(&e);
+	obj_cache_flush_all(c);
+	struct mock_record *r = mock_find(&m, "newmob");
+	check("backing store has the created object", r != NULL);
+	check("stored record carries %kind",
+		r && strstr(r->json, "npc") != NULL);
+
+	entity_unload(&e);
+
+	/* now that it persists, a create still fails (probes the backend) */
+	check("duplicate create (persisted) fails",
+		entity_create(&dup, c, "newmob", ENTITY_KIND_NPC, NULL) == -1);
+
+	obj_cache_free(c);
+	mock_free(&m);
+}
+
 int
 main(void)
 {
@@ -187,5 +229,6 @@ main(void)
 	test_load_missing();
 	test_prop_resolve_inheritance();
 	test_save_marks_dirty();
+	test_create();
 	return ctest_report("test_entity");
 }

@@ -14,3 +14,14 @@ Commands:
   char <id> [attr]    Get character information.
   help <topic>        Show help on a topic.
   quit                Disconnect from the server.
+
+Builder commands:
+
+  @edit <roomid> <property>   Edit a room property (web/MCP client).
+  @view <roomid> <property>   View a room property (web client).
+
+Admin commands (wizard only):
+
+  @grant <account> <flag>   Set an acs flag on an account.
+  @revoke <account> <flag>  Clear an acs flag on an account.
+  @chown <object> <owner>   Set an object's owner.

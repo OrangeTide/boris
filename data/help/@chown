@@ -1,0 +1,14 @@
+Set the owner of an object.
+
+usage: @chown <object> <owner>
+
+Sets the %owner of an object to a character. The object is a cache id and the
+owner is a character id, for example:
+
+  @chown programs/greeter chars/1
+
+The owner must be a character (a chars/ id) and must exist. A resident program
+must have an owner before it can be launched as an agent, because an agent runs
+with its object's owner's authority.
+
+Wizard only.

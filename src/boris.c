@@ -50,9 +50,10 @@
 #include <webserver.h>
 #include <webclient.h>
 #include <security.h>
-#include <obj_program.h>
-#include <program.h>
 #include <invite.h>
+#include <telnetclient.h>
+#include <verb_dispatch.h>
+#include <verb_agent.h>
 #include <unistd.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
@@ -90,6 +91,48 @@ show_version(void)
 
 static struct iox_loop *g_loop;
 
+/* Deliver a guest program's output line into the room it is attached to. This
+ * shim keeps the VM dispatch module free of the telnet layer. */
+static void
+vm_room_broadcast(const char *room_id, const char *line)
+{
+	telnetclient_room_broadcast(room_id, line);
+}
+
+/* Durable wizard-capability query for the VM authority model. Map an effective
+ * owner id (a character object id) back to its owning account and report
+ * whether that account may enable wizard rights. An owner that resolves to no
+ * object, or to an object with no account, is not wizard-capable. This reports
+ * only the durable capability, never any current elevation state. */
+static int
+vm_wizard_check(const char *owner_id)
+{
+	OBJ *obj;
+	const char *username;
+	struct user *u;
+	int wiz = 0;
+
+	if (!owner_id)
+		return 0;
+
+	obj = obj_get(owner_id);
+	if (!obj)
+		return 0;
+
+	/* The character's owning account username, stamped at session bind. */
+	username = obj_prop_get(obj, "owner");
+	if (username) {
+		u = user_lookup(username);
+		if (u) {
+			wiz = user_is_wizard(u);
+			user_put(&u);
+		}
+	}
+
+	obj_release(obj);
+	return wiz;
+}
+
 /** set by SIGHUP handler, checked in idle callback to flush caches. */
 static volatile sig_atomic_t sighup_fl;
 
@@ -118,6 +161,20 @@ obj_commit_timer(struct iox_loop *loop, void *arg UNUSED)
 	obj_commit();
 	iox_timer_add(loop, (int)mud_config.cas_commit_seconds * 1000,
 		obj_commit_timer, NULL);
+}
+
+/* VM agent heartbeat: step every resident agent a slice, reap the dead, and
+ * relaunch any configured resident that is missing. One-shot timer re-armed on
+ * every firing, the same pattern as obj_commit_timer. */
+#define VM_TICK_MS      100     /* agent scheduling period */
+#define VM_TICK_QUANTUM 8192    /* instructions per agent per tick */
+
+static void
+vm_agent_timer(struct iox_loop *loop, void *arg UNUSED)
+{
+	verb_agent_tick(VM_TICK_QUANTUM);
+	verb_agent_supervise();
+	iox_timer_add(loop, VM_TICK_MS, vm_agent_timer, NULL);
 }
 
 static void
@@ -472,17 +529,26 @@ main(int argc, char **argv)
 
 	atexit(game_shutdown);
 
-	if (program_init() < 0)
-		LOG_WARNING("program loader disabled (no image directory)");
-
-	atexit(program_shutdown);
-
-	if (obj_program_init(g_loop) < 0) {
-		LOG_ERROR("could not initialize obj_program");
+	if (verb_dispatch_init(mud_config.vm_image_path, vm_room_broadcast) < 0) {
+		LOG_ERROR("could not initialize the program dispatcher");
 		return EXIT_FAILURE;
 	}
 
-	atexit(obj_program_shutdown);
+	atexit(verb_dispatch_shutdown);
+
+	/* Let the authority model map an effective owner to its account's durable
+	 * wizard capability. Until this is set, no identity may elevate. */
+	verb_dispatch_set_wizard_check(vm_wizard_check);
+
+	/* Bound how many objects a verb may create per task and per owner, so a
+	 * runaway or hostile verb cannot spam the object store. */
+	verb_dispatch_set_quota((int)mud_config.vm_create_max,
+	                        (int)mud_config.vm_owned_max);
+
+	/* Arm the agent heartbeat and register the configured resident programs.
+	 * The first firing launches them; the supervisor keeps them running. */
+	verb_agent_set_resident(mud_config.vm_resident);
+	iox_timer_add(g_loop, VM_TICK_MS, vm_agent_timer, NULL);
 
 	eventlog_server_startup();
 

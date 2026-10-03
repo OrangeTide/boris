@@ -9,5 +9,6 @@ struct acs_info {
 
 void acs_init(struct acs_info *ai, unsigned level, unsigned flags);
 int acs_testflag(struct acs_info *ai, unsigned flag);
+int acs_setflag(struct acs_info *ai, unsigned flag, int enable);
 int acs_check(struct acs_info *ai, const char *acsstring);
 #endif

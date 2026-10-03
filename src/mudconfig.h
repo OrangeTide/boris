@@ -19,6 +19,8 @@ struct mud_config {
 	char *msg_userexists;
 	char *msg_usermin3;
 	char *msg_invalidcommand;
+	char *msg_verbnomatch; /* a verb matched the word but not the arguments */
+	char *msg_verbbadarg;  /* a verb argument named an object not in scope */
 	char *msgfile_welcome;
 	unsigned newuser_level;
 	unsigned newuser_flags;
@@ -44,8 +46,11 @@ struct mud_config {
 #endif
 	unsigned daemonize;
 	char *pid_file;
-	char *image_path;
 	char *db_backend; /* object store backend: "muddb" or "cas" */
+	char *vm_image_path; /* directory holding guest program ELF images */
+	char *vm_resident; /* comma-separated resident program ids to keep running */
+	unsigned vm_create_max; /* max objects one verb task may create; 0 = unlimited */
+	unsigned vm_owned_max; /* max objects one owner may hold; 0 = unlimited */
 	char *cas_path; /* CAS depot directory */
 	char *cas_ref; /* CAS ref name for the world snapshot */
 	unsigned cas_retain; /* keep last N snapshots; 0 keeps all */

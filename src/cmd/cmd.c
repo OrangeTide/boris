@@ -33,6 +33,7 @@
 #include <util.h>
 #include <eventlog.h>
 #include <help.h>
+#include <verb_dispatch.h>
 
 #include <assert.h>
 #include <stdlib.h>
@@ -95,6 +96,9 @@ static const struct command_table {
 	{ "chartest", command_do_chartest },
 	{ "@edit", command_do_edit },
 	{ "@view", command_do_view },
+	{ "@grant", command_do_grant },
+	{ "@revoke", command_do_revoke },
+	{ "@chown", command_do_chown },
 };
 
 /**
@@ -115,6 +119,48 @@ static const struct command_short_table {
 };
 
 /**
+ * try to run `cmd arg` as a game-object verb in the actor's scope, as a
+ * fallback after no built-in command matched. Returns 1 when the verb layer
+ * handled the input (a verb ran, or a verb matched the word but gave the
+ * player a specific failure), 0 to fall through to the invalid-command
+ * message. A verb's own output is delivered asynchronously to the actor's
+ * room, not returned here.
+ */
+static int
+command_try_verb(DESCRIPTOR_DATA *cl, const char *cmd, const char *arg)
+{
+	const char *actor_id = character_obj_id(telnetclient_character(cl));
+
+	/* No character bound to this descriptor yet (e.g. menu state): there is
+	 * no scope to resolve a verb against, so this is not a verb. */
+	if (!actor_id)
+		return 0;
+
+	switch (verb_dispatch_command(actor_id, cmd, arg)) {
+	case VERB_CMD_OK:
+		return 1;
+	case VERB_CMD_NOMATCH:
+		/* A verb owns this word but the arguments did not fit its spec. */
+		telnetclient_puts(cl, mud_config.msg_verbnomatch);
+		return 1;
+	case VERB_CMD_BADARG:
+		/* A named object or player argument did not resolve in scope. */
+		telnetclient_puts(cl, mud_config.msg_verbbadarg);
+		return 1;
+	case VERB_CMD_ERROR:
+		/* The word is a verb, but its program could not be run. Log it for
+		 * the builder and fall through so the player sees a plain refusal
+		 * rather than an internal error. */
+		LOG_ERROR("verb '%s' failed to run for %s", cmd, actor_id);
+		return 0;
+	case VERB_CMD_NOVERB:
+	default:
+		/* Not a verb in this actor's scope. */
+		return 0;
+	}
+}
+
+/**
  * use cmd to run a command from the command_table array.
  */
 static int
@@ -128,6 +174,10 @@ command_run(DESCRIPTOR_DATA *cl, struct user *u, const char *cmd, const char *ar
 			return command_table[i].cb(cl, u, cmd, arg);
 		}
 	}
+
+	/* no built-in matched: try a game-object verb in the actor's scope. */
+	if (command_try_verb(cl, cmd, arg))
+		return 1;
 
 	telnetclient_puts(cl, mud_config.msg_invalidcommand);
 
@@ -239,7 +289,13 @@ command_start_lineinput(DESCRIPTOR_DATA *cl)
 	if (!ch) {
 		ch = character_new();
 		if (ch) {
-			character_attr_set(ch, "name.short", telnetclient_username(cl));
+			const char *username = telnetclient_username(cl);
+
+			character_attr_set(ch, "name.short", username);
+			/* Record the owning account so authority can map this
+			 * character back to its account (e.g. the wizard-capability
+			 * check). name.short is a display name, not an account key. */
+			character_attr_set(ch, "owner", username);
 			character_attr_set(ch, "room.current", mud_config.newuser_room);
 			telnetclient_setcharacter(cl, ch);
 		}

@@ -20,6 +20,7 @@ junk*/
 # ignore database and runtime files
 /data/users/*
 data/muddb
+/depot
 boris.pid
 
 # ignore build & release artifacts
@@ -35,6 +36,11 @@ boris.log
 *.env
 core
 
+
+# VM guest SDK build artifacts
+/data/vm/
+sdk/vm/*.o
+sdk/vm/*.s
 
 # ignore AI junk
 .claude

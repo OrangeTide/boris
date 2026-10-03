@@ -87,39 +87,32 @@ entity_create(struct entity *e, OBJ_CACHE *cache, const char *id,
 	enum entity_kind kind, const char *template_ref)
 {
 	if (!e || !cache || !id) return -1;
-	if (entity_load(e, cache, id) == 0) {
-		LOG_ERROR("entity_create: id=%s already exists", id);
-		entity_unload(e);
+	memset(e, 0, sizeof(*e));
+
+	/* obj_cache_create inserts a new dirty object into the cache and fails
+	 * if the id is already taken, so no separate existence check is needed. */
+	OBJ *obj = obj_cache_create(cache, id);
+	if (!obj) {
+		LOG_ERROR("entity_create: id=%s already exists or insert failed", id);
 		return -1;
 	}
-	/* Backend may or may not auto-create on first get. We synthesize
-	 * via obj_new + prime the cache by saving, then load it. To keep
-	 * this simple, require callers to pre-insert the record if the
-	 * backend is load-on-miss only. */
-	OBJ *obj = obj_new(id);
-	if (!obj) return -1;
 	if (obj_prop_set_internal(obj, "%kind", entity_kind_name(kind))
 		!= OBJ_OK) goto fail;
 	if (template_ref
 		&& obj_prop_set_internal(obj, "%parent", template_ref)
 		!= OBJ_OK) goto fail;
+	obj_cache_mark_dirty(cache, obj);
 
-	/* Inject into cache by saving through the backend then loading. */
-	/* Simpler path: inject directly using a small trick -- we require
-	 * the caller's backend to accept puts. We use obj_cache via a put
-	 * through the save vtable by marking it dirty then flushing. But
-	 * cache doesn't offer "insert". So: drop this entity's obj into
-	 * the backend via a direct save-equivalent is not exposed either.
-	 *
-	 * Instead: most callers will have seeded the record through
-	 * muddb_put (or the test backend) before calling entity_load.
-	 * We fail here and direct users to that path. */
-	obj_free(obj);
-	LOG_ERROR("entity_create: cache doesn't support insert-on-create;"
-		" seed the backend directly then call entity_load");
-	return -1;
+	e->id = strdup(id);
+	if (!e->id) goto fail;
+	e->cache = cache;
+	e->obj = obj;
+	e->kind = kind;
+	return 0;
 fail:
-	obj_free(obj);
+	/* Discard the object we just created. We still hold its only pin, so
+	 * forget drops it without a save or a backend delete, on any backend. */
+	obj_cache_forget(cache, id);
 	return -1;
 }
 
