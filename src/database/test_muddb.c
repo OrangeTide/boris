@@ -301,6 +301,162 @@ test_multiple_domains(void)
 	muddb_close(db);
 }
 
+static void
+test_index(void)
+{
+	MUDDB *db = muddb_open(tmpdir, 0);
+	MUDDB_INDEX_ITER *it;
+	const char *v;
+	int n;
+
+	check("open for index", db != NULL);
+	if (!db) return;
+
+	check("register index",
+		muddb_index_register(db, "idx.contents") == MUDDB_OK);
+
+	/* an empty index has no values and counts zero */
+	check("empty count zero",
+		muddb_index_count(db, "idx.contents", "rooms/altar") == 0);
+	it = muddb_index_iter_begin(db, "idx.contents", "rooms/altar");
+	check("empty iter begins", it != NULL);
+	check("empty iter yields nothing", it && muddb_index_iter_next(it) == NULL);
+	muddb_index_iter_end(it);
+
+	check("add sword", muddb_index_add(db, "idx.contents", "rooms/altar",
+		"objs/sword") == MUDDB_OK);
+	check("add shield", muddb_index_add(db, "idx.contents", "rooms/altar",
+		"objs/shield") == MUDDB_OK);
+	check("add char", muddb_index_add(db, "idx.contents", "rooms/altar",
+		"chars/7") == MUDDB_OK);
+	check("add to other container",
+		muddb_index_add(db, "idx.contents", "rooms/vault", "objs/gold")
+		== MUDDB_OK);
+
+	/* a duplicate pair is idempotent, not double-counted */
+	check("dup add ok", muddb_index_add(db, "idx.contents", "rooms/altar",
+		"objs/sword") == MUDDB_OK);
+	check("count is 3",
+		muddb_index_count(db, "idx.contents", "rooms/altar") == 3);
+
+	check("contains present",
+		muddb_index_contains(db, "idx.contents", "rooms/altar", "chars/7"));
+	check("not contains cross-container",
+		!muddb_index_contains(db, "idx.contents", "rooms/altar", "objs/gold"));
+
+	n = 0;
+	it = muddb_index_iter_begin(db, "idx.contents", "rooms/altar");
+	while ((v = muddb_index_iter_next(it)) != NULL)
+		n++;
+	muddb_index_iter_end(it);
+	check("iter yields all 3", n == 3);
+
+	check("other container isolated",
+		muddb_index_count(db, "idx.contents", "rooms/vault") == 1);
+
+	check("del one pair", muddb_index_del(db, "idx.contents", "rooms/altar",
+		"objs/shield") == MUDDB_OK);
+	check("count now 2",
+		muddb_index_count(db, "idx.contents", "rooms/altar") == 2);
+	check("del of missing pair ok",
+		muddb_index_del(db, "idx.contents", "rooms/altar", "nope")
+		== MUDDB_OK);
+
+	/* index data survives a reopen */
+	muddb_close(db);
+	db = muddb_open(tmpdir, 0);
+	check("reopen for index", db != NULL);
+	check("re-register ok",
+		muddb_index_register(db, "idx.contents") == MUDDB_OK);
+	check("count persisted across reopen",
+		muddb_index_count(db, "idx.contents", "rooms/altar") == 2);
+	muddb_close(db);
+}
+
+static void
+test_txn_atomic(void)
+{
+	MUDDB *db = muddb_open(tmpdir, 0);
+	MUDDB_TXN *t;
+	OBJ *obj, *got;
+
+	check("open for txn", db != NULL);
+	if (!db) return;
+	check("register idx",
+		muddb_index_register(db, "idx.contents") == MUDDB_OK);
+
+	/* a committed transaction lands the object and the index delta together */
+	obj = obj_new_from_json("objs/lamp", "{\"name\":\"brass lamp\"}");
+	t = muddb_txn_begin(db);
+	check("txn begin", t != NULL);
+	check("txn put", muddb_txn_put(t, "objs", "objs/lamp", obj) == MUDDB_OK);
+	check("txn index add",
+		muddb_txn_index_add(t, "idx.contents", "rooms/cave", "objs/lamp")
+		== MUDDB_OK);
+	check("txn commit", muddb_txn_commit(t) == MUDDB_OK);
+	obj_free(obj);
+
+	got = muddb_get(db, "objs", "objs/lamp");
+	check("committed object present", got != NULL);
+	if (got) obj_free(got);
+	check("committed index present",
+		muddb_index_contains(db, "idx.contents", "rooms/cave", "objs/lamp"));
+
+	/* an aborted transaction lands nothing */
+	obj = obj_new_from_json("objs/ghost", "{\"name\":\"ghost\"}");
+	t = muddb_txn_begin(db);
+	check("txn2 put", muddb_txn_put(t, "objs", "objs/ghost", obj) == MUDDB_OK);
+	check("txn2 index add",
+		muddb_txn_index_add(t, "idx.contents", "rooms/cave", "objs/ghost")
+		== MUDDB_OK);
+	muddb_txn_abort(t);
+	obj_free(obj);
+
+	got = muddb_get(db, "objs", "objs/ghost");
+	check("aborted object absent", got == NULL);
+	if (got) obj_free(got);
+	check("aborted index absent",
+		!muddb_index_contains(db, "idx.contents", "rooms/cave", "objs/ghost"));
+
+	muddb_close(db);
+}
+
+static void
+test_txn_rollback(void)
+{
+	MUDDB *db = muddb_open(tmpdir, 0);
+	MUDDB_TXN *t;
+
+	check("open for rollback", db != NULL);
+	if (!db)
+		return;
+
+	/* Create a brand-new index inside a transaction, then abort. LMDB
+	 * closes the DBI it opened on abort, so muddb must not keep it cached;
+	 * otherwise the name would later resolve to a closed handle. */
+	t = muddb_txn_begin(db);
+	check("rollback txn begin", t != NULL);
+	check("stage add to new index",
+		muddb_txn_index_add(t, "idx.scratch", "k", "v") == MUDDB_OK);
+	muddb_txn_abort(t);
+
+	/* the aborted creation left nothing on disk */
+	check("aborted index empty",
+		muddb_index_count(db, "idx.scratch", "k") == 0);
+
+	/* registering and using the same name now works on a fresh handle */
+	check("register after abort",
+		muddb_index_register(db, "idx.scratch") == MUDDB_OK);
+	check("add after abort",
+		muddb_index_add(db, "idx.scratch", "k", "v") == MUDDB_OK);
+	check("contains after abort",
+		muddb_index_contains(db, "idx.scratch", "k", "v"));
+	check("count after abort",
+		muddb_index_count(db, "idx.scratch", "k") == 1);
+
+	muddb_close(db);
+}
+
 int
 main(void)
 {
@@ -321,6 +477,9 @@ main(void)
 	test_reopen();
 	test_iteration();
 	test_multiple_domains();
+	test_index();
+	test_txn_atomic();
+	test_txn_rollback();
 
 	cleanup_tmpdir();
 

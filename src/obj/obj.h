@@ -18,8 +18,17 @@ OBJ *obj_new(const char *key);
 OBJ *obj_new_from_json(const char *key, const char *json);
 void obj_free(OBJ *obj);
 
+/* the object's key (its cache id), borrowed and valid for the object's life */
+const char *obj_key(OBJ *obj);
+
 /* returns borrowed pointer -- valid until next mutation or obj_free */
 char *obj_prop_get(OBJ *obj, const char *propname);
+
+/* Resolve propname through the prototype chain: the object's own value, else
+ * the first ancestor (%parent) that defines it, stopping at a local tombstone.
+ * Returns a strdup'd string the caller frees, or NULL if unset. Structural
+ * (%) and tombstone (!) names are not resolvable and return NULL. */
+char *obj_prop_resolve(OBJ *obj, const char *propname);
 
 /*
  * Public setters/deleter. Reject propnames starting with '%' (structural
@@ -61,6 +70,64 @@ void obj_commit(void);
 void obj_shutdown(void);
 OBJ *obj_get(const char *id);
 void obj_release(OBJ *obj);
+
+/* Create a new persistent object with the given id, inserted into the global
+ * cache as a pinned, dirty object (written through on flush or eviction).
+ * Returns the pinned object (release with obj_release), or NULL if the id is
+ * already taken or on error. */
+OBJ *obj_create(const char *id);
+
+/* Destroy the object with the given id: drop it from the cache and delete it
+ * from the backing store. Fails if the object is still pinned or the backend
+ * cannot delete. Returns OBJ_OK or OBJ_ERR. */
+int obj_destroy(const char *id);
+
+/* Mark obj dirty so it is saved on eviction, flush, or obj_save. Call after
+ * mutating a cached object (e.g. obj_prop_set) so the change is not lost. */
+void obj_mark_dirty(OBJ *obj);
+
+/* Persist the object with the given id now if it is cached and dirty. A no-op
+ * when it is not cached or already clean. Returns OBJ_OK or OBJ_ERR. */
+int obj_save(const char *id);
+
+/*
+ * Containment. An object carries %location (its container's id) as a cheap
+ * forward pointer; the reverse view (container -> members) is a persisted
+ * secondary index maintained on the write path. Only available on the muddb
+ * backend, which has the index facility and multi-op transactions.
+ */
+
+/* Move member into container, or to limbo when container is NULL. Writes
+ * %location and the old and new contents-index entries in one transaction, so
+ * the forward pointer and the reverse view cannot diverge. Refuses a move that
+ * would form a cycle (member into itself or into one of its own descendants).
+ * Returns OBJ_OK or OBJ_ERR. */
+int obj_move(const char *member, const char *container);
+
+/* Return the container id of member (strdup'd, caller frees), or NULL if the
+ * object is in limbo, missing, or on error. */
+char *obj_location(const char *member);
+
+/* Number of members directly contained by container (0 if none or on error). */
+long obj_contents_count(const char *container);
+
+/* Set an object's owner (%owner) and keep the owner index in step, so
+ * obj_owner_count stays a cheap per-owner tally. Returns OBJ_OK or OBJ_ERR. On
+ * the CAS backend the property is written but no index is kept. */
+int obj_set_owner(const char *id, const char *owner);
+
+/* Number of objects owned by `owner`, from the owner index (0 if none, or on
+ * the CAS backend which keeps no index). Counts only objects whose owner was
+ * set through obj_set_owner. */
+long obj_owner_count(const char *owner);
+
+/* Walk the ids of the members directly contained by container. The returned id
+ * is borrowed from the iterator and valid only until the next call. A missing
+ * or empty container yields nothing. Members need not be currently loaded. */
+typedef struct obj_contents_iter OBJ_CONTENTS_ITER;
+OBJ_CONTENTS_ITER *obj_contents_begin(const char *container);
+const char *obj_contents_next(OBJ_CONTENTS_ITER *it);
+void obj_contents_end(OBJ_CONTENTS_ITER *it);
 
 typedef void (*obj_notify_fn)(OBJ *obj, const char *id, void *arg);
 void obj_set_load_cb(obj_notify_fn cb, void *arg);

@@ -50,6 +50,13 @@ bridge_save(void *ctx, const char *id, OBJ *obj)
 	return muddb_put(b->db, b->domain, id, obj);
 }
 
+static int
+bridge_del(void *ctx, const char *id)
+{
+	struct bridge *b = ctx;
+	return muddb_del(b->db, b->domain, id);
+}
+
 static OBJ_CACHE *
 bridge_resolve_parent(void *ctx, const char *parent_ref, const char **out_id)
 {
@@ -98,6 +105,7 @@ obj_cache_muddb_new(MUDDB *db, const char *domain, unsigned max_unreferenced)
 	struct obj_cache_ops ops = {
 		.load = bridge_load,
 		.save = bridge_save,
+		.del = bridge_del,
 		.resolve_parent_cache = bridge_resolve_parent,
 		.destroy = bridge_destroy,
 	};
@@ -105,6 +113,20 @@ obj_cache_muddb_new(MUDDB *db, const char *domain, unsigned max_unreferenced)
 	if (!c) { free(b->domain); free(b); return NULL; }
 	b->self = c;
 	return c;
+}
+
+MUDDB *
+obj_cache_muddb_db(OBJ_CACHE *c)
+{
+	struct bridge *b = c ? obj_cache_ctx(c) : NULL;
+	return b ? b->db : NULL;
+}
+
+const char *
+obj_cache_muddb_domain(OBJ_CACHE *c)
+{
+	struct bridge *b = c ? obj_cache_ctx(c) : NULL;
+	return b ? b->domain : NULL;
 }
 
 int

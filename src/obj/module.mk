@@ -1,7 +1,7 @@
 LIBRARIES += obj
 obj_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
 obj_SRCS   = obj.c obj_cache.c obj_cache_muddb.c obj_cache_cas.c obj_store.c
-obj_LIBS   = smolvfs
+obj_LIBS   = hashtable smolvfs
 
 EXECUTABLES  += test_obj
 TEST_TARGETS += test_obj
@@ -28,6 +28,15 @@ test_obj_cache_cas_SRCS = test_obj_cache_cas.c
 test_obj_cache_cas_LIBS = obj hashtable log smolvfs
 define test_obj_cache_cas_TESTCMD
 $(test_obj_cache_cas_RUN)
+endef
+
+EXECUTABLES            += test_obj_contain
+TEST_TARGETS           += test_obj_contain
+test_obj_contain_DIR   := $(obj_DIR)
+test_obj_contain_SRCS   = test_obj_contain.c
+test_obj_contain_LIBS   = obj database hashtable log smolvfs lmdb
+define test_obj_contain_TESTCMD
+$(test_obj_contain_RUN)
 endef
 
 # benchmark harness, not part of the test suite

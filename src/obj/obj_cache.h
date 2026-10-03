@@ -27,6 +27,10 @@ struct obj_cache_ops {
 	OBJ_CACHE *(*resolve_parent_cache)(void *ctx, const char *parent_ref,
 		const char **out_id);
 
+	/* Delete a record from the backing store. Returns 0 on success. May be
+	 * NULL when the backend cannot delete; obj_cache_destroy then fails. */
+	int (*del)(void *ctx, const char *id);
+
 	/* free the backend ctx; called once by obj_cache_free. May be NULL if
 	 * the ctx is not owned by the cache. */
 	void (*destroy)(void *ctx);
@@ -47,12 +51,48 @@ OBJ *obj_cache_get(OBJ_CACHE *c, const char *id);
  * to the LRU and is eligible for eviction. */
 void obj_cache_release(OBJ_CACHE *c, OBJ *obj);
 
+/*
+ * Create a brand-new object with the given id and insert it into the cache as
+ * a pinned, dirty entry (written through on flush or eviction). Fails, returning
+ * NULL, if the id is already cached or already present in the backing store.
+ * Caller must obj_cache_release the returned object.
+ */
+OBJ *obj_cache_create(OBJ_CACHE *c, const char *id);
+
+/*
+ * Destroy the object with the given id: drop it from the cache and delete it
+ * from the backing store via ops->del. Fails (OBJ_CACHE_ERR) if the object is
+ * still pinned or if the backend provides no del op. Returns OBJ_CACHE_OK on
+ * success, including when the id was not present anywhere.
+ */
+int obj_cache_destroy(OBJ_CACHE *c, const char *id);
+
+/*
+ * Discard an object from the cache without saving it or deleting it from the
+ * backing store. Used to abort a freshly created object that was never
+ * persisted, so it needs no del op and works on any backend. The caller may
+ * still hold its single pin (refcount 1); a shared object (refcount > 1) is
+ * refused. Returns OBJ_CACHE_OK, including when nothing was cached.
+ */
+int obj_cache_forget(OBJ_CACHE *c, const char *id);
+
 /* Mark obj as dirty; it will be saved before eviction or on flush_all. */
 void obj_cache_mark_dirty(OBJ_CACHE *c, OBJ *obj);
+
+/* Mark obj as clean, so eviction and flush_all will not save it. Used after a
+ * caller has already persisted obj through its own path (e.g. a containment
+ * transaction), so the cache does not redundantly re-save it. */
+void obj_cache_mark_clean(OBJ_CACHE *c, OBJ *obj);
 
 /* Save all dirty objects via ops->save. Returns OBJ_CACHE_OK on full
  * success, OBJ_CACHE_ERR if any save failed. */
 int obj_cache_flush_all(OBJ_CACHE *c);
+
+/* Save one object now via ops->save if it is cached and dirty. A no-op
+ * (OBJ_CACHE_OK) when the id is not cached or already clean; OBJ_CACHE_ERR on a
+ * save failure. Used for explicit durability points (e.g. a character logout)
+ * without flushing the whole cache. */
+int obj_cache_save(OBJ_CACHE *c, const char *id);
 
 /*
  * Resolve a property via the prototype chain. Starts at obj, then walks

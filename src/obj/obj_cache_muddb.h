@@ -26,4 +26,11 @@ OBJ_CACHE *obj_cache_muddb_new(struct muddb *db, const char *domain,
 int obj_cache_muddb_link_parent(OBJ_CACHE *c, const char *domain,
 	OBJ_CACHE *parent_cache);
 
+/* Reach the underlying muddb handle and domain of a muddb-backed cache, so
+ * code that needs transactional or index access (e.g. containment) can bundle
+ * an object write with its index deltas. The cache must be one built by
+ * obj_cache_muddb_new; the ctx of another backend would be misread. */
+struct muddb *obj_cache_muddb_db(OBJ_CACHE *c);
+const char *obj_cache_muddb_domain(OBJ_CACHE *c);
+
 #endif
