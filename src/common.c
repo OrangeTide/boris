@@ -719,11 +719,6 @@ mud_config_init(void)
 #endif
 	mud_config.daemonize = 0;
 	mud_config.pid_file = strdup("boris.pid");
-	mud_config.db_backend = strdup("muddb");
-	mud_config.cas_path = strdup("data/casdb");
-	mud_config.cas_ref = strdup("world");
-	mud_config.cas_retain = 0;
-	mud_config.cas_commit_seconds = 60;
 }
 
 /**
@@ -758,9 +753,6 @@ mud_config_shutdown(void)
 		&mud_config.default_channels,
 		&mud_config.form_newuser_filename,
 		&mud_config.newuser_room,
-		&mud_config.db_backend,
-		&mud_config.cas_path,
-		&mud_config.cas_ref,
 		&mud_config.vm_image_path,
 		&mud_config.vm_resident,
 	};
@@ -806,15 +798,10 @@ mud_config_process(void)
 	config_watch(&cfg, "webserver.port", do_config_uint, &mud_config.webserver_port);
 	config_watch(&cfg, "form.newuser.filename", do_config_string, &mud_config.form_newuser_filename);
 	config_watch(&cfg, "newuser.room", do_config_string, &mud_config.newuser_room);
-	config_watch(&cfg, "database.backend", do_config_string, &mud_config.db_backend);
 	config_watch(&cfg, "vm.image_path", do_config_string, &mud_config.vm_image_path);
 	config_watch(&cfg, "vm.resident", do_config_string, &mud_config.vm_resident);
 	config_watch(&cfg, "vm.create_max", do_config_uint, &mud_config.vm_create_max);
 	config_watch(&cfg, "vm.owned_max", do_config_uint, &mud_config.vm_owned_max);
-	config_watch(&cfg, "database.cas.path", do_config_string, &mud_config.cas_path);
-	config_watch(&cfg, "database.cas.ref", do_config_string, &mud_config.cas_ref);
-	config_watch(&cfg, "database.cas.retain", do_config_uint, &mud_config.cas_retain);
-	config_watch(&cfg, "database.cas.commit_seconds", do_config_uint, &mud_config.cas_commit_seconds);
 	config_watch(&cfg, "cache.obj.size", do_config_uint, &mud_config.obj_cache_size);
 	config_watch(&cfg, "cache.character.size", do_config_uint, &mud_config.character_cache_size);
 	config_watch(&cfg, "rpg.enabled", do_config_uint, &mud_config.rpg_enabled);

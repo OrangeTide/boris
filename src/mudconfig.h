@@ -46,15 +46,10 @@ struct mud_config {
 #endif
 	unsigned daemonize;
 	char *pid_file;
-	char *db_backend; /* object store backend: "muddb" or "cas" */
 	char *vm_image_path; /* directory holding guest program ELF images */
 	char *vm_resident; /* comma-separated resident program ids to keep running */
 	unsigned vm_create_max; /* max objects one verb task may create; 0 = unlimited */
 	unsigned vm_owned_max; /* max objects one owner may hold; 0 = unlimited */
-	char *cas_path; /* CAS depot directory */
-	char *cas_ref; /* CAS ref name for the world snapshot */
-	unsigned cas_retain; /* keep last N snapshots; 0 keeps all */
-	unsigned cas_commit_seconds; /* periodic commit interval */
 };
 
 typedef struct mud_config MUD_CONFIG;
