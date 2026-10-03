@@ -23,7 +23,6 @@
  */
 
 #include "boris.h"
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -153,19 +152,9 @@ sh_quit(struct iox_loop *loop, int signo UNUSED, void *arg UNUSED)
 	iox_loop_stop(loop);
 }
 
-/* periodic flush + commit for the CAS object backend. one-shot
- * timer, re-armed on every firing. */
-static void
-obj_commit_timer(struct iox_loop *loop, void *arg UNUSED)
-{
-	obj_commit();
-	iox_timer_add(loop, (int)mud_config.cas_commit_seconds * 1000,
-		obj_commit_timer, NULL);
-}
-
 /* VM agent heartbeat: step every resident agent a slice, reap the dead, and
  * relaunch any configured resident that is missing. One-shot timer re-armed on
- * every firing, the same pattern as obj_commit_timer. */
+ * every firing. */
 #define VM_TICK_MS      100     /* agent scheduling period */
 #define VM_TICK_QUANTUM 8192    /* instructions per agent per tick */
 
@@ -445,36 +434,8 @@ main(int argc, char **argv)
 
 	atexit(channel_shutdown);
 
-	if (strcmp(mud_config.db_backend, "cas") == 0) {
-		if (obj_initialize_cas(mud_config.cas_path,
-			mud_config.cas_ref, mud_config.obj_cache_size,
-			mud_config.cas_retain)) {
-			LOG_ERROR("could not load object cache");
-			return EXIT_FAILURE;
-		}
-
-		if (mud_config.cas_commit_seconds > INT_MAX / 1000) {
-			LOG_WARNING("database.cas.commit_seconds too large,"
-				" clamping to %d", INT_MAX / 1000);
-			mud_config.cas_commit_seconds = INT_MAX / 1000;
-		}
-
-		if (mud_config.cas_commit_seconds > 0)
-			iox_timer_add(g_loop,
-				(int)mud_config.cas_commit_seconds * 1000,
-				obj_commit_timer, NULL);
-		else
-			LOG_WARNING("database.cas.commit_seconds is 0:"
-				" objects commit only at shutdown; a crash"
-				" loses all changes since boot");
-	} else if (strcmp(mud_config.db_backend, "muddb") == 0) {
-		if (obj_initialize(mud_db, mud_config.obj_cache_size)) {
-			LOG_ERROR("could not load object cache");
-			return EXIT_FAILURE;
-		}
-	} else {
-		LOG_ERROR("unknown database.backend \"%s\""
-			" (use muddb or cas)", mud_config.db_backend);
+	if (obj_initialize(mud_db, mud_config.obj_cache_size)) {
+		LOG_ERROR("could not load object cache");
 		return EXIT_FAILURE;
 	}
 

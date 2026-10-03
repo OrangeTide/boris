@@ -294,56 +294,23 @@ sample/
 Each `.json` file contains a single JSON object. The filename (minus `.json`)
 is the database key.
 
-### Object Store Backends
+### Object Store
 
-World objects (the `objs` domain: rooms, exits, programs) can be
-served by one of two backends, selected with `database.backend` in
-`boris.cfg`:
+All data, including world objects (the `objs` domain: rooms, exits,
+programs), lives in the LMDB database at `data/muddb/`, described above.
+LMDB is the only live backend.
 
-- **muddb** (default): the LMDB database at `data/muddb/`, described above.
-- **cas**: a content-addressed depot (smolvfs). Every commit is an
-  immutable snapshot, so the depot keeps a history of world states.
-
-User accounts, characters, and invites always live in LMDB regardless of
-this setting, so `data/muddb/` is required either way.
-
-Configuration keys:
-
-| Setting                       | Default      | Description                                        |
-|-------------------------------|--------------|----------------------------------------------------|
-| `database.backend`            | `muddb`      | Object store backend: `muddb` or `cas`             |
-| `database.cas.path`           | `data/casdb` | Depot directory for the cas backend                |
-| `database.cas.ref`            | `world`      | Named snapshot reference inside the depot          |
-| `database.cas.retain`         | 0            | Keep the last N snapshots; 0 keeps all history     |
-| `database.cas.commit_seconds` | 60           | Interval between automatic snapshot commits        |
-
-To switch an existing MUD to the cas backend, stop the server, import the
-objects into a depot, and enable the backend in `boris.cfg`:
+A content-addressed depot format (smolvfs CAS) is also available, but only
+as an offline snapshot and export target, not as a live store. Each commit
+to a depot is an immutable snapshot, so a depot keeps a history of world
+states, which makes it useful for backups and for diffing world versions.
+Export a snapshot with:
 
 ```sh
 ./bin/muddb-tool to-cas data/muddb data/casdb
 ```
 
-```
-database.backend	=	cas
-database.cas.path	=	data/casdb
-database.cas.retain	=	8
-```
-
-Notes for operating the cas backend:
-
-- Object edits are saved to the depot as they happen, but only become part
-  of a snapshot at the next commit. Commits run every
-  `database.cas.commit_seconds` and once more at clean shutdown. After a
-  crash, the world reverts to the last committed snapshot, losing at most
-  one commit interval of edits.
-- With `database.cas.retain = 0` the depot grows without bound, because
-  every snapshot is kept forever. Set it to a small number (for example 8)
-  to prune old snapshots automatically; the depot then converges to a
-  bounded size.
-- There is currently no cas-to-muddb export. Keep your LMDB data (or a
-  JSON export of it) until you are confident in the cutover, and back up
-  the depot as described below.
+See Backup and Restore below.
 
 ### Backup and Restore
 
@@ -389,21 +356,20 @@ rm -rf data/muddb
 cp -r /path/to/backup/muddb data/muddb
 ```
 
-**CAS depot copy (cas backend only)**
+**CAS snapshot export (deduplicated history)**
 
-Both methods above cover only the LMDB database. When
-`database.backend = cas`, world objects live in the depot directory and
-must be backed up separately with a plain file copy:
+For a backup that keeps a deduplicated history of world states, export the
+object store into a CAS depot. Each export adds an immutable snapshot:
 
 ```sh
-cp -a data/casdb /path/to/backup/casdb
+./bin/muddb-tool to-cas data/muddb /path/to/backup/casdb
 ```
 
-Depot files are immutable once written and the snapshot reference is
-updated by atomic rename, so copying while the server runs is safe. The
-only files that can disappear during a live copy are old snapshots pruned
-by `database.cas.retain`. To restore, stop the server and copy the depot
-back into place.
+Repeated exports to the same depot share unchanged objects, so the history
+stays compact. Depot files are immutable once written, so copying a depot
+elsewhere is always safe. This is an export format, not a live store: there
+is no cas-to-muddb import yet, so keep a JSON or `mdb_copy` backup as the
+restore path until one exists.
 
 **Automated daily backup (cron)**
 
@@ -498,8 +464,8 @@ Pre-built ELF binaries load automatically when the object enters the cache.
 
 This subsystem is under active development. It replaces the earlier ColdFire
 sandbox. See [doc/mud-vm-design.md](doc/mud-vm-design.md) for the design and
-[doc/vm-migration-plan.md](doc/vm-migration-plan.md) for the migration plan.
-See [DEV.md](doc/DEV.md) for the architecture summary.
+[doc/vm-migration-plan.md](doc/vm-migration-plan.md) for the (retired) record
+of the migration. See [DEV.md](doc/DEV.md) for the architecture summary.
 
 ## Development
 

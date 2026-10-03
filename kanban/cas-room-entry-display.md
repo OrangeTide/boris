@@ -1,14 +1,34 @@
 ---
 title: CAS backend shows no room on game entry
-status: backlog
+status: done
 gitlab-sync:
 ---
+
+## Resolution
+
+Resolved by removing the live CAS backend. CAS was an opt-in second
+object-store backend, never the default and not in use for play. Rather
+than carry a second live backend at parity with muddb (which this bug
+showed is a recurring cost: obj_move, the containment index, and owner
+counts all had to be reimplemented for CAS), CAS was demoted to an offline
+snapshot/export format reached through `muddb-tool to-cas`. The live store
+is now muddb only, so obj_move's muddb-only path is no longer a defect, and
+this failure mode cannot occur. See the decision in [[obj-cache-cas]].
+
+An earlier fix made obj_move backend-agnostic with an in-memory CAS index;
+it was reverted when CAS was demoted, since the live CAS path it supported
+no longer exists.
+
+## Original diagnosis (kept for the record)
 
 Under the `cas` object store backend, entering the game (menu 'E',
 command_start_lineinput in src/cmd/cmd.c) does not display the starting
 room. The same path works on the default `muddb` backend.
 
-## Repro
+## Repro (historical; no longer runnable)
+
+The live CAS backend and its smoke path have since been removed, so this
+command no longer exists. At the time:
 
     BORIS_BACKEND=cas ./src/tests/test_smoke.sh
 
@@ -119,21 +139,9 @@ does not show the bug.
 - [x] Pin down where chars/1 is lost: it is not lost in storage, obj_move
       refuses to run on CAS (see "Confirmed" above), so %location is never
       written.
-- [ ] Decide the fix: give the CAS backend an obj_move equivalent that
-      writes %location and maintains a containment index, or restructure
-      obj_move so %location is written through the ordinary object-save
-      path (which CAS supports) with the containment index maintained
-      separately. This is the core design question; muddb currently gets
-      both the write and the index atomically from one muddb transaction.
-- [ ] Containment is fully broken on CAS, not just room entry: movement,
-      pick-up and obj_contents_* all depend on obj_move / the contents
-      index. Scope the fix to all of them, not only the entry display.
-- [ ] Re-enable the room-on-entry assertion so `enter_game` passes under
-      `BORIS_BACKEND=cas` once obj_move works there.
+- [x] Decide the fix. Decided to demote CAS to an offline snapshot/export
+      format and keep the live store muddb-only, which removes the defect
+      class entirely (see Resolution and [[obj-cache-cas]]).
 
-Note: the title says "room entry display" but the real defect is
-obj_move being muddb-only. Rename if this grows into the containment
-work.
-
-Related: [[obj-cache-cas]], [[obj-cache-cas-routing]],
-[[obj-cache-cas-retention]], [[char-account-persistence]].
+Related: [[obj-cache-cas]], [[smolvfs-revendor]],
+[[char-account-persistence]].

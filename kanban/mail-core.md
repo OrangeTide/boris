@@ -10,8 +10,9 @@ name addressing, standalone anti-abuse, and the backend-agnostic `mailstore`
 vtable all bindings call. See doc/mail-protocol-proposal.md. Mail is
 self-contained; the contacts extension is optional.
 
-Immutable message content is split from mutable metadata so a content-addressed
-backend can de-duplicate and support undo.
+Immutable message content is split from mutable metadata so the backend can
+de-duplicate (by content hash) and support undo. In muddb this is the
+[[mail-dedup-undo]] enhancement, not a separate store.
 
 ## Tasks
 

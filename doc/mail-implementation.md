@@ -18,8 +18,9 @@ New source directories, each with a `module.mk` added to `SUBDIRS`:
 - `src/mail/`
   - `mail.h` / `mail.c` -- the `mailstore` interface, operation dispatch, id and
     identity types, the mail controller.
-  - `mail_muddb.c` -- the default muddb backend.
-  - `mail_cas.c` -- the content-addressed backend (phase 3; provides `undo`).
+  - `mail_muddb.c` -- the muddb backend. The base store keys content by id;
+    the phase-3 enhancement adds content-hash keying for de-duplication and a
+    generation chain for `undo`, all within muddb (no separate store).
   - `mail_form.c` -- the text compose form (callback state machine).
 - `src/contacts/`
   - `contacts.h` / `contacts.c` -- the contacts store, operation dispatch,
@@ -171,7 +172,8 @@ int  mail_prefs_set(const mail_id *box, OBJ *patch);
 The muddb backend (`mail_muddb.c`) implements the vtable over the schema above.
 `store` appends a header (bumping `modseq`, assigning an id from a per-mailbox
 counter derived from the current max), writes the content record first, then the
-index. `undo` is `NULL` here; the CAS backend provides it.
+index. `undo` is `NULL` in the base store; the phase-3 content-hash + generation
+enhancement (still in `mail_muddb.c`) provides it.
 
 ## Identity resolution
 
@@ -281,7 +283,7 @@ Per the project's `module.mk` test pattern (`EXECUTABLES +=`, `TEST_TARGETS +=`,
 
 - `test_mail`: deliver, list delta by `since_modseq`, flag, soft delete + expunge,
   IC vs OOC mailbox routing, block enforcement, receive-mode enforcement, handle
-  uniqueness, undo on the CAS backend.
+  uniqueness, undo on the history-capable muddb store (content-hash + generation).
 - `test_contacts`: request/accept writes both sides, decline -> denied, block
   drops relationship and shares the mail block list, presence delta on
   login/logout, request-policy `none` refusal.
@@ -291,7 +293,9 @@ Per the project's `module.mk` test pattern (`EXECUTABLES +=`, `TEST_TARGETS +=`,
 - GMCP option 201 negotiation and `Core.Supports` must land first (the `gmcp`
   card). Until then, MCP and HTTP carry the feature.
 - Handle registry: the `h:<handle>` index location and case-folding rules.
-- Content-addressed backend and `undo` reuse the CAS store's retention/GC (the
-  `obj-cache-cas` card family); confirm the interface fit before phase 3.
+- De-duplication and `undo` are a muddb-layer enhancement (content-hash keying
+  plus a generation chain), not a separate store; retention is muddb record
+  pruning. CAS is only the offline `muddb-tool to-cas` world export. See the
+  `mail-dedup-undo` card.
 - Escrow service is unbuilt; attachments depend on the pinned contract in the mail
   proposal.

@@ -8,6 +8,12 @@ smolvfs is vendored at v0.2.0 (2026-07-15), recorded in
 src/thirdparty/smolvfs/UPSTREAM. Upstream has since released v0.2.1
 through v0.5.0. Re-vendor to pick up the CAS improvements and fixes.
 
+Scope note: smolvfs/CAS is no longer a live backend (see
+[[obj-cache-cas]]); it now backs only the `muddb-tool to-cas` snapshot/
+export path. So this re-vendor serves the export/backup format, and the
+v0.3.0 UTF-8 / validate-on-write boundary needs checking only against the
+to-cas writer, not a live object store. Lower priority accordingly.
+
 ## What newer versions bring
 
 From the commits v0.2.0..v0.5.0 (github.com/OrangeTide/smolvfs):
@@ -46,6 +52,7 @@ Re-vendoring has its own value, but it is a separate task.
 - [ ] Reconcile any API changes against obj_cache_cas.c and muddb-tool's
       to-cas path.
 - [ ] Verify the UTF-8 / validate-on-write boundary accepts boris's keys.
-- [ ] Run `make check` and the CAS smoke (`BORIS_BACKEND=cas`).
+- [ ] Run `make check` (covers test_obj_cache_cas / test_cas / test_cas_tree)
+      and a `muddb-tool to-cas` round-trip on the sample world.
 - [ ] Relicense the vendored files to boris' license per project policy
       (authorized for OrangeTide sources).

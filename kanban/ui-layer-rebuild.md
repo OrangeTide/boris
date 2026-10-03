@@ -28,5 +28,5 @@ Supersedes the small fixes in `menu-freelist` (#29); relates to
 - [ ] plain TELNET text renderer
 - [ ] web/SSE structured UI message type -> native HTML forms (#11)
 - [ ] port login menu and newuser form to the new layer
-- [ ] unit tests for the layer; extend `make smoke` / `make smoke-cas` to
+- [ ] unit tests for the layer; extend `make smoke` to
       cover the newuser application and login end to end
