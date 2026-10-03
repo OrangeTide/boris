@@ -26,5 +26,8 @@ int command_do_charset(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *c
 int command_do_chartest(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED);
 int command_do_edit(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg);
 int command_do_view(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg);
+int command_do_grant(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd, const char *arg);
+int command_do_revoke(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd, const char *arg);
+int command_do_chown(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd, const char *arg);
 
 #endif

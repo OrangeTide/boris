@@ -249,7 +249,6 @@ struct socketio_handle;
 #define DOMAIN_TEMPLATE "templates"
 /* root directories within DOMAIN_OBJS */
 #define ROOM_ROOTDIR "rooms"
-#define PROGRAM_ROOTDIR "programs"
 
 /** max id in any domain */
 #define ID_MAX 32767

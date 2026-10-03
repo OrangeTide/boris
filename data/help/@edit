@@ -1,0 +1,13 @@
+Edit a room property in an interactive editor.
+
+usage: @edit <roomid> <property>
+
+Opens the named property of a room for editing. The property must
+already exist on the room. Your changes are saved back to the room when
+you finish in the editor.
+
+Requires the web client or an MCP-capable client. It is not available
+from a plain telnet session. See also @view.
+
+Example:
+  @edit tower-entrance desc.long    Edit the room's long description.

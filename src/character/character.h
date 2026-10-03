@@ -3,6 +3,7 @@
 
 struct character;
 struct attr_list;
+struct obj;
 
 int character_initialize(void);
 void character_shutdown(void);
@@ -35,7 +36,15 @@ int character_save(struct character *ch);
 /**
  * return the extra-attributes list for iteration. Does not include built-in
  * fields (name.short, room.current, etc). Never returns NULL for a valid ch.
+ * The list is a transient view rebuilt from the character's object; it is
+ * valid until the next call on this character or until character_put.
  */
 struct attr_list *character_attrs_extras(struct character *ch);
+
+/** the backing object for this character (pinned for the character's life). */
+struct obj *character_obj(struct character *ch);
+
+/** the object cache id of this character, e.g. "chars/42". */
+const char *character_obj_id(struct character *ch);
 
 #endif

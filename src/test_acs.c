@@ -30,6 +30,29 @@ test_flags(void)
 	CHECK("flag B unset fails fB", acs_check(&ai, "fB") == 0);
 }
 
+/* acs_setflag sets and clears a flag bit by letter and rejects bad letters. */
+static void
+test_setflag(void)
+{
+	struct acs_info ai;
+
+	acs_init(&ai, 0, 0);
+
+	CHECK("set 'w' returns 0", acs_setflag(&ai, 'w', 1) == 0);
+	CHECK("'w' now reads set", acs_testflag(&ai, 'w') == 1);
+	/* case is ignored: 'W' addresses the same bit as 'w'. */
+	CHECK("'W' reads the same bit", acs_testflag(&ai, 'W') == 1);
+	CHECK("acs_check fw passes", acs_check(&ai, "fw") == 1);
+
+	CHECK("clear 'w' returns 0", acs_setflag(&ai, 'w', 0) == 0);
+	CHECK("'w' now reads clear", acs_testflag(&ai, 'w') == 0);
+
+	/* digits map above the letters; a non-alphanumeric flag is rejected. */
+	CHECK("set digit '0' returns 0", acs_setflag(&ai, '0', 1) == 0);
+	CHECK("'0' now reads set", acs_testflag(&ai, '0') == 1);
+	CHECK("set '-' is rejected", acs_setflag(&ai, '-', 1) == -1);
+}
+
 /* combined terms AND together; '|' introduces an alternative. */
 static void
 test_combined(void)
@@ -47,6 +70,7 @@ main(void)
 {
 	test_level();
 	test_flags();
+	test_setflag();
 	test_combined();
 
 	return ctest_report("test_acs");

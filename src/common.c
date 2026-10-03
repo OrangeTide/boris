@@ -551,6 +551,8 @@ do_config_msg(struct config *cfg UNUSED, void *extra UNUSED, const char *id, con
 		{ "msg.errormain", &mud_config.msg_errormain },
 		{ "msg.usermin3", &mud_config.msg_usermin3 },
 		{ "msg.invalidcommand", &mud_config.msg_invalidcommand },
+		{ "msg.verbnomatch", &mud_config.msg_verbnomatch },
+		{ "msg.verbbadarg", &mud_config.msg_verbbadarg },
 		{ "msg.useralphanumeric", &mud_config.msg_useralphanumeric },
 		{ "msg.userexists", &mud_config.msg_userexists },
 		{ "msg.usercreatesuccess", &mud_config.msg_usercreatesuccess },
@@ -687,6 +689,8 @@ mud_config_init(void)
 	mud_config.msg_userexists = strdup("Username already exists!\n");
 	mud_config.msg_usermin3 = strdup("Username must contain at least 3 characters!\n");
 	mud_config.msg_invalidcommand = strdup("Invalid command!\n");
+	mud_config.msg_verbnomatch = strdup("You can't do that.\n");
+	mud_config.msg_verbbadarg = strdup("You don't see that here.\n");
 	mud_config.msgfile_welcome = strdup("Welcome\n\n");
 	mud_config.newuser_level = 5;
 	mud_config.newuser_flags = 0;
@@ -703,6 +707,10 @@ mud_config_init(void)
 	mud_config.newuser_room = strdup("tower-entrance");
 	mud_config.obj_cache_size = 256;
 	mud_config.character_cache_size = 128;
+	mud_config.vm_image_path = strdup("data/vm");
+	mud_config.vm_resident = strdup("");
+	mud_config.vm_create_max = 64;
+	mud_config.vm_owned_max = 1024;
 #ifdef CONFIG_LANDLOCK
 	mud_config.security_landlock = 1;
 #endif
@@ -711,7 +719,6 @@ mud_config_init(void)
 #endif
 	mud_config.daemonize = 0;
 	mud_config.pid_file = strdup("boris.pid");
-	mud_config.image_path = strdup("data/machine");
 	mud_config.db_backend = strdup("muddb");
 	mud_config.cas_path = strdup("data/casdb");
 	mud_config.cas_ref = strdup("world");
@@ -741,6 +748,8 @@ mud_config_shutdown(void)
 		&mud_config.msg_userexists,
 		&mud_config.msg_usermin3,
 		&mud_config.msg_invalidcommand,
+		&mud_config.msg_verbnomatch,
+		&mud_config.msg_verbbadarg,
 		&mud_config.msgfile_welcome,
 		&mud_config.eventlog_filename,
 		&mud_config.eventlog_timeformat,
@@ -749,10 +758,11 @@ mud_config_shutdown(void)
 		&mud_config.default_channels,
 		&mud_config.form_newuser_filename,
 		&mud_config.newuser_room,
-		&mud_config.image_path,
 		&mud_config.db_backend,
 		&mud_config.cas_path,
 		&mud_config.cas_ref,
+		&mud_config.vm_image_path,
+		&mud_config.vm_resident,
 	};
 	unsigned i;
 
@@ -797,6 +807,10 @@ mud_config_process(void)
 	config_watch(&cfg, "form.newuser.filename", do_config_string, &mud_config.form_newuser_filename);
 	config_watch(&cfg, "newuser.room", do_config_string, &mud_config.newuser_room);
 	config_watch(&cfg, "database.backend", do_config_string, &mud_config.db_backend);
+	config_watch(&cfg, "vm.image_path", do_config_string, &mud_config.vm_image_path);
+	config_watch(&cfg, "vm.resident", do_config_string, &mud_config.vm_resident);
+	config_watch(&cfg, "vm.create_max", do_config_uint, &mud_config.vm_create_max);
+	config_watch(&cfg, "vm.owned_max", do_config_uint, &mud_config.vm_owned_max);
 	config_watch(&cfg, "database.cas.path", do_config_string, &mud_config.cas_path);
 	config_watch(&cfg, "database.cas.ref", do_config_string, &mud_config.cas_ref);
 	config_watch(&cfg, "database.cas.retain", do_config_uint, &mud_config.cas_retain);
@@ -813,7 +827,6 @@ mud_config_process(void)
 #endif
 	config_watch(&cfg, "server.daemonize", do_config_uint, &mud_config.daemonize);
 	config_watch(&cfg, "server.pidfile", do_config_string, &mud_config.pid_file);
-	config_watch(&cfg, "mud.image_path", do_config_string, &mud_config.image_path);
 #if !defined(NDEBUG) && !defined(NTEST)
 	config_watch(&cfg, "*", mud_config_show, 0);
 #endif

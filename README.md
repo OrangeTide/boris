@@ -36,7 +36,7 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 - LMDB back-end database for objects and user accounts.
 - Room navigation: look, go, enter, and direction aliases (north/n, south/s, etc.).
 - SSE-based web client with output buffering and multipart framing.
-- ColdFire machine programs -- objects can have ColdFire V4e programs (ELF binaries) attached that post messages to the game world via hypercalls.
+- ***TODO*** Programmable objects -- objects can have RV32 programs (ELF binaries, compiled from kobold or C) attached that act on the game world through a small host-call interface. Replacing the earlier ColdFire sandbox, see [doc/mud-vm-design.md](doc/mud-vm-design.md).
 - ***TODO*** ability to host multiple independent worlds from a single server.
 - ***TODO*** On-Line Creation: interactive wizard provides menu-based building.
 
@@ -46,9 +46,9 @@ Boris MUD is a text-based virtual reality that allows multiple people to engage 
 - GCC or Clang
 - zlib development headers
 
-**Optional** (for rebuilding machine programs in `sdk/machine/`):
-
-- m68k-linux-gnu-gcc cross-compiler (`apt install gcc-m68k-linux-gnu` on Debian/Ubuntu)
+Guest programs for the RV32 sandbox are built offline with the kobold and
+skjegg toolchains, not by this build. The server itself needs no extra
+toolchain to run pre-built program ELFs.
 
 ### Linux
 
@@ -296,7 +296,7 @@ is the database key.
 
 ### Object Store Backends
 
-World objects (the `objs` domain: rooms, exits, machine programs) can be
+World objects (the `objs` domain: rooms, exits, programs) can be
 served by one of two backends, selected with `database.backend` in
 `boris.cfg`:
 
@@ -489,24 +489,17 @@ sudo ufw allow 8080/tcp
 Replace the port numbers if you changed `server.port` or `webserver.port` in
 `boris.cfg`. Check status with `sudo ufw status`.
 
-## Machine Programs
+## Programmable Objects
 
-Objects can have ColdFire V4e programs attached to them. Pre-built ELF
-binaries ship in `data/machine/` and are loaded automatically when the
-object enters the cache.
+Objects can have programs attached to them. A program is an RV32 (RISC-V
+32-bit) ELF binary, compiled from kobold or C, that runs in a bounded
+emulator and acts on the game world through a small host-call interface.
+Pre-built ELF binaries load automatically when the object enters the cache.
 
-Source code for machine programs lives in `sdk/machine/`. To rebuild:
-
-```sh
-cd sdk/machine
-make
-```
-
-This cross-compiles with `m68k-linux-gnu-gcc` and writes ELF files to
-`data/machine/`. The SDK header `sdk/machine/include/machine_hc.h` provides
-inline wrappers for all available hypercalls (sleep, message post, exit, etc.).
-
-See [DEV.md](doc/DEV.md) for the machine program architecture details.
+This subsystem is under active development. It replaces the earlier ColdFire
+sandbox. See [doc/mud-vm-design.md](doc/mud-vm-design.md) for the design and
+[doc/vm-migration-plan.md](doc/vm-migration-plan.md) for the migration plan.
+See [DEV.md](doc/DEV.md) for the architecture summary.
 
 ## Development
 

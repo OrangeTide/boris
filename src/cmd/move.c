@@ -28,8 +28,7 @@
 #include "cmdutil.h"
 #include "room.h"
 #include "util.h"
-#include <objref.h>
-#include <obj_program.h>
+#include "verb_dispatch.h"
 
 #define DIRECTION_STRING_MAX 64
 
@@ -109,22 +108,27 @@ do_move(DESCRIPTOR_DATA *cl, const char *exit_name)
 		return 0;
 	}
 	snprintf(dest_buf, sizeof dest_buf, "%s", dest);
-	room_put(r);
 
-	/* check if exit is handled by a script */
-	{
-		struct objref ref;
-		if (objref_parse(dest, ROOM_ROOTDIR, &ref) == 0 &&
-		    strcmp(ref.domain, "script") == 0) {
-			const char *player_name =
-				character_attr_get(ch, "name.short");
-			if (obj_program_dispatch_verb(room_id, "go",
-			    player_name, exit_name) < 0)
-				telnetclient_puts(cl,
-				    "The exit doesn't respond.\n");
-			return 1;
-		}
+	/* an exit whose target is "prog:<id>" runs a one-shot program on the
+	 * current room instead of moving the player */
+	if (strncmp(dest_buf, "prog:", 5) == 0) {
+		char rid[OBJ_PATH_MAX];
+		const char *player;
+		const char *argv[4];
+
+		snprintf(rid, sizeof rid, "%s", room_id);
+		player = character_attr_get(ch, "name.short");
+		argv[0] = "go";
+		argv[1] = rid;
+		argv[2] = player ? player : "";
+		argv[3] = exit_name;
+		if (verb_dispatch_oneshot(dest_buf + 5, r, rid, argv, 4) < 0)
+			telnetclient_puts(cl, "The exit doesn't respond.\n");
+		room_put(r);
+		return 1;
 	}
+
+	room_put(r);
 
 	/* verify destination exists */
 	r = room_get(dest_buf);
@@ -133,8 +137,13 @@ do_move(DESCRIPTOR_DATA *cl, const char *exit_name)
 		return 0;
 	}
 
-	/* move the character */
-	character_attr_set(ch, "room.current", dest_buf);
+	/* move the character; only show the destination if the move committed */
+	if (!character_attr_set(ch, "room.current", dest_buf)) {
+		telnetclient_printf(cl, "You can't move to \"%s\" right now.\n",
+			dest_buf);
+		room_put(r);
+		return 0;
+	}
 	show_room(cl, r);
 	room_put(r);
 	return 1;

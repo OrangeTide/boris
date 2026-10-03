@@ -1,0 +1,12 @@
+Revoke an acs flag from an account.
+
+usage: @revoke <account> <flag>
+
+Clears a single access-control flag on an account. The change is stored
+on the account and lasts across logins. A flag is one letter or digit.
+The 'w' flag marks an account as wizard-capable.
+
+Wizard only. Use @grant to set a flag.
+
+Example:
+  @revoke alice w   Remove wizard capability from the account 'alice'.

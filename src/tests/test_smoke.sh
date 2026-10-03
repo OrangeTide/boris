@@ -84,8 +84,8 @@ setup_testenv()
 {
 	TMPDIR="$(mktemp -d /tmp/boris-smoke.XXXXXX)"
 
-	# copy the static data files the server needs (text, forms, machine
-	# programs), then drop any object store that came along. The working
+	# copy the static data files the server needs (text, forms), then
+	# drop any object store that came along. The working
 	# tree's data/muddb is a developer's world of unknown provenance: it may
 	# hold edited or half-migrated state, and an LMDB file is not portable
 	# between 32-bit and 64-bit builds, so a cross-built server cannot even
@@ -102,7 +102,10 @@ setup_testenv()
 		die "muddb-tool import failed"
 	fi
 
-	# write a test config with our port
+	# write a test config with our port. newuser.flags carries the wizard
+	# bit (0x400000, acs flag 'w') on top of the usual 0x2 so the smoke
+	# account can exercise the admin @-commands; the at_commands test also
+	# verifies the refusal path by revoking that flag mid-session.
 	cat > "$TMPDIR/boris.cfg" <<-EOF
 	server.name	=	SMOKETEST
 	server.port	=	$PORT
@@ -122,7 +125,7 @@ setup_testenv()
 	msg.usercreatesuccess	=	Account successfully created!
 	msgfile.welcome	=	data/text/welcome.txt
 	newuser.level	=	5
-	newuser.flags	=	0x2
+	newuser.flags	=	0x400002
 	newuser.allowed	=	1
 	eventlog.filename	=	boris.log
 	eventlog.timeformat	=	%y%m%d-%H%M
@@ -213,7 +216,7 @@ run_test bad_login
 run_test new_user
 run_test enter_game
 run_test charset_command
-run_test fountain_script
+run_test at_commands
 
 echo "%%%%%%%%%%%% END-TEST : $PASS passed, $FAIL failed (of $TOTAL)"
 

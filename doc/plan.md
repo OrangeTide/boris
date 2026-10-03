@@ -165,15 +165,13 @@ out as such. Settled items are also listed in section 9.
   is the one ownership fact recorded; it is never rewritten. `owner` may
   still be stored for display, but no command enforces per-object
   ownership. This keeps v1 simple and social; per-object enforcement can
-  be layered on later (and aligns with the eventual sandbox `world:` /
-  `area:` write model, `#53`, if we ever want it) without reworking the
+  be layered on later without reworking the
   data, since `creator` is already captured.
 - **DECIDED: introduce a light Zone record.** A zone is a small OBJ in
   `objs` (key `zones/<id>`) holding: title, creator, id-prefix, and a
   default-template reference for `dig`. Room ids inside a zone are
   namespaced (`<zone>/<room>`). This is the grouping unit for `dig`
-  templates and quotas. Kept deliberately minimal; not the ColdFire
-  sandbox area model.
+  templates and quotas. Kept deliberately minimal.
 - **DECIDED: step-wizard editor per object type, rooms first.** `redit`
   (rooms) first, then `oedit` (items), then `medit` (NPCs). The default
   creation flow is a **step wizard** that walks the object's fields in
@@ -238,12 +236,12 @@ out as such. Settled items are also listed in section 9.
   export/dump command that writes the muddb store as JSON records (the
   `muddb-tool import/export` format). Full snapshot / rollback / gc /
   diff follow the existing `doc/snapshot-proposal.md` design. This is a
-  distinct concern from the ColdFire `sandbox-snapshot` card (`#56`),
-  which is emulator task state, not the world DB. NEW card needed.
-- **The near-term OLC is independent of the ColdFire sandbox.** The
-  sandbox track (`doc/mud-cf-sandbox-design.md`, `#50`/`#53`/others)
-  is a separate, longer-horizon effort for in-world programmable
-  objects. Nothing in this plan blocks on it.
+  distinct concern from the VM sandbox, which snapshots emulator task
+  state, not the world DB. NEW card needed.
+- **The near-term OLC is independent of the program sandbox.** The
+  sandbox track (`doc/mud-vm-design.md`, `doc/vm-migration-plan.md`) is a
+  separate, longer-horizon effort for in-world programmable objects.
+  Nothing in this plan blocks on it.
 
 ## 5. Working method (spec-first, test-backed)
 
@@ -386,10 +384,9 @@ current modules, so this comes before the editors.
 
 ## 7. Explicitly out of scope (near term)
 
-- The ColdFire in-world programming sandbox and its capability/ABI work
-  (`#50`, `#53`, `#54`, and the other `sandbox-*` cards). Separate
-  track.
-- Combat, RPG stat systems, and machine programs on objects.
+- The RV32 in-world programming sandbox and its host-call work (the VM
+  track in `doc/vm-migration-plan.md`). Separate track.
+- Combat, RPG stat systems, and programmable objects.
 - A bespoke web building IDE beyond the OLC form renderer. The web/SSE
   renderer draws the same declared forms as every other client; a
   hand-built graphical map/room editor is out of scope for now.
@@ -437,4 +434,4 @@ questions will accrue here as phases are cut into cards.
 - **In-game world backup commands.** `@checkpoint <label>` and a world
   export/dump land in Phase 0 as a data-loss safety net; full
   snapshot/rollback/gc/diff (`doc/snapshot-proposal.md`) follow in
-  Phase 5. Distinct from the ColdFire `sandbox-snapshot` card (`#56`).
+  Phase 5. Distinct from VM task-state snapshotting in the sandbox track.

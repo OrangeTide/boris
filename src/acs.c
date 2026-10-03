@@ -39,23 +39,49 @@ acs_init(struct acs_info *ai, unsigned level, unsigned flags)
 	ai->flags = flags;
 }
 
+/* Map a flag letter or digit to its bit index, or -1 if it names no flag.
+ * 'a'-'z' map to bits 0-25 and '0'-'9' to bits 26-35; case is ignored. */
+static int
+acs_flag_bit(unsigned flag)
+{
+	flag = tolower((char)flag);
+
+	if (flag >= 'a' && flag <= 'z')
+		return (int)(flag - 'a');
+	if (flag >= '0' && flag <= '9')
+		return (int)(flag - '0') + 26;
+
+	LOG_ERROR("unknown flag '%c'", flag);
+	return -1;
+}
+
 /** test if a flag is set in acs_info. */
 int
 acs_testflag(struct acs_info *ai, unsigned flag)
 {
-	unsigned i;
-	flag = tolower((char)flag);
+	int i = acs_flag_bit(flag);
 
-	if (flag >= 'a' && flag <= 'z') {
-		i = flag - 'a';
-	} else if (flag >= '0' && flag <= '9') {
-		i = flag - '0' + 26;
-	} else {
-		LOG_ERROR("unknown flag '%c'", flag);
+	if (i < 0)
 		return 0;
-	}
 
 	return ((ai->flags >> i) & 1) == 1;
+}
+
+/** set or clear a flag in acs_info. Returns 0, or -1 for an unknown flag. */
+int
+acs_setflag(struct acs_info *ai, unsigned flag, int enable)
+{
+	int i = acs_flag_bit(flag);
+
+	if (i < 0)
+		return -1;
+
+	if (enable)
+		ai->flags |= (1u << i);
+	else
+		ai->flags &= ~(1u << i);
+
+	return 0;
 }
 
 /** check a string against acs_info.

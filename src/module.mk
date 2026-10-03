@@ -3,7 +3,7 @@ SUBDIRS = \
 	thirdparty/smolvfs \
 	crypt \
 	log scrypt util help iox net passwd obj entity rpg combat database \
-	security muddb-tool daemonize coldfire machine verb rv32 vm resolve
+	security muddb-tool daemonize verb rv32 vm resolve
 
 LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
@@ -91,6 +91,15 @@ define test_bitmap_TESTCMD
 $(test_bitmap_RUN)
 endef
 
+EXECUTABLES  += test_character
+TEST_TARGETS += test_character
+test_character_DIR := $(hashtable_DIR)
+test_character_SRCS = character/test_character.c character/character.c freelist.c
+test_character_LIBS = obj database hashtable log smolvfs lmdb
+define test_character_TESTCMD
+$(test_character_RUN)
+endef
+
 EXECUTABLES += boris
 boris_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
 boris_SRCS = \
@@ -132,14 +141,14 @@ boris_SRCS = \
 	cmd/yell.c \
 	cmd/charset.c \
 	cmd/edit.c \
+	cmd/grant.c \
+	cmd/chown.c \
 	worldclock/worldclock.c \
 	invite.c \
 	web/server/webclient.c \
 	web/server/weblogin.c \
-	web/server/webserver.c \
-	machine/obj_program.c \
-	machine/objref.c \
-	machine/program.c
+	web/server/webserver.c
 boris_LIBS = \
+	verb vm rv32 resolve \
 	crypt daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
-	database security machine coldfire lmdb mth tinyaes
+	database security lmdb mth tinyaes

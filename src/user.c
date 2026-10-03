@@ -715,6 +715,33 @@ user_username(struct user *u)
 	return u ? u->username : NULL;
 }
 
+/* An account is wizard-capable when its acs flags carry the 'w' bit. This is
+ * the durable capability consulted before a program may enable wizard rights;
+ * it does not reflect any runtime elevation state. */
+int
+user_is_wizard(struct user *u)
+{
+	return u && acs_check(&u->acs, "fw");
+}
+
+/* Report whether the account carries a given acs flag letter. */
+int
+user_acs_testflag(struct user *u, char flag)
+{
+	return u && acs_testflag(&u->acs, (unsigned)flag);
+}
+
+/* Set or clear an acs flag on the account. Returns 1 on success, 0 if the
+ * account is missing or the flag letter names no flag. The caller persists the
+ * change with user_save. */
+int
+user_acs_setflag(struct user *u, char flag, int enable)
+{
+	if (!u)
+		return 0;
+	return acs_setflag(&u->acs, (unsigned)flag, enable) == 0;
+}
+
 /** initialize the user system. */
 int
 user_init(void)

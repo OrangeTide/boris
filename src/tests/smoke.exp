@@ -9,6 +9,9 @@
 #   new_user     - create account, login, reach main menu
 #   enter_game   - login, enter game world, run help, quit
 #   charset_command - login, set charset, run chartest, reset
+#   at_commands  - login as a wizard, exercise @chown/@grant/@revoke and
+#                  their refusal paths (this test must run last: it revokes
+#                  the account's own wizard flag at the end)
 
 set timeout 10
 set port [lindex $argv 0]
@@ -316,48 +319,132 @@ switch -- $test {
 		}
 	}
 
-	fountain_script {
-		# login and enter the game -- Tower Entrance has a fountain script
+	at_commands {
+		# login with the account created by new_user. In the smoke config
+		# newuser.flags carries the wizard bit, so this account may run the
+		# admin @-commands.
 		send "L\r"
 		expect {
 			"Username:" {}
-			timeout { fail "fountain_script: no username prompt" }
+			timeout { fail "at_commands: no username prompt" }
 		}
 		send "testuser\r"
 		expect {
 			"Password:" {}
-			timeout { fail "fountain_script: no password prompt" }
+			timeout { fail "at_commands: no password prompt" }
 		}
 		send "testpass123\r"
 		expect {
 			"Main Menu" {}
 			-re "Invalid|invalid" {
-				fail "fountain_script: login rejected"
+				fail "at_commands: login rejected"
 			}
-			timeout { fail "fountain_script: no main menu after login" }
+			timeout { fail "at_commands: no main menu after login" }
 		}
 		expect {
 			"Choose:" {}
-			timeout { fail "fountain_script: no menu prompt" }
+			timeout { fail "at_commands: no menu prompt" }
 		}
+		# enter the game
 		send "E\r"
 		expect {
-			"Tower Entrance" {}
-			timeout { fail "fountain_script: no room description" }
+			"> " {}
+			timeout { fail "at_commands: no command prompt" }
 		}
-		# fountain posts immediately on load, then every 10s;
-		# machine ticks at 1s intervals so first message arrives quickly
-		set timeout 15
+
+		# @chown: assign an existing object to a seeded reserved owner.
+		# chars/system is seeded at character_initialize, so no player need
+		# exist for this to resolve.
+		send "@chown rooms/tower-entrance chars/system\r"
 		expect {
-			"fountain bubbles" {
-				pass "fountain_script: machine script produced output"
-			}
-			timeout { fail "fountain_script: no fountain output within 15s" }
+			"is now owned by chars/system" {}
+			-re "Permission denied" { fail "at_commands: @chown denied to wizard" }
+			timeout { fail "at_commands: @chown did not report success" }
 		}
+		expect {
+			"> " {}
+			timeout { fail "at_commands: no prompt after @chown" }
+		}
+
+		# @chown failure: the object does not exist.
+		send "@chown rooms/nonesuch chars/system\r"
+		expect {
+			"No such object" {}
+			timeout { fail "at_commands: @chown missing object not reported" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "at_commands: no prompt after bad @chown object" }
+		}
+
+		# @chown failure: the owner does not exist.
+		send "@chown rooms/tower-entrance chars/9999\r"
+		expect {
+			"No such owner" {}
+			timeout { fail "at_commands: @chown missing owner not reported" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "at_commands: no prompt after bad @chown owner" }
+		}
+
+		# @chown failure: the owner must be a chars/ id.
+		send "@chown rooms/tower-entrance rooms/church\r"
+		expect {
+			"must be a character id" {}
+			timeout { fail "at_commands: @chown non-char owner not rejected" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "at_commands: no prompt after non-char @chown owner" }
+		}
+
+		# @grant then @revoke a flag on the account.
+		send "@grant testuser x\r"
+		expect {
+			"Granted flag 'x' to testuser" {}
+			timeout { fail "at_commands: @grant did not report success" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "at_commands: no prompt after @grant" }
+		}
+		send "@revoke testuser x\r"
+		expect {
+			"Revoked flag 'x' from testuser" {}
+			timeout { fail "at_commands: @revoke did not report success" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "at_commands: no prompt after @revoke" }
+		}
+
+		# deny path: revoke our own wizard flag, which takes effect on the
+		# live session, then confirm a gated command is now refused.
+		send "@revoke testuser w\r"
+		expect {
+			"Revoked flag 'w' from testuser" {}
+			timeout { fail "at_commands: self @revoke of wizard flag failed" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "at_commands: no prompt after wizard self-revoke" }
+		}
+		send "@grant testuser b\r"
+		expect {
+			"Permission denied" {}
+			"Granted" { fail "at_commands: gated command allowed after wizard revoke" }
+			timeout { fail "at_commands: no permission response after revoke" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "at_commands: no prompt after denied command" }
+		}
+
 		send "quit\r"
 		expect {
-			eof {}
-			timeout {}
+			eof { pass "at_commands: @chown/@grant/@revoke and refusals work" }
+			timeout { fail "at_commands: no disconnect after quit" }
 		}
 	}
 

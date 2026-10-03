@@ -1,0 +1,12 @@
+Grant an acs flag to an account.
+
+usage: @grant <account> <flag>
+
+Sets a single access-control flag on an account. The change is stored on
+the account and lasts across logins. A flag is one letter or digit. The
+'w' flag marks an account as wizard-capable.
+
+Wizard only. Use @revoke to clear a flag.
+
+Example:
+  @grant alice w    Make the account 'alice' wizard-capable.
