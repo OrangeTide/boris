@@ -145,7 +145,11 @@ hc_listen(struct vm_task *t, void *ctx)
 		vm_set_ret(t, (uint32_t)-1);
 		return;
 	}
-	snprintf(ag->listen_key, sizeof ag->listen_key, "%s", ag->self_key);
+	/* self_key is already bounded and NUL-terminated, and the two buffers are
+	 * the same size, so copy it whole. memcpy avoids the -Wrestrict warning
+	 * gcc raises for snprintf when source and destination are fields of the
+	 * same object. */
+	memcpy(ag->listen_key, ag->self_key, sizeof ag->listen_key);
 	ag->listening = 1;
 	vm_set_ret(t, 0);
 }
