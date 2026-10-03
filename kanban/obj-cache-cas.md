@@ -4,6 +4,37 @@ status: done
 gitlab-sync: OrangeTide/boris#62
 ---
 
+## Outcome of the experiment (2026-10-03)
+
+The experiment ran its course and the live CAS backend was removed. Keeping
+a second live backend at parity with muddb proved to be a recurring tax:
+every structural feature (containment via obj_move, the contents and owner
+indexes) had to be implemented twice, and the two backends drifted
+(see [[cas-room-entry-display]], where obj_move was muddb-only and silently
+broke all containment on CAS). The MUD is greenfield and not yet playable,
+so the CAS value proposition (snapshots, dedup, replication) is not needed
+as a live store today.
+
+Decision: demote CAS from a live backend to an offline snapshot/export
+format. The live object store is muddb only. The CAS modules
+(src/obj/obj_cache_cas.c, vendored smolvfs) stay, but are reached only
+through `muddb-tool to-cas`, which exports the muddb world into a
+content-addressed depot for deduplicated backups and world-version diffs.
+The `database.backend` / `database.cas.*` config keys, obj_initialize_cas,
+and the boris commit timer were removed. See [[smolvfs-revendor]] and
+[[world-backup-commands]].
+
+Everything below is the original 2026-07 experiment record, kept for its
+measurements and design notes. Its forward-looking conclusions (the
+Go/No-Go "optional backend" verdict and the promotion conditions) are
+superseded by the Outcome above: CAS was not promoted to a live backend,
+it was demoted to an export-only format. The measurements still inform the
+export path (depot growth, batching, GC), and the depot-bounding work they
+call for now matters only for the `muddb-tool to-cas` export, tracked in
+[[smolvfs-revendor]].
+
+---
+
 Experiment: implement a second obj_cache backend over smolvfs
 (cas + cas-omap) alongside the default muddb/LMDB backend. Evaluate
 content-addressable storage for MUD objects without replacing LMDB.
@@ -109,7 +140,12 @@ Findings:
 - On-disk usage runs ~4x apparent size from 4 KB block rounding on
   small loose objects; cas-pack rollup would mitigate.
 
-## Go/No-Go (2026-07-14)
+## Go/No-Go (2026-07-14; superseded 2026-10-03)
+
+Verdict at the time: GO as an optional, non-default backend, promotion to
+default deferred on upstream smolvfs work. Superseded: the optional live
+backend was removed and CAS demoted to an export-only format (see Outcome).
+The reasoning below is kept as the record of that call.
 
 Verdict: GO as an optional, non-default backend. muddb/LMDB stays
 the default. Promotion to default is deferred, gated on upstream
@@ -137,7 +173,10 @@ Why not promote yet:
 - Cross-domain %parent resolution is not implemented in the CAS
   shim (obj_cache_muddb has it; entity->template chains need it).
 
-Conditions to revisit promotion:
+Conditions to revisit promotion (no longer planned; CAS is export-only
+now, so these do not apply. Of them, only depot bounding via smolvfs
+history pruning still matters, for the export depot, and is tracked in
+[[smolvfs-revendor]]):
 
 1. Upstream smolvfs sparse references + history pruning lands
    (feature request filed: smolvfs doc/feature-requests/
@@ -175,5 +214,7 @@ Conditions to revisit promotion:
 - [x] go/no-go writeup: GO as optional backend, promotion deferred
       pending upstream sparse refs + history pruning (see Go/No-Go)
 
-Related: object-versioning card (CAS snapshots would give diff/history
-for free if this backend is adopted).
+Related: [[world-backup-commands]] (the `muddb-tool to-cas` export is the
+snapshot/backup path), [[smolvfs-revendor]], [[cas-room-entry-display]].
+The object-versioning card no longer depends on this: CAS is not a live
+store, so versioning uses muddb directly.
