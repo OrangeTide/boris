@@ -7,9 +7,9 @@ gitlab-sync: OrangeTide/boris#76
 Protect builder data with in-game snapshot and export commands so a bad
 edit, wipe, or crash does not cost a builder their work, without shell
 access. First cut only; full snapshot / rollback / gc / diff follow
-`doc/snapshot-proposal.md` in a later phase. Distinct from the ColdFire
-`sandbox-snapshot` (#56), which is emulator task state, not the world DB.
-See `doc/plan.md` Phase 0.
+`doc/snapshot-proposal.md` in a later phase. Distinct from VM task-state
+snapshotting in the sandbox track, which is emulator state, not the world
+DB. See `doc/plan.md` Phase 0.
 
 - [ ] `@checkpoint <label>` -- named snapshot before risky work
 - [ ] world export/dump command over the `muddb-tool` JSON-record format
