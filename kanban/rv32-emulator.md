@@ -1,7 +1,7 @@
 ---
 title: Vendor the RV32 Emulator Core
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#91
 ---
 
 Phase 1 of the VM pivot. Bring in and own the RV32 CPU emulator core and
