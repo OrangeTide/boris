@@ -9,6 +9,14 @@ LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 hashtable_SRCS = hashtable.c
 
+LIBRARIES    += freelist
+freelist_DIR := $(hashtable_DIR)
+freelist_SRCS = freelist.c
+
+LIBRARIES    += character
+character_DIR := $(hashtable_DIR)
+character_SRCS = character/character.c
+
 EXECUTABLES        += test_hashtable
 TEST_TARGETS       += test_hashtable
 test_hashtable_DIR := $(hashtable_DIR)
@@ -94,8 +102,8 @@ endef
 EXECUTABLES  += test_character
 TEST_TARGETS += test_character
 test_character_DIR := $(hashtable_DIR)
-test_character_SRCS = character/test_character.c character/character.c freelist.c
-test_character_LIBS = obj database hashtable log smolvfs lmdb
+test_character_SRCS = character/test_character.c
+test_character_LIBS = character freelist obj database hashtable log smolvfs lmdb
 define test_character_TESTCMD
 $(test_character_RUN)
 endef
@@ -109,7 +117,6 @@ boris_SRCS = \
 	config.c \
 	fds.c \
 	form.c \
-	freelist.c \
 	game.c \
 	login.c \
 	mcp.c \
@@ -118,7 +125,6 @@ boris_SRCS = \
 	user.c \
 	acs.c \
 	channel/channel.c \
-	character/character.c \
 	crypt/sha1crypt.c \
 	room/room.c \
 	cmd/cmd.c \
@@ -149,6 +155,6 @@ boris_SRCS = \
 	web/server/weblogin.c \
 	web/server/webserver.c
 boris_LIBS = \
-	verb vm rv32 resolve \
+	verb vm rv32 resolve character freelist \
 	crypt daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
 	database security lmdb mth tinyaes
