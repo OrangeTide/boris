@@ -3,7 +3,7 @@ SUBDIRS = \
 	thirdparty/smolvfs \
 	crypt \
 	log scrypt util help iox net passwd obj entity rpg combat database \
-	security muddb-tool daemonize coldfire machine verb
+	security muddb-tool daemonize coldfire machine verb rv32
 
 LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
