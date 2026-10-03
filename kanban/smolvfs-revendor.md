@@ -1,7 +1,7 @@
 ---
 title: Re-vendor smolvfs (v0.2.0 -> v0.5.0)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#111
 ---
 
 smolvfs is vendored at v0.2.0 (2026-07-15), recorded in

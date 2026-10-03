@@ -1,7 +1,7 @@
 ---
 title: sys_errno Granularity for Protected Writes
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#100
 ---
 
 From the L7 authority review of the [[vm-object-model]] card. sys_setprop

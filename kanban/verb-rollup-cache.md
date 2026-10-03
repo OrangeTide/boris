@@ -1,7 +1,7 @@
 ---
 title: Containment Rollup Cache (sys_rollup)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#101
 ---
 
 Captured while implementing [[verb-creation-quota]]. Per-owner counts turned out

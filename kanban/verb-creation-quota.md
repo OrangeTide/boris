@@ -1,7 +1,7 @@
 ---
 title: Verb Object-Creation Quota
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#99
 ---
 
 From the L7 authority review of the [[vm-object-model]] card. A verb can call

@@ -1,7 +1,7 @@
 ---
 title: Scoped Agent Authority
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#98
 ---
 
 From the agent-authority review of the [[vm-object-model]] card. Resident agent

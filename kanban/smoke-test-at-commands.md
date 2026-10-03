@@ -1,7 +1,7 @@
 ---
 title: Smoke Test for @-Commands
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#96
 ---
 
 ## Resolution

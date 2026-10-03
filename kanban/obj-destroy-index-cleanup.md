@@ -1,7 +1,7 @@
 ---
 title: Destroy must clean up containment index entries
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#95
 ---
 
 Found while reviewing the L2 containment work in [[vm-object-model]]. The

@@ -1,7 +1,7 @@
 ---
 title: VM Host-Call ABI and Table
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#105
 ---
 
 Phase 2 of the VM pivot. Implement the flat, name-bound host-call table the

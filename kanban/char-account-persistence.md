@@ -1,7 +1,7 @@
 ---
 title: Persist a character per account across sessions
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#93
 ---
 
 Split out of [[vm-object-model]] L3. The migration map found that characters do

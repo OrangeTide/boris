@@ -1,7 +1,7 @@
 ---
 title: In-Server Compile and Link (stages 1-2)
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#108
 ---
 
 Later work, after the first cut runs pre-built ELFs. Bring stages 1 and 2 of

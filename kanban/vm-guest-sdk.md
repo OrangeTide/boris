@@ -1,7 +1,7 @@
 ---
 title: VM Guest SDK
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#104
 ---
 
 Phase 4 of the VM pivot. Land `sdk/vm/`: the guest-side runtime and headers a

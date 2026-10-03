@@ -1,7 +1,7 @@
 ---
 title: Verb Programs, Mailbox, and Events
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#102
 ---
 
 Second slice split out of the old verb-agent-model card. The event-driven

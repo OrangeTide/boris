@@ -1,7 +1,7 @@
 ---
 title: VM Task Runtime and Cooperative Scheduler
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#109
 ---
 
 Phase 2 of the VM pivot. Stand up `src/vm/`: the task lifecycle and the

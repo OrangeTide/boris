@@ -1,7 +1,7 @@
 ---
 title: One-Shot Program Dispatch Backbone
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#107
 ---
 
 First slice split out of the old verb-agent-model card. The end-to-end

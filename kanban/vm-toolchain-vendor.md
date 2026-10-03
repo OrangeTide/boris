@@ -1,7 +1,7 @@
 ---
 title: Vendor the skjegg RV32 C Toolchain
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#110
 ---
 
 Prerequisite for [[vm-guest-sdk]]: bring skjegg's C compiler, assembler, and

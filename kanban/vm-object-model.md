@@ -1,7 +1,7 @@
 ---
 title: Object Model, Verb Resolution, and Object-Access Host Calls
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#106
 ---
 
 Third slice split out of the old verb-agent-model card, and the largest. The

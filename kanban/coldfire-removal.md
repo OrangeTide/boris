@@ -1,7 +1,7 @@
 ---
 title: Remove the ColdFire Emulator
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#94
 ---
 
 Phase 0 of the VM pivot. Delete the ColdFire V4e emulator, the machine

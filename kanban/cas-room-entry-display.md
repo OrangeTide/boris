@@ -1,7 +1,7 @@
 ---
 title: CAS backend shows no room on game entry
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#92
 ---
 
 ## Resolution
