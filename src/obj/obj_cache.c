@@ -91,15 +91,21 @@ flush_entry(OBJ_CACHE *c, struct cache_entry *e)
 }
 
 static void
-drop_entry(OBJ_CACHE *c, struct cache_entry *e)
+drop_entry_ex(OBJ_CACHE *c, struct cache_entry *e, int notify)
 {
-	if (c->on_evict)
+	if (notify && c->on_evict)
 		c->on_evict(e->obj, e->id, c->on_evict_arg);
 	ht_str_del(&c->ht, e->id);
 	obj_free(e->obj);
 	free(e->id);
 	free(e);
 	c->total--;
+}
+
+static void
+drop_entry(OBJ_CACHE *c, struct cache_entry *e)
+{
+	drop_entry_ex(c, e, 1);
 }
 
 static void
@@ -217,12 +223,109 @@ obj_cache_release(OBJ_CACHE *c, OBJ *obj)
 	}
 }
 
+OBJ *
+obj_cache_create(OBJ_CACHE *c, const char *id)
+{
+	if (!c || !id || !*id) return NULL;
+	if (ht_str_get(&c->ht, id)) return NULL;       /* already cached */
+
+	/* Refuse if a record already exists in the store. load returns a fresh
+	 * detached OBJ that is not in the cache, so free it after probing. */
+	if (c->ops.load) {
+		OBJ *existing = c->ops.load(c->ctx, id);
+		if (existing) {
+			obj_free(existing);
+			return NULL;
+		}
+	}
+
+	OBJ *obj = obj_new(id);
+	if (!obj) return NULL;
+	struct cache_entry *e = calloc(1, sizeof(*e));
+	if (!e) { obj_free(obj); return NULL; }
+	e->id = strdup(id);
+	if (!e->id) { free(e); obj_free(obj); return NULL; }
+	e->obj = obj;
+	e->refcount = 1;
+	e->dirty = 1;                                   /* written through on flush */
+	e->owner = c;
+	if (ht_str_set(&c->ht, e->id, e) != 0) {
+		free(e->id);
+		free(e);
+		obj_free(obj);
+		return NULL;
+	}
+	c->total++;
+	return obj;
+}
+
+int
+obj_cache_destroy(OBJ_CACHE *c, const char *id)
+{
+	if (!c || !id) return OBJ_CACHE_ERR;
+
+	/* Check the failure conditions before touching anything, so a refused
+	 * destroy has no side effects. */
+	if (!c->ops.del) {
+		LOG_ERROR("backend has no delete; id=%s not removed from store", id);
+		return OBJ_CACHE_ERR;
+	}
+	struct cache_entry *e = ht_str_get(&c->ht, id);
+	if (e && e->refcount > 0) {
+		LOG_ERROR("destroy of pinned obj id=%s (refcount=%d)",
+			id, e->refcount);
+		return OBJ_CACHE_ERR;
+	}
+
+	if (e) {
+		/* refcount 0 -> currently on the LRU. */
+		lru_unlink(c, e);
+		drop_entry(c, e);               /* fires on_evict, frees the obj */
+	}
+	if (c->ops.del(c->ctx, id) != 0) {
+		LOG_ERROR("backend delete failed for id=%s", id);
+		return OBJ_CACHE_ERR;
+	}
+	return OBJ_CACHE_OK;
+}
+
+int
+obj_cache_forget(OBJ_CACHE *c, const char *id)
+{
+	if (!c || !id) return OBJ_CACHE_ERR;
+
+	struct cache_entry *e = ht_str_get(&c->ht, id);
+	if (!e) return OBJ_CACHE_OK;            /* nothing cached */
+
+	/* refcount 1 means the caller is the sole holder (a freshly created
+	 * object it is discarding); refcount 0 means it is unreferenced on the
+	 * LRU. Either is safe to drop. A higher count means someone else holds
+	 * it, so refuse rather than free it out from under them. */
+	if (e->refcount > 1) {
+		LOG_ERROR("forget of shared obj id=%s (refcount=%d)",
+			id, e->refcount);
+		return OBJ_CACHE_ERR;
+	}
+	if (e->refcount == 0)
+		lru_unlink(c, e);
+	drop_entry_ex(c, e, 0);                 /* no save, no del, no notify */
+	return OBJ_CACHE_OK;
+}
+
 void
 obj_cache_mark_dirty(OBJ_CACHE *c, OBJ *obj)
 {
 	if (!c || !obj) return;
 	struct cache_entry *e = find_entry_by_obj(c, obj);
 	if (e) e->dirty = 1;
+}
+
+void
+obj_cache_mark_clean(OBJ_CACHE *c, OBJ *obj)
+{
+	if (!c || !obj) return;
+	struct cache_entry *e = find_entry_by_obj(c, obj);
+	if (e) e->dirty = 0;
 }
 
 int
@@ -238,6 +341,17 @@ obj_cache_flush_all(OBJ_CACHE *c)
 		if (flush_entry(c, e) != OBJ_CACHE_OK) rc = OBJ_CACHE_ERR;
 	}
 	return rc;
+}
+
+int
+obj_cache_save(OBJ_CACHE *c, const char *id)
+{
+	struct cache_entry *e;
+
+	if (!c || !id) return OBJ_CACHE_ERR;
+	e = ht_str_get(&c->ht, id);
+	if (!e) return OBJ_CACHE_OK;            /* not cached: nothing to flush */
+	return flush_entry(c, e);
 }
 
 /* --- prototype walk -------------------------------------------------- */

@@ -72,6 +72,21 @@ mock_save(void *ctx, const char *id, OBJ *obj)
 	return 0;
 }
 
+static int
+mock_del(void *ctx, const char *id)
+{
+	struct mock_backend *m = ctx;
+	for (int i = 0; i < m->count; i++) {
+		if (strcmp(m->records[i].id, id) == 0) {
+			free(m->records[i].id);
+			free(m->records[i].json);
+			m->records[i] = m->records[--m->count];
+			return 0;
+		}
+	}
+	return 0;       /* missing key is success, like muddb */
+}
+
 static void
 mock_free(struct mock_backend *m)
 {
@@ -288,6 +303,124 @@ test_missing_key(void)
 	mock_free(&m);
 }
 
+static void
+test_create_and_flush(void)
+{
+	struct mock_backend m = {0};
+	mock_put(&m, "seeded", "{\"k\":\"v\"}");
+	struct obj_cache_ops ops = {
+		.load = mock_load, .save = mock_save, .del = mock_del,
+	};
+	OBJ_CACHE *c = obj_cache_new(4, &ops, &m);
+
+	OBJ *o = obj_cache_create(c, "fresh");
+	check("create returns an object", o != NULL);
+	check("nothing saved yet", m.save_calls == 0);
+	check("in cache", obj_cache_size(c) == 1);
+
+	/* creating over a cached id, or a persisted-but-uncached id, fails */
+	check("create over cached id fails", obj_cache_create(c, "fresh") == NULL);
+	check("create over persisted id fails",
+		obj_cache_create(c, "seeded") == NULL);
+
+	obj_prop_set(o, "k", "v");
+	obj_cache_release(c, o);
+	check("flush persists the created object",
+		obj_cache_flush_all(c) == OBJ_CACHE_OK);
+	check("saved once", m.save_calls == 1);
+	check("record now in backend", mock_find(&m, "fresh") != NULL);
+
+	obj_cache_free(c);
+	mock_free(&m);
+}
+
+static void
+test_destroy(void)
+{
+	struct mock_backend m = {0};
+	mock_put(&m, "gone", "{\"k\":\"v\"}");
+	struct obj_cache_ops ops = {
+		.load = mock_load, .save = mock_save, .del = mock_del,
+	};
+	OBJ_CACHE *c = obj_cache_new(4, &ops, &m);
+
+	/* destroy a persisted object that is not currently cached */
+	check("destroy persisted-only ok",
+		obj_cache_destroy(c, "gone") == OBJ_CACHE_OK);
+	check("removed from backend", mock_find(&m, "gone") == NULL);
+
+	/* create, release, destroy */
+	OBJ *o = obj_cache_create(c, "tmp");
+	obj_cache_release(c, o);
+	check("destroy unpinned cached ok",
+		obj_cache_destroy(c, "tmp") == OBJ_CACHE_OK);
+	check("dropped from cache", obj_cache_size(c) == 0);
+
+	/* a pinned object cannot be destroyed */
+	OBJ *p = obj_cache_create(c, "pin");
+	check("destroy pinned fails",
+		obj_cache_destroy(c, "pin") == OBJ_CACHE_ERR);
+	check("still cached after refused destroy", obj_cache_size(c) == 1);
+	obj_cache_release(c, p);
+	check("destroy after release ok",
+		obj_cache_destroy(c, "pin") == OBJ_CACHE_OK);
+
+	obj_cache_free(c);
+	mock_free(&m);
+}
+
+static void
+test_destroy_no_del_op(void)
+{
+	struct mock_backend m = {0};
+	struct obj_cache_ops ops = { .load = mock_load, .save = mock_save };
+	OBJ_CACHE *c = obj_cache_new(4, &ops, &m);
+
+	OBJ *o = obj_cache_create(c, "x");
+	obj_cache_release(c, o);
+	check("destroy without a del op fails",
+		obj_cache_destroy(c, "x") == OBJ_CACHE_ERR);
+	check("refused destroy left it in cache", obj_cache_size(c) == 1);
+
+	obj_cache_free(c);
+	mock_free(&m);
+}
+
+static void
+test_forget(void)
+{
+	struct mock_backend m = {0};
+	struct obj_cache_ops ops = {
+		.load = mock_load, .save = mock_save, .del = mock_del,
+	};
+	OBJ_CACHE *c = obj_cache_new(4, &ops, &m);
+
+	/* forget a freshly created object while still holding its only pin */
+	OBJ *o = obj_cache_create(c, "scratch");
+	check("created scratch", o != NULL);
+	check("forget while pinned ok",
+		obj_cache_forget(c, "scratch") == OBJ_CACHE_OK);
+	check("dropped from cache", obj_cache_size(c) == 0);
+	check("never saved to backend",
+		m.save_calls == 0 && mock_find(&m, "scratch") == NULL);
+
+	/* a shared object (refcount > 1) is refused */
+	mock_put(&m, "shared", "{}");
+	OBJ *a = obj_cache_get(c, "shared");
+	OBJ *b = obj_cache_get(c, "shared");
+	check("forget shared refused",
+		obj_cache_forget(c, "shared") == OBJ_CACHE_ERR);
+	check("shared still cached", obj_cache_size(c) == 1);
+	obj_cache_release(c, a);
+	obj_cache_release(c, b);
+
+	/* forgetting an uncached id is a no-op success */
+	check("forget uncached ok", obj_cache_forget(c, "nope") == OBJ_CACHE_OK);
+
+	obj_cache_free(c);
+	mock_free(&m);
+}
+
 int
 main(void)
 {
@@ -300,6 +433,10 @@ main(void)
 	test_prop_resolve_depth_limit();
 	test_flush_all();
 	test_missing_key();
+	test_create_and_flush();
+	test_destroy();
+	test_destroy_no_del_op();
+	test_forget();
 
 	return ctest_report("test_obj_cache");
 }

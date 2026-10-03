@@ -541,6 +541,12 @@ obj_free(OBJ *obj)
 	free(obj);
 }
 
+const char *
+obj_key(OBJ *obj)
+{
+	return obj ? obj->key : NULL;
+}
+
 char *
 obj_prop_get(OBJ *obj, const char *propname)
 {

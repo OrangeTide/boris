@@ -18,11 +18,27 @@
 #include "obj_cache.h"
 #include "obj_cache_muddb.h"
 #include "obj_cache_cas.h"
+#include "muddb.h"
 
 #include <cas.h>
 #include <cas-tree.h>
 
 #include <log.h>
+
+#include <stdlib.h>
+#include <string.h>
+
+/* The contents index: container id -> set of directly-contained member ids. */
+#define OBJ_CONTENTS_INDEX "idx.contents"
+
+/* The owner index: owner id -> set of objects it owns. Maintained when an
+ * object's %owner is set (obj_set_owner) and cleared when it is destroyed, so
+ * obj_owner_count is a cheap per-owner tally. */
+#define OBJ_OWNER_INDEX "idx.owner"
+
+/* Cap on how far obj_move walks the %location chain for its cycle check. A
+ * chain longer than this is treated as corrupt and the move is refused. */
+#define OBJ_CONTAIN_MAX_DEPTH 64
 
 static OBJ_CACHE *obj_global_cache;
 
@@ -30,12 +46,26 @@ static OBJ_CACHE *obj_global_cache;
 static struct cas *obj_cas_store;
 static struct cas_tree *obj_cas_tree;
 
+static MUDDB *store_muddb(void);
+
 int
 obj_initialize(struct muddb *db, unsigned cache_size)
 {
 	obj_global_cache = obj_cache_muddb_new(db, "objs", cache_size);
 	if (!obj_global_cache) {
 		LOG_ERROR("could not create object cache");
+		return -1;
+	}
+	if (muddb_index_register(db, OBJ_CONTENTS_INDEX) != MUDDB_OK) {
+		LOG_ERROR("could not register contents index");
+		obj_cache_free(obj_global_cache);
+		obj_global_cache = NULL;
+		return -1;
+	}
+	if (muddb_index_register(db, OBJ_OWNER_INDEX) != MUDDB_OK) {
+		LOG_ERROR("could not register owner index");
+		obj_cache_free(obj_global_cache);
+		obj_global_cache = NULL;
 		return -1;
 	}
 	LOG_INFO("Object cache loaded (muddb backend).");
@@ -128,6 +158,332 @@ obj_release(OBJ *obj)
 {
 	if (obj)
 		obj_cache_release(obj_global_cache, obj);
+}
+
+OBJ *
+obj_create(const char *id)
+{
+	if (!id)
+		return NULL;
+	return obj_cache_create(obj_global_cache, id);
+}
+
+int
+obj_destroy(const char *id)
+{
+	MUDDB *db;
+	char *owner = NULL;
+	int rc;
+
+	if (!id)
+		return OBJ_ERR;
+
+	/* Capture the owner before the record is gone, so the owner index can be
+	 * cleared to match. The get/release is pin-neutral, so it does not block
+	 * the destroy. */
+	db = store_muddb();
+	if (db) {
+		OBJ *o = obj_get(id);
+
+		if (o) {
+			const char *w = obj_prop_get(o, "%owner");
+
+			if (w && *w)
+				owner = strdup(w);
+			obj_release(o);
+		}
+	}
+
+	rc = obj_cache_destroy(obj_global_cache, id) == OBJ_CACHE_OK
+		? OBJ_OK : OBJ_ERR;
+	if (rc == OBJ_OK && owner)
+		muddb_index_del(db, OBJ_OWNER_INDEX, owner, id);
+	free(owner);
+	return rc;
+}
+
+void
+obj_mark_dirty(OBJ *obj)
+{
+	if (obj)
+		obj_cache_mark_dirty(obj_global_cache, obj);
+}
+
+int
+obj_save(const char *id)
+{
+	if (!id)
+		return OBJ_ERR;
+	return obj_cache_save(obj_global_cache, id) == OBJ_CACHE_OK
+		? OBJ_OK : OBJ_ERR;
+}
+
+char *
+obj_prop_resolve(OBJ *obj, const char *propname)
+{
+	return obj_cache_prop_resolve(obj_global_cache, obj, propname);
+}
+
+/* The muddb handle backing the global cache, or NULL on the CAS backend
+ * (which has no index facility; containment is muddb-only). */
+static MUDDB *
+store_muddb(void)
+{
+	if (!obj_global_cache || obj_cas_tree)
+		return NULL;
+	return obj_cache_muddb_db(obj_global_cache);
+}
+
+/* True if containing member inside container would form a cycle, i.e. container
+ * is member itself or one of member's own descendants. Walks up the %location
+ * chain from container; reaching member means container sits inside it. */
+static int
+would_cycle(const char *member, const char *container)
+{
+	char *cur = strdup(container);
+	int depth = 0, cycle = 0;
+
+	while (cur) {
+		char *next;
+		OBJ *o;
+		char *loc;
+
+		if (strcmp(cur, member) == 0) {
+			cycle = 1;
+			break;
+		}
+		if (++depth > OBJ_CONTAIN_MAX_DEPTH) {
+			LOG_ERROR("containment chain from %s too deep", container);
+			cycle = 1;
+			break;
+		}
+		o = obj_get(cur);
+		if (!o)
+			break;                  /* chain ends at an unloadable id */
+		loc = obj_prop_get(o, "%location");
+		next = (loc && *loc) ? strdup(loc) : NULL;
+		obj_release(o);
+		free(cur);
+		cur = next;
+	}
+	free(cur);
+	return cycle;
+}
+
+int
+obj_move(const char *member, const char *container)
+{
+	MUDDB *db = store_muddb();
+	const char *domain;
+	int to_limbo = (!container || !*container);
+	OBJ *m, *c = NULL;
+	MUDDB_TXN *t;
+	char *old = NULL;
+	char *loc;
+	int rc;
+
+	if (!member || !*member)
+		return OBJ_ERR;
+	if (!db) {
+		LOG_ERROR("obj_move requires the muddb backend");
+		return OBJ_ERR;
+	}
+
+	if (!to_limbo) {
+		if (strcmp(member, container) == 0) {
+			LOG_ERROR("obj_move: %s cannot contain itself", member);
+			return OBJ_ERR;
+		}
+		if (would_cycle(member, container)) {
+			LOG_ERROR("obj_move: %s into %s would form a cycle",
+				member, container);
+			return OBJ_ERR;
+		}
+	}
+
+	m = obj_get(member);
+	if (!m) {
+		LOG_ERROR("obj_move: no such member %s", member);
+		return OBJ_ERR;
+	}
+	if (!to_limbo) {
+		c = obj_get(container);
+		if (!c) {
+			LOG_ERROR("obj_move: no such container %s", container);
+			obj_release(m);
+			return OBJ_ERR;
+		}
+	}
+
+	loc = obj_prop_get(m, "%location");
+	if (loc && *loc)
+		old = strdup(loc);
+
+	/* Set the forward pointer in memory before staging the record, so the
+	 * serialized object carries the new %location. */
+	rc = to_limbo ? obj_prop_delete_internal(m, "%location")
+		: obj_prop_set_internal(m, "%location", container);
+	if (rc != OBJ_OK) {
+		LOG_ERROR("obj_move: could not set %%location on %s", member);
+		goto fail_revert;
+	}
+
+	domain = obj_cache_muddb_domain(obj_global_cache);
+	t = muddb_txn_begin(db);
+	if (!t)
+		goto fail_revert;
+	if (muddb_txn_put(t, domain, member, m) != MUDDB_OK)
+		goto fail_abort;
+	if (old && muddb_txn_index_del(t, OBJ_CONTENTS_INDEX, old, member)
+			!= MUDDB_OK)
+		goto fail_abort;
+	if (!to_limbo && muddb_txn_index_add(t, OBJ_CONTENTS_INDEX, container,
+			member) != MUDDB_OK)
+		goto fail_abort;
+	if (muddb_txn_commit(t) != MUDDB_OK)
+		goto fail_revert;
+
+	/* The record is persisted by the transaction, so the cache need not
+	 * save it again. */
+	obj_cache_mark_clean(obj_global_cache, m);
+	free(old);
+	if (c)
+		obj_release(c);
+	obj_release(m);
+	return OBJ_OK;
+
+fail_abort:
+	muddb_txn_abort(t);
+fail_revert:
+	/* Restore the in-memory %location so the cache matches the unchanged
+	 * store. */
+	if (old)
+		obj_prop_set_internal(m, "%location", old);
+	else
+		obj_prop_delete_internal(m, "%location");
+	free(old);
+	if (c)
+		obj_release(c);
+	obj_release(m);
+	return OBJ_ERR;
+}
+
+char *
+obj_location(const char *member)
+{
+	OBJ *m;
+	char *loc, *out = NULL;
+
+	if (!member || !*member)
+		return NULL;
+	m = obj_get(member);
+	if (!m)
+		return NULL;
+	loc = obj_prop_get(m, "%location");
+	if (loc && *loc)
+		out = strdup(loc);
+	obj_release(m);
+	return out;
+}
+
+long
+obj_contents_count(const char *container)
+{
+	MUDDB *db = store_muddb();
+
+	if (!db || !container || !*container)
+		return 0;
+	return muddb_index_count(db, OBJ_CONTENTS_INDEX, container);
+}
+
+int
+obj_set_owner(const char *id, const char *owner)
+{
+	MUDDB *db = store_muddb();
+	OBJ *o;
+	char *prev = NULL;
+	const char *cur;
+	int rc;
+
+	if (!id || !owner)
+		return OBJ_ERR;
+	o = obj_get(id);
+	if (!o)
+		return OBJ_ERR;
+	cur = obj_prop_get(o, "%owner");
+	if (cur && *cur)
+		prev = strdup(cur);
+	rc = obj_prop_set_internal(o, "%owner", owner);
+	if (rc == OBJ_OK) {
+		obj_mark_dirty(o);
+		rc = obj_save(id);
+	}
+	obj_release(o);
+	if (rc != OBJ_OK) {
+		free(prev);
+		return rc;
+	}
+
+	/* Keep the owner index in step. The record is already persisted; the
+	 * index is maintained separately (as for the contents index), so a crash
+	 * between the two can only undercount, never grant extra quota. */
+	if (db) {
+		if (prev && strcmp(prev, owner) != 0)
+			muddb_index_del(db, OBJ_OWNER_INDEX, prev, id);
+		muddb_index_add(db, OBJ_OWNER_INDEX, owner, id);
+	}
+	free(prev);
+	return OBJ_OK;
+}
+
+long
+obj_owner_count(const char *owner)
+{
+	MUDDB *db = store_muddb();
+
+	if (!db || !owner || !*owner)
+		return 0;
+	return muddb_index_count(db, OBJ_OWNER_INDEX, owner);
+}
+
+struct obj_contents_iter {
+	MUDDB_INDEX_ITER *it;
+};
+
+OBJ_CONTENTS_ITER *
+obj_contents_begin(const char *container)
+{
+	MUDDB *db = store_muddb();
+	OBJ_CONTENTS_ITER *ci;
+
+	if (!db || !container || !*container)
+		return NULL;
+	ci = calloc(1, sizeof(*ci));
+	if (!ci)
+		return NULL;
+	ci->it = muddb_index_iter_begin(db, OBJ_CONTENTS_INDEX, container);
+	if (!ci->it) {
+		free(ci);
+		return NULL;
+	}
+	return ci;
+}
+
+const char *
+obj_contents_next(OBJ_CONTENTS_ITER *ci)
+{
+	if (!ci)
+		return NULL;
+	return muddb_index_iter_next(ci->it);
+}
+
+void
+obj_contents_end(OBJ_CONTENTS_ITER *ci)
+{
+	if (!ci)
+		return;
+	muddb_index_iter_end(ci->it);
+	free(ci);
 }
 
 void
