@@ -45,7 +45,6 @@
 #include <user.h>
 #include <game.h>
 #include <mth.h>
-#include <form.h>
 #include <webserver.h>
 #include <webclient.h>
 #include <security.h>
@@ -460,13 +459,6 @@ main(int argc, char **argv)
 	}
 
 	atexit(user_shutdown);
-
-	if (!form_module_init()) {
-		LOG_ERROR("could not initialize forms");
-		return EXIT_FAILURE;
-	}
-
-	atexit(form_module_shutdown);
 
 	if (!invite_init()) {
 		LOG_ERROR("could not initialize invite system");

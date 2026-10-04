@@ -2,6 +2,8 @@
 #define USER_H_
 #include <time.h>
 
+#include "acs.h"
+
 #define USER_LASTLOGINS_MAX 5
 
 struct user;
@@ -18,6 +20,7 @@ struct user *user_lookup(const char *username);
 struct user *user_create(const char *username, const char *password, const char *email);
 int user_password_check(struct user *u, const char *cleartext);
 const char *user_username(struct user *u);
+const struct acs_info *user_acs(struct user *u);
 /** non-zero if the account is durably permitted to enable wizard rights. */
 int user_is_wizard(struct user *u);
 /** non-zero if the account carries the given acs flag letter. */

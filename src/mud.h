@@ -7,8 +7,8 @@
 #include <acs.h>
 
 struct charset;
-struct form_state;
-struct menuinfo;
+struct ui_session;
+struct stred_session;
 struct user;
 struct character;
 struct buf;
@@ -45,9 +45,11 @@ struct descriptor_data {
 		struct login_state {
 			char username[32];
 		} login;
-		struct form_state *form;
-		const struct menuinfo *menu;
+		struct ui_session *ui;		/* interactive UI layer session */
 	} state;
+	/* the string editor nests inside a (suspended) UI session, so it does
+	 * not share the state union with it. */
+	struct stred_session *stred;
 	void (*line_input)(DESCRIPTOR_DATA *cl, const char *line);
 	char *prompt_string;
 	unsigned prompt_flag:1;

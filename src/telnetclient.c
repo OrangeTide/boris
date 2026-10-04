@@ -40,7 +40,6 @@
 #include <mudconfig.h>
 #include <user.h>
 #include <character.h>
-#include <menu.h>
 #include <mth.h>
 #include <buf.h>
 #include <charset.h>
@@ -581,7 +580,7 @@ telnetclient_newclient(struct telnetserver *server, struct net_stream *stream)
 
 	telnetclient_puts(cl, mud_config.msgfile_welcome);
 
-	menu_start_input(cl, &gamemenu_login);
+	login_ui_open(cl);
 
 	LIST_INSERT_HEAD(&server->client_list, cl, list);
 
@@ -1043,15 +1042,14 @@ telnetclient_room_broadcast(const char *room_id, const char *msg)
 		for (cl = LIST_TOP(sv->client_list); cl; cl = LIST_NEXT(cl, list)) {
 			struct character *ch = cl->character;
 			const char *cur;
-			char key[OBJ_PATH_MAX];
 			if (!ch)
 				continue;
 			cur = character_attr_get(ch, "room.current");
 			if (!cur)
 				continue;
-			snprintf(key, sizeof(key),
-			         ROOM_ROOTDIR "/%s", cur);
-			if (strcmp(key, room_id) == 0)
+			/* room.current and room_id are both full object keys
+			 * (zone/<slug>/<room>, doc/zone-spec.md). */
+			if (strcmp(cur, room_id) == 0)
 				telnetclient_puts(cl, msg);
 		}
 	}
@@ -1061,14 +1059,12 @@ telnetclient_room_broadcast(const char *room_id, const char *msg)
 			continue;
 		struct character *ch = wc->cl->character;
 		const char *cur;
-		char key[OBJ_PATH_MAX];
 		if (!ch)
 			continue;
 		cur = character_attr_get(ch, "room.current");
 		if (!cur)
 			continue;
-		snprintf(key, sizeof(key), ROOM_ROOTDIR "/%s", cur);
-		if (strcmp(key, room_id) == 0)
+		if (strcmp(cur, room_id) == 0)
 			telnetclient_puts(wc->cl, msg);
 	}
 }
@@ -1207,18 +1203,32 @@ telnetclient_user(DESCRIPTOR_DATA *cl)
 	return cl ? cl->user : NULL;
 }
 
-/* telnetclient_get_menu returns the current menu state for the client. */
-const struct menuinfo *
-telnetclient_get_menu(DESCRIPTOR_DATA *cl)
+/* telnetclient_get_ui returns the interactive UI session for the client. */
+struct ui_session *
+telnetclient_get_ui(DESCRIPTOR_DATA *cl)
 {
-	return cl->state.menu;
+	return cl ? cl->state.ui : NULL;
 }
 
-/* telnetclient_set_menu sets the current menu state for the client. */
+/* telnetclient_set_ui sets the interactive UI session for the client. */
 void
-telnetclient_set_menu(DESCRIPTOR_DATA *cl, const struct menuinfo *menu)
+telnetclient_set_ui(DESCRIPTOR_DATA *cl, struct ui_session *ui)
 {
-	cl->state.menu = menu;
+	cl->state.ui = ui;
+}
+
+/* telnetclient_get_stred returns the string-editor session for the client. */
+struct stred_session *
+telnetclient_get_stred(DESCRIPTOR_DATA *cl)
+{
+	return cl ? cl->stred : NULL;
+}
+
+/* telnetclient_set_stred sets the string-editor session for the client. */
+void
+telnetclient_set_stred(DESCRIPTOR_DATA *cl, struct stred_session *stred)
+{
+	cl->stred = stred;
 }
 
 /* telnetclient_get_login_username returns the username entered during login. */
@@ -1236,23 +1246,15 @@ telnetclient_set_login_username(DESCRIPTOR_DATA *cl, const char *name)
 		 sizeof(cl->state.login.username), "%s", name);
 }
 
-/* telnetclient_get_form returns the client's current form state. */
-struct form_state *
-telnetclient_get_form(DESCRIPTOR_DATA *cl)
-{
-	return cl->state.form;
-}
-
-/* telnetclient_set_form sets the client's current form state. */
-void
-telnetclient_set_form(DESCRIPTOR_DATA *cl, struct form_state *form)
-{
-	cl->state.form = form;
-}
-
 /* telnetclient_set_state_free registers a cleanup callback for the client's current state data. */
 void
 telnetclient_set_state_free(DESCRIPTOR_DATA *cl, void (*fn)(DESCRIPTOR_DATA *))
 {
 	cl->state_free = fn;
+}
+
+/* telnetclient_get_state_free returns the current state cleanup callback. */
+void (*telnetclient_get_state_free(DESCRIPTOR_DATA *cl))(DESCRIPTOR_DATA *)
+{
+	return cl ? cl->state_free : NULL;
 }

@@ -58,7 +58,7 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 				telnetclient_puts(cl, "Your account has been locked.\n");
 			user_record_login(u, telnetclient_socket_name(cl), 0);
 			user_save(u);
-			menu_start_input(cl, &gamemenu_login);
+			login_ui_open(cl);
 			return;
 		}
 
@@ -79,7 +79,7 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 			user_save(u);
 			eventlog_signon(telnetclient_get_login_username(cl), telnetclient_socket_name(cl));
 			telnetclient_printf(cl, "Hello, %s.\n\n", user_username(u));
-			menu_start_input(cl, &gamemenu_main);
+			main_ui_open(cl);
 			return; /* success */
 		}
 
@@ -94,7 +94,7 @@ login_password_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 	eventlog_login_failattempt(telnetclient_get_login_username(cl), telnetclient_socket_name(cl));
 
 	/* failed logins go back to the login menu or disconnect */
-	menu_start_input(cl, &gamemenu_login);
+	login_ui_open(cl);
 }
 
 /** undocumented - please add documentation. */
@@ -121,7 +121,7 @@ login_username_lineinput(DESCRIPTOR_DATA *cl, const char *line)
 
 	if (!*line) {
 		telnetclient_puts(cl, mud_config.msg_invalidusername);
-		menu_start_input(cl, &gamemenu_login);
+		login_ui_open(cl);
 		return;
 	}
 

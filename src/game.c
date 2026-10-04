@@ -27,40 +27,23 @@
 #include <boris.h>
 #include <mud.h>
 #include <worldclock.h>
-#include <form.h>
 #include <command.h>
 
 /******************************************************************************
  * Globals
  ******************************************************************************/
 
-/** login form and main menu. */
-struct menuinfo gamemenu_login, gamemenu_main;
-
 /******************************************************************************
  * Game - game logic
  ******************************************************************************/
 
-/** initializes important server state */
+/** initializes important server state. The login and main menus are now on
+ * the interactive UI layer (login_ui.c), built per connection. */
 int
 game_init(void)
 {
 	if (worldclock_init())
 		return 0;
-
-	/*** The login menu ***/
-	menu_create(&gamemenu_login, "Login Menu");
-
-	menu_additem(&gamemenu_login, 'L', "Login", login_username_start, 0, NULL);
-	menu_additem(&gamemenu_login, 'N', "New User", form_createaccount_start, 0, NULL);
-	menu_additem(&gamemenu_login, 'Q', "Disconnect", signoff, 0, NULL);
-
-	/*** The Main Menu ***/
-	menu_create(&gamemenu_main, "Main Menu");
-	menu_additem(&gamemenu_main, 'E', "Enter the game", command_start, 0, NULL);
-	// menu_additem(&gamemenu_main, 'C', "Create Character", form_start, 0, &character_form);
-	menu_additem(&gamemenu_main, 'B', "Back to login menu", menu_start, 0, &gamemenu_login);
-	menu_additem(&gamemenu_main, 'Q', "Disconnect", signoff, 0, NULL);
 
 	return 1;
 }
@@ -69,7 +52,5 @@ game_init(void)
 void
 game_shutdown(void)
 {
-	menu_free(&gamemenu_login);
-	menu_free(&gamemenu_main);
 }
 
