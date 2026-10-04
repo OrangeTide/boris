@@ -123,6 +123,9 @@ setup_testenv()
 	msg.usercreatesuccess	=	Account successfully created!
 	msgfile.welcome	=	data/text/welcome.txt
 	newuser.level	=	5
+	# builder (0x2) + wizard (0x400000): wizard is needed for @zedit and the
+	# admin @-commands; the other editor smoke cases only require the builder
+	# flag.
 	newuser.flags	=	0x400002
 	newuser.allowed	=	1
 	eventlog.filename	=	boris.log
@@ -198,6 +201,12 @@ run_test bad_login
 run_test new_user
 run_test enter_game
 run_test charset_command
+run_test redit_longdesc
+run_test redit_check
+run_test medit_class
+run_test oedit_item
+run_test zedit_meta
+# at_commands must run last: it revokes the account's own wizard flag.
 run_test at_commands
 
 echo "%%%%%%%%%%%% END-TEST : $PASS passed, $FAIL failed (of $TOTAL)"

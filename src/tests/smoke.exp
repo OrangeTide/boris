@@ -9,6 +9,12 @@
 #   new_user     - create account, login, reach main menu
 #   enter_game   - login, enter game world, run help, quit
 #   charset_command - login, set charset, run chartest, reset
+#   redit_longdesc  - @redit a room, edit long desc in the string editor,
+#                     save, reopen and confirm the multi-line text persists
+#   redit_check     - @check reports a clean room ok, flags a dangling exit,
+#                     and sweeps a whole zone
+#   medit_class     - @medit authors a mob class (templates/mob), saves, and
+#                     reopens to confirm the fields round-trip
 #   at_commands  - login as a wizard, exercise @chown/@grant/@revoke and
 #                  their refusal paths (this test must run last: it revokes
 #                  the account's own wizard flag at the end)
@@ -52,7 +58,7 @@ switch -- $test {
 	}
 
 	bad_login {
-		send "L\r"
+		send "1\r"
 		expect {
 			"Username:" {}
 			timeout { fail "bad_login: no username prompt" }
@@ -80,7 +86,7 @@ switch -- $test {
 	}
 
 	new_user {
-		send "N\r"
+		send "2\r"
 		expect {
 			"Username:" {}
 			timeout { fail "new_user: no username prompt" }
@@ -92,7 +98,7 @@ switch -- $test {
 		}
 		send "testpass123\r"
 		expect {
-			"password again:" {}
+			"Confirm password:" {}
 			timeout { fail "new_user: no confirm password prompt" }
 		}
 		send "testpass123\r"
@@ -101,16 +107,12 @@ switch -- $test {
 			timeout { fail "new_user: no email prompt" }
 		}
 		send "test@test.com\r"
-		# form shows a review screen, accept it
+		# wizard finishes on the last field; submit to create the account
 		expect {
-			"accept" {}
-			timeout { fail "new_user: no review screen after form" }
+			-re "New User Application|Submit" {}
+			timeout { fail "new_user: no form after email" }
 		}
-		expect {
-			"Pick:" {}
-			timeout { fail "new_user: no form prompt" }
-		}
-		send "A\r"
+		send "s\r"
 		# after acceptance, expect account creation + login menu
 		expect {
 			-re "success|Login Menu" {}
@@ -120,7 +122,7 @@ switch -- $test {
 			"Choose:" {}
 			timeout {}
 		}
-		send "L\r"
+		send "1\r"
 		expect {
 			"Username:" {}
 			timeout { fail "new_user: no username prompt for login" }
@@ -154,7 +156,7 @@ switch -- $test {
 
 	enter_game {
 		# login with the account created by new_user
-		send "L\r"
+		send "1\r"
 		expect {
 			"Username:" {}
 			timeout { fail "enter_game: no username prompt" }
@@ -177,7 +179,7 @@ switch -- $test {
 			timeout { fail "enter_game: no menu prompt" }
 		}
 		# enter the game
-		send "E\r"
+		send "1\r"
 		expect {
 			"Tower Entrance" {}
 			timeout { fail "enter_game: no room description on entry" }
@@ -230,7 +232,7 @@ switch -- $test {
 
 	charset_command {
 		# login with the account created by new_user
-		send "L\r"
+		send "1\r"
 		expect {
 			"Username:" {}
 			timeout { fail "charset_command: no username prompt" }
@@ -253,7 +255,7 @@ switch -- $test {
 			timeout { fail "charset_command: no menu prompt" }
 		}
 		# enter the game
-		send "E\r"
+		send "1\r"
 		expect {
 			"> " {}
 			timeout { fail "charset_command: no command prompt" }
@@ -323,7 +325,7 @@ switch -- $test {
 		# login with the account created by new_user. In the smoke config
 		# newuser.flags carries the wizard bit, so this account may run the
 		# admin @-commands.
-		send "L\r"
+		send "1\r"
 		expect {
 			"Username:" {}
 			timeout { fail "at_commands: no username prompt" }
@@ -346,7 +348,7 @@ switch -- $test {
 			timeout { fail "at_commands: no menu prompt" }
 		}
 		# enter the game
-		send "E\r"
+		send "1\r"
 		expect {
 			"> " {}
 			timeout { fail "at_commands: no command prompt" }
@@ -355,7 +357,7 @@ switch -- $test {
 		# @chown: assign an existing object to a seeded reserved owner.
 		# chars/system is seeded at character_initialize, so no player need
 		# exist for this to resolve.
-		send "@chown rooms/tower-entrance chars/system\r"
+		send "@chown zone/world/tower-entrance chars/system\r"
 		expect {
 			"is now owned by chars/system" {}
 			-re "Permission denied" { fail "at_commands: @chown denied to wizard" }
@@ -378,7 +380,7 @@ switch -- $test {
 		}
 
 		# @chown failure: the owner does not exist.
-		send "@chown rooms/tower-entrance chars/9999\r"
+		send "@chown zone/world/tower-entrance chars/9999\r"
 		expect {
 			"No such owner" {}
 			timeout { fail "at_commands: @chown missing owner not reported" }
@@ -389,7 +391,7 @@ switch -- $test {
 		}
 
 		# @chown failure: the owner must be a chars/ id.
-		send "@chown rooms/tower-entrance rooms/church\r"
+		send "@chown zone/world/tower-entrance zone/world/church\r"
 		expect {
 			"must be a character id" {}
 			timeout { fail "at_commands: @chown non-char owner not rejected" }
@@ -445,6 +447,550 @@ switch -- $test {
 		expect {
 			eof { pass "at_commands: @chown/@grant/@revoke and refusals work" }
 			timeout { fail "at_commands: no disconnect after quit" }
+		}
+	}
+
+	redit_longdesc {
+		# login and enter the game as the builder account
+		send "1\r"
+		expect {
+			"Username:" {}
+			timeout { fail "redit_longdesc: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "redit_longdesc: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {}
+			-re "Invalid|invalid" {
+				fail "redit_longdesc: login rejected"
+			}
+			timeout { fail "redit_longdesc: no main menu after login" }
+		}
+		expect {
+			"Choose:" {}
+			timeout { fail "redit_longdesc: no menu prompt" }
+		}
+		send "1\r"
+		expect {
+			"> " {}
+			timeout { fail "redit_longdesc: no command prompt" }
+		}
+		# create a room; the long-desc field must open the string editor
+		send "@redit new zone/world/smoketest\r"
+		expect {
+			"Title:" {}
+			timeout { fail "redit_longdesc: no Title prompt" }
+		}
+		send "Smoke Room\r"
+		expect {
+			"Glance:" {}
+			timeout { fail "redit_longdesc: no Glance prompt" }
+		}
+		send "a smoke room\r"
+		expect {
+			"Short desc:" {}
+			timeout { fail "redit_longdesc: no Short desc prompt" }
+		}
+		send "A room built by the smoke test.\r"
+		# UI_TEXT suspends to the multi-line string editor
+		expect {
+			-re "Enter text|/s saves" {}
+			timeout { fail "redit_longdesc: long desc did not open the string editor" }
+		}
+		send "First smoke line.\r"
+		send "Second smoke line.\r"
+		send "/s\r"
+		# the wizard resumes on the field after the editor
+		expect {
+			"Builder note:" {}
+			timeout { fail "redit_longdesc: wizard did not resume after the editor" }
+		}
+		send "smoke note\r"
+		expect {
+			"Owner:" {}
+			timeout { fail "redit_longdesc: no Owner prompt" }
+		}
+		send "testuser\r"
+		expect {
+			-re "Submit" {}
+			timeout { fail "redit_longdesc: no submit action" }
+		}
+		send "s\r"
+		expect {
+			-re "Saved zone/world/smoketest" {}
+			timeout { fail "redit_longdesc: room not saved" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "redit_longdesc: no prompt after save" }
+		}
+		# reopen: the saved multi-line long desc must round-trip
+		send "@redit zone/world/smoketest\r"
+		expect {
+			"Long desc" {}
+			timeout { fail "redit_longdesc: no long desc row on reopen" }
+		}
+		expect {
+			"First smoke line." {}
+			timeout { fail "redit_longdesc: first long-desc line did not persist" }
+		}
+		expect {
+			"Second smoke line." {}
+			timeout { fail "redit_longdesc: second long-desc line did not persist" }
+		}
+		# leave the editor (q pops the frame) and the game
+		send "q\r"
+		expect {
+			"> " {}
+			timeout { fail "redit_longdesc: editor did not close" }
+		}
+		send "quit\r"
+		expect {
+			eof { pass "redit_longdesc: multi-line long desc round-trips through stred" }
+			timeout { fail "redit_longdesc: no disconnect after quit" }
+		}
+	}
+
+	redit_check {
+		# login and enter the game as the builder account
+		send "1\r"
+		expect {
+			"Username:" {}
+			timeout { fail "redit_check: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "redit_check: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {}
+			-re "Invalid|invalid" { fail "redit_check: login rejected" }
+			timeout { fail "redit_check: no main menu after login" }
+		}
+		expect {
+			"Choose:" {}
+			timeout { fail "redit_check: no menu prompt" }
+		}
+		send "1\r"
+		expect {
+			"> " {}
+			timeout { fail "redit_check: no command prompt" }
+		}
+		# the room we start in is clean: all its exits resolve
+		send "@check\r"
+		expect {
+			-re "tower-entrance: ok" {}
+			timeout { fail "redit_check: clean room not reported ok" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "redit_check: no prompt after @check" }
+		}
+		# add a dangling exit, then re-check: it must soft-warn
+		send "@set exit.testexit.to zone/world/ghost\r"
+		expect {
+			-re "Set exit.testexit.to" {}
+			timeout { fail "redit_check: @set did not set the exit" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "redit_check: no prompt after @set" }
+		}
+		send "@check\r"
+		expect {
+			"target does not exist yet" {}
+			timeout { fail "redit_check: dangling exit not flagged" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "redit_check: no prompt after warning" }
+		}
+		# a whole-zone sweep reports a summary; the CAS backend has no key
+		# enumeration yet and says so instead -- accept either.
+		send "@check zone world\r"
+		expect {
+			-re "Checked \[0-9\]+ object.* with warnings" {}
+			-re "not available on the current object store" {}
+			timeout { fail "redit_check: zone sweep gave no response" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "redit_check: no prompt after sweep" }
+		}
+		send "quit\r"
+		expect {
+			eof { pass "redit_check: @check flags dangling exits and sweeps a zone" }
+			timeout { fail "redit_check: no disconnect after quit" }
+		}
+	}
+
+	medit_class {
+		# login and enter the game as the builder account
+		send "1\r"
+		expect {
+			"Username:" {}
+			timeout { fail "medit_class: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "medit_class: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {}
+			-re "Invalid|invalid" { fail "medit_class: login rejected" }
+			timeout { fail "medit_class: no main menu after login" }
+		}
+		expect {
+			"Choose:" {}
+			timeout { fail "medit_class: no menu prompt" }
+		}
+		send "1\r"
+		expect {
+			"> " {}
+			timeout { fail "medit_class: no command prompt" }
+		}
+		# author a mob class; the wizard walks the core fields
+		send "@medit new templates/mob/goblin\r"
+		expect {
+			"Name:" {}
+			timeout { fail "medit_class: no Name prompt" }
+		}
+		send "a goblin sentry\r"
+		expect {
+			"Keywords:" {}
+			timeout { fail "medit_class: no Keywords prompt" }
+		}
+		send "goblin sentry\r"
+		expect {
+			"Short desc:" {}
+			timeout { fail "medit_class: no Short desc prompt" }
+		}
+		send "A goblin sentry stands watch.\r"
+		# UI_TEXT long desc opens the string editor; abort it (leave empty)
+		expect {
+			-re "Enter text|/s saves" {}
+			timeout { fail "medit_class: long desc editor did not open" }
+		}
+		send "/a\r"
+		# Kind is an enum: pick choice 1 (creature)
+		expect {
+			-re "Kind" {}
+			timeout { fail "medit_class: no Kind prompt" }
+		}
+		send "1\r"
+		expect {
+			-re "Template" {}
+			timeout { fail "medit_class: no Template prompt" }
+		}
+		send "templates/mob/base\r"
+		expect {
+			-re "Difficulty" {}
+			timeout { fail "medit_class: no Difficulty prompt" }
+		}
+		send "3\r"
+		expect {
+			"Faction:" {}
+			timeout { fail "medit_class: no Faction prompt" }
+		}
+		send "goblins\r"
+		expect {
+			-re "Loot" {}
+			timeout { fail "medit_class: no Loot prompt" }
+		}
+		send "loot/goblin-purse\r"
+		expect {
+			-re "Submit" {}
+			timeout { fail "medit_class: no submit action" }
+		}
+		send "s\r"
+		expect {
+			-re "Saved templates/mob/goblin" {}
+			timeout { fail "medit_class: mob class not saved" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "medit_class: no prompt after save" }
+		}
+		# reopen: the saved fields must round-trip
+		send "@medit templates/mob/goblin\r"
+		expect {
+			-re "a goblin sentry" {}
+			timeout { fail "medit_class: name did not persist" }
+		}
+		expect {
+			-re "creature" {}
+			timeout { fail "medit_class: kind did not persist" }
+		}
+		# add a scene tag through the Tags sub-frame (row 10)
+		send "10\r"
+		expect {
+			"(add a new tag)" {}
+			timeout { fail "medit_class: no tag list" }
+		}
+		send "1\r"
+		expect {
+			"Tag name:" {}
+			timeout { fail "medit_class: no tag-name prompt" }
+		}
+		send "armored\r"
+		expect {
+			-re "Value" {}
+			timeout { fail "medit_class: no tag value prompt" }
+		}
+		send "2\r"
+		expect {
+			-re "Mode" {}
+			timeout { fail "medit_class: no tag mode prompt" }
+		}
+		send "1\r"
+		expect {
+			-re "Submit" {}
+			timeout { fail "medit_class: no tag submit action" }
+		}
+		send "s\r"
+		expect {
+			-re "armored = 2" {}
+			timeout { fail "medit_class: tag not added to the list" }
+		}
+		# leave the tag list, then the editor, then the game
+		send "q\r"
+		send "q\r"
+		expect {
+			"> " {}
+			timeout { fail "medit_class: editor did not close" }
+		}
+		send "quit\r"
+		expect {
+			eof { pass "medit_class: mob class round-trips; tag sub-frame works" }
+			timeout { fail "medit_class: no disconnect after quit" }
+		}
+	}
+
+	oedit_item {
+		# login and enter the game as the builder account
+		send "1\r"
+		expect {
+			"Username:" {}
+			timeout { fail "oedit_item: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "oedit_item: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {}
+			-re "Invalid|invalid" { fail "oedit_item: login rejected" }
+			timeout { fail "oedit_item: no main menu after login" }
+		}
+		expect {
+			"Choose:" {}
+			timeout { fail "oedit_item: no menu prompt" }
+		}
+		send "1\r"
+		expect {
+			"> " {}
+			timeout { fail "oedit_item: no command prompt" }
+		}
+		# create an item in the current zone; the wizard walks the fields
+		send "@oedit new lamp\r"
+		expect {
+			"Name:" {}
+			timeout { fail "oedit_item: no Name prompt" }
+		}
+		send "a brass lamp\r"
+		expect {
+			"Keywords:" {}
+			timeout { fail "oedit_item: no Keywords prompt" }
+		}
+		send "brass lamp light\r"
+		expect {
+			"Short desc:" {}
+			timeout { fail "oedit_item: no Short desc prompt" }
+		}
+		send "A brass lamp sits here.\r"
+		expect {
+			-re "Enter text|/s saves" {}
+			timeout { fail "oedit_item: long desc editor did not open" }
+		}
+		send "/a\r"
+		expect {
+			-re "Template" {}
+			timeout { fail "oedit_item: no Template prompt" }
+		}
+		send "templates/item/base\r"
+		# Type is an enum: pick choice 2 (container)
+		expect {
+			-re "Type" {}
+			timeout { fail "oedit_item: no Type prompt" }
+		}
+		send "2\r"
+		expect {
+			"Weight:" {}
+			timeout { fail "oedit_item: no Weight prompt" }
+		}
+		send "3\r"
+		expect {
+			"Bulk:" {}
+			timeout { fail "oedit_item: no Bulk prompt" }
+		}
+		send "5\r"
+		expect {
+			"Value:" {}
+			timeout { fail "oedit_item: no Value prompt" }
+		}
+		send "10\r"
+		# Fixed is a bool: the wizard prompts yes/no
+		expect {
+			-re "Fixed .yes/no." {}
+			timeout { fail "oedit_item: no Fixed yes/no prompt" }
+		}
+		send "no\r"
+		# type=container revealed Capacity live, so the wizard walks into it
+		expect {
+			-re "Capacity" {}
+			timeout { fail "oedit_item: container Capacity not revealed live" }
+		}
+		send "20\r"
+		expect {
+			"Owner:" {}
+			timeout { fail "oedit_item: no Owner prompt" }
+		}
+		send "testuser\r"
+		expect {
+			-re "Submit" {}
+			timeout { fail "oedit_item: no submit action" }
+		}
+		send "s\r"
+		expect {
+			-re "Saved zone/world/lamp" {}
+			timeout { fail "oedit_item: item not saved" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "oedit_item: no prompt after save" }
+		}
+		# reopen: fields round-trip, and type=container reveals Capacity
+		send "@oedit zone/world/lamp\r"
+		expect {
+			-re "a brass lamp" {}
+			timeout { fail "oedit_item: name did not persist" }
+		}
+		expect {
+			-re "Capacity" {}
+			timeout { fail "oedit_item: container capacity field not shown" }
+		}
+		# leave the editor and the game
+		send "q\r"
+		expect {
+			"> " {}
+			timeout { fail "oedit_item: editor did not close" }
+		}
+		send "quit\r"
+		expect {
+			eof { pass "oedit_item: item round-trips; type-dependent field shown" }
+			timeout { fail "oedit_item: no disconnect after quit" }
+		}
+	}
+
+	zedit_meta {
+		# @zedit is wizard-only; the smoke account carries the wizard flag
+		send "1\r"
+		expect {
+			"Username:" {}
+			timeout { fail "zedit_meta: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "zedit_meta: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {}
+			-re "Invalid|invalid" { fail "zedit_meta: login rejected" }
+			timeout { fail "zedit_meta: no main menu after login" }
+		}
+		expect {
+			"Choose:" {}
+			timeout { fail "zedit_meta: no menu prompt" }
+		}
+		send "1\r"
+		expect {
+			"> " {}
+			timeout { fail "zedit_meta: no command prompt" }
+		}
+		# edit the existing world zone's metadata: change the Title
+		send "@zedit world\r"
+		expect {
+			-re "Title" {}
+			timeout { fail "zedit_meta: no zedit frame" }
+		}
+		send "1\r"
+		expect {
+			-re "Title:" {}
+			timeout { fail "zedit_meta: no Title edit prompt" }
+		}
+		send "The Wide World\r"
+		expect {
+			-re "Submit" {}
+			timeout { fail "zedit_meta: no submit action" }
+		}
+		send "s\r"
+		expect {
+			-re "Saved zone/world/zoneinfo" {}
+			timeout { fail "zedit_meta: zone metadata not saved" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "zedit_meta: no prompt after save" }
+		}
+		# reopen: the new title persists; then add a builder in the sub-frame
+		send "@zedit world\r"
+		expect {
+			-re "The Wide World" {}
+			timeout { fail "zedit_meta: title did not persist" }
+		}
+		send "7\r"
+		expect {
+			-re "add a builder" {}
+			timeout { fail "zedit_meta: no builders list" }
+		}
+		send "1\r"
+		expect {
+			-re "Builder name:" {}
+			timeout { fail "zedit_meta: no builder-name prompt" }
+		}
+		send "alice\r"
+		expect {
+			-re "Submit" {}
+			timeout { fail "zedit_meta: no builder submit action" }
+		}
+		send "s\r"
+		expect {
+			-re "Added builder alice" {}
+			timeout { fail "zedit_meta: builder not added to the list" }
+		}
+		# leave without persisting the allow-list change (keeps the zone open)
+		send "q\r"
+		send "q\r"
+		expect {
+			"> " {}
+			timeout { fail "zedit_meta: editor did not close" }
+		}
+		send "quit\r"
+		expect {
+			eof { pass "zedit_meta: zone title persists; builders sub-frame works" }
+			timeout { fail "zedit_meta: no disconnect after quit" }
 		}
 	}
 
