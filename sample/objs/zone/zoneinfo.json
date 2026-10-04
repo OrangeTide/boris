@@ -1,0 +1,1 @@
+{"%kind":"zone","title":"World Root","creator":"system","desc":"Root of the zone hierarchy. Top-level zones inherit shared defaults from here through %parent.","builder.info":"Default root zone shipped with boris; parent of all top-level zones."}

@@ -122,11 +122,17 @@ character_attr_set(struct character *ch, const char *name, const char *value)
 		return 0;
 
 	/* location is the %location forward pointer, written via obj_move. The
-	 * stored value is the full room object id; callers pass a bare room id. */
+	 * stored value is the full room object id. */
 	if (!strcasecmp(name, "room.current")) {
 		char container[OBJ_PATH_MAX];
 
 		if (value && *value) {
+			/* A full object key (it contains '/', e.g. a zone instance
+			 * zone/<slug>/<room>) is used as-is; a bare room id falls
+			 * back to the legacy ROOM_ROOTDIR prefix. This mirrors
+			 * room_get() so the two agree on the room object key. */
+			if (strchr(value, '/'))
+				return obj_move(ch->obj_id, value) == OBJ_OK;
 			snprintf(container, sizeof container, "%s%s",
 				ROOM_PREFIX, value);
 			return obj_move(ch->obj_id, container) == OBJ_OK;

@@ -704,7 +704,7 @@ mud_config_init(void)
 	mud_config.invite_required = 0;
 	mud_config.form_newuser_filename = strdup("data/forms/newuser.form");
 	mud_config.default_family = 0;
-	mud_config.newuser_room = strdup("tower-entrance");
+	mud_config.newuser_room = strdup("zone/world/tower-entrance");
 	mud_config.obj_cache_size = 256;
 	mud_config.character_cache_size = 128;
 	mud_config.vm_image_path = strdup("data/vm");
