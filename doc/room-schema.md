@@ -1,11 +1,14 @@
 # Room Schema
 
 This document describes the room JSON schema used by boris. Rooms are
-stored in `sample/rooms/` as individual JSON files. The filename
-(minus `.json`) must match the `id` field inside the file.
+instances under the zone namespace: sample rooms ship in
+`sample/objs/zone/<slug>/` as individual JSON files, keyed
+`zone/<slug>/<room>` (doc/zone-spec.md). Exit targets (`exit.<dir>.to`)
+are full room keys.
 
-Rooms are imported into muddb via `muddb-tool import` under the
-`rooms` domain.
+Rooms are imported into the `objs` domain via `muddb-tool import`.
+`room_get` accepts a full `zone/<slug>/<room>` key (a bare id falls back
+to the legacy `rooms/` prefix).
 
 ## Top-level Fields
 
@@ -13,8 +16,8 @@ Rooms are imported into muddb via `muddb-tool import` under the
 |-----------------|----------|-------------|
 | `id`            | yes      | Unique room identifier. Must match the filename. |
 | `name`          | yes      | Room title shown on the first line when a player looks. |
-| `name.glance`   | no       | Extra at-a-glance text shown below the title. |
 | `builder.info`  | no       | Builder-facing note (not shown to players). |
+| `desc.glance`   | no       | Extra at-a-glance text shown below the title. |
 | `desc.short`    | yes      | One-sentence fallback description. |
 | `desc.long`     | no       | Full room description, may contain multiple paragraphs separated by `\n\n`. Supports variable expansion (`${room.name}`, `${char.name}`, etc.). Falls back to `desc.short` when absent. |
 | `creator`       | no       | Username of the room's creator. |
@@ -66,7 +69,7 @@ layout (see `src/cmd/show_room.c:room_show()`):
 
  1. Room Title (`name`)
  2. Time of Day. Ambient Weather Condition.
- 3. Extra at-a-glance information (`name.glance`), if available.
+ 3. Extra at-a-glance information (`desc.glance`), if available.
  4. Blank line.
  5. Body of main room description (`desc.long` or `desc.short`),
     including posed objects.
