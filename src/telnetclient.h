@@ -35,13 +35,18 @@ struct web_client;
 DESCRIPTOR_DATA *telnetclient_webclient_new(struct web_client *wc, const struct client_ops *ops);
 void telnetclient_webclient_destroy(DESCRIPTOR_DATA *cl);
 struct user *telnetclient_user(DESCRIPTOR_DATA *cl);
-const struct menuinfo *telnetclient_get_menu(DESCRIPTOR_DATA *cl);
-void telnetclient_set_menu(DESCRIPTOR_DATA *cl, const struct menuinfo *menu);
 const char *telnetclient_get_login_username(DESCRIPTOR_DATA *cl);
 void telnetclient_set_login_username(DESCRIPTOR_DATA *cl, const char *name);
-struct form_state *telnetclient_get_form(DESCRIPTOR_DATA *cl);
-void telnetclient_set_form(DESCRIPTOR_DATA *cl, struct form_state *form);
 void telnetclient_set_state_free(DESCRIPTOR_DATA *cl, void (*fn)(DESCRIPTOR_DATA *));
+void (*telnetclient_get_state_free(DESCRIPTOR_DATA *cl))(DESCRIPTOR_DATA *);
+
+struct ui_session;
+struct ui_session *telnetclient_get_ui(DESCRIPTOR_DATA *cl);
+void telnetclient_set_ui(DESCRIPTOR_DATA *cl, struct ui_session *ui);
+
+struct stred_session;
+struct stred_session *telnetclient_get_stred(DESCRIPTOR_DATA *cl);
+void telnetclient_set_stred(DESCRIPTOR_DATA *cl, struct stred_session *stred);
 void telnetclient_set_buffered(DESCRIPTOR_DATA *cl);
 void telnetclient_clear_buffered(DESCRIPTOR_DATA *cl);
 void telnetclient_flush(DESCRIPTOR_DATA *cl);

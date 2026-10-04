@@ -3,11 +3,16 @@ SUBDIRS = \
 	thirdparty/smolvfs \
 	crypt \
 	log scrypt util help iox net passwd obj entity rpg combat database \
-	security muddb-tool daemonize verb rv32 vm resolve
+	security muddb-tool daemonize verb rv32 vm resolve builder zone ui stred
 
 LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 hashtable_SRCS = hashtable.c
+
+LIBRARIES += acs
+acs_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
+acs_SRCS   = acs.c
+acs_LIBS   = log
 
 LIBRARIES    += freelist
 freelist_DIR := $(hashtable_DIR)
@@ -120,10 +125,10 @@ boris_SRCS = \
 	game.c \
 	login.c \
 	mcp.c \
-	menu.c \
 	telnetclient.c \
 	user.c \
-	acs.c \
+	login_ui.c \
+	newuser_ui.c \
 	channel/channel.c \
 	crypt/sha1crypt.c \
 	room/room.c \
@@ -147,6 +152,15 @@ boris_SRCS = \
 	cmd/yell.c \
 	cmd/charset.c \
 	cmd/edit.c \
+	cmd/zone_cmd.c \
+	cmd/dig.c \
+	cmd/builder_edit.c \
+	cmd/olc.c \
+	cmd/redit.c \
+	cmd/medit.c \
+	cmd/oedit.c \
+	cmd/zedit.c \
+	cmd/check.c \
 	cmd/grant.c \
 	cmd/chown.c \
 	worldclock/worldclock.c \
@@ -155,6 +169,7 @@ boris_SRCS = \
 	web/server/weblogin.c \
 	web/server/webserver.c
 boris_LIBS = \
-	verb vm rv32 resolve character freelist \
+	verb vm rv32 resolve character freelist acs \
 	crypt daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
-	database security lmdb mth tinyaes
+	database security lmdb mth tinyaes \
+	zone_builder zone builder ui stred

@@ -30,14 +30,15 @@ retrofit. Each is expanded in the phases below.
   requires that gate to actually close.
 - **An ownership / scope model.** Which rooms may a given Builder edit?
   The room schema already carries `creator` and `owner`. We settled on
-  open editing with `creator` recorded (section 4); we still need the
-  stamping, not just the fields.
+  open editing by default with `creator` recorded, restrictable per zone
+  via a `builders` allow-list (section 4); we still need the stamping and
+  the allow-list check, not just the fields.
 - **Protection against lost builder data.** The moment non-operators
   create content, that content is worth backing up. We need in-game
   commands to snapshot / checkpoint / export the world so a bad edit,
   a wipe, or a crash does not cost a builder their work. Design already
   exists in `doc/snapshot-proposal.md`.
-- **A grouping unit for content (zones/areas).** `dig` "from a zone
+- **A grouping unit for content (zones/areas).** `@dig` "from a zone
   template" (`#6`), per-Builder quotas, and "edit only my area" all lean
   on a grouping concept that does not exist yet.
 - **Safe creation primitives.** `room_create()`, exit linking, and
@@ -72,12 +73,14 @@ Grounding for the plan (from a source survey):
   close callback) exist and drive the login menu and account creation,
   but they are fragile and do not fit an OLC. Details below; this is
   the critical path for the menu editor.
-- **Objects**: game objects are OBJ (copy-on-write JSON). Rooms live in
-  domain `objs` under key `rooms/<id>`; `%`-prefixed metadata such as
+- **Objects**: game objects are OBJ (copy-on-write JSON). Room instances
+  live in domain `objs` under the zone namespace, key `zone/<slug>/<id>`
+  (`doc/zone-spec.md` 3); `%`-prefixed metadata such as
   `%parent` is protected from player edits. Exits are
   `exit.<dir>.to` / `exit.<dir>.desc`. Prototype inheritance via
-  `%parent` resolves up to 5 levels (`templates` domain,
-  `src/entity/`).
+  `%parent` resolves up to 5 levels today (`templates` domain,
+  `src/entity/`); the template hierarchy work raises this to 10 with
+  cycle detection (see `doc/template-hierarchy.md`).
 - **No zone concept, no `room_create()`, no builder commands** beyond
   property editing. Entity (PC/NPC/creature) system exists but is not
   wired to any command.
@@ -159,21 +162,27 @@ out as such. Settled items are also listed in section 9.
   commands guard on `acs_check(&u->acs, "sNfB")`. Operators/wizards get
   a higher flag (`W`) that implies Builder. Rationale: flags are precise
   and already persisted; no new storage.
-- **DECIDED: open edit scope, creator recorded but not enforced.** The
-  only gate on building is the `B` flag: any Builder may edit any
-  object. Creation stamps `creator` (username) for provenance, and this
-  is the one ownership fact recorded; it is never rewritten. `owner` may
-  still be stored for display, but no command enforces per-object
-  ownership. This keeps v1 simple and social; per-object enforcement can
-  be layered on later without reworking the
-  data, since `creator` is already captured.
-- **DECIDED: introduce a light Zone record.** A zone is a small OBJ in
-  `objs` (key `zones/<id>`) holding: title, creator, id-prefix, and a
-  default-template reference for `dig`. Room ids inside a zone are
-  namespaced (`<zone>/<room>`). This is the grouping unit for `dig`
-  templates and quotas. Kept deliberately minimal.
-- **DECIDED: step-wizard editor per object type, rooms first.** `redit`
-  (rooms) first, then `oedit` (items), then `medit` (NPCs). The default
+- **DECIDED: open edit scope by default, zone-restrictable.** The base
+  gate on building is the `B` flag: by default any Builder may edit any
+  object. A zone may narrow that with an optional `builders` allow-list
+  (`doc/zone-spec.md` 2.2): when set, only the listed builders, plus
+  wizards, may edit objects in that zone. Creation stamps `creator`
+  (username) for provenance, the one ownership fact recorded; it is
+  never rewritten. `owner` is editable in the OLC, so setting it is an
+  implicit transfer, but an illegal `owner` hard-blocks Submit. This
+  keeps v1 simple and social while letting a head builder hand a zone to
+  a specific team. `builder_save()` is the enforcement point, and this
+  aligns with the eventual sandbox `world:` / `area:` write model
+  (`#53`).
+- **DECIDED: introduce a light Zone record.** A zone's metadata is a
+  `zoneinfo` OBJ in `objs` (key `zone/<slug>/zoneinfo`, `%kind = zone`)
+  holding title, creator, and a default-template reference for `@dig`.
+  Instances live under `zone/<slug>/...`; the `zone/` segment marks a game
+  instance (`doc/zone-spec.md` 2-3). This is the grouping unit for `@dig`
+  templates and quotas. Kept deliberately minimal; not the ColdFire
+  sandbox area model.
+- **DECIDED: step-wizard editor per object type, rooms first.** `@redit`
+  (rooms) first, then `@oedit` (items), then `@medit` (NPCs). The default
   creation flow is a **step wizard** that walks the object's fields in
   sequence, not a full-object numbered menu. The same field set is
   reachable out of order for editing (via the `List` action below).
@@ -196,10 +205,10 @@ out as such. Settled items are also listed in section 9.
   letter/symbol as an action. This is part of the UI layer's input
   contract so all editors share one dispatch and one help.
 - **All writes go through one save path.** A `builder_save()` choke
-  point performs: `B`-flag check, field validation, exit-target
-  existence check, `creator` stamping on new objects, then commit. No
-  per-object ownership check (see open edit scope above). Versioning
-  (`#14`) and audit logging hook here later.
+  point performs: `B`-flag check, the zone `builders` allow-list check
+  (open unless the zone restricts), field validation, exit-target
+  existence check, `creator` stamping on new objects, then commit.
+  Versioning (`#14`) and audit logging hook here later.
 - **Rework menu.c / form.c into one per-session, data-driven UI
   layer** before building the OLC on top. **DECIDED: full rebuild**,
   not incremental hardening. Rationale: a rebuild avoids the churn of a
@@ -222,7 +231,7 @@ out as such. Settled items are also listed in section 9.
   half-wired in MTH), and the web/SSE client via a new structured UI
   message type rendering native HTML forms. GMCP can later carry the
   same spec as a JSON package for Mudlet-class clients. A form such as
-  `redit` is declared once; each client gets the best rendering it can
+  `@redit` is declared once; each client gets the best rendering it can
   do. See section 3b.
   Caveat: menu and form drive the live new-user application and login
   flow, so this rework touches a user-facing path in production. It is
@@ -290,6 +299,10 @@ Close the gate before opening the door.
 - **NEW**: `builder_save()` / `room_create()` primitive with validation
   (unique id, required fields, exit targets resolve) and `creator`
   stamping. Ships with unit tests as acceptance criteria.
+  *Implemented* in `src/builder/` (`builder_save.c` policy, `builder_ops.c`
+  production hooks, `test_builder_save.c`), on the obj insert/resolve
+  primitives added in `src/obj/` (`obj_put`, `obj_resolve_prop`). The
+  zone allow-list check is wired in the command layer (Phase 1).
 - **NEW**: world backup safety net before builders write at scale.
   In-game `@checkpoint <label>` (named snapshot) and a world export/dump
   command over the `muddb-tool` JSON-record format. Full snapshot /
@@ -304,18 +317,21 @@ The `@`-command layer that the menu editor will later call into. Useful
 on its own for power users and for testing.
 
 - **Spec first**: `doc/zone-spec.md` before coding (section 5).
-- **NEW**: light Zone record (`zones/<id>`: title, creator, id-prefix,
-  default `dig` template) and `<zone>/<room>` id namespacing. This lands
-  in Phase 1 because `dig` and quotas build on it. Ships with round-trip
-  tests.
-- `dig <dir> <id>`: create a room from the current zone's template,
+- **NEW**: light Zone record (`zone/<slug>/zoneinfo`: title, creator,
+  default `@dig` template) and the `zone/<slug>/...` instance namespace.
+  This lands in Phase 1 because `@dig` and quotas build on it. Ships with
+  round-trip tests. *Implemented* in `src/zone/`: the core query/resolution
+  model (`zone.c`, game-facing, depends only on obj) and the builder-facing
+  `zone_create` (`zone_builder.c`, on `builder_save`), with `test_zone.c`
+  and `test_zone_builder.c`.
+- `@dig <dir> <id>`: create a room from the current zone's template,
   link the exit both ways, place the new room. (`#6`)
 - `return`: send the Builder back to their previous location. (`#6`)
 - **NEW**: `@create` (item/NPC from template), `@link` / `@unlink`
   (exits), `@set <prop> <value>` (`B`-flag guarded property edit),
   `@destroy`.
-- Wire these to `builder_save()` (flag check + validation + `creator`
-  stamping; no per-object ownership enforcement).
+- Wire these to `builder_save()` (flag check + zone allow-list check +
+  validation + `creator` stamping).
 
 ### Phase 2 — Interactive UI rearchitecture (critical path for the OLC)
 
@@ -348,14 +364,14 @@ current modules, so this comes before the editors.
 
 - **Spec first**: `doc/olc-spec.md` (field sets per object type, wizard
   step flow, validation rules) before coding (section 5).
-- **NEW**: `redit` room step wizard on the new UI layer, walking the
+- **NEW**: `@redit` room step wizard on the new UI layer, walking the
   fields (name, glance, short desc, long desc, exits, creator note) with
   the two-namespace key model: universal actions as letters
   (`(N)ext`/`(P)revious`/`(S)ubmit`/`(L)ist`/`(U)ndo`/`(Q)uit`/`(?)`),
   enumerated choices as numbers (exit directions, template picks). Exit
   add/remove is a sub-step. Long text suspends to `@edit` and resumes.
-- **NEW**: `oedit` (items) and `medit` (NPCs) on the same pattern once
-  `redit` shape is proven.
+- **NEW**: `@oedit` (items) and `@medit` (NPCs) on the same pattern once
+  `@redit` shape is proven.
 - Finish `show_room` so builders see their work: entity list, exit
   summary, posed objects (`#34`).
 
@@ -365,7 +381,8 @@ current modules, so this comes before the editors.
   wizard-only), so operators promote players in-game instead of editing
   the store.
 - **NEW**: per-Builder room/zone quota (creation limit by `creator`
-  count). Advisory guardrail, not access control; edit scope stays open.
+  count). Advisory guardrail; the zone `builders` allow-list (section 4)
+  is the access control, quota is not.
 - Communication commands finished so builders can coordinate:
   say/pose/emote wiring, aliases, directed speech (`#25`).
 - Account/login completeness for a multi-user builder community:
@@ -405,17 +422,19 @@ questions will accrue here as phases are cut into cards.
   sections 4 and Phase 2.
 - **Builder role = ACS flag `B`** (plus a minimum level), reusing the
   existing ACS layer; no new role storage. See section 4.
-- **Edit scope: open.** The `B` flag is the only gate; any Builder may
-  edit any object. Creation records `creator` for provenance, but no
-  per-object ownership is enforced. See section 4.
+- **Edit scope: open by default, zone-restrictable.** By default the `B`
+  flag is the only gate; a zone may narrow edit access to a `builders`
+  allow-list. Creation records `creator` for provenance; `owner` is an
+  editable transfer that hard-blocks Submit if illegal. Enforced in
+  `builder_save()`. See section 4 and `doc/zone-spec.md` 2.2.
 - **Zones: in scope now.** A light zone record lands in Phase 1 as the
-  grouping unit for `dig` templates and quotas. See section 4 and
+  grouping unit for `@dig` templates and quotas. See section 4 and
   Phase 1.
 - **Transport reach: MXP up front.** Three renderers ship in v1 (plain
   TELNET text, MXP, web/SSE HTML forms); GMCP is a later add. See
   sections 3b and 4 and Phase 2.
-- **First OLC target: rooms first**, then items (`oedit`) and NPCs
-  (`medit`) once the `redit` shape is proven. See Phase 3.
+- **First OLC target: rooms first**, then items (`@oedit`) and NPCs
+  (`@medit`) once the `@redit` shape is proven. See Phase 3.
 - **Builders minted via wizard `@grant` / `@revoke`** (sets/clears the
   `B` flag, wizard-only). Not an application queue or config allowlist
   for v1. See Phase 4.

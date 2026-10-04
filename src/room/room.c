@@ -39,6 +39,12 @@ room_get(const char *room_id)
 
 	if (!room_id || !room_id[0])
 		return NULL;
+	/* Rooms are instances under the zone namespace (zone/<slug>/<room>,
+	 * doc/zone-spec.md). A room_id that is already a full object key (it
+	 * contains a '/') is used as-is; a bare id falls back to the legacy
+	 * ROOM_ROOTDIR for backward compatibility. */
+	if (strchr(room_id, '/'))
+		return obj_get(room_id);
 	snprintf(key, sizeof key, ROOM_ROOTDIR "/%s", room_id);
 	return obj_get(key);
 }

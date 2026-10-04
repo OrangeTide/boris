@@ -96,6 +96,19 @@ static const struct command_table {
 	{ "chartest", command_do_chartest },
 	{ "@edit", command_do_edit },
 	{ "@view", command_do_view },
+	{ "@zone", command_do_zone },
+	{ "@dig", command_do_dig },
+	{ "return", command_do_return },
+	{ "@create", command_do_create },
+	{ "@link", command_do_link },
+	{ "@unlink", command_do_unlink },
+	{ "@set", command_do_set },
+	{ "@destroy", command_do_destroy },
+	{ "@redit", command_do_redit },
+	{ "@medit", command_do_medit },
+	{ "@oedit", command_do_oedit },
+	{ "@zedit", command_do_zedit },
+	{ "@check", command_do_check },
 	{ "@grant", command_do_grant },
 	{ "@revoke", command_do_revoke },
 	{ "@chown", command_do_chown },
@@ -323,4 +336,11 @@ void
 command_start(void *p, long unused2 UNUSED, void *unused3 UNUSED)
 {
 	command_start_lineinput(p);
+}
+
+/** re-install the game command line input (e.g. after an editor closes). */
+void
+command_resume(DESCRIPTOR_DATA *cl)
+{
+	telnetclient_start_lineinput(cl, command_lineinput, mud_config.command_prompt);
 }

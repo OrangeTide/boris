@@ -715,6 +715,12 @@ user_username(struct user *u)
 	return u ? u->username : NULL;
 }
 
+const struct acs_info *
+user_acs(struct user *u)
+{
+	return u ? &u->acs : NULL;
+}
+
 /* An account is wizard-capable when its acs flags carry the 'w' bit. This is
  * the durable capability consulted before a program may enable wizard rights;
  * it does not reflect any runtime elevation state. */

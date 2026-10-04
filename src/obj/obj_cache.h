@@ -26,9 +26,9 @@ struct obj_cache_ops {
 	 * the same cache. */
 	OBJ_CACHE *(*resolve_parent_cache)(void *ctx, const char *parent_ref,
 		const char **out_id);
-
 	/* Delete a record from the backing store. Returns 0 on success. May be
-	 * NULL when the backend cannot delete; obj_cache_destroy then fails. */
+	 * NULL when the backend cannot delete; obj_cache_del and
+	 * obj_cache_destroy then fail. */
 	int (*del)(void *ctx, const char *id);
 
 	/* free the backend ctx; called once by obj_cache_free. May be NULL if
@@ -78,6 +78,38 @@ int obj_cache_forget(OBJ_CACHE *c, const char *id);
 
 /* Mark obj as dirty; it will be saved before eviction or on flush_all. */
 void obj_cache_mark_dirty(OBJ_CACHE *c, OBJ *obj);
+
+/*
+ * Insert a new object under id by writing it straight to the backing
+ * store (ops->save), the way muddb_put / obj_cache_cas_put do. This is
+ * how a brand-new object enters the store: obj_cache_get only loads on
+ * miss and has no way to register an object that does not yet exist.
+ *
+ * The object is serialized; the cache does not take ownership of obj and
+ * does not retain the pointer, so the caller still frees it. Intended for
+ * new keys. Modifying an already-cached object should go through
+ * obj_cache_get + mutate + obj_cache_mark_dirty instead, so the cached
+ * copy stays coherent. Returns OBJ_CACHE_OK or OBJ_CACHE_ERR.
+ */
+int obj_cache_put(OBJ_CACHE *c, const char *id, OBJ *obj);
+
+/*
+ * Delete id from the backing store (via ops->del) and drop any cached copy
+ * so a later obj_cache_get does not resurrect it. Returns OBJ_CACHE_OK, or
+ * OBJ_CACHE_ERR if the backend has no del op or the delete failed. A copy
+ * still referenced by a caller is left in the cache (backend deleted) to
+ * avoid freeing an object in use.
+ */
+int obj_cache_del(OBJ_CACHE *c, const char *id);
+
+/*
+ * Drop an unreferenced cached copy of id WITHOUT touching the backend and
+ * WITHOUT flushing. Used after a write-through put to keep the cache coherent:
+ * the next obj_cache_get reloads the just-written value from the store. A
+ * still-referenced copy is left in place (its holders own the pointer).
+ * Returns OBJ_CACHE_OK (a missing entry is not an error).
+ */
+int obj_cache_forget(OBJ_CACHE *c, const char *id);
 
 /* Mark obj as clean, so eviction and flush_all will not save it. Used after a
  * caller has already persisted obj through its own path (e.g. a containment
