@@ -83,6 +83,40 @@ _tc_flush(struct _tc_sink *s)
 	s->len = 0;
 }
 
+/* direction word -> exit key, and each key's opposite for reverse links.
+ * "enter" has no automatic reverse (doc/olc-spec.md 5.3). */
+static const struct {
+	const char *name;
+	const char *key;
+	const char *opp;
+} cmd_dirs[] = {
+	{ "north", "n", "s" }, { "n", "n", "s" },
+	{ "south", "s", "n" }, { "s", "s", "n" },
+	{ "east", "e", "w" }, { "e", "e", "w" },
+	{ "west", "w", "e" }, { "w", "w", "e" },
+	{ "up", "u", "d" }, { "u", "u", "d" },
+	{ "down", "d", "u" }, { "d", "d", "u" },
+	{ "northeast", "ne", "sw" }, { "ne", "ne", "sw" },
+	{ "northwest", "nw", "se" }, { "nw", "nw", "se" },
+	{ "southeast", "se", "nw" }, { "se", "se", "nw" },
+	{ "southwest", "sw", "ne" }, { "sw", "sw", "ne" },
+};
+
+int
+cmd_dir_resolve(const char *word, const char **key, const char **opp)
+{
+	unsigned i;
+
+	for (i = 0; i < NR(cmd_dirs); i++) {
+		if (!strcasecmp(word, cmd_dirs[i].name)) {
+			*key = cmd_dirs[i].key;
+			*opp = cmd_dirs[i].opp;
+			return 0;
+		}
+	}
+	return -1;
+}
+
 /* _tc_sink buffers data and flushes it to the client when the buffer is full. */
 int
 _tc_sink(void *user, const char *data, unsigned n)

@@ -137,13 +137,54 @@ do_move(DESCRIPTOR_DATA *cl, const char *exit_name)
 		return 0;
 	}
 
-	/* move the character; only show the destination if the move committed */
+	/* Move the character, remembering where we came from so "return" can
+	 * send us back. room_id is still valid here; setting room.current below
+	 * invalidates it, so record room.previous first. Only show the
+	 * destination if the move committed. */
+	character_attr_set(ch, "room.previous", room_id);
 	if (!character_attr_set(ch, "room.current", dest_buf)) {
 		telnetclient_printf(cl, "You can't move to \"%s\" right now.\n",
 			dest_buf);
 		room_put(r);
 		return 0;
 	}
+	show_room(cl, r);
+	room_put(r);
+	return 1;
+}
+
+/** action callback to send the player back to their previous location. */
+int
+command_do_return(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED, const char *arg UNUSED)
+{
+	struct character *ch = telnetclient_character(cl);
+	const char *prev, *cur;
+	char prev_buf[OBJ_PATH_MAX], cur_buf[OBJ_PATH_MAX];
+	OBJ *r;
+
+	if (!ch) {
+		telnetclient_puts(cl, "You have no character.\n");
+		return 0;
+	}
+	prev = character_attr_get(ch, "room.previous");
+	if (!prev || !prev[0]) {
+		telnetclient_puts(cl, "You have nowhere to return to.\n");
+		return 0;
+	}
+	/* copy before any attr_set, which may invalidate borrowed pointers */
+	snprintf(prev_buf, sizeof prev_buf, "%s", prev);
+	cur = character_attr_get(ch, "room.current");
+	snprintf(cur_buf, sizeof cur_buf, "%s", cur ? cur : "");
+
+	r = room_get(prev_buf);
+	if (!r) {
+		telnetclient_printf(cl, "You can't return there (\"%s\").\n", prev_buf);
+		return 0;
+	}
+	/* swap current and previous so a second return comes back here */
+	character_attr_set(ch, "room.current", prev_buf);
+	if (cur_buf[0])
+		character_attr_set(ch, "room.previous", cur_buf);
 	show_room(cl, r);
 	room_put(r);
 	return 1;

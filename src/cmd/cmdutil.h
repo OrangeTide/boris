@@ -22,4 +22,11 @@ int show_ambient(DESCRIPTOR_DATA *cl);
 int show_pose(DESCRIPTOR_DATA *cl);
 void show_room(DESCRIPTOR_DATA *cl, OBJ *r);
 
+/*
+ * Resolve a direction word (full name or abbreviation) to its canonical exit
+ * key and, via *opp, the opposite direction for reverse links (NULL for
+ * directions with no automatic reverse). Returns 0, or -1 if unrecognized.
+ */
+int cmd_dir_resolve(const char *word, const char **key, const char **opp);
+
 #endif

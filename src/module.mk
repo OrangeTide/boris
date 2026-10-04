@@ -152,6 +152,15 @@ boris_SRCS = \
 	cmd/yell.c \
 	cmd/charset.c \
 	cmd/edit.c \
+	cmd/zone_cmd.c \
+	cmd/dig.c \
+	cmd/builder_edit.c \
+	cmd/olc.c \
+	cmd/redit.c \
+	cmd/medit.c \
+	cmd/oedit.c \
+	cmd/zedit.c \
+	cmd/check.c \
 	cmd/grant.c \
 	cmd/chown.c \
 	worldclock/worldclock.c \
