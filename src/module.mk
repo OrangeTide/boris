@@ -3,11 +3,16 @@ SUBDIRS = \
 	thirdparty/smolvfs \
 	crypt \
 	log scrypt util help iox net passwd obj entity rpg combat database \
-	security muddb-tool daemonize verb rv32 vm resolve
+	security muddb-tool daemonize verb rv32 vm resolve builder zone
 
 LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 hashtable_SRCS = hashtable.c
+
+LIBRARIES += acs
+acs_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
+acs_SRCS   = acs.c
+acs_LIBS   = log
 
 LIBRARIES    += freelist
 freelist_DIR := $(hashtable_DIR)
@@ -123,7 +128,6 @@ boris_SRCS = \
 	menu.c \
 	telnetclient.c \
 	user.c \
-	acs.c \
 	channel/channel.c \
 	crypt/sha1crypt.c \
 	room/room.c \
@@ -155,6 +159,7 @@ boris_SRCS = \
 	web/server/weblogin.c \
 	web/server/webserver.c
 boris_LIBS = \
-	verb vm rv32 resolve character freelist \
+	verb vm rv32 resolve character freelist acs \
 	crypt daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
-	database security lmdb mth tinyaes
+	database security lmdb mth tinyaes \
+	zone_builder zone builder

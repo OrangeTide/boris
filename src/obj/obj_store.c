@@ -90,6 +90,72 @@ obj_release(OBJ *obj)
 		obj_cache_release(obj_global_cache, obj);
 }
 
+int
+obj_put(const char *id, OBJ *obj)
+{
+	if (!obj_global_cache || !id || !obj)
+		return OBJ_ERR;
+	return obj_cache_put(obj_global_cache, id, obj) == OBJ_CACHE_OK
+		? OBJ_OK : OBJ_ERR;
+}
+
+int
+obj_delete(const char *id)
+{
+	if (!obj_global_cache || !id)
+		return OBJ_ERR;
+	return obj_cache_del(obj_global_cache, id) == OBJ_CACHE_OK
+		? OBJ_OK : OBJ_ERR;
+}
+
+void
+obj_forget(const char *id)
+{
+	if (obj_global_cache && id)
+		obj_cache_forget(obj_global_cache, id);
+}
+
+char *
+obj_resolve_prop(const char *id, const char *propname)
+{
+	OBJ *o;
+	char *v;
+
+	if (!obj_global_cache || !id || !propname)
+		return NULL;
+	o = obj_cache_get(obj_global_cache, id);
+	if (!o)
+		return NULL;
+	v = obj_cache_prop_resolve(obj_global_cache, o, propname);
+	obj_cache_release(obj_global_cache, o);
+	return v;
+}
+
+int
+obj_foreach_key(const char *prefix,
+	void (*cb)(const char *key, void *ctx), void *ctx)
+{
+	MUDDB *db = store_muddb();
+	MUDDB_ITER *it;
+	const char *key;
+	size_t plen = prefix ? strlen(prefix) : 0;
+	int n = 0;
+
+	if (!cb || !db)
+		return -1;
+	it = muddb_iter_begin(db, "objs");
+	if (!it)
+		return -1;
+	while ((key = muddb_iter_next(it))) {
+		if (plen && strncmp(key, prefix, plen) != 0)
+			continue;
+		cb(key, ctx);
+		n++;
+	}
+	muddb_iter_end(it);
+	return n;
+}
+
 OBJ *
 obj_create(const char *id)
 {

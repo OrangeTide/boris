@@ -67,6 +67,46 @@ void obj_shutdown(void);
 OBJ *obj_get(const char *id);
 void obj_release(OBJ *obj);
 
+/*
+ * Insert a new object into the global store under id. Write-through wrapper
+ * over the cache's put: the object is serialized to muddb immediately and
+ * ownership stays with the caller. Use for new keys; edit an existing object
+ * through obj_get + obj_release instead. Returns OBJ_OK or OBJ_ERR.
+ */
+int obj_put(const char *id, OBJ *obj);
+
+/*
+ * Resolve a property on the object at id, walking the %parent prototype
+ * chain (up to the cache's max depth). Returns a strdup'd value the caller
+ * frees, or NULL if id is missing or the property is unset/tombstoned.
+ * Used for inherited defaults (a room's template, a zone's ambient props).
+ */
+char *obj_resolve_prop(const char *id, const char *propname);
+
+/*
+ * Delete id from the global store and drop any cached copy. Returns OBJ_OK,
+ * or OBJ_ERR if the delete failed.
+ */
+int obj_delete(const char *id);
+
+/*
+ * Drop a cached copy of id without deleting it from the store, so the next
+ * obj_get reloads the current stored value. Use after a write-through obj_put
+ * to a key that may already be cached (editing an existing object), keeping
+ * the cache coherent. A copy still held by more than one caller is left in
+ * place. No-op if id is not cached.
+ */
+void obj_forget(const char *id);
+
+/*
+ * Enumerate object keys beginning with prefix (all keys if prefix is NULL or
+ * empty), calling cb(key, ctx) for each in key order. Read-only over the
+ * store's key space. Returns the number of keys visited, or -1 on error. The
+ * key passed to cb is valid only for that call; copy it to retain it. Fetch
+ * values with obj_get so cached edits are honored.
+ */
+int obj_foreach_key(const char *prefix,
+	void (*cb)(const char *key, void *ctx), void *ctx);
 /* Create a new persistent object with the given id, inserted into the global
  * cache as a pinned, dirty object (written through on flush or eviction).
  * Returns the pinned object (release with obj_release), or NULL if the id is

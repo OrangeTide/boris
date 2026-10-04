@@ -329,6 +329,42 @@ obj_cache_mark_clean(OBJ_CACHE *c, OBJ *obj)
 }
 
 int
+obj_cache_put(OBJ_CACHE *c, const char *id, OBJ *obj)
+{
+	if (!c || !id || !obj) return OBJ_CACHE_ERR;
+	if (!c->ops.save) return OBJ_CACHE_ERR;
+	if (c->ops.save(c->ctx, id, obj) != 0) {
+		LOG_ERROR("put failed for id=%s", id);
+		return OBJ_CACHE_ERR;
+	}
+	return OBJ_CACHE_OK;
+}
+
+int
+obj_cache_del(OBJ_CACHE *c, const char *id)
+{
+	struct cache_entry *e;
+
+	if (!c || !id) return OBJ_CACHE_ERR;
+	if (!c->ops.del) return OBJ_CACHE_ERR;
+	if (c->ops.del(c->ctx, id) != 0) {
+		LOG_ERROR("del failed for id=%s", id);
+		return OBJ_CACHE_ERR;
+	}
+	e = ht_str_get(&c->ht, id);
+	if (e) {
+		if (e->refcount == 0) {
+			lru_unlink(c, e);
+			drop_entry(c, e);
+		} else {
+			LOG_WARNING("obj_cache_del: %s still referenced; "
+				"backend deleted, cache entry retained", id);
+		}
+	}
+	return OBJ_CACHE_OK;
+}
+
+int
 obj_cache_flush_all(OBJ_CACHE *c)
 {
 	if (!c) return OBJ_CACHE_ERR;
