@@ -1,7 +1,7 @@
 ---
 title: Template Class Hierarchy
 status: backlog
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#115
 ---
 
 Class templates for every object kind (room, item, container, mob, player)

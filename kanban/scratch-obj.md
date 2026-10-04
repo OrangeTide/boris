@@ -1,7 +1,7 @@
 ---
 title: Scratch / Temporary OBJ
 status: active
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#113
 ---
 
 A detached OBJ with no live database key, used as the working copy for

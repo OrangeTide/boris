@@ -1,7 +1,7 @@
 ---
 title: Online String Editor
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#114
 ---
 
 In-band server-side string editor for editing text fields from a terminal.

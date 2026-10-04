@@ -1,7 +1,7 @@
 ---
 title: net do_read use-after-free on close-during-dispatch
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#112
 ---
 
 `do_read` read `s->state` after `dispatch` may have freed the stream, a

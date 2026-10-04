@@ -1,7 +1,7 @@
 ---
 title: UI_BOOL fields in the step wizard
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#116
 ---
 
 A `UI_BOOL` field could not be used inside the step wizard. When the wizard

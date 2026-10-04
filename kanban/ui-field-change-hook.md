@@ -1,7 +1,7 @@
 ---
 title: UI field-change hook (live type-dependent fields)
 status: done
-gitlab-sync:
+gitlab-sync: OrangeTide/boris#117
 ---
 
 The UI layer had no way for editing one field to change the visible field
