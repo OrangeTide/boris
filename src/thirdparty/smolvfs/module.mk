@@ -1,6 +1,6 @@
 LIBRARIES   += smolvfs
 smolvfs_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
-smolvfs_SRCS = cas.c cas-codec.c cas-pack.c cas-tree.c
+smolvfs_SRCS = cas.c cas-codec.c cas-pack.c cas-tree.c cas-gc.c
 
 EXECUTABLES    += test_cas
 TEST_TARGETS   += test_cas

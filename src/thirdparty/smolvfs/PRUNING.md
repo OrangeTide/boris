@@ -1,8 +1,9 @@
 # History pruning and sparse references
 
 How smolvfs bounds depot growth for a mutation-heavy ref, and the
-reference contract that makes it safe. This documents behavior that
-exists in code, in `cas-tree.c`.
+reference contract that makes it safe. It also covers reclaiming the
+objects a prune frees, both loose and packed. This documents behavior
+that exists in code, in `cas-tree.c`, `cas-gc.c`, and `cas-pack.c`.
 
 PUBLIC DOMAIN (CC0-1.0)
 
@@ -106,35 +107,85 @@ snapshot and never reports a pruned object as missing. Its contract is
 incomplete by design but its live roots are intact, and fsck verifies
 clean.
 
+Because a live-root object may exist only in the pack after a reclaiming
+pack (see below), fsck reads through the pack. An object with no loose
+copy is verified against its packed copy, so reclaiming loose objects
+never makes a live root report missing.
+
+## Packing and reclamation
+
+Pruning makes objects unreachable; a collection pass reclaims them. Where
+those objects live, loose or packed, decides which pass can do it. The
+pack-level primitives live in `cas-pack.c`; the reachability collector
+that drives them (`cas_tree_gc`, `cas_tree_gc_pack`) lives in `cas-gc.c`.
+
+`castool pack` rolls loose objects into a single `pack.dat`, and `pack
+--prune` then deletes each loose copy once the pack holds it. This is
+safe because the pack is written durably, fsynced and atomically renamed
+into place before any loose copy is removed, and each loose copy is
+deleted only after the committed pack is confirmed to hold a retrievable,
+address-correct copy. So every object stays readable through the pack at
+the instant its loose copy disappears, including across a crash.
+
+A packed object carries no per-object timestamp, so the grace period does
+not apply to it. Being in a pack already means it was written before that
+pack was built, so by the time a later collection runs, its
+write-to-commit window has long closed. Plain `gc` only removes loose
+objects, so it can never reclaim an object once it has been packed: after
+a `prune`, the objects a dropped snapshot alone held are collectable, but
+any that were already packed stay in `pack.dat`.
+
+`gc --pack` closes that gap. It marks the reachable set the same way,
+rebuilds `pack.dat` from only the reachable objects, reclaims their loose
+copies, and then sweeps unreachable loose objects past the grace period.
+Rebuilding from the reachable set drops every unreachable object, whether
+it was loose or trapped in the pack, so compaction is what actually
+reclaims packed space that a prune frees. Because it reuses the same mark
+phase, the sparse-reference contract above holds unchanged: a missing
+object is a boundary, and any other error is still a hard failure.
+
 ## Command line
 
 `castool` exposes both halves of the workflow:
 
 ```
 castool prune <ref> <keep-count>   drop all but the last keep-count log entries
-castool gc [--now]                 collect unreachable objects; --now ignores the grace period
+castool gc [--now] [--pack] [-z]   collect unreachable objects; --now ignores
+                                   the grace period; --pack also expunges
+                                   packed garbage (-z compresses the rebuilt
+                                   pack)
 ```
 
 `prune` requires `keep-count` of at least 1, consistent with always
 keeping the newest entry. Plain `gc` keeps a one hour grace period that
 protects freshly written objects, so immediately after a prune it may
-reclaim nothing. `gc --now` drops the grace period and collects the
-objects the prune freed.
+reclaim nothing. `gc --now` drops the grace period and collects the loose
+objects the prune freed. Add `--pack` when the depot has been packed, so
+objects a dropped snapshot held are expunged from `pack.dat` too rather
+than left behind by a loose-only sweep.
 
 The maintenance cycle for a mutation-heavy ref:
 
 ```sh
 castool prune main 100
-castool gc --now
+castool gc --pack --now
 ```
+
+Plain `gc --now` is enough when nothing has been packed; use `gc --pack
+--now` once `pack` or `pack --prune` has run, otherwise the packed
+objects a prune frees are never reclaimed.
 
 ## What this does not change
 
 - Objects shared between refs stay reachable as long as any ref's
   retained log still walks to them. Pruning one ref does not delete
   another ref's content.
-- The grace period still applies. `gc` without `--now` will not collect
-  objects younger than one hour even if they are unreachable.
+- The grace period still applies to loose objects. `gc` without `--now`
+  will not collect a loose object younger than one hour even if it is
+  unreachable. Packed objects carry no timestamp, so `gc --pack` expunges
+  an unreachable one without a grace period.
 - The on-disk formats in [FORMAT.md](FORMAT.md) are unchanged. Only the
   reference contract is relaxed: a ref's log may now name absent
-  objects.
+  objects. Packing and compaction preserve every object's address, so a
+  reclaimed or compacted depot holds the same objects under the same
+  hashes.

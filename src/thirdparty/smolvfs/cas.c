@@ -571,6 +571,24 @@ cas_free(struct cas *store)
     free(store);
 }
 
+int
+cas_reload_pack(struct cas *store)
+{
+    char packpath[CAS_PATH_MAX];
+
+    if (snprintf(packpath, sizeof(packpath), "%s/pack.dat",
+                 store->basedir) >= (int)sizeof(packpath))
+        return CAS_ERR;
+
+    /* A missing or invalid pack leaves the store with none, which is a
+     * valid state, not an error. */
+    struct cas_pack *np = cas_pack_open(packpath);
+
+    cas_pack_close(store->pack);
+    store->pack = np;
+    return CAS_OK;
+}
+
 const char *
 cas_basedir(struct cas *store)
 {
@@ -602,6 +620,26 @@ write_full(int fd, const void *data, size_t len)
         len -= (size_t)n;
     }
     return CAS_OK;
+}
+
+/*
+ * fsync a directory so a rename or unlink of an entry within it is made
+ * durable. The object data is fsynced before the rename, but the rename
+ * itself only reaches disk once the directory is fsynced. Without this a
+ * crash can leave a committed ref pointing at an object whose directory
+ * entry was lost. Failure to open or fsync the directory is best effort:
+ * the caller has already reported success for the object write, and there
+ * is no clean way to unwind a completed rename.
+ */
+static void
+fsync_dir(const char *dirpath)
+{
+    int fd = open(dirpath, O_RDONLY | O_DIRECTORY);
+
+    if (fd < 0)
+        return;
+    fsync(fd);
+    close(fd);
 }
 
 /** Format "type len\0" into buf, return total length including NUL. */
@@ -1070,6 +1108,8 @@ cas_put_object(struct cas *store, const char *type,
         CAS_LOG(CAS_LOG_PUT_RENAME, NULL);
     }
 
+    fsync_dir(dir);
+
     memcpy(hash_out, hash, CAS_HASH_HEX + 1);
     return CAS_OK;
 }
@@ -1156,6 +1196,8 @@ cas_put_object_at(struct cas *store, const char *type,
             return CAS_EIO;
         /* Target exists: dedup success, fall through */
     }
+
+    fsync_dir(dir);
 
     return CAS_OK;
 }
@@ -1247,6 +1289,8 @@ cas_put_precompressed(struct cas *store, const char *type, int codec,
             return CAS_EIO;
         /* Target exists: dedup success, fall through */
     }
+
+    fsync_dir(dir);
 
     return CAS_OK;
 }
@@ -1398,6 +1442,41 @@ cas_type_is_reencoded(const char *type)
     return strcmp(type, "htree") == 0;
 }
 
+/* Verify an object that lives only in the pack (its loose copy was
+ * reclaimed).  cas_pack_lookup returns the decoded plaintext, so the
+ * check mirrors the loose path: re-encoded objects are left to the tree
+ * layer, everything else is rehashed against its address. */
+static int
+fsck_packed_object(struct cas *store, const char *hash)
+{
+    struct cas_file cf;
+    char type[CAS_TYPE_MAX + 1];
+    int rc = cas_pack_lookup(store->pack, &cf, hash, type, sizeof(type));
+
+    if (rc == CAS_ENOTFOUND)
+        return CAS_FSCK_IOERR;
+    if (rc == CAS_ETYPE)
+        return CAS_FSCK_NOCODEC;  /* compressed, no decoder */
+    if (rc != CAS_OK)
+        return CAS_FSCK_CORRUPT;
+
+    if (cas_type_is_reencoded(type)) {
+        cas_close(&cf);
+        return CAS_FSCK_REENCODED;
+    }
+
+    /* cas_digest_object leaves out untouched if the header does not fit;
+     * a zeroed digest then compares unequal, which is the right verdict. */
+    unsigned char digest[CAS_HASH_LEN] = {0};
+    char actual[CAS_HASH_HEX + 1];
+
+    cas_digest_object(type, cf.data, cf.len, digest);
+    to_hex(digest, CAS_HASH_LEN, actual);
+    cas_close(&cf);
+
+    return strcmp(actual, hash) == 0 ? CAS_FSCK_OK : CAS_FSCK_CORRUPT;
+}
+
 int
 cas_fsck_object(struct cas *store, const char *hash)
 {
@@ -1408,6 +1487,10 @@ cas_fsck_object(struct cas *store, const char *hash)
     struct cas_pack_trailer tr;
     int rc = cas_open_loose_raw(store, &cf, hash, &tr);
 
+    /* No loose copy: verify the packed copy instead, so a reclaimed
+     * object still passes fsck. */
+    if (rc == CAS_ENOTFOUND && store->pack)
+        return fsck_packed_object(store, hash);
     if (rc == CAS_ENOTFOUND || rc == CAS_EIO)
         return CAS_FSCK_IOERR;
     if (rc != CAS_OK)
@@ -1453,7 +1536,7 @@ cas_fsck_object(struct cas *store, const char *hash)
         return CAS_FSCK_CORRUPT;
     }
 
-    unsigned char digest[CAS_HASH_LEN];
+    unsigned char digest[CAS_HASH_LEN] = {0};
     char actual[CAS_HASH_HEX + 1];
 
     cas_digest_object(type, data, len, digest);

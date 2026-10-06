@@ -149,6 +149,8 @@ enum {
     CAS_TREE_FSCK_CORRUPT,
     CAS_TREE_FSCK_BAD_TREE,
     CAS_TREE_FSCK_NOCODEC,  /* compressed blob, no decoder to verify */
+    CAS_TREE_FSCK_FOREIGN,  /* ref points at something that is not a
+                               directory; valid, just not ours to walk */
 };
 
 /** Callback for cas_tree_fsck.
@@ -171,9 +173,77 @@ int
 cas_tree_fsck_root(struct cas_tree *ct, const char *root_hash,
                    cas_tree_fsck_fn fn, void *ctx);
 
+/** Verify one directory object against the address it is stored under,
+ *  without descending into it.  Returns a CAS_FSCK_* code.
+ *
+ *  This is the verification cas_fsck_object cannot perform: an htree is
+ *  addressed by the canonical text form of the directory it encodes, not
+ *  by its own bytes, so checking it needs the tree layer.  A caller
+ *  accepting an htree from an untrusted source must use this rather than
+ *  the object-level check, which reports CAS_FSCK_REENCODED and defers.
+ *
+ *  A `tree` is delegated to cas_fsck_object.  An htree must both encode
+ *  the entry set whose text form hashes to the address and reproduce its
+ *  own bytes when that entry set is re-encoded; see FORMAT.md,
+ *  "Verifying an htree", for why one check without the other is not
+ *  enough.
+ *
+ *  An object of some other type returns CAS_FSCK_FOREIGN rather than
+ *  CAS_FSCK_CORRUPT.  Nothing constrains a ref to name a directory, and
+ *  a signed topic head deliberately names a version record, so calling
+ *  that corruption would be this layer claiming authority over types it
+ *  does not own.
+ */
+int
+cas_tree_verify(struct cas_tree *ct, const char *hash);
+
+/** Check an in-memory object against the address it claims, without
+ *  storing it or touching a depot.
+ *
+ *  An `htree` is checked by the two rules of cas_tree_verify.  A `tree`
+ *  must hash to `hash` and be spelled canonically.  Any other type must
+ *  hash to `hash`.  `data` is the plaintext, not a stored form.
+ *
+ *  Returns CAS_OK if the object may be admitted, CAS_ERR otherwise.  The
+ *  signature matches cas_pack_verify_fn, so it can be handed to
+ *  cas_pack_import directly.
+ */
+int
+cas_tree_check_object(const char *type, const void *data, size_t len,
+                      const char *hash);
+
+/** Store an object obtained from outside, checking it first.
+ *
+ *  This is the trust boundary.  Objects are validated as they enter the
+ *  depot, and objects already in the depot are trusted when read, so a
+ *  reader does no work to re-establish what this call established.  Use
+ *  it for anything a peer, an origin, or a user supplied.
+ *
+ *  cas_put_object_at is the unchecked primitive underneath: it writes
+ *  the bytes at whatever address the caller names and verifies nothing.
+ *  Only a caller that has already verified may use it.
+ *
+ *  An `htree` gets the two checks of cas_tree_verify.  A `tree` must
+ *  hash to `hash` and be spelled canonically.  Any other type must hash
+ *  to `hash`.  Returns CAS_OK on success, CAS_ERR if the object fails
+ *  its check, and nothing is stored in that case.
+ *
+ *  fsck re-runs the equivalent checks periodically, which catches what
+ *  happened to an object after it was admitted rather than what it was
+ *  when it arrived.
+ */
+int
+cas_tree_put_checked(struct cas_tree *ct, const char *type,
+                     const void *data, size_t len, const char *hash);
+
 /****************************************************************
  * Garbage collection
  ****************************************************************/
+
+/* Implemented in cas-gc.c, a separate translation unit.  A consumer that
+ * uses the tree layer only as a content-addressed store, with no garbage
+ * collection, can leave cas-gc.c out of the build; nothing else in the
+ * tree layer depends on it. */
 
 /** Callback for cas_tree_gc progress reporting.
  *  Called for each removed hash.
@@ -191,6 +261,25 @@ typedef int (*cas_tree_gc_fn)(const char *hash, void *ctx);
 int
 cas_tree_gc(struct cas_tree *ct, time_t grace, cas_tree_gc_fn fn,
             void *ctx, int *removed);
+
+/** Compacting gc: rebuild the pack from only the reachable objects, then
+ *  reclaim their loose copies and sweep unreachable loose objects past the
+ *  grace period.
+ *
+ *  Unlike cas_tree_gc, this expunges unreachable objects trapped in the
+ *  pack (a pack entry has no grace, since it predates the pack it sits in),
+ *  and it moves reachable loose objects into the pack.  policy and codec
+ *  set the pack's compression (a CAS_COMPRESS_* mode and codec tag from
+ *  cas-codec.h; pass CAS_COMPRESS_NEVER / CAS_CODEC_NONE for none).
+ *
+ *  Sets *removed to the count of unreachable loose objects deleted and
+ *  *reclaimed to the count of loose copies folded into the pack (both if
+ *  non-NULL).  Returns CAS_OK on success.
+ */
+int
+cas_tree_gc_pack(struct cas_tree *ct, time_t grace, int policy, int codec,
+                 cas_tree_gc_fn fn, void *ctx, int *removed,
+                 uint64_t *reclaimed);
 
 /****************************************************************
  * Ref iteration

@@ -1,16 +1,36 @@
 repo:   https://github.com/OrangeTide/smolvfs
-tag:    v0.2.0
-date:   2026-07-15
+tag:    v0.5.1
+date:   2026-10-05
 
 Vendored files: cas.c cas.h cas-codec.c cas-codec.h cas-pack.c
-cas-pack.h cas-tree.c cas-tree.h test.h test_cas.c test_cas_tree.c
-PRUNING.md LICENSE-MIT LICENSE-BSD-2-CLAUSE-PATENT
+cas-pack.h cas-tree.c cas-tree.h cas-gc.c test.h test_cas.c
+test_cas_tree.c PRUNING.md LICENSE-MIT LICENSE-BSD-2-CLAUSE-PATENT
 
 Only the CAS modules are vendored (content-addressable store, codec
-table, packfiles, tree layer). The VFS layer (vfs.c, vfs-snap.c),
-cas-omap, castool, and the optional miniz DEFLATE codec are not used
-by boris and are omitted.
+table, packfiles, tree layer, garbage collection). The VFS layer
+(vfs.c, vfs-snap.c), cas-omap, cas-sign, cas-topic, castool, and the
+optional miniz DEFLATE codec are not used by boris and are omitted.
 
-v0.2.0 adds sparse references and history pruning (PRUNING.md):
+cas-gc.c is new to this subset. In v0.2.0 cas_tree_gc lived in
+cas-tree.c; v0.5.0 moved both cas_tree_gc and the new cas_tree_gc_pack
+into cas-gc.c. boris's obj_cache_cas.c calls cas_tree_gc, so cas-gc.c
+must now be linked and is vendored. cas-gc.c pulls in only cas-tree.h
+and cas-pack.h, both already present.
+
+Since v0.2.0 (the previously vendored tag) upstream has added:
+
+- v0.2.1: musl build fix (realpath via _DEFAULT_SOURCE). This had been
+  carried as a boris-local patch and is now upstream.
+- v0.3.0: validate-on-write trust boundary (cas_tree_put_checked,
+  cas_tree_check_object, cas_tree_verify); htree re-derivation on
+  lookup; directory canonicalization hardening. UTF-8 entry names are
+  now required (an incompatible change upstream). boris's in-process
+  writer still uses the trusted cas_tree_store path.
+- v0.4.0: signed refs (cas-sign, not vendored).
+- v0.4.1: fsync the object directory after a loose-object rename.
+- v0.5.0: online loose-object reclaim and compacting GC; cas_tree_gc
+  and cas_tree_gc_pack now live in cas-gc.c (see note above).
+
+v0.2.0 added sparse references and history pruning (PRUNING.md):
 cas_tree_log_truncate bounds a ref's snapshot log, and cas_tree_gc
 marking treats missing objects as boundaries instead of errors.
