@@ -43,6 +43,13 @@ iox_events_from_poll(unsigned short revents)
         ev |= IOX_READ;
     if (revents & POLLOUT)
         ev |= IOX_WRITE;
+
+    /* Additive, so the IOX_READ above stays set and callers written
+     * before this flag existed are unaffected. POLLNVAL is deliberately
+     * not folded in: a closed descriptor is a caller bug the loop already
+     * handles by dropping the entry, not a condition to go read about. */
+    if (revents & POLLERR)
+        ev |= IOX_EXCEPT;
     return ev;
 }
 

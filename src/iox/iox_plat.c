@@ -70,6 +70,10 @@ iox_plat_mono_ns(void)
 #include <fcntl.h>
 #include <time.h>
 
+#ifdef __APPLE__
+#include <sys/select.h>
+#endif
+
 int
 iox_plat_net_init(void)
 {
@@ -93,11 +97,107 @@ iox_plat_socket_nonblock(int fd)
     return fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0 ? IOX_ERR : IOX_OK;
 }
 
+#ifdef __APPLE__
+
+/* macOS poll() does not report readiness on a pseudo-terminal master. A
+ * process whose only ready descriptor is a pty master blocks forever: it
+ * wakes only once unrelated traffic on another descriptor returns from
+ * poll(), at which point the level-triggered pty read finally runs.
+ * select() reports ptys correctly here, so translate the pollfd set into a
+ * select() call on this platform.
+ *
+ * Only POLLIN and POLLOUT are honored. A hangup or error surfaces through
+ * select()'s read/write sets: an ended or errored descriptor reads ready and
+ * its read()/write() then fails visibly, matching how the caller already
+ * treats POLLHUP/POLLERR. A descriptor closed behind the loop's back makes
+ * select() fail with EBADF; that case is mapped to POLLNVAL per descriptor so
+ * the loop drops it, as it would with poll(). */
+int
+iox_plat_poll(struct pollfd *fds, unsigned long nfds, int timeout_ms)
+{
+    fd_set rfds, wfds;
+    struct timeval tv, *ptv;
+    int maxfd = -1, ready, n;
+    unsigned long i;
+
+    FD_ZERO(&rfds);
+    FD_ZERO(&wfds);
+
+    for (i = 0; i < nfds; i++) {
+        int fd = fds[i].fd;
+
+        fds[i].revents = 0;
+        if (fd < 0)
+            continue;
+        if (fd >= FD_SETSIZE) {
+            errno = EINVAL;
+            return -1;
+        }
+        if (fds[i].events & POLLIN)
+            FD_SET(fd, &rfds);
+        if (fds[i].events & POLLOUT)
+            FD_SET(fd, &wfds);
+        if (fd > maxfd)
+            maxfd = fd;
+    }
+
+    if (timeout_ms < 0) {
+        ptv = NULL;
+    } else {
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+        ptv = &tv;
+    }
+
+    ready = select(maxfd + 1, &rfds, &wfds, NULL, ptv);
+    if (ready < 0) {
+        /* one or more descriptors were closed behind the loop's back;
+         * flag each dead one like poll()'s POLLNVAL. */
+        if (errno == EBADF) {
+            n = 0;
+            for (i = 0; i < nfds; i++) {
+                int fd = fds[i].fd;
+
+                if (fd < 0)
+                    continue;
+                if (fcntl(fd, F_GETFD) < 0 && errno == EBADF) {
+                    fds[i].revents = POLLNVAL;
+                    n++;
+                }
+            }
+            if (n > 0)
+                return n;
+        }
+        return -1;    /* EINTR or a real error; caller checks errno */
+    }
+
+    n = 0;
+    for (i = 0; i < nfds; i++) {
+        int fd = fds[i].fd;
+        short re = 0;
+
+        if (fd < 0 || fd >= FD_SETSIZE)
+            continue;
+        if (FD_ISSET(fd, &rfds))
+            re |= POLLIN;
+        if (FD_ISSET(fd, &wfds))
+            re |= POLLOUT;
+        fds[i].revents = re;
+        if (re)
+            n++;
+    }
+    return n;
+}
+
+#else
+
 int
 iox_plat_poll(struct pollfd *fds, unsigned long nfds, int timeout_ms)
 {
     return poll(fds, (nfds_t)nfds, timeout_ms);
 }
+
+#endif
 
 int
 iox_plat_poll_interrupted(void)

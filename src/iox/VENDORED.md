@@ -2,8 +2,8 @@
 
 | | |
 | --- | --- |
-| Version | `v0.1.0` (IOX_VERSION_STRING 0.1.0) |
-| Source | <https://github.com/OrangeTide/libiox/archive/refs/tags/v0.1.0.tar.gz> |
+| Version | `v0.1.2` (IOX_VERSION_STRING 0.1.2) |
+| Source | <https://github.com/OrangeTide/libiox/archive/refs/tags/v0.1.2.tar.gz> |
 | Tests | not copied |
 
 Copied by `tools/vendor.sh` from the release snapshot. Do not edit these
@@ -14,7 +14,7 @@ with a newer `--version`, then read the upstream CHANGELOG.
 `iox_version.h` identifies this copy at compile time:
 
 ```c
-#if IOX_VERSION < 100          /* 0.1.0 */
-#  error "libiox 0.1.0 or newer is required"
+#if IOX_VERSION < 102          /* 0.1.2 */
+#  error "libiox 0.1.2 or newer is required"
 #endif
 ```
