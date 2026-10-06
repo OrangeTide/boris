@@ -1,6 +1,6 @@
 ---
-title: Re-vendor smolvfs (v0.2.0 -> v0.5.0)
-status: backlog
+title: Re-vendor smolvfs (v0.2.0 -> v0.5.1)
+status: done
 gitlab-sync: OrangeTide/boris#111
 ---
 
@@ -45,14 +45,26 @@ is absent from both the pending buffer and the committed ref), and none
 of the v0.3.0..v0.5.0 changes is an in-process fresh-write-not-found fix.
 Re-vendoring has its own value, but it is a separate task.
 
-## To do
+## Done
 
-- [ ] Pull the chosen tag's CAS modules into src/thirdparty/smolvfs,
-      keeping the current file subset, and update UPSTREAM.
-- [ ] Reconcile any API changes against obj_cache_cas.c and muddb-tool's
-      to-cas path.
-- [ ] Verify the UTF-8 / validate-on-write boundary accepts boris's keys.
-- [ ] Run `make check` (covers test_obj_cache_cas / test_cas / test_cas_tree)
-      and a `muddb-tool to-cas` round-trip on the sample world.
-- [ ] Relicense the vendored files to boris' license per project policy
-      (authorized for OrangeTide sources).
+Re-vendored at v0.5.1 (2026-10-05).
+
+- [x] Pulled v0.5.1's CAS modules into src/thirdparty/smolvfs and updated
+      UPSTREAM. The subset gained one file: cas-gc.c. In v0.2.0
+      `cas_tree_gc` lived in cas-tree.c; v0.5.0 moved it (and the new
+      `cas_tree_gc_pack`) into cas-gc.c, and boris calls `cas_tree_gc`, so
+      cas-gc.c is now vendored and added to module.mk's smolvfs_SRCS.
+- [x] Reconciled API against obj_cache_cas.c and the to-cas path. No
+      source changes needed; the only break was the moved `cas_tree_gc`
+      symbol, fixed by vendoring cas-gc.c.
+- [x] Verified the UTF-8 / validate-on-write boundary accepts boris's
+      keys: the to-cas round-trip commits the `world` ref through
+      cas_tree_store without rejection.
+- [x] `make check` passes (1354 tests, 40 suites, including
+      test_obj_cache_cas / test_cas / test_cas_tree). A `muddb-tool
+      import` + `to-cas zone` round-trip on sample/ writes the depot and
+      commits cleanly.
+- [x] Licensing: the vendored .c/.h already carry the upstream
+      BSD-2-Clause-Patent OR MIT dual-license header (upstream author is
+      the project owner). cas-gc.c ships with no header upstream and was
+      left as-is; no notices were added or altered.
