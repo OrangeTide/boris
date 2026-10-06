@@ -549,8 +549,10 @@ test_fsck_corrupt_blob(void)
 	FILE *fp = fopen(path, "a");
 
 	ASSERT(fp != NULL);
-	fputc('X', fp);
-	fclose(fp);
+	if (fp) {
+		fputc('X', fp);
+		fclose(fp);
+	}
 
 	struct tree_fsck_result r = {0};
 
@@ -734,6 +736,82 @@ test_gc_preserves_history(void)
 
 	cas_tree_dir_free(&dir1);
 	cas_tree_dir_free(&dir2);
+	cas_tree_free(ct);
+	cas_free(store);
+}
+
+/****************************************************************
+ * GC -- compacting pack expunges trapped garbage
+ *
+ * cas_tree_gc_pack rebuilds the pack from only the reachable objects, so
+ * an unreachable object that was trapped in the pack is expunged, and
+ * reachable objects survive readable through the pack.
+ ****************************************************************/
+
+static void
+test_gc_pack_compacts(void)
+{
+	struct cas *store = make_store("gc_pack");
+	struct cas_tree *ct = cas_tree_new(store);
+
+	char blob[CAS_HASH_HEX + 1];
+	char orphan[CAS_HASH_HEX + 1];
+
+	ASSERT_INT_EQ(cas_put(store, "keepme", 6, blob), CAS_OK);
+	ASSERT_INT_EQ(cas_put(store, "garbage", 7, orphan), CAS_OK);
+
+	struct cas_tree_dir dir;
+
+	cas_tree_dir_init(&dir);
+
+	struct cas_tree_entry e = { .mode = 0100644 };
+
+	memcpy(e.hash, blob, CAS_HASH_HEX + 1);
+	strcpy(e.name, "a.txt");
+	ASSERT_INT_EQ(cas_tree_dir_add(&dir, &e), CAS_OK);
+
+	char tree_hash[CAS_HASH_HEX + 1];
+
+	ASSERT_INT_EQ(cas_tree_store(ct, &dir, tree_hash), CAS_OK);
+	ASSERT_INT_EQ(cas_tree_ref_commit(ct, "main", tree_hash, "v1"),
+	              CAS_OK);
+
+	/* Pack everything, orphan included, and drop the loose copies so the
+	 * orphan is trapped in the pack with no loose copy left. */
+	char packpath[600];
+
+	snprintf(packpath, sizeof(packpath), "%s/pack.dat",
+	         cas_basedir(store));
+	ASSERT_INT_EQ(cas_pack_create(store, packpath), CAS_OK);
+
+	uint64_t reclaimed = 0;
+
+	ASSERT_INT_EQ(cas_pack_reclaim(store, packpath, &reclaimed), CAS_OK);
+	ASSERT_INT_EQ((int)reclaimed, 3);
+	ASSERT(cas_exists(store, orphan));  /* still there, via the pack */
+
+	/* Compacting gc: reachable = {blob, tree}; the orphan is dropped. */
+	int removed = 0;
+
+	reclaimed = 0;
+	ASSERT_INT_EQ(cas_tree_gc_pack(ct, 0, CAS_COMPRESS_NEVER,
+	              CAS_CODEC_NONE, NULL, NULL, &removed, &reclaimed),
+	              CAS_OK);
+
+	/* The orphan is expunged; reachable objects remain, readable and
+	 * fsck-clean through the pack, with no loose copy. */
+	ASSERT(!cas_exists(store, orphan));
+	ASSERT(cas_exists(store, blob));
+	ASSERT(cas_exists(store, tree_hash));
+
+	struct cas_file cf;
+	unsigned char tr[CAS_PACK_BLOCK];
+
+	ASSERT_INT_EQ(cas_open_loose_raw(store, &cf, blob, tr),
+	              CAS_ENOTFOUND);
+	ASSERT_INT_EQ(cas_fsck_object(store, blob), CAS_FSCK_OK);
+
+	cas_tree_dir_free(&dir);
 	cas_tree_free(ct);
 	cas_free(store);
 }
@@ -1185,8 +1263,10 @@ test_log_truncated(void)
 	FILE *fp = fopen(logpath, "a");
 
 	ASSERT(fp != NULL);
-	fprintf(fp, "%s 999 0 partial", hash);
-	fclose(fp);
+	if (fp) {
+		fprintf(fp, "%s 999 0 partial", hash);
+		fclose(fp);
+	}
 
 	/* log_read should return the one good entry, skip the truncated one */
 	log_count = 0;
@@ -1632,7 +1712,8 @@ test_htree_pack_import(void)
     uint64_t total = 0, stored = 0;
 
     ASSERT_INT_EQ(cas_pack_import(pack, tgt, CAS_COMPRESS_NEVER,
-                  CAS_CODEC_NONE, &total, &stored), CAS_OK);
+                  CAS_CODEC_NONE, cas_tree_check_object,
+                  &total, &stored), CAS_OK);
     ASSERT_INT_EQ((int)total, 2);
     ASSERT_INT_EQ((int)stored, 2);
     cas_pack_close(pack);
@@ -1747,6 +1828,751 @@ test_htree_fsck_skips(void)
 }
 
 /****************************************************************
+ * Forged htree: a table slot pointing outside the records region
+ ****************************************************************/
+
+/* Adler-32 per FORMAT.md, reimplemented rather than borrowed from the
+ * library.  A forgery has to carry a correct checksum, or the test would
+ * pass because the checksum failed rather than because the encoding is
+ * pinned, which is the property actually under test. */
+static uint32_t
+t_adler32(const unsigned char *p, size_t n)
+{
+    uint32_t a = 1, b = 0;
+
+    for (size_t i = 0; i < n; i++) {
+        a = (a + p[i]) % 65521;
+        b = (b + a) % 65521;
+    }
+    return (b << 16) | a;
+}
+
+static uint32_t
+t_le32(const unsigned char *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void
+t_store_le32(unsigned char *p, uint32_t v)
+{
+    p[0] = (unsigned char)v;
+    p[1] = (unsigned char)(v >> 8);
+    p[2] = (unsigned char)(v >> 16);
+    p[3] = (unsigned char)(v >> 24);
+}
+
+/** Find the table slot whose record carries `name`, or 0.
+ *  Scanning every bucket avoids reimplementing the djb hash here.
+ */
+static size_t
+t_find_slot(const unsigned char *d, size_t cdb_len, const char *name)
+{
+    size_t namelen = strlen(name);
+
+    for (int b = 0; b < 256; b++) {
+        uint32_t tpos = t_le32(d + b * 8);
+        uint32_t nslots = t_le32(d + b * 8 + 4);
+
+        for (uint32_t s = 0; s < nslots; s++) {
+            size_t spos = (size_t)tpos + (size_t)s * 8;
+            uint32_t rpos = t_le32(d + spos + 4);
+
+            if (rpos == 0 || (size_t)rpos + 8 + namelen > cdb_len)
+                continue;
+            if (t_le32(d + rpos) != (uint32_t)namelen)
+                continue;
+            if (memcmp(d + rpos + 8, name, namelen) == 0)
+                return spos;
+        }
+    }
+    return 0;
+}
+
+static void
+test_htree_forged_table_pointer(void)
+{
+    struct cas *store = make_store("htree_forge");
+    struct cas_tree *ct = cas_tree_new(store);
+    const char *target = "config.lua";
+
+    cas_tree_set_flags(ct, CAS_TREE_USE_HTREE);
+
+    char good[CAS_HASH_HEX + 1], evil[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(store, "good", 4, good), CAS_OK);
+    ASSERT_INT_EQ(cas_put(store, "evil", 4, evil), CAS_OK);
+
+    static const char *names[] = { "alpha", "beta", "config.lua", };
+    struct cas_tree_dir dir;
+
+    cas_tree_dir_init(&dir);
+
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        struct cas_tree_entry e = {
+            .mode = 0100644, .uid = 1, .gid = 2,
+            .mtime_s = 100, .mtime_ns = 0,
+        };
+
+        memcpy(e.hash, good, CAS_HASH_HEX + 1);
+        strcpy(e.name, names[i]);
+        ASSERT_INT_EQ(cas_tree_dir_add(&dir, &e), CAS_OK);
+    }
+
+    char hash[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_tree_store(ct, &dir, hash), CAS_OK);
+    cas_tree_dir_free(&dir);
+
+    /* an honest htree verifies */
+    ASSERT_INT_EQ(cas_tree_verify(ct, hash), CAS_FSCK_OK);
+
+    struct cas_file cf;
+    char type[CAS_TYPE_MAX + 1];
+
+    ASSERT_INT_EQ(cas_open_object(store, &cf, hash, type, sizeof(type)),
+                  CAS_OK);
+    ASSERT_STR_EQ(type, "htree");
+
+    size_t orig_len = cf.len;
+
+    /* Every htree ends with a four-byte checksum and the "HTv1" magic,
+     * so a stored one is always longer than that trailer.  Checked
+     * rather than assumed because cdb_len below subtracts 8 from an
+     * unsigned length, and gcc's analyzer is right to point out that it
+     * has been given nothing that rules out the wrap. */
+    ASSERT(orig_len > 8);
+    if (orig_len <= 8) {
+        cas_close(&cf);
+        cas_tree_free(ct);
+        cas_free(store);
+        return;
+    }
+
+    size_t namelen = strlen(target);
+    size_t reclen = 8 + namelen + 56;
+    size_t cdb_len = orig_len - 8;
+
+    /* Sized from cdb_len rather than the equal orig_len + reclen.  Every
+     * write below is placed relative to cdb_len, so expressing the
+     * capacity in the same term lets the analyzer compare the two
+     * directly instead of having to see through the subtraction. */
+    size_t forged_len = cdb_len + 8 + reclen;
+    unsigned char *forged = calloc(1, forged_len);
+
+    ASSERT(forged != NULL);
+    if (!forged) {
+        cas_close(&cf);
+        cas_tree_free(ct);
+        cas_free(store);
+        return;
+    }
+    memcpy(forged, cf.data, cdb_len);
+    cas_close(&cf);
+
+    /* Append a second record for the target naming the evil child, past
+     * the tables where the record scan cannot reach it, and point the
+     * target's slot at it.  htree_parse_dir stops at the lowest table
+     * offset, so a listing still sees the honest record, while
+     * htree_lookup_entry follows the slot to the forged one. */
+    size_t spos = t_find_slot(forged, cdb_len, target);
+
+    ASSERT(spos != 0);
+
+    uint32_t honest = t_le32(forged + spos + 4);
+    size_t rec = cdb_len;
+
+    memcpy(forged + rec, forged + honest, reclen);
+
+    unsigned char evil_bin[CAS_HASH_LEN];
+
+    ASSERT_INT_EQ(cas_hex_decode(evil, CAS_HASH_HEX, evil_bin,
+                                 sizeof(evil_bin)), CAS_OK);
+    memcpy(forged + rec + 8 + namelen + 24, evil_bin, CAS_HASH_LEN);
+    t_store_le32(forged + spos + 4, (uint32_t)rec);
+
+    /* forged_len - 8, written the long way round for the same reason
+     * forged_len itself was: the analyzer can place this offset inside
+     * the buffer when both are built up from cdb_len, and cannot when
+     * it has to reverse a subtraction to get there. */
+    size_t new_cdb = cdb_len + reclen;
+
+    t_store_le32(forged + new_cdb, t_adler32(forged, new_cdb));
+    memcpy(forged + new_cdb + 4, "HTv1", 4);
+
+    ASSERT_INT_EQ(cas_remove(store, hash), CAS_OK);
+    ASSERT_INT_EQ(cas_put_object_at(store, "htree", forged, forged_len,
+                                    hash), CAS_OK);
+
+    /* The forgery clears the checksum and the entry-set check: a
+     * listing still reports the honest child. */
+    struct cas_tree_dir listed;
+
+    ASSERT_INT_EQ(cas_tree_load(ct, hash, &listed), CAS_OK);
+    ASSERT_INT_EQ(listed.count, 3);
+
+    for (int i = 0; i < listed.count; i++) {
+        if (strcmp(listed.entries[i].name, target) == 0)
+            ASSERT_STR_EQ(listed.entries[i].hash, good);
+    }
+    cas_tree_dir_free(&listed);
+
+    /* while a lookup follows the tables and returns the forged child.
+     * Listing and lookup disagreeing is the defect byte pinning exists
+     * to catch. */
+    struct cas_tree_entry got;
+
+    ASSERT_INT_EQ(cas_tree_lookup(ct, hash, target, &got), CAS_OK);
+    ASSERT_STR_EQ(got.hash, evil);
+
+    /* re-deriving the encoding and comparing bytes rejects it */
+    ASSERT_INT_EQ(cas_tree_verify(ct, hash), CAS_FSCK_CORRUPT);
+
+    free(forged);
+    cas_tree_free(ct);
+    cas_free(store);
+}
+
+/****************************************************************
+ * Canonicalization: names, ordering, duplicates
+ ****************************************************************/
+
+static struct cas_tree_entry
+t_entry(const char *name, const char *hash)
+{
+    struct cas_tree_entry e = {
+        .mode = 0100644, .uid = 1, .gid = 2,
+        .mtime_s = 100, .mtime_ns = 0,
+    };
+
+    memcpy(e.hash, hash, CAS_HASH_HEX + 1);
+    strcpy(e.name, name);
+    return e;
+}
+
+static void
+test_name_utf8_validation(void)
+{
+    struct cas *store = make_store("utf8_names");
+    struct cas_tree *ct = cas_tree_new(store);
+    char h[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(store, "x", 1, h), CAS_OK);
+
+    struct cas_tree_dir dir;
+
+    cas_tree_dir_init(&dir);
+
+    /* An overlong encoding of '/' (C0 AF).  strchr never sees the byte
+     * 0x2F, so only the UTF-8 check stops it becoming a separator in a
+     * consumer that decodes leniently. */
+    struct cas_tree_entry bad = t_entry("a", h);
+
+    bad.name[0] = (char)0xc0;
+    bad.name[1] = (char)0xaf;
+    bad.name[2] = '\0';
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &bad), CAS_ERR);
+
+    /* a lone continuation byte */
+    struct cas_tree_entry cont = t_entry("a", h);
+
+    cont.name[0] = (char)0x80;
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &cont), CAS_ERR);
+
+    /* a truncated two-byte sequence */
+    struct cas_tree_entry trunc = t_entry("a", h);
+
+    trunc.name[0] = (char)0xc3;
+    trunc.name[1] = '\0';
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &trunc), CAS_ERR);
+
+    /* a surrogate, ED A0 80 = U+D800 */
+    struct cas_tree_entry surr = t_entry("abc", h);
+
+    surr.name[0] = (char)0xed;
+    surr.name[1] = (char)0xa0;
+    surr.name[2] = (char)0x80;
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &surr), CAS_ERR);
+
+    /* well-formed multi-byte names are accepted */
+    struct cas_tree_entry ok = t_entry("caf\xc3\xa9", h);   // cafe + U+00E9
+
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &ok), CAS_OK);
+    ASSERT_INT_EQ(dir.count, 1);
+
+    cas_tree_dir_free(&dir);
+    cas_tree_free(ct);
+    cas_free(store);
+}
+
+static void
+test_name_order_is_codepoint_order(void)
+{
+    struct cas *store = make_store("utf8_order");
+    struct cas_tree *ct = cas_tree_new(store);
+    char h[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(store, "x", 1, h), CAS_OK);
+
+    struct cas_tree_dir dir;
+
+    cas_tree_dir_init(&dir);
+
+    /* U+00E9 encodes as C3 A9, so it sorts after 'z' (0x7A) by bytes
+     * and after U+007A by codepoint.  UTF-8 makes the two agree, which
+     * is why one byte-wise rule suffices. */
+    struct cas_tree_entry a = t_entry("\xc3\xa9", h);      // U+00E9
+    struct cas_tree_entry b = t_entry("z", h);
+    struct cas_tree_entry c = t_entry("z\xc3\xa9", h);     // "z" + U+00E9
+
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &a), CAS_OK);
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &b), CAS_OK);
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &c), CAS_OK);
+
+    char hash[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_tree_store(ct, &dir, hash), CAS_OK);
+    cas_tree_dir_free(&dir);
+
+    struct cas_tree_dir loaded;
+
+    ASSERT_INT_EQ(cas_tree_load(ct, hash, &loaded), CAS_OK);
+    ASSERT_INT_EQ(loaded.count, 3);
+    ASSERT_STR_EQ(loaded.entries[0].name, "z");
+    ASSERT_STR_EQ(loaded.entries[1].name, "z\xc3\xa9");
+    ASSERT_STR_EQ(loaded.entries[2].name, "\xc3\xa9");
+    cas_tree_dir_free(&loaded);
+
+    ASSERT_INT_EQ(cas_tree_verify(ct, hash), CAS_FSCK_OK);
+
+    cas_tree_free(ct);
+    cas_free(store);
+}
+
+static void
+test_duplicate_names_rejected(void)
+{
+    struct cas *store = make_store("dup_names");
+    struct cas_tree *ct = cas_tree_new(store);
+    char h1[CAS_HASH_HEX + 1], h2[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(store, "one", 3, h1), CAS_OK);
+    ASSERT_INT_EQ(cas_put(store, "two", 3, h2), CAS_OK);
+
+    struct cas_tree_dir dir;
+
+    cas_tree_dir_init(&dir);
+
+    struct cas_tree_entry a = t_entry("same", h1);
+    struct cas_tree_entry b = t_entry("same", h2);
+
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &a), CAS_OK);
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &b), CAS_OK);
+
+    /* qsort is not stable, so the address would depend on how the tie
+     * was broken.  Refused instead. */
+    char hash[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_tree_store(ct, &dir, hash), CAS_ERR);
+
+    cas_tree_dir_free(&dir);
+    cas_tree_free(ct);
+    cas_free(store);
+}
+
+static void
+test_htree_duplicate_record_rejected(void)
+{
+    struct cas *store = make_store("htree_dup");
+    struct cas_tree *ct = cas_tree_new(store);
+
+    cas_tree_set_flags(ct, CAS_TREE_USE_HTREE);
+
+    char h[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(store, "x", 1, h), CAS_OK);
+
+    static const char *names[] = { "aaa", "bbb", "ccc", };
+    struct cas_tree_dir dir;
+
+    cas_tree_dir_init(&dir);
+
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        struct cas_tree_entry e = t_entry(names[i], h);
+
+        ASSERT_INT_EQ(cas_tree_dir_add(&dir, &e), CAS_OK);
+    }
+
+    char hash[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_tree_store(ct, &dir, hash), CAS_OK);
+    cas_tree_dir_free(&dir);
+
+    struct cas_file cf;
+    char type[CAS_TYPE_MAX + 1];
+
+    ASSERT_INT_EQ(cas_open_object(store, &cf, hash, type, sizeof(type)),
+                  CAS_OK);
+
+    size_t len = cf.len;
+    unsigned char *forged = malloc(len);
+
+    ASSERT(forged != NULL);
+    if (!forged) {
+        cas_close(&cf);
+        cas_tree_free(ct);
+        cas_free(store);
+        return;
+    }
+    memcpy(forged, cf.data, len);
+    cas_close(&cf);
+
+    /* Rename the "ccc" record to "aaa".  The names are the same length,
+     * so every offset is unchanged and only the key bytes move.  The
+     * record sequence becomes aaa, bbb, aaa: both duplicated and out of
+     * order. */
+    size_t cdb_len = len - 8;
+    size_t spos = t_find_slot(forged, cdb_len, "ccc");
+
+    ASSERT(spos != 0);
+
+    uint32_t rec = t_le32(forged + spos + 4);
+
+    memcpy(forged + rec + 8, "aaa", 3);
+    t_store_le32(forged + cdb_len, t_adler32(forged, cdb_len));
+
+    ASSERT_INT_EQ(cas_remove(store, hash), CAS_OK);
+    ASSERT_INT_EQ(cas_put_object_at(store, "htree", forged, len, hash),
+                  CAS_OK);
+
+    struct cas_tree_dir listed;
+
+    ASSERT_INT_EQ(cas_tree_load(ct, hash, &listed), CAS_ERR);
+    ASSERT_INT_EQ(cas_tree_verify(ct, hash), CAS_FSCK_CORRUPT);
+
+    free(forged);
+    cas_tree_free(ct);
+    cas_free(store);
+}
+
+static void
+test_text_tree_non_canonical(void)
+{
+    struct cas *store = make_store("text_noncanon");
+    struct cas_tree *ct = cas_tree_new(store);
+    char h[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(store, "x", 1, h), CAS_OK);
+
+    /* A mode padded to seven octal digits instead of six.  sscanf reads
+     * it as the same value, so the entry set is identical, but the text
+     * is not what tree_serialize would emit.  The bytes hash to their
+     * own address, so cas_fsck_object is content; only the
+     * canonicality check notices. */
+    char text[512];
+    int n = snprintf(text, sizeof(text), "%%0100644 1 2 100 0 %s a\n", h);
+
+    ASSERT(n > 0 && (size_t)n < sizeof(text));
+
+    char hash[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put_object(store, "tree", text, (size_t)n, hash),
+                  CAS_OK);
+    ASSERT_INT_EQ(cas_fsck_object(store, hash), CAS_FSCK_OK);
+    ASSERT_INT_EQ(cas_tree_verify(ct, hash), CAS_FSCK_CORRUPT);
+
+    /* the canonical spelling of the same directory verifies */
+    n = snprintf(text, sizeof(text), "%%100644 1 2 100 0 %s a\n", h);
+    ASSERT(n > 0 && (size_t)n < sizeof(text));
+    ASSERT_INT_EQ(cas_put_object(store, "tree", text, (size_t)n, hash),
+                  CAS_OK);
+    ASSERT_INT_EQ(cas_tree_verify(ct, hash), CAS_FSCK_OK);
+
+    cas_tree_free(ct);
+    cas_free(store);
+}
+
+/****************************************************************
+ * The write-side trust boundary
+ ****************************************************************/
+
+static void
+test_put_checked_rejects_forgery(void)
+{
+    struct cas *store = make_store("put_checked");
+    struct cas_tree *ct = cas_tree_new(store);
+
+    cas_tree_set_flags(ct, CAS_TREE_USE_HTREE);
+
+    char h[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(store, "x", 1, h), CAS_OK);
+
+    static const char *names[] = { "aaa", "bbb", "ccc", };
+    struct cas_tree_dir dir;
+
+    cas_tree_dir_init(&dir);
+
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        struct cas_tree_entry e = t_entry(names[i], h);
+
+        ASSERT_INT_EQ(cas_tree_dir_add(&dir, &e), CAS_OK);
+    }
+
+    char hash[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_tree_store(ct, &dir, hash), CAS_OK);
+    cas_tree_dir_free(&dir);
+
+    struct cas_file cf;
+    char type[CAS_TYPE_MAX + 1];
+
+    ASSERT_INT_EQ(cas_open_object(store, &cf, hash, type, sizeof(type)),
+                  CAS_OK);
+
+    size_t len = cf.len;
+    unsigned char *bytes = malloc(len);
+
+    ASSERT(bytes != NULL);
+    if (!bytes) {
+        cas_close(&cf);
+        cas_tree_free(ct);
+        cas_free(store);
+        return;
+    }
+    memcpy(bytes, cf.data, len);
+    cas_close(&cf);
+
+    /* honest bytes are admitted, and admitting them twice is fine */
+    ASSERT_INT_EQ(cas_remove(store, hash), CAS_OK);
+    ASSERT_INT_EQ(cas_tree_put_checked(ct, "htree", bytes, len, hash),
+                  CAS_OK);
+    ASSERT_INT_EQ(cas_tree_put_checked(ct, "htree", bytes, len, hash),
+                  CAS_OK);
+
+    /* Rename a record so the object no longer re-derives.  This is what
+     * a hostile peer would hand a fetch. */
+    size_t cdb_len = len - 8;
+    size_t spos = t_find_slot(bytes, cdb_len, "ccc");
+
+    ASSERT(spos != 0);
+
+    uint32_t rec = t_le32(bytes + spos + 4);
+
+    memcpy(bytes + rec + 8, "zzz", 3);
+    t_store_le32(bytes + cdb_len, t_adler32(bytes, cdb_len));
+
+    ASSERT_INT_EQ(cas_remove(store, hash), CAS_OK);
+    ASSERT_INT_EQ(cas_tree_put_checked(ct, "htree", bytes, len, hash),
+                  CAS_ERR);
+
+    /* nothing was stored, so the depot never held the forgery */
+    ASSERT_INT_EQ(cas_exists(store, hash), 0);
+
+    /* a blob whose bytes do not match the address it claims */
+    char bh[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(store, "real", 4, bh), CAS_OK);
+    ASSERT_INT_EQ(cas_remove(store, bh), CAS_OK);
+    ASSERT_INT_EQ(cas_tree_put_checked(ct, "blob", "fake", 4, bh),
+                  CAS_ERR);
+    ASSERT_INT_EQ(cas_tree_put_checked(ct, "blob", "real", 4, bh),
+                  CAS_OK);
+
+    free(bytes);
+    cas_tree_free(ct);
+    cas_free(store);
+}
+
+/****************************************************************
+ * Malformed htree reaching a lookup directly
+ ****************************************************************/
+
+/* cas_tree_lookup takes a bare address, so it can be handed an object
+ * that never passed cas_tree_put_checked: a depot written before the
+ * trust boundary existed, or one a caller populated through the
+ * unchecked primitive.  The probe has to hold up on its own. */
+static void
+test_htree_lookup_malformed(void)
+{
+    struct cas *store = make_store("htree_malformed");
+    struct cas_tree *ct = cas_tree_new(store);
+
+    cas_tree_set_flags(ct, CAS_TREE_USE_HTREE);
+
+    char h[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(store, "x", 1, h), CAS_OK);
+
+    struct cas_tree_dir dir;
+
+    cas_tree_dir_init(&dir);
+
+    struct cas_tree_entry e = t_entry("aaa", h);
+
+    ASSERT_INT_EQ(cas_tree_dir_add(&dir, &e), CAS_OK);
+
+    char hash[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_tree_store(ct, &dir, hash), CAS_OK);
+    cas_tree_dir_free(&dir);
+
+    struct cas_file cf;
+    char type[CAS_TYPE_MAX + 1];
+
+    ASSERT_INT_EQ(cas_open_object(store, &cf, hash, type, sizeof(type)),
+                  CAS_OK);
+
+    size_t len = cf.len;
+    unsigned char *bad = malloc(len);
+
+    ASSERT(bad != NULL);
+    if (!bad) {
+        cas_close(&cf);
+        cas_tree_free(ct);
+        cas_free(store);
+        return;
+    }
+    memcpy(bad, cf.data, len);
+    cas_close(&cf);
+
+    /* Point the slot at an offset near UINT32_MAX.  Added in 32-bit
+     * width, offset + 8 wraps to 4 and slips under the
+     * bound it is tested against, sending the read gigabytes away. */
+    size_t cdb_len = len - 8;
+    size_t spos = t_find_slot(bad, cdb_len, "aaa");
+
+    ASSERT(spos != 0);
+    t_store_le32(bad + spos + 4, 0xfffffffcu);
+    t_store_le32(bad + cdb_len, t_adler32(bad, cdb_len));
+
+    ASSERT_INT_EQ(cas_remove(store, hash), CAS_OK);
+    ASSERT_INT_EQ(cas_put_object_at(store, "htree", bad, len, hash),
+                  CAS_OK);
+
+    struct cas_tree_entry got;
+
+    ASSERT_INT_EQ(cas_tree_lookup(ct, hash, "aaa", &got), CAS_ERR);
+
+    /* admission rejects it too, so it could not have arrived this way */
+    ASSERT_INT_EQ(cas_tree_verify(ct, hash), CAS_FSCK_CORRUPT);
+
+    /* A name longer than any record may hold.  Matching one would copy
+     * it into a fixed-size field, so it is refused before the probe. */
+    char toolong[CAS_TREE_NAME_MAX + 64];
+
+    memset(toolong, 'a', sizeof(toolong) - 1);
+    toolong[sizeof(toolong) - 1] = '\0';
+    ASSERT_INT_EQ(cas_tree_lookup(ct, hash, toolong, &got),
+                  CAS_ENOTFOUND);
+
+    free(bad);
+    cas_tree_free(ct);
+    cas_free(store);
+}
+
+/****************************************************************
+ * Bundle import is a trust boundary
+ ****************************************************************/
+
+static void
+test_pack_import_rejects_forged_htree(void)
+{
+    struct cas *src = make_store("import_src");
+    struct cas_tree *sct = cas_tree_new(src);
+
+    cas_tree_set_flags(sct, CAS_TREE_USE_HTREE);
+
+    char h[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_put(src, "x", 1, h), CAS_OK);
+
+    static const char *names[] = { "aaa", "bbb", "ccc", };
+    struct cas_tree_dir dir;
+
+    cas_tree_dir_init(&dir);
+
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        struct cas_tree_entry e = t_entry(names[i], h);
+
+        ASSERT_INT_EQ(cas_tree_dir_add(&dir, &e), CAS_OK);
+    }
+
+    char hash[CAS_HASH_HEX + 1];
+
+    ASSERT_INT_EQ(cas_tree_store(sct, &dir, hash), CAS_OK);
+    cas_tree_dir_free(&dir);
+
+    /* Forge the htree in the source depot, so the bundle carries it. */
+    struct cas_file cf;
+    char type[CAS_TYPE_MAX + 1];
+
+    ASSERT_INT_EQ(cas_open_object(src, &cf, hash, type, sizeof(type)),
+                  CAS_OK);
+
+    size_t len = cf.len;
+    unsigned char *bad = malloc(len);
+
+    ASSERT(bad != NULL);
+    if (!bad) {
+        cas_close(&cf);
+        cas_tree_free(sct);
+        cas_free(src);
+        return;
+    }
+    memcpy(bad, cf.data, len);
+    cas_close(&cf);
+
+    size_t cdb_len = len - 8;
+    size_t spos = t_find_slot(bad, cdb_len, "ccc");
+
+    ASSERT(spos != 0);
+
+    uint32_t rec = t_le32(bad + spos + 4);
+
+    memcpy(bad + rec + 8, "aaa", 3);
+    t_store_le32(bad + cdb_len, t_adler32(bad, cdb_len));
+
+    ASSERT_INT_EQ(cas_remove(src, hash), CAS_OK);
+    ASSERT_INT_EQ(cas_put_object_at(src, "htree", bad, len, hash),
+                  CAS_OK);
+    free(bad);
+
+    char packpath[512];
+
+    snprintf(packpath, sizeof(packpath), "%s/forged.pack", tmpdir);
+    ASSERT_INT_EQ(cas_pack_create(src, packpath), CAS_OK);
+
+    struct cas *dst = make_store("import_dst");
+    struct cas_tree *dct = cas_tree_new(dst);
+    struct cas_pack *pack = cas_pack_open(packpath);
+
+    ASSERT(pack != NULL);
+
+    uint64_t total = 0, stored = 0;
+
+    /* With a verifier the forgery is refused and never lands. */
+    ASSERT_INT_EQ(cas_pack_import(pack, dst, CAS_COMPRESS_NEVER,
+                  CAS_CODEC_NONE, cas_tree_check_object,
+                  &total, &stored), CAS_ERR);
+    ASSERT_INT_EQ(cas_exists(dst, hash), 0);
+
+    /* Without one, a re-encoded object is refused rather than trusted,
+     * because this layer has nothing to check it against. */
+    total = stored = 0;
+    ASSERT_INT_EQ(cas_pack_import(pack, dst, CAS_COMPRESS_NEVER,
+                  CAS_CODEC_NONE, NULL, &total, &stored), CAS_ERR);
+    ASSERT_INT_EQ(cas_exists(dst, hash), 0);
+
+    cas_pack_close(pack);
+    cas_tree_free(dct);
+    cas_free(dst);
+    cas_tree_free(sct);
+    cas_free(src);
+}
+
+/****************************************************************
  * Main
  ****************************************************************/
 
@@ -1773,6 +2599,7 @@ main(void)
     RUN(test_fsck_corrupt_blob);
     RUN(test_fsck_root);
     RUN(test_gc_basic);
+    RUN(test_gc_pack_compacts);
     RUN(test_gc_preserves_history);
     RUN(test_gc_empty);
     RUN(test_gc_grace_period);
@@ -1793,6 +2620,15 @@ main(void)
     RUN(test_htree_many_entries);
     RUN(test_htree_pack_import);
     RUN(test_htree_fsck_skips);
+    RUN(test_htree_forged_table_pointer);
+    RUN(test_name_utf8_validation);
+    RUN(test_name_order_is_codepoint_order);
+    RUN(test_duplicate_names_rejected);
+    RUN(test_htree_duplicate_record_rejected);
+    RUN(test_text_tree_non_canonical);
+    RUN(test_put_checked_rejects_forgery);
+    RUN(test_htree_lookup_malformed);
+    RUN(test_pack_import_rejects_forged_htree);
 
     TEST_REPORT();
 }

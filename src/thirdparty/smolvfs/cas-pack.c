@@ -127,6 +127,44 @@ parse_header(const char *hdr, size_t hdrsz,
 	return CAS_OK;
 }
 
+/* fsync a directory so a rename or unlink of an entry within it becomes
+ * durable, mirroring fsync_dir in cas.c.  Best effort: a failure to open
+ * or fsync is not reported, since the rename or unlink has already
+ * completed and there is no clean way to unwind it. */
+static void
+fsync_dir(const char *dir)
+{
+	int fd = open(dir, O_RDONLY | O_DIRECTORY);
+
+	if (fd < 0)
+		return;
+	fsync(fd);
+	close(fd);
+}
+
+/* fsync the directory holding path.  The pack contents are fsynced before
+ * the rename; the rename itself only reaches disk once its directory is
+ * fsynced. */
+static void
+fsync_parent_dir(const char *path)
+{
+	char dir[512];
+	const char *slash = strrchr(path, '/');
+	size_t n = slash ? (size_t)(slash - path) : 0;
+
+	if (n == 0) {
+		dir[0] = '.';
+		dir[1] = '\0';
+	} else {
+		if (n >= sizeof(dir))
+			return;
+		memcpy(dir, path, n);
+		dir[n] = '\0';
+	}
+
+	fsync_dir(dir);
+}
+
 /****************************************************************
  * Lifecycle
  ****************************************************************/
@@ -239,6 +277,50 @@ find_entry(const struct cas_pack *pack,
 			return e;
 	}
 	return NULL;
+}
+
+/* Locate an object's raw on-disk region within an open pack, without
+ * decoding it.  On success *region and *region_size point into the pack
+ * mmap (the data region preceding the trailer) and *tr is a copy of the
+ * object's trailer.  This lets pack_create copy a packed object forward
+ * verbatim, preserving its v1/v2 framing.  Returns CAS_ENOTFOUND if the
+ * hash is not in the pack. */
+static int
+pack_raw_region(struct cas_pack *pack, const unsigned char *bin_hash,
+                const unsigned char **region, uint64_t *region_size,
+                struct cas_pack_trailer *tr)
+{
+	const unsigned char *e = find_entry(pack, bin_hash);
+
+	if (!e)
+		return CAS_ENOTFOUND;
+
+	uint64_t trailer_off = load_le64(e + PACK_IDX_OFFSET);
+
+	if (trailer_off + CAS_PACK_BLOCK > pack->maplen)
+		return CAS_ERR;
+
+	const struct cas_pack_trailer *ptr =
+		(const struct cas_pack_trailer *)
+		((const char *)pack->map + trailer_off);
+
+	char type[CAS_TYPE_MAX + 1];
+	size_t content_len;
+
+	if (parse_header(ptr->header, CAS_PACK_HEADER_LEN,
+	                 type, sizeof(type), &content_len) != CAS_OK)
+		return CAS_ERR;
+
+	uint64_t stored = load_le64(e + PACK_IDX_STORED);
+	uint64_t rsize = stored ? stored : content_len;
+
+	if (rsize > trailer_off)
+		return CAS_ERR;
+
+	*region = (const unsigned char *)pack->map + trailer_off - rsize;
+	*region_size = rsize;
+	memcpy(tr, ptr, sizeof(*tr));
+	return CAS_OK;
 }
 
 static void
@@ -495,6 +577,7 @@ struct import_ctx {
 	struct cas *store;
 	int policy;
 	int codec;
+	cas_pack_verify_fn verify;
 	uint64_t total;
 	uint64_t stored;
 	int rc;
@@ -514,17 +597,30 @@ import_one(const char *hash, void *ctx)
 		return 1;
 	}
 
-	/* An "htree" object is a lookup-optimized re-encoding of a "tree"
-	 * whose address is the hash of the canonical text form, not of the
-	 * htree bytes; that text form cannot be rebuilt here, so the bytes
-	 * are stored verbatim at the pack's address and trusted (the pack
-	 * index is checksummed, and the htree carries its own adler32).
-	 * Every other type is self-addressed: its content must hash to the
-	 * claimed address, so a tampered object is rejected before it is
-	 * written into the depot. */
+	/* A bundle is somebody else's bytes, so this is a trust boundary and
+	 * nothing crosses it unchecked.
+	 *
+	 * With a verifier, it is the authority for every type and replaces
+	 * the check below.  Without one, a self-addressed object still has
+	 * to hash to the address it claims, but a re-encoded object is
+	 * refused: its address commits to a canonical form this layer cannot
+	 * rebuild, so there is nothing here to check it against.  Refusing
+	 * is the only safe answer.  Trusting the pack index checksum and the
+	 * htree's own adler32 is not: both are computed by whoever produced
+	 * the bundle. */
 	int reencoded = cas_type_is_reencoded(type);
 
-	if (!reencoded) {
+	if (ic->verify) {
+		if (ic->verify(type, cf.data, cf.len, hash) != CAS_OK) {
+			cas_close(&cf);
+			ic->rc = CAS_ERR;
+			return 1;
+		}
+	} else if (reencoded) {
+		cas_close(&cf);
+		ic->rc = CAS_ERR;
+		return 1;
+	} else {
 		char computed[CAS_HASH_HEX + 1];
 
 		cas_hash_object(type, cf.data, cf.len, computed);
@@ -562,14 +658,15 @@ import_one(const char *hash, void *ctx)
 
 int
 cas_pack_import(struct cas_pack *pack, struct cas *store,
-                int policy, int codec, uint64_t *total_out,
-                uint64_t *stored_out)
+                int policy, int codec, cas_pack_verify_fn verify,
+                uint64_t *total_out, uint64_t *stored_out)
 {
 	struct import_ctx ic = {
 		.pack = pack,
 		.store = store,
 		.policy = policy,
 		.codec = codec,
+		.verify = verify,
 	};
 
 	cas_pack_foreach(pack, import_one, &ic);
@@ -621,20 +718,32 @@ hash_cmp(const void *a, const void *b)
 	return memcmp(a, b, CAS_HASH_LEN);
 }
 
-/* Build a packfile from all loose objects.  policy/codec decide per
- * object whether to compress a raw (v1) object into the packfile;
- * compression is kept only if it saves space, and already-compressed
- * objects are copied verbatim.  The address of every object is
- * unchanged. */
+/* Build a packfile from every loose object plus every object already in
+ * the pack at path, so a repack folds the existing pack forward instead
+ * of dropping it.  This is what makes reclaiming loose copies safe: once
+ * the loose objects are gone, the only surviving copy is in the pack, and
+ * the next repack must carry it forward.  policy/codec decide per object
+ * whether to compress a raw (v1) object into the packfile; compression is
+ * kept only if it saves space, and already-compressed objects (loose or
+ * carried from the old pack) are copied verbatim.  The address of every
+ * object is unchanged. */
 static int
-pack_create(struct cas *store, const char *path, int policy, int codec)
+pack_create(struct cas *store, const char *path, int policy, int codec,
+            cas_pack_keep_fn keep, void *keep_ctx)
 {
 	struct hash_list hl = {0};
 
+	/* Read the current pack (if any) so its objects are carried into the
+	 * new one.  A missing or corrupt pack simply contributes nothing. */
+	struct cas_pack *old = cas_pack_open(path);
+
 	cas_foreach(store, collect_hash, &hl);
+	if (old)
+		cas_pack_foreach(old, collect_hash, &hl);
 
 	if (hl.count == 0) {
 		free(hl.hashes);
+		cas_pack_close(old);
 		return CAS_OK;
 	}
 
@@ -653,11 +762,44 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 	}
 	hl.count = unique;
 
+	/* If the filter drops every object, leave the existing pack in place
+	 * rather than replacing it with an empty one.  That only happens when
+	 * nothing is reachable (no refs), where wiping the pack would be an
+	 * aggressive response to a possibly missing ref; the conservative
+	 * choice keeps the data. */
+
+	/* Drop objects the caller does not want kept.  A gc-driven compaction
+	 * keeps only reachable objects, so unreachable ones (loose, or trapped
+	 * in the old pack) fall out of the new pack here. */
+	if (keep) {
+		int kept = 0;
+
+		for (int i = 0; i < hl.count; i++) {
+			char hex[CAS_HASH_HEX + 1];
+
+			cas_hex_encode(hl.hashes[i], CAS_HASH_LEN, hex);
+			if (keep(hex, keep_ctx)) {
+				if (i != kept)
+					memcpy(hl.hashes[kept],
+					       hl.hashes[i], CAS_HASH_LEN);
+				kept++;
+			}
+		}
+		hl.count = kept;
+
+		if (hl.count == 0) {
+			free(hl.hashes);
+			cas_pack_close(old);
+			return CAS_OK;
+		}
+	}
+
 	char tmp[512];
 
 	if (snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path) >=
 	    (int)sizeof(tmp)) {
 		free(hl.hashes);
+		cas_pack_close(old);
 		return CAS_ERR;
 	}
 
@@ -665,6 +807,7 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 
 	if (fd < 0) {
 		free(hl.hashes);
+		cas_pack_close(old);
 		return CAS_EIO;
 	}
 
@@ -675,6 +818,7 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 		close(fd);
 		unlink(tmp);
 		free(hl.hashes);
+		cas_pack_close(old);
 		return CAS_ENOMEM;
 	}
 
@@ -685,18 +829,31 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 
 		cas_hex_encode(hl.hashes[i], CAS_HASH_LEN, hex);
 
-		/* copy the raw on-disk encoding verbatim so compressed
-		 * objects stay compressed and their trailer (v1 or v2
-		 * magic) is preserved unchanged */
-		struct cas_file cf;
+		/* Copy the raw on-disk encoding verbatim so compressed
+		 * objects stay compressed and their trailer (v1 or v2 magic)
+		 * is preserved unchanged.  Prefer the loose copy; fall back to
+		 * the old pack for objects whose loose copy was reclaimed. */
+		struct cas_file cf = {0};
 		struct cas_pack_trailer tr;
+		const unsigned char *src;
+		uint64_t src_len;
+		int from_loose;
 		int rc = cas_open_loose_raw(store, &cf, hex, &tr);
 
-		if (rc != CAS_OK) {
+		if (rc == CAS_OK) {
+			src = cf.data;
+			src_len = cf.len;
+			from_loose = 1;
+		} else if (rc == CAS_ENOTFOUND && old &&
+		           pack_raw_region(old, hl.hashes[i], &src,
+		                           &src_len, &tr) == CAS_OK) {
+			from_loose = 0;
+		} else {
 			close(fd);
 			unlink(tmp);
 			free(index);
 			free(hl.hashes);
+			cas_pack_close(old);
 			return rc;
 		}
 
@@ -706,11 +863,13 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 		if (parse_header(tr.header, CAS_PACK_HEADER_LEN,
 		                 type, sizeof(type),
 		                 &content_len) != CAS_OK) {
-			cas_close(&cf);
+			if (from_loose)
+				cas_close(&cf);
 			close(fd);
 			unlink(tmp);
 			free(index);
 			free(hl.hashes);
+			cas_pack_close(old);
 			return CAS_ERR;
 		}
 
@@ -720,26 +879,26 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 		                       CAS_PACK_MAGIC_LEN) == 0;
 
 		/* bytes to write for this object: raw region by default */
-		const unsigned char *emit = cf.data;
-		uint64_t emit_size = cf.len;
+		const unsigned char *emit = src;
+		uint64_t emit_size = src_len;
 		unsigned char *scratch = NULL;
 
 		/* a raw object is the plaintext, so the policy can judge
 		 * it; already-compressed (framed) objects are left alone */
-		int use = (!framed_in && cf.len > 0)
-		          ? cas_codec_policy(policy, codec, cf.data, cf.len)
+		int use = (!framed_in && src_len > 0)
+		          ? cas_codec_policy(policy, codec, src, src_len)
 		          : CAS_CODEC_NONE;
 
 		if (use != CAS_CODEC_NONE && cas_codec_can_encode(use)) {
-			scratch = malloc(cf.len + 1);
+			scratch = malloc(src_len + 1);
 			if (scratch) {
-				size_t plen = cf.len;
-				int erc = cas_codec_encode(use, cf.data,
-				                           cf.len, scratch + 1,
+				size_t plen = src_len;
+				int erc = cas_codec_encode(use, src,
+				                           src_len, scratch + 1,
 				                           &plen);
 
 				if (erc == CAS_OK &&
-				    plen + 1 < cf.len - cf.len / 8) {
+				    plen + 1 < src_len - src_len / 8) {
 					scratch[0] = (unsigned char)use;
 					emit = scratch;
 					emit_size = plen + 1;
@@ -758,16 +917,19 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 			rc = write_full(fd, emit, emit_size);
 			if (rc != CAS_OK) {
 				free(scratch);
-				cas_close(&cf);
+				if (from_loose)
+					cas_close(&cf);
 				close(fd);
 				unlink(tmp);
 				free(index);
 				free(hl.hashes);
+				cas_pack_close(old);
 				return rc;
 			}
 		}
 		free(scratch);
-		cas_close(&cf);
+		if (from_loose)
+			cas_close(&cf);
 		offset += emit_size;
 
 		rc = write_full(fd, &tr, sizeof(tr));
@@ -776,6 +938,7 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 			unlink(tmp);
 			free(index);
 			free(hl.hashes);
+			cas_pack_close(old);
 			return rc;
 		}
 
@@ -791,6 +954,7 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 	}
 
 	free(hl.hashes);
+	cas_pack_close(old);
 
 	size_t index_size = (size_t)hl.count * sizeof(*index);
 	int rc = write_full(fd, index, index_size);
@@ -838,6 +1002,16 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 		return rc;
 	}
 
+	/* Flush the pack contents before the rename so a crash cannot leave a
+	 * committed pack.dat whose bytes never reached disk.  With loose
+	 * copies now reclaimable, the pack can be the only copy, so it needs
+	 * the same durability as a loose object write in cas.c. */
+	if (fsync(fd) != 0) {
+		close(fd);
+		unlink(tmp);
+		return CAS_EIO;
+	}
+
 	close(fd);
 
 	if (rename(tmp, path) != 0) {
@@ -845,18 +1019,126 @@ pack_create(struct cas *store, const char *path, int policy, int codec)
 		return CAS_EIO;
 	}
 
+	/* Make the rename itself durable. */
+	fsync_parent_dir(path);
 	return CAS_OK;
 }
 
 int
 cas_pack_create(struct cas *store, const char *path)
 {
-	return pack_create(store, path, CAS_COMPRESS_NEVER, CAS_CODEC_NONE);
+	return pack_create(store, path, CAS_COMPRESS_NEVER, CAS_CODEC_NONE,
+	                   NULL, NULL);
 }
 
 int
 cas_pack_create_z(struct cas *store, const char *path, int policy,
                   int codec)
 {
-	return pack_create(store, path, policy, codec);
+	return pack_create(store, path, policy, codec, NULL, NULL);
+}
+
+int
+cas_pack_create_filtered(struct cas *store, const char *path, int policy,
+                         int codec, cas_pack_keep_fn keep, void *ctx)
+{
+	return pack_create(store, path, policy, codec, keep, ctx);
+}
+
+/* Confirm a loose object is safely retrievable from the committed pack
+ * before its loose copy may be removed.  For an ordinary object the pack
+ * copy must decode and re-hash to the same address; a re-encoded object
+ * (htree) is addressed by a canonical form this layer cannot rebuild, so
+ * a successful decode from the checksum-validated pack is the check.
+ * Returns nonzero if the loose copy may be reclaimed. */
+static int
+reclaimable(struct cas_pack *pack, const char *hex)
+{
+	struct cas_file cf;
+	char type[CAS_TYPE_MAX + 1];
+
+	if (cas_pack_lookup(pack, &cf, hex, type, sizeof(type)) != CAS_OK)
+		return 0;
+
+	int ok;
+
+	if (cas_type_is_reencoded(type)) {
+		ok = 1;
+	} else {
+		char verify[CAS_HASH_HEX + 1];
+
+		ok = cas_hash_object(type, cf.data, cf.len, verify) == CAS_OK &&
+		     memcmp(verify, hex, CAS_HASH_HEX) == 0;
+	}
+
+	cas_close(&cf);
+	return ok;
+}
+
+int
+cas_pack_reclaim(struct cas *store, const char *path, uint64_t *removed_out)
+{
+	/* Open the pack fresh: this is the authoritative committed state,
+	 * independent of any pack handle the store opened earlier.  Without a
+	 * valid pack there is nothing to reclaim against. */
+	struct cas_pack *pack = cas_pack_open(path);
+
+	if (!pack) {
+		/* No valid pack means no object has a pack copy, so every
+		 * loose object must stay.  Reclaiming nothing is the safe,
+		 * correct result, not an error. */
+		if (removed_out)
+			*removed_out = 0;
+		return CAS_OK;
+	}
+
+	/* Point the live store at the committed pack before removing any
+	 * loose copy, so a read through the store finds every object in the
+	 * pack the instant its loose copy is gone. */
+	cas_reload_pack(store);
+
+	/* Snapshot the loose objects up front; removing during cas_foreach
+	 * would mutate the directories it is walking. */
+	struct hash_list hl = {0};
+
+	cas_foreach(store, collect_hash, &hl);
+
+	unsigned char touched[256] = {0};
+	uint64_t removed = 0;
+
+	for (int i = 0; i < hl.count; i++) {
+		char hex[CAS_HASH_HEX + 1];
+
+		cas_hex_encode(hl.hashes[i], CAS_HASH_LEN, hex);
+
+		if (!reclaimable(pack, hex))
+			continue;
+
+		if (cas_remove(store, hex) == CAS_OK) {
+			removed++;
+			touched[hl.hashes[i][0]] = 1;
+		}
+	}
+
+	free(hl.hashes);
+	cas_pack_close(pack);
+
+	/* Make the removals durable: fsync each bucket directory an object
+	 * was unlinked from.  A bucket is named by the two hex digits of the
+	 * hash's first byte. */
+	const char *base = cas_basedir(store);
+
+	for (int b = 0; b < 256; b++) {
+		char dir[512];
+
+		if (!touched[b])
+			continue;
+		if (snprintf(dir, sizeof(dir), "%s/%02x", base, b) <
+		    (int)sizeof(dir))
+			fsync_dir(dir);
+	}
+
+	if (removed_out)
+		*removed_out = removed;
+	return CAS_OK;
 }

@@ -315,8 +315,10 @@ test_fsck_corrupt(void)
     snprintf(path, sizeof(path), "%s/%.2s/%s", depot, hash, hash);
     FILE *fp = fopen(path, "a");
     ASSERT(fp != NULL);
-    fputc('X', fp);
-    fclose(fp);
+    if (fp) {
+        fputc('X', fp);
+        fclose(fp);
+    }
 
     ASSERT_INT_EQ(cas_fsck_object(store, hash), CAS_FSCK_CORRUPT);
 

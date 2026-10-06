@@ -5,6 +5,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "cas-tree.h"
+#include "cas-pack.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -85,6 +86,97 @@ cas_tree_dir_free(struct cas_tree_dir *dir)
     dir->_cap = 0;
 }
 
+/****************************************************************
+ * Name validation and canonical ordering
+ ****************************************************************/
+
+/** Compare two names in unsigned byte order.
+ *
+ *  This is the canonical order.  For well-formed UTF-8 it is also
+ *  codepoint order, because UTF-8 is designed so that byte-wise
+ *  comparison and codepoint comparison agree, so a single rule serves
+ *  both and no table is needed to apply it.
+ *
+ *  Spelled out with memcmp rather than strcmp because the ordering is
+ *  part of the format: it must be unsigned, and it must break a tie
+ *  between a name and its own prefix by length.
+ */
+static int
+name_cmp(const char *a, const char *b)
+{
+    size_t la = strlen(a);
+    size_t lb = strlen(b);
+    size_t n = la < lb ? la : lb;
+    int c = memcmp(a, b, n);
+
+    if (c != 0)
+        return c;
+    if (la != lb)
+        return la < lb ? -1 : 1;
+    return 0;
+}
+
+/** Reject anything that is not well-formed UTF-8.
+ *
+ *  Strict about the three encodings a lenient decoder would accept and
+ *  a canonical form must not: an overlong sequence, a surrogate, and a
+ *  codepoint past U+10FFFF.  Overlong forms matter most.  Without this
+ *  check a name may carry C0 AF, which is not the byte 0x2F and so slips
+ *  past the separator test below, yet decodes to U+002F in any consumer
+ *  that is not equally strict.
+ *
+ *  Normalization is deliberately not attempted: NFC would need Unicode
+ *  tables this library will not carry.  A producer that wants a name to
+ *  address the same on every platform must normalize before storing it.
+ *  Byte-distinct names are distinct entries here.
+ */
+static int
+valid_utf8(const char *s, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)s;
+    size_t i = 0;
+
+    while (i < len) {
+        unsigned char c = p[i];
+        uint32_t cp, min;
+        int extra;
+
+        if (c < 0x80) {
+            i++;
+            continue;
+        } else if ((c & 0xe0) == 0xc0) {
+            cp = c & 0x1fu; extra = 1; min = 0x80;
+        } else if ((c & 0xf0) == 0xe0) {
+            cp = c & 0x0fu; extra = 2; min = 0x800;
+        } else if ((c & 0xf8) == 0xf0) {
+            cp = c & 0x07u; extra = 3; min = 0x10000;
+        } else {
+            return 0;  // continuation byte, or a 5-byte or longer form
+        }
+
+        if (i + (size_t)extra >= len)
+            return 0;
+
+        for (int k = 1; k <= extra; k++) {
+            unsigned char cc = p[i + k];
+
+            if ((cc & 0xc0) != 0x80)
+                return 0;
+            cp = (cp << 6) | (cc & 0x3fu);
+        }
+
+        if (cp < min)
+            return 0;  // overlong
+        if (cp >= 0xd800 && cp <= 0xdfff)
+            return 0;  // surrogate
+        if (cp > 0x10ffff)
+            return 0;
+
+        i += (size_t)extra + 1;
+    }
+    return 1;
+}
+
 int
 cas_tree_dir_add(struct cas_tree_dir *dir,
                  const struct cas_tree_entry *e)
@@ -94,6 +186,8 @@ cas_tree_dir_add(struct cas_tree_dir *dir,
     if (nlen == 0 || nlen > CAS_TREE_NAME_MAX)
         return CAS_ERR;
     if (strchr(e->name, '/') || strchr(e->name, '\n'))
+        return CAS_ERR;
+    if (!valid_utf8(e->name, nlen))
         return CAS_ERR;
 
     if (dir->count >= dir->_cap) {
@@ -414,6 +508,17 @@ htree_parse_dir(const unsigned char *data, size_t len,
                            (const char *)(data + pos), keylen, &e);
         pos += keylen + datalen;
 
+        /* Records are stored in ascending name order, so requiring it
+         * here costs one comparison and rejects both a reordered object
+         * and a duplicate name.  A duplicate is what matters: it would
+         * let a listing and a lookup disagree about which child a name
+         * has, the same divergence htree_verify exists to catch. */
+        if (dir->count > 0 &&
+            name_cmp(dir->entries[dir->count - 1].name, e.name) >= 0) {
+            cas_tree_dir_free(dir);
+            return CAS_ERR;
+        }
+
         if (cas_tree_dir_add(dir, &e) != CAS_OK) {
             cas_tree_dir_free(dir);
             return CAS_ERR;
@@ -436,6 +541,12 @@ htree_lookup_entry(const unsigned char *data, size_t len,
 
     size_t cdb_len = len - HTREE_FOOTER_LEN;
     size_t keylen = strlen(name);
+
+    /* No valid record can carry a longer key, and matching one would
+     * copy it into a fixed-size name field below. */
+    if (keylen > CAS_TREE_NAME_MAX)
+        return CAS_ENOTFOUND;
+
     uint32_t h = djb_hash(name, keylen);
     int b = (int)(h % HTREE_NBUCKETS);
 
@@ -460,7 +571,12 @@ htree_lookup_entry(const unsigned char *data, size_t len,
             return CAS_ENOTFOUND;
         if (sh != h)
             continue;
-        if (rpos + 8 > cdb_len)
+
+        /* Every bound here widens to size_t before it is added.  These
+         * offsets come off the wire as uint32_t, so computing the sum in
+         * that width lets a value near UINT32_MAX wrap past the limit it
+         * is being tested against and the read go anywhere. */
+        if ((size_t)rpos + 8 > cdb_len)
             return CAS_ERR;
 
         uint32_t rkeylen = load_le32(data + rpos);
@@ -470,7 +586,7 @@ htree_lookup_entry(const unsigned char *data, size_t len,
             continue;
         if (rdatalen != HTREE_ENTRY_DATA_LEN)
             return CAS_ERR;
-        if (rpos + 8 + rkeylen + rdatalen > cdb_len)
+        if ((size_t)rpos + 8 + rkeylen + rdatalen > cdb_len)
             return CAS_ERR;
         if (memcmp(data + rpos + 8, name, keylen) != 0)
             continue;
@@ -495,7 +611,20 @@ tree_text_lookup(const unsigned char *data, size_t len,
 
     const char *p = (const char *)data + 1;
     const char *end = (const char *)data + len;
+    struct cas_tree_entry prev;
+    int have_prev = 0;
 
+    /* Stops at the match, and validates only the lines it passed on the
+     * way.  A read does not re-verify a whole object: objects are
+     * checked as they enter the store, and what is in the store is
+     * trusted (see cas_tree_put_checked).  Scanning past the answer to
+     * re-prove a property that was established on write would be work
+     * every lookup pays and no lookup needs.
+     *
+     * The prefix check is kept because it is free.  This loop compares
+     * names anyway, and the early exit below is only sound while the
+     * order holds, so noticing a break in it costs nothing and keeps the
+     * function from silently reporting a name absent. */
     while (p < end) {
         const char *nl = memchr(p, '\n', (size_t)(end - p));
 
@@ -508,7 +637,10 @@ tree_text_lookup(const unsigned char *data, size_t len,
         if (parse_entry(p, linelen, &e) != CAS_OK)
             return CAS_ERR;
 
-        int cmp = strcmp(e.name, name);
+        if (have_prev && name_cmp(prev.name, e.name) >= 0)
+            return CAS_ERR;
+
+        int cmp = name_cmp(e.name, name);
 
         if (cmp == 0) {
             *e_out = e;
@@ -517,6 +649,8 @@ tree_text_lookup(const unsigned char *data, size_t len,
         if (cmp > 0)
             return CAS_ENOTFOUND;
 
+        prev = e;
+        have_prev = 1;
         p = nl + 1;
     }
 
@@ -533,7 +667,7 @@ entry_cmp(const void *a, const void *b)
     const struct cas_tree_entry *ea = a;
     const struct cas_tree_entry *eb = b;
 
-    return strcmp(ea->name, eb->name);
+    return name_cmp(ea->name, eb->name);
 }
 
 int
@@ -543,6 +677,14 @@ cas_tree_store(struct cas_tree *ct, struct cas_tree_dir *dir,
     if (dir->count > 1)
         qsort(dir->entries, (size_t)dir->count,
               sizeof(*dir->entries), entry_cmp);
+
+    /* Two entries under one name have no canonical order, so the
+     * address they produce would depend on how qsort happened to break
+     * the tie.  Refuse rather than mint an unstable address. */
+    for (int i = 1; i < dir->count; i++) {
+        if (name_cmp(dir->entries[i - 1].name, dir->entries[i].name) == 0)
+            return CAS_ERR;
+    }
 
     size_t textlen;
     char *text = tree_serialize(dir, &textlen);
@@ -645,6 +787,13 @@ tree_text_load(const unsigned char *data, size_t len,
         struct cas_tree_entry e;
 
         if (parse_entry(p, linelen, &e) != CAS_OK) {
+            cas_tree_dir_free(dir);
+            return CAS_ERR;
+        }
+
+        /* ascending, strictly: see the same check in htree_parse_dir */
+        if (dir->count > 0 &&
+            name_cmp(dir->entries[dir->count - 1].name, e.name) >= 0) {
             cas_tree_dir_free(dir);
             return CAS_ERR;
         }
@@ -1283,8 +1432,104 @@ cas_tree_ref_foreach(struct cas_tree *ct, cas_tree_ref_fn fn,
  * Fsck
  ****************************************************************/
 
+/** Check that a text tree is spelled canonically.
+ *
+ *  Hashing the bytes already binds them to the address, so a
+ *  non-canonical text is not a forgery: it is a second, self-consistent
+ *  object for the same directory. That is still worth catching, because
+ *  it means one directory has two addresses and will not dedup, and
+ *  loading it and storing it back silently moves it.
+ *
+ *  The check is the same shape as the htree one: parse, re-serialize,
+ *  compare. It rejects the spellings sscanf would otherwise accept, a
+ *  signed uid or a differently padded mode among them.
+ */
 static int
-fsck_verify_tree_object(struct cas_tree *ct, const char *hash)
+tree_text_verify(const unsigned char *data, size_t len)
+{
+    struct cas_tree_dir dir;
+
+    if (tree_text_load(data, len, &dir) != CAS_OK)
+        return CAS_FSCK_CORRUPT;
+
+    size_t textlen;
+    char *text = tree_serialize(&dir, &textlen);
+
+    cas_tree_dir_free(&dir);
+    if (!text)
+        return CAS_FSCK_CORRUPT;
+
+    int canonical = textlen == len && memcmp(text, data, len) == 0;
+
+    free(text);
+    return canonical ? CAS_FSCK_OK : CAS_FSCK_CORRUPT;
+}
+
+/** Verify an htree against the address it is stored under.
+ *
+ *  Two checks are required, and the second is the one that is easy to
+ *  leave out.  Recovering the entry set and hashing its canonical text
+ *  form proves the object names the right children.  It does not prove
+ *  the object answers a lookup with them: entries can be reached either
+ *  by scanning the records region or by following the tables, and only
+ *  the latter is the path htree_lookup_entry takes.  An htree whose
+ *  tables point at records the scan never reaches -- one placed past the
+ *  tables, say -- passes the first check while returning a different
+ *  child from a lookup than from a listing.
+ *
+ *  Re-deriving the whole encoding and comparing bytes closes that,
+ *  whichever way the entries were recovered, and covers anything else a
+ *  forger might hide in the object.  It works because the encoding is
+ *  canonical: htree_build is a function of the sorted entry set alone.
+ *
+ *  See FORMAT.md, "Verifying an htree", and ATOLL.md A4.1.
+ */
+static int
+htree_verify(const unsigned char *data, size_t len, const char *hash)
+{
+    struct cas_tree_dir dir;
+
+    /* checks the magic, the adler32, and the record framing */
+    if (htree_parse_dir(data, len, &dir) != CAS_OK)
+        return CAS_FSCK_CORRUPT;
+
+    if (dir.count > 1)
+        qsort(dir.entries, (size_t)dir.count,
+              sizeof(*dir.entries), entry_cmp);
+
+    size_t textlen;
+    char *text = tree_serialize(&dir, &textlen);
+
+    if (!text) {
+        cas_tree_dir_free(&dir);
+        return CAS_FSCK_CORRUPT;
+    }
+
+    char computed[CAS_HASH_HEX + 1];
+
+    cas_hash_object("tree", text, textlen, computed);
+    free(text);
+
+    if (strcmp(computed, hash) != 0) {
+        cas_tree_dir_free(&dir);
+        return CAS_FSCK_CORRUPT;
+    }
+
+    size_t binlen;
+    unsigned char *bin = htree_build(&dir, &binlen);
+
+    cas_tree_dir_free(&dir);
+    if (!bin)
+        return CAS_FSCK_CORRUPT;
+
+    int pinned = binlen == len && memcmp(bin, data, len) == 0;
+
+    free(bin);
+    return pinned ? CAS_FSCK_OK : CAS_FSCK_CORRUPT;
+}
+
+int
+cas_tree_verify(struct cas_tree *ct, const char *hash)
 {
     struct cas_file cf;
     char type[CAS_TYPE_MAX + 1];
@@ -1300,55 +1545,62 @@ fsck_verify_tree_object(struct cas_tree *ct, const char *hash)
         return CAS_FSCK_CORRUPT;
 
     if (strcmp(type, "tree") == 0) {
+        int status = tree_text_verify(cf.data, cf.len);
+
         cas_close(&cf);
+        if (status != CAS_FSCK_OK)
+            return status;
         return cas_fsck_object(ct->store, hash);
     }
 
     if (strcmp(type, "htree") != 0) {
         cas_close(&cf);
-        return CAS_FSCK_CORRUPT;
+        return CAS_FSCK_FOREIGN;
     }
 
-    if (cf.len < HTREE_HEADER_LEN + HTREE_FOOTER_LEN ||
-        memcmp(cf.data + cf.len - HTREE_MAGIC_LEN, HTREE_MAGIC,
-               HTREE_MAGIC_LEN) != 0) {
-        cas_close(&cf);
-        return CAS_FSCK_CORRUPT;
-    }
+    int status = htree_verify(cf.data, cf.len, hash);
 
-    size_t cdb_len = cf.len - HTREE_FOOTER_LEN;
-
-    if (load_le32(cf.data + cdb_len) != adler32(cf.data, cdb_len)) {
-        cas_close(&cf);
-        return CAS_FSCK_CORRUPT;
-    }
-
-    struct cas_tree_dir dir;
-
-    if (htree_parse_dir(cf.data, cf.len, &dir) != CAS_OK) {
-        cas_close(&cf);
-        return CAS_FSCK_CORRUPT;
-    }
     cas_close(&cf);
+    return status;
+}
 
-    if (dir.count > 1)
-        qsort(dir.entries, (size_t)dir.count,
-              sizeof(*dir.entries), entry_cmp);
+int
+cas_tree_check_object(const char *type, const void *data, size_t len,
+                      const char *hash)
+{
+    if (!type || !hash || (!data && len > 0))
+        return CAS_ERR;
 
-    size_t textlen;
-    char *text = tree_serialize(&dir, &textlen);
+    if (strcmp(type, "htree") == 0)
+        return htree_verify(data, len, hash) == CAS_FSCK_OK
+               ? CAS_OK : CAS_ERR;
 
-    cas_tree_dir_free(&dir);
-    if (!text)
-        return CAS_FSCK_CORRUPT;
-
+    /* Every other type is addressed by its own plaintext, so the
+     * address is the check. */
     char computed[CAS_HASH_HEX + 1];
 
-    cas_hash_object("tree", text, textlen, computed);
-    free(text);
+    if (cas_hash_object(type, data, len, computed) != CAS_OK)
+        return CAS_ERR;
+    if (strcmp(computed, hash) != 0)
+        return CAS_ERR;
 
-    return strcmp(computed, hash) == 0
-        ? CAS_FSCK_OK : CAS_FSCK_CORRUPT;
+    if (strcmp(type, "tree") == 0 &&
+        tree_text_verify(data, len) != CAS_FSCK_OK)
+        return CAS_ERR;
+
+    return CAS_OK;
+}
+
+int
+cas_tree_put_checked(struct cas_tree *ct, const char *type,
+                     const void *data, size_t len, const char *hash)
+{
+    if (!ct)
+        return CAS_ERR;
+    if (cas_tree_check_object(type, data, len, hash) != CAS_OK)
+        return CAS_ERR;
+
+    return cas_put_object_at(ct->store, type, data, len, hash);
 }
 
 static int
@@ -1356,12 +1608,20 @@ fsck_tree(struct cas_tree *ct, const char *path,
           const char *tree_hash, cas_tree_fsck_fn fn, void *ctx,
           int *errors)
 {
-    int status = fsck_verify_tree_object(ct, tree_hash);
+    int status = cas_tree_verify(ct, tree_hash);
 
     if (status == CAS_FSCK_NOCODEC) {
         /* compressed tree, no decoder: a skip.  Cannot descend into
          * a tree we cannot decode, so this subtree is left unchecked. */
         if (fn && fn(path, tree_hash, CAS_TREE_FSCK_NOCODEC, ctx))
+            return 1;
+        return 0;
+    }
+    if (status == CAS_FSCK_FOREIGN) {
+        /* A ref may name any object, and a signed topic head names a
+         * version record on purpose.  Report it and stop descending;
+         * whoever understands the type is the one who can check it. */
+        if (fn && fn(path, tree_hash, CAS_TREE_FSCK_FOREIGN, ctx))
             return 1;
         return 0;
     }
@@ -1481,207 +1741,4 @@ cas_tree_fsck(struct cas_tree *ct, cas_tree_fsck_fn fn, void *ctx)
 
     cas_tree_ref_foreach(ct, fsck_ref, &fc);
     return fc.errors ? CAS_ERR : CAS_OK;
-}
-
-/****************************************************************
- * Garbage collection
- ****************************************************************/
-
-struct hash_set {
-    char (*hashes)[CAS_HASH_HEX + 1];
-    int count;
-    int cap;
-};
-
-static void
-hash_set_init(struct hash_set *hs)
-{
-    hs->hashes = NULL;
-    hs->count = 0;
-    hs->cap = 0;
-}
-
-static void
-hash_set_free(struct hash_set *hs)
-{
-    free(hs->hashes);
-    hs->hashes = NULL;
-    hs->count = 0;
-    hs->cap = 0;
-}
-
-static int
-hash_set_contains(struct hash_set *hs, const char *hash)
-{
-    for (int i = 0; i < hs->count; i++)
-        if (strcmp(hs->hashes[i], hash) == 0)
-            return 1;
-    return 0;
-}
-
-static int
-hash_set_add(struct hash_set *hs, const char *hash)
-{
-    if (hash_set_contains(hs, hash))
-        return CAS_OK;
-    if (hs->count >= hs->cap) {
-        int newcap = hs->cap ? hs->cap * 2 : 64;
-        void *p = realloc(hs->hashes,
-            (size_t)newcap * sizeof(*hs->hashes));
-
-        if (!p)
-            return CAS_ENOMEM;
-        hs->hashes = p;
-        hs->cap = newcap;
-    }
-    memcpy(hs->hashes[hs->count++], hash, CAS_HASH_HEX + 1);
-    return CAS_OK;
-}
-
-static int
-mark_tree(struct cas_tree *ct, struct hash_set *reachable,
-          const char *tree_hash)
-{
-    if (hash_set_contains(reachable, tree_hash))
-        return CAS_OK;
-    if (hash_set_add(reachable, tree_hash) != CAS_OK)
-        return CAS_ENOMEM;
-
-    struct cas_tree_dir dir;
-    int rc = cas_tree_load(ct, tree_hash, &dir);
-
-    /* A missing object is a sparse boundary, not an error: history may
-     * have been pruned out from under a still-referenced ref.  The hash
-     * stays marked (harmless, nothing to sweep) and we stop descending
-     * here since the entry list is gone.  Corruption or I/O errors are
-     * still real failures and abort the mark. */
-    if (rc == CAS_ENOTFOUND)
-        return CAS_OK;
-    if (rc != CAS_OK)
-        return rc;
-
-    for (int i = 0; i < dir.count; i++) {
-        struct cas_tree_entry *e = &dir.entries[i];
-        int type = e->mode & CAS_TREE_S_IFMT;
-
-        if (type == CAS_TREE_S_IFDIR) {
-            rc = mark_tree(ct, reachable, e->hash);
-            if (rc != CAS_OK) {
-                cas_tree_dir_free(&dir);
-                return rc;
-            }
-        } else {
-            if (hash_set_add(reachable, e->hash) != CAS_OK) {
-                cas_tree_dir_free(&dir);
-                return CAS_ENOMEM;
-            }
-        }
-    }
-
-    cas_tree_dir_free(&dir);
-    return CAS_OK;
-}
-
-struct mark_ref_ctx {
-    struct cas_tree *ct;
-    struct hash_set *reachable;
-    int rc;
-};
-
-static int
-mark_log_entry(const char *hash, int64_t time_s, int32_t time_ns,
-               const char *comment, void *ctx)
-{
-    (void)time_s;
-    (void)time_ns;
-    (void)comment;
-    struct mark_ref_ctx *mc = ctx;
-
-    int rc = mark_tree(mc->ct, mc->reachable, hash);
-
-    if (rc != CAS_OK) {
-        mc->rc = rc;
-        return 1;
-    }
-    return 0;
-}
-
-static int
-mark_ref(const char *name, void *ctx)
-{
-    struct mark_ref_ctx *mc = ctx;
-
-    cas_tree_log_read(mc->ct, name, mark_log_entry, mc);
-    return mc->rc != CAS_OK ? 1 : 0;
-}
-
-struct sweep_ctx {
-    struct cas *store;
-    struct hash_set *reachable;
-    cas_tree_gc_fn fn;
-    void *ctx;
-    time_t cutoff;
-    int removed;
-};
-
-static int
-sweep_visitor(const char *hash, void *ctx)
-{
-    struct sweep_ctx *sc = ctx;
-
-    if (hash_set_contains(sc->reachable, hash))
-        return 0;
-
-    if (sc->cutoff > 0) {
-        time_t mtime;
-
-        if (cas_object_mtime(sc->store, hash, &mtime) == CAS_OK &&
-            mtime >= sc->cutoff)
-            return 0;
-    }
-
-    if (cas_remove(sc->store, hash) == CAS_OK) {
-        sc->removed++;
-        if (sc->fn && sc->fn(hash, sc->ctx) != 0)
-            return 1;
-    }
-    return 0;
-}
-
-int
-cas_tree_gc(struct cas_tree *ct, time_t grace, cas_tree_gc_fn fn,
-            void *ctx, int *removed)
-{
-    struct hash_set reachable;
-
-    hash_set_init(&reachable);
-
-    struct mark_ref_ctx mc = {
-        .ct = ct,
-        .reachable = &reachable,
-        .rc = CAS_OK,
-    };
-
-    cas_tree_ref_foreach(ct, mark_ref, &mc);
-    if (mc.rc != CAS_OK) {
-        hash_set_free(&reachable);
-        return mc.rc;
-    }
-
-    struct sweep_ctx sc = {
-        .store = cas_tree_cas(ct),
-        .reachable = &reachable,
-        .fn = fn,
-        .ctx = ctx,
-        .cutoff = grace > 0 ? time(NULL) - grace : 0,
-        .removed = 0,
-    };
-
-    cas_foreach(cas_tree_cas(ct), sweep_visitor, &sc);
-
-    if (removed)
-        *removed = sc.removed;
-
-    hash_set_free(&reachable);
-    return CAS_OK;
 }
