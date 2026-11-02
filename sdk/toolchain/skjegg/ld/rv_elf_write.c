@@ -2,6 +2,7 @@
 
 #include "rv_ld.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -46,8 +47,6 @@ rv_ld_write_exec(struct linker *ld, const char *path)
     int shstrtab_len = 0;
     shstrtab[shstrtab_len++] = '\0';
 
-    int shnum = 1 + nalloc + 1;
-
     struct {
         int sec_idx;
         uint32_t file_off;
@@ -70,6 +69,98 @@ rv_ld_write_exec(struct linker *ld, const char *path)
         nmap++;
     }
 
+    /* Non-alloc debug sections ride after the loadable ones: real file bytes,
+       no vaddr, so they are not part of any program header. */
+    struct {
+        int dbg_idx;
+        uint32_t file_off;
+        uint32_t shname_off;
+    } debug_map[MAX_DEBUG_SECS];
+    int ndmap = 0;
+
+    for (int k = 0; k < ld->ndebug; k++) {
+        if (ld->debug[k].size == 0)
+            continue;
+        debug_map[ndmap].dbg_idx = k;
+        debug_map[ndmap].file_off = file_offset;
+        size_t nlen = strlen(ld->debug[k].name) + 1;
+        debug_map[ndmap].shname_off = (uint32_t)shstrtab_len;
+        memcpy(shstrtab + shstrtab_len, ld->debug[k].name, nlen);
+        shstrtab_len += (int)nlen;
+        file_offset += ld->debug[k].size;
+        ndmap++;
+    }
+
+    /* Re-emit a .symtab (+ its .strtab): the defined functions (STT_FUNC, local
+       statics and globals) and defined global symbols, with final addresses and
+       sizes, so addr2line -f and a backtrace resolve names.  ELF orders local
+       symbols before global ones, and sh_info names the first global. */
+    int *symsel = xmalloc((size_t)(ld->nsyms + 1) * sizeof(int));
+    int nsymsel = 0, nlocal = 0;
+    size_t symstr_cap = 1;
+    for (int pass = 0; pass < 2; pass++) {
+        for (int s = 0; s < ld->nsyms; s++) {
+            struct ld_symbol *g = &ld->syms[s];
+            if (!g->defined || g->name[0] == '\0')
+                continue;
+            if (g->type != STT_FUNC && g->binding != STB_GLOBAL)
+                continue;
+            if ((g->binding == STB_LOCAL) != (pass == 0))
+                continue;
+            symsel[nsymsel++] = s;
+            symstr_cap += strlen(g->name) + 1;
+        }
+        if (pass == 0)
+            nlocal = nsymsel;
+    }
+    int first_global = 1 + nlocal;      /* the null symbol at index 0 is local */
+
+    char *symstr = xmalloc(symstr_cap);
+    int symstr_len = 0;
+    symstr[symstr_len++] = '\0';
+    uint32_t symtab_size = (uint32_t)(1 + nsymsel) * 16;
+    uint8_t *symtab = xmalloc(symtab_size);
+    memset(symtab, 0, symtab_size);     /* entry 0 is the null symbol */
+    for (int i = 0; i < nsymsel; i++) {
+        struct ld_symbol *g = &ld->syms[symsel[i]];
+        uint8_t *e = symtab + (uint32_t)(i + 1) * 16;
+        uint16_t shndx = SHN_ABS;
+        size_t nlen = strlen(g->name) + 1;
+        for (int m = 0; m < nmap; m++) {
+            struct ld_output_sec *os = &sc->sections[alloc_map[m].sec_idx];
+            if (g->value >= os->vaddr && g->value < os->vaddr + os->size) {
+                shndx = (uint16_t)(1 + m);      /* section 0 is the null shdr */
+                break;
+            }
+        }
+        put32(e + 0, (uint32_t)symstr_len);
+        memcpy(symstr + symstr_len, g->name, nlen);
+        symstr_len += (int)nlen;
+        put32(e + 4, g->value);
+        put32(e + 8, g->size);
+        e[12] = (uint8_t)ELF32_ST_INFO(g->binding, g->type);
+        e[13] = 0;
+        put16(e + 14, shndx);
+    }
+
+    uint32_t symtab_name_off = (uint32_t)shstrtab_len;
+    {
+        const char *nm = ".symtab";
+        size_t nlen = strlen(nm) + 1;
+        memcpy(shstrtab + shstrtab_len, nm, nlen);
+        shstrtab_len += (int)nlen;
+    }
+    uint32_t strtab_name_off = (uint32_t)shstrtab_len;
+    {
+        const char *nm = ".strtab";
+        size_t nlen = strlen(nm) + 1;
+        memcpy(shstrtab + shstrtab_len, nm, nlen);
+        shstrtab_len += (int)nlen;
+    }
+
+    int shnum = 1 + nalloc + ndmap + 3;   /* +.symtab +.strtab +.shstrtab */
+    int strtab_shndx = 1 + nalloc + ndmap + 1;  /* .strtab follows .symtab */
+
     uint32_t shstrtab_name_off = (uint32_t)shstrtab_len;
     {
         const char *nm = ".shstrtab";
@@ -78,6 +169,10 @@ rv_ld_write_exec(struct linker *ld, const char *path)
         shstrtab_len += (int)nlen;
     }
 
+    uint32_t symtab_file_off = file_offset;
+    file_offset += symtab_size;
+    uint32_t symstr_file_off = file_offset;
+    file_offset += (uint32_t)symstr_len;
     uint32_t shstrtab_file_off = file_offset;
     file_offset += (uint32_t)shstrtab_len;
     uint32_t shoff = file_offset;
@@ -155,6 +250,13 @@ rv_ld_write_exec(struct linker *ld, const char *path)
         fwrite(os->data, 1, os->size, f);
     }
 
+    for (int i = 0; i < ndmap; i++)
+        fwrite(ld->debug[debug_map[i].dbg_idx].data, 1,
+               ld->debug[debug_map[i].dbg_idx].size, f);
+
+    fwrite(symtab, 1, symtab_size, f);
+    fwrite(symstr, 1, (size_t)symstr_len, f);
+
     fwrite(shstrtab, 1, (size_t)shstrtab_len, f);
 
     {
@@ -182,8 +284,45 @@ rv_ld_write_exec(struct linker *ld, const char *path)
         fwrite(sh, 1, 40, f);
     }
 
-    {
+    for (int i = 0; i < ndmap; i++) {
+        struct ld_debug_sec *d = &ld->debug[debug_map[i].dbg_idx];
         uint8_t sh[40];
+        memset(sh, 0, sizeof(sh));
+        put32(sh + 0, debug_map[i].shname_off);
+        put32(sh + 4, SHT_PROGBITS);    /* non-alloc: flags 0, vaddr 0 */
+        put32(sh + 16, debug_map[i].file_off);
+        put32(sh + 20, d->size);
+        put32(sh + 32, 1);              /* byte-aligned */
+        fwrite(sh, 1, 40, f);
+    }
+
+    {
+        uint8_t sh[40];                 /* .symtab */
+        memset(sh, 0, sizeof(sh));
+        put32(sh + 0, symtab_name_off);
+        put32(sh + 4, SHT_SYMTAB);
+        put32(sh + 16, symtab_file_off);
+        put32(sh + 20, symtab_size);
+        put32(sh + 24, (uint32_t)strtab_shndx);     /* sh_link = .strtab */
+        put32(sh + 28, (uint32_t)first_global);     /* sh_info = 1st global */
+        put32(sh + 32, 4);
+        put32(sh + 36, 16);                         /* entsize */
+        fwrite(sh, 1, 40, f);
+    }
+
+    {
+        uint8_t sh[40];                 /* .strtab (symbol names) */
+        memset(sh, 0, sizeof(sh));
+        put32(sh + 0, strtab_name_off);
+        put32(sh + 4, SHT_STRTAB);
+        put32(sh + 16, symstr_file_off);
+        put32(sh + 20, (uint32_t)symstr_len);
+        put32(sh + 32, 1);
+        fwrite(sh, 1, 40, f);
+    }
+
+    {
+        uint8_t sh[40];                 /* .shstrtab */
         memset(sh, 0, sizeof(sh));
         put32(sh + 0, shstrtab_name_off);
         put32(sh + 4, SHT_STRTAB);
@@ -193,6 +332,9 @@ rv_ld_write_exec(struct linker *ld, const char *path)
         fwrite(sh, 1, 40, f);
     }
 
+    free(symsel);
+    free(symstr);
+    free(symtab);
     fclose(f);
     chmod(path, 0755);
     return 0;

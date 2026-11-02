@@ -154,6 +154,14 @@ slurp(const char *path)
         fclose(f);
         die("cannot read %s", path);
     }
+    /* ftell on a directory or a special file can report a wild size (a
+       #include naming a directory is the common way in); cap it so the size is
+       never trusted into an absurd allocation. A real source file is far under
+       this, and a directory/device then fails cleanly here or on the read. */
+    if (n > (1L << 30)) {
+        fclose(f);
+        die("file too large: %s", path);
+    }
     rewind(f);
     buf = malloc((size_t)n + 1);
     if (!buf) {
@@ -168,4 +176,94 @@ slurp(const char *path)
     fclose(f);
     buf[n] = '\0';
     return buf;
+}
+
+/****************************************************************
+ * String set (open addressing, borrowed keys)
+ *
+ * Membership for C strings whose storage outlives the set.  Keys are not
+ * copied, only pointed at.  Used to turn a linear "is this name already in a
+ * list" scan (repeated strcmp against a growing array) into an O(1) lookup.
+ ****************************************************************/
+
+static size_t
+strset_hash(const char *s)
+{
+    unsigned long long h = 1469598103934665603ULL;   /* FNV-1a 64-bit */
+
+    while (*s) {
+        h ^= (unsigned char)*s++;
+        h *= 1099511628211ULL;
+    }
+    return (size_t)h;
+}
+
+void
+strset_init(struct strset *s)
+{
+    s->slots = NULL;
+    s->cap = 0;
+    s->count = 0;
+}
+
+static void
+strset_grow(struct strset *s)
+{
+    size_t newcap = s->cap ? s->cap * 2 : 64;
+    const char **ns = xcalloc(newcap, sizeof *ns);
+    size_t mask = newcap - 1;
+    size_t i;
+
+    for (i = 0; i < s->cap; i++) {
+        const char *k = s->slots[i];
+        size_t j;
+        if (!k)
+            continue;
+        for (j = strset_hash(k) & mask; ns[j]; j = (j + 1) & mask)
+            ;
+        ns[j] = k;
+    }
+    free(s->slots);
+    s->slots = ns;
+    s->cap = newcap;
+}
+
+int
+strset_contains(const struct strset *s, const char *key)
+{
+    size_t mask, i;
+
+    if (!s->cap)
+        return 0;
+    mask = s->cap - 1;
+    for (i = strset_hash(key) & mask; s->slots[i]; i = (i + 1) & mask)
+        if (strcmp(s->slots[i], key) == 0)
+            return 1;
+    return 0;
+}
+
+int
+strset_add(struct strset *s, const char *key)
+{
+    size_t mask, i;
+
+    /* keep the load factor under 1/2 so probe chains stay short */
+    if (s->count * 2 >= s->cap)
+        strset_grow(s);
+    mask = s->cap - 1;
+    for (i = strset_hash(key) & mask; s->slots[i]; i = (i + 1) & mask)
+        if (strcmp(s->slots[i], key) == 0)
+            return 0;
+    s->slots[i] = key;
+    s->count++;
+    return 1;
+}
+
+void
+strset_free(struct strset *s)
+{
+    free(s->slots);
+    s->slots = NULL;
+    s->cap = 0;
+    s->count = 0;
 }

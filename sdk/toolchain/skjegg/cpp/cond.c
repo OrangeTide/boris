@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <limits.h>
 
 void
 cond_push(struct cpp *p, int active)
@@ -160,7 +161,8 @@ eval_unary(struct eval_ctx *e)
             switch (op) {
             case '!': return !val;
             case '~': return ~val;
-            case '-': return -val;
+            /* unsigned negate so LLONG_MIN does not overflow (UB) */
+            case '-': return (long long)(0ULL - (unsigned long long)val);
             case '+': return val;
             }
         }
@@ -178,9 +180,16 @@ eval_mul(struct eval_ctx *e)
             break;
         eval_advance(e);
         long long rhs = eval_unary(e);
-        if (op == '*') val *= rhs;
-        else if (op == '/' && rhs != 0) val /= rhs;
-        else if (op == '%' && rhs != 0) val %= rhs;
+        /* Signed overflow is UB; the #if evaluator must not trip it on hostile
+           input. Multiply wraps through unsigned, and divide/modulo guard both
+           the zero divisor and the LLONG_MIN / -1 overflow (defined here to
+           wrap, matching the two's-complement result). */
+        if (op == '*')
+            val = (long long)((unsigned long long)val * (unsigned long long)rhs);
+        else if (op == '/' && rhs != 0)
+            val = (val == LLONG_MIN && rhs == -1) ? LLONG_MIN : val / rhs;
+        else if (op == '%' && rhs != 0)
+            val = (val == LLONG_MIN && rhs == -1) ? 0 : val % rhs;
     }
     return val;
 }
@@ -195,8 +204,11 @@ eval_add(struct eval_ctx *e)
             break;
         eval_advance(e);
         long long rhs = eval_mul(e);
-        if (op == '+') val += rhs;
-        else val -= rhs;
+        /* wrap through unsigned so an overflowing + or - is defined, not UB */
+        if (op == '+')
+            val = (long long)((unsigned long long)val + (unsigned long long)rhs);
+        else
+            val = (long long)((unsigned long long)val - (unsigned long long)rhs);
     }
     return val;
 }
@@ -207,11 +219,27 @@ eval_shift(struct eval_ctx *e)
     long long val = eval_add(e);
     while (e->cur && e->cur->kind == PP_PUNCT && e->cur->len == 2) {
         if (memcmp(e->cur->text, "<<", 2) == 0) {
+            long long n;
             eval_advance(e);
-            val <<= eval_add(e);
+            n = eval_add(e);
+            /* A shift count outside [0,63] is undefined in C; define it here so
+               a hostile #if expression cannot trigger UB. Out of range shifts
+               every bit out (an arithmetic right shift of a negative value
+               saturates to -1). */
+            if (n < 0 || n >= 64)
+                val = 0;
+            else
+                /* compute in unsigned so a left shift that overflows the
+                   signed range wraps (defined) instead of being UB */
+                val = (long long)((unsigned long long)val << n);
         } else if (memcmp(e->cur->text, ">>", 2) == 0) {
+            long long n;
             eval_advance(e);
-            val >>= eval_add(e);
+            n = eval_add(e);
+            if (n < 0 || n >= 64)
+                val = val < 0 ? -1 : 0;
+            else
+                val >>= n;
         } else {
             break;
         }

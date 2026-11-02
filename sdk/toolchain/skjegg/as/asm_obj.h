@@ -55,7 +55,10 @@ struct symbol {
     int section;
     uint32_t value;
     int global;
+    int weak;           /* STB_WEAK binding (a weak definition or reference) */
     int defined;
+    int is_func;        /* STT_FUNC type (set by .type sym,@function) */
+    uint32_t size;      /* st_size (set by .size); 0 if unset */
 };
 
 struct symtab {
@@ -69,5 +72,8 @@ int sym_lookup(struct symtab *st, const char *name);
 int sym_add(struct symtab *st, const char *name);
 void sym_define(struct symtab *st, int idx, int section, uint32_t value);
 void sym_set_global(struct symtab *st, int idx);
+void sym_set_weak(struct symtab *st, int idx);
+void sym_set_func(struct symtab *st, int idx);
+void sym_set_size(struct symtab *st, int idx, uint32_t size);
 
 #endif

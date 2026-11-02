@@ -222,7 +222,11 @@ collect_args(struct pp_token *open, int nparams, int is_variadic, int *nargs)
 
     for (int i = 0; i < argc && i <= cap; i++)
         args[i] = strip_leading_space(arg_heads[i]);
-    *nargs = argc;
+    /* args holds cap + 1 slots and the loop above fills at most that many; a
+       call with more arguments than the macro takes drives argc past it. Report
+       the count actually stored, so the caller's walk over args stays in bounds
+       (an over-long call is otherwise accepted, as before, just not overrun). */
+    *nargs = argc < cap + 1 ? argc : cap + 1;
     return args;
 }
 
@@ -297,8 +301,16 @@ substitute(struct cpp *p, struct cpp_macro *m, struct pp_token **args, int nargs
             if (ridx >= 0 && ridx < nargs && args[ridx]) {
                 struct pp_token *ar = pp_list_dup(args[ridx]);
                 rhs = ar;
-                if (ar)
+                if (ar) {
+                    /* Only the first token of the argument pastes with the lhs;
+                       the rest is appended afterward. Detach it so rhs is a
+                       single token: pp_free_tokens(rhs) below then frees only
+                       that token and leaves rhs_rest, which is spliced in after
+                       the paste, intact (otherwise freeing the whole list left
+                       rhs_rest dangling). */
                     rhs_rest = ar->next;
+                    ar->next = NULL;
+                }
             } else if (ridx >= 0) {
                 rhs = NULL;
             } else {
@@ -388,15 +400,22 @@ macro_expand(struct cpp *p, struct pp_token *input)
                 tail->next->len = (int)strlen(buf);
                 tail->next->kind = PP_NUMBER;
                 break;
-            case BUILTIN_FILE:
-                snprintf(buf, sizeof buf, "\"%s\"",
-                         p->file ? p->file->path : "");
+            case BUILTIN_FILE: {
+                /* A path can be arbitrarily long (a deep CI checkout dir),
+                 * so size the quoted literal to the path rather than a fixed
+                 * buffer: truncation here dropped the closing quote and left
+                 * an unterminated string that ran the parser off to EOF. */
+                const char *fp = p->file ? p->file->path : "";
+                size_t fn = strlen(fp) + 3;     /* two quotes + NUL */
+                char *fb = xmalloc(fn);
+                snprintf(fb, fn, "\"%s\"", fp);
                 tail->next = pp_token_dup(t);
                 free(tail->next->text);
-                tail->next->text = xstrdup(buf);
-                tail->next->len = (int)strlen(buf);
+                tail->next->text = fb;
+                tail->next->len = (int)strlen(fb);
                 tail->next->kind = PP_STRING;
                 break;
+            }
             case BUILTIN_DATE:
                 tail->next = pp_token_dup(t);
                 free(tail->next->text);
@@ -466,7 +485,12 @@ macro_expand(struct cpp *p, struct pp_token *input)
 
         struct pp_token *rparen = find_closing_paren(lparen);
         if (!rparen) {
-            warn("unterminated macro arguments for '%s'", m->name);
+            /* The argument list is not closed within this token list.  A
+               function-like macro call may span source lines, so signal the
+               line driver (cpp_next_line) to pull more input and retry rather
+               than warning here.  Leave the macro name in place meanwhile; if
+               no more input arrives the driver reports it. */
+            p->macro_need_more = 1;
             tail->next = pp_token_dup(t);
             tail = tail->next;
             t = t->next;

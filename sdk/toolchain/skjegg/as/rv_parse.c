@@ -6,6 +6,7 @@
  * shared byte emitter produces RISC-V byte order. */
 
 #include "rv.h"
+#include "dwarf.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -284,15 +285,29 @@ emit_int_list(struct rv_asm *a, int width)
             }
         } else if ((l->tok.type == T_IDENT || l->tok.type == T_DOT_IDENT)
                    && width == 4) {
+            /* resolve the symbol while tok.str is valid, then parse an optional
+               "+ N" / "- N" addend (a symbol-relative `.word sym + 8`) */
+            int idx = -1;
             if (a->pass == 2) {
-                int idx = sym_lookup(&a->st, l->tok.str);
+                idx = sym_lookup(&a->st, l->tok.str);
                 if (idx < 0) idx = sym_add(&a->st, l->tok.str);
-                sec_add_reloc_t(s, s->len, idx, 0, R_RISCV_32);
+            }
+            lex_next(l);
+            int32_t addend = 0;
+            if (l->tok.type == T_PLUS || l->tok.type == T_MINUS) {
+                int neg = l->tok.type == T_MINUS;
+                lex_next(l);
+                if (l->tok.type == T_INT) {
+                    addend = neg ? -(int32_t)l->tok.ival : (int32_t)l->tok.ival;
+                    lex_next(l);
+                }
+            }
+            if (a->pass == 2) {
+                sec_add_reloc_t(s, s->len, idx, addend, R_RISCV_32);
                 sec_emit32(s, 0);
             } else {
                 s->len += 4;
             }
-            lex_next(l);
         } else {
             break;
         }
@@ -332,6 +347,20 @@ do_align(struct rv_asm *a, int bytes)
         while (s->len % bytes) s->len++;
 }
 
+/* Append one line-table row (emit pass only; see .loc below). */
+static void
+rv_add_locrow(struct rv_asm *a, uint32_t offset, int line)
+{
+    if (a->n_locrows >= a->locrow_cap) {
+        a->locrow_cap = a->locrow_cap ? a->locrow_cap * 2 : 64;
+        a->locrows = realloc(a->locrows,
+                             (size_t)a->locrow_cap * sizeof *a->locrows);
+    }
+    a->locrows[a->n_locrows].offset = offset;
+    a->locrows[a->n_locrows].line = line;
+    a->n_locrows++;
+}
+
 static void
 handle_directive(struct rv_asm *a, const char *dir)
 {
@@ -343,6 +372,14 @@ handle_directive(struct rv_asm *a, const char *dir)
     if (strcmp(dir, ".rodata") == 0) { a->cur_section = RSEC_RODATA; return; }
     if (strcmp(dir, ".bss") == 0 || strcmp(dir, ".sbss") == 0) {
         a->cur_section = RSEC_BSS; return;
+    }
+    if (strcmp(dir, ".include") == 0) {
+        lex_next(l);
+        if (l->tok.type != T_STRING)
+            die("line %d: .include needs a \"file\" operand", l->tok.line);
+        if (lex_include(l, l->tok.str) != 0)
+            die("line %d: cannot .include \"%s\"", l->tok.line, l->tok.str);
+        return;         /* the included tokens come next; the parent resumes on pop */
     }
 
     if (strcmp(dir, ".section") == 0) {
@@ -359,12 +396,15 @@ handle_directive(struct rv_asm *a, const char *dir)
         return;
     }
 
-    if (strcmp(dir, ".globl") == 0 || strcmp(dir, ".global") == 0) {
+    if (strcmp(dir, ".globl") == 0 || strcmp(dir, ".global") == 0 ||
+        strcmp(dir, ".weak") == 0) {
+        int is_weak = (dir[1] == 'w');
         lex_next(l);
         if (l->tok.type == T_IDENT || l->tok.type == T_DOT_IDENT) {
             int idx = sym_lookup(&a->st, l->tok.str);
             if (idx < 0) idx = sym_add(&a->st, l->tok.str);
-            sym_set_global(&a->st, idx);
+            if (is_weak) sym_set_weak(&a->st, idx);
+            else sym_set_global(&a->st, idx);
             lex_next(l);
         }
         return;
@@ -419,9 +459,100 @@ handle_directive(struct rv_asm *a, const char *dir)
         return;
     }
 
+    /* .type sym,@function : mark the symbol STT_FUNC so the ELF writer types
+       it, which is what a debugger's address-to-function map and a backtrace
+       read in .symtab.  The '@' is skipped by the lexer, so scan the operands
+       for the "function" word; any other type is left as the default. */
+    if (strcmp(dir, ".type") == 0) {
+        lex_next(l);
+        if (l->tok.type == T_IDENT || l->tok.type == T_DOT_IDENT) {
+            int idx = sym_lookup(&a->st, l->tok.str);
+            if (idx < 0) idx = sym_add(&a->st, l->tok.str);
+            for (lex_next(l); l->tok.type != T_NEWLINE
+                              && l->tok.type != T_EOF; lex_next(l)) {
+                if ((l->tok.type == T_IDENT || l->tok.type == T_DOT_IDENT)
+                    && strcmp(l->tok.str, "function") == 0)
+                    sym_set_func(&a->st, idx);
+            }
+        } else {
+            skip_to_eol(l);
+        }
+        return;
+    }
+
+    /* .size sym,expr : the symbol's byte extent, written as st_size.  expr is a
+       sum of label and integer terms (the backend emits `.Lfunc_endN - func`);
+       resolved symbol values are final by the emit pass, so evaluating the
+       terms each pass leaves the authoritative size after it. */
+    if (strcmp(dir, ".size") == 0) {
+        int target = -1;
+        lex_next(l);
+        if (l->tok.type == T_IDENT || l->tok.type == T_DOT_IDENT) {
+            target = sym_lookup(&a->st, l->tok.str);
+            if (target < 0) target = sym_add(&a->st, l->tok.str);
+            lex_next(l);
+        }
+        if (target >= 0 && l->tok.type == T_COMMA) {
+            int32_t acc = 0;
+            int neg = 0;
+            for (lex_next(l); l->tok.type != T_NEWLINE
+                              && l->tok.type != T_EOF; lex_next(l)) {
+                int32_t v;
+                if (l->tok.type == T_MINUS) { neg = 1; continue; }
+                if (l->tok.type == T_PLUS)  { neg = 0; continue; }
+                if (l->tok.type == T_INT) {
+                    v = (int32_t)l->tok.ival;
+                } else if (l->tok.type == T_IDENT
+                           || l->tok.type == T_DOT_IDENT) {
+                    if (strcmp(l->tok.str, ".") == 0) {
+                        v = (int32_t)a->sections[a->cur_section].len;
+                    } else {
+                        int si = sym_lookup(&a->st, l->tok.str);
+                        v = si >= 0 ? (int32_t)a->st.syms[si].value : 0;
+                    }
+                } else {
+                    break;
+                }
+                acc += neg ? -v : v;
+                neg = 0;
+            }
+            if (acc < 0) acc = 0;
+            sym_set_size(&a->st, target, (uint32_t)acc);
+        }
+        skip_to_eol(l);
+        return;
+    }
+
+    /* .file ["]name["] or .file N "name" : the DWARF source name.  The last
+       one wins; a column/path form past the name is ignored. */
+    if (strcmp(dir, ".file") == 0) {
+        lex_next(l);
+        if (l->tok.type == T_INT)       /* the file number, if present */
+            lex_next(l);
+        if (l->tok.type == T_STRING)
+            a->debug_file = arena_strndup(&a->arena, l->tok.str, l->tok.str_len);
+        skip_to_eol(l);
+        return;
+    }
+
+    /* .loc N line [column] [opts] : one row of the line table.  The address is
+       the current .text offset, known only in the emit pass, so rows are
+       collected then; operands past the line are ignored. */
+    if (strcmp(dir, ".loc") == 0) {
+        int line = 0, seen_line = 0;
+        lex_next(l);
+        if (l->tok.type == T_INT) {     /* file number */
+            lex_next(l);
+            if (l->tok.type == T_INT) { line = (int)l->tok.ival; seen_line = 1; }
+        }
+        if (a->pass == 2 && seen_line && a->cur_section == RSEC_TEXT)
+            rv_add_locrow(a, (uint32_t)a->sections[RSEC_TEXT].len, line);
+        skip_to_eol(l);
+        return;
+    }
+
     /* metadata directives we accept and ignore */
-    if (strcmp(dir, ".type") == 0 || strcmp(dir, ".size") == 0
-        || strcmp(dir, ".option") == 0 || strcmp(dir, ".file") == 0
+    if (strcmp(dir, ".option") == 0
         || strcmp(dir, ".ident") == 0 || strcmp(dir, ".attribute") == 0
         || strcmp(dir, ".local") == 0 || strncmp(dir, ".cfi_", 5) == 0) {
         skip_to_eol(l);
@@ -527,7 +658,7 @@ run_pass(struct rv_asm *a)
                 (*cnt)++;
                 continue;
             }
-            *l = saved;
+            lex_restore(l, &saved);
             skip_to_eol(l);
             if (l->tok.type == T_NEWLINE) lex_next(l);
             continue;
@@ -546,7 +677,7 @@ run_pass(struct rv_asm *a)
                 define_label(a, name);
                 continue;
             }
-            *l = saved;
+            lex_restore(l, &saved);
             handle_directive(a, name);
             skip_to_eol(l);
             if (l->tok.type == T_NEWLINE) lex_next(l);
@@ -603,9 +734,7 @@ sizing_pass(struct rv_asm *a)
     a->recording = 1;
     a->bsite = 0;
     a->nbsites = 0;
-    a->lex.pos = a->lex.src;
-    a->lex.line = 1;
-    a->lex.tok.type = T_NEWLINE;
+    lex_rewind(&a->lex);
     run_pass(a);
 }
 
@@ -668,8 +797,66 @@ rv_free(struct rv_asm *a)
     free(a->bsites);
     free(a->brelax);
     free(a->numlabels);
+    free(a->locrows);
     free(a->lex.str_buf);
     arena_free(&a->arena);
+}
+
+/* Build the DWARF debug sections from the .loc rows collected in the emit pass.
+   The three sections are non-alloc, so they do not perturb the text/data
+   layout; the only link-time unknowns are the absolute address fields, each an
+   R_RISCV_32 against a synthesized .text base symbol (value 0, so the folding in
+   the ELF writer turns it into the .text section symbol plus the addend). */
+void
+rv_emit_debug(struct rv_asm *a)
+{
+    struct arena *ar = &a->arena;
+    struct section *sl = &a->sections[RSEC_DEBUG_LINE];
+    struct section *si = &a->sections[RSEC_DEBUG_INFO];
+    struct section *sa = &a->sections[RSEC_DEBUG_ABBREV];
+    const char *name = a->debug_file ? a->debug_file : "?";
+    struct dw_line_row *rows;
+    uint8_t *bytes;
+    size_t len, set_addr_off, low_off, high_off, b;
+    uint32_t text_end;
+    int sym, i;
+
+    if (a->n_locrows == 0)
+        return;                 /* no .loc seen (no -g): emit nothing */
+
+    /* The text-base symbol the absolute address fields relocate against. */
+    sym = sym_lookup(&a->st, ".Ldebug_text0");
+    if (sym < 0)
+        sym = sym_add(&a->st, ".Ldebug_text0");
+    sym_define(&a->st, sym, RSEC_TEXT, 0);
+
+    rows = arena_zalloc(ar, (size_t)a->n_locrows * sizeof *rows);
+    for (i = 0; i < a->n_locrows; i++) {
+        rows[i].addr = a->locrows[i].offset;
+        rows[i].line = a->locrows[i].line;
+    }
+    text_end = (uint32_t)a->sections[RSEC_TEXT].len;
+
+    /* .debug_line: the line program, set_address fixed to .text + first row. */
+    len = dw_line_build(ar, &name, 1, rows, a->n_locrows, text_end, &bytes,
+                        &set_addr_off, 0, 4);
+    for (b = 0; b < len; b++)
+        sec_emit8(sl, bytes[b]);
+    sec_add_reloc_t(sl, (uint32_t)set_addr_off, sym,
+                    (int32_t)rows[0].addr, R_RISCV_32);
+
+    /* .debug_abbrev: fixed, no relocations. */
+    len = dw_abbrev_build(ar, &bytes);
+    for (b = 0; b < len; b++)
+        sec_emit8(sa, bytes[b]);
+
+    /* .debug_info: a CU spanning all of .text, stmt_list at line program 0. */
+    len = dw_info_build(ar, "skjegg", name, ".", 0, text_end, 0, &bytes,
+                        &low_off, &high_off, 0, 4);
+    for (b = 0; b < len; b++)
+        sec_emit8(si, bytes[b]);
+    sec_add_reloc_t(si, (uint32_t)low_off, sym, 0, R_RISCV_32);
+    sec_add_reloc_t(si, (uint32_t)high_off, sym, (int32_t)text_end, R_RISCV_32);
 }
 
 void
@@ -697,8 +884,6 @@ rv_assemble(struct rv_asm *a)
     a->recording = 0;
     a->bsite = 0;
     a->pcrel_serial = 0;
-    a->lex.pos = a->lex.src;
-    a->lex.line = 1;
-    a->lex.tok.type = T_NEWLINE;
+    lex_rewind(&a->lex);
     run_pass(a);
 }

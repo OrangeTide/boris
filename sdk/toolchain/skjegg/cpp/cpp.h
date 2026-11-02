@@ -25,4 +25,12 @@ int         cpp_next_line(struct cpp *p, char *buf, int bufsize);
 int         cpp_get_line_number(struct cpp *p);
 const char *cpp_get_filename(struct cpp *p);
 
+/* The original source line and file of the content the most recent
+   cpp_next_line returned.  Unlike cpp_get_line_number/cpp_get_filename (which
+   report the current input position, already advanced past that content and
+   possibly into a different file after a directive), these stay pinned to what
+   was emitted, so a consumer can attribute it to its true source location. */
+int         cpp_get_emit_line(struct cpp *p);
+const char *cpp_get_emit_file(struct cpp *p);
+
 #endif /* CPP_H */

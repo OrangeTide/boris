@@ -70,6 +70,13 @@ rvt_begin_func(struct rv_mc *m, int serial)
 
 const char *rvt_errsym(struct rv_mc *m) { return m->errsym; }
 
+/* Debug info (-g): the text sink has no address-to-line table to build, so it
+   records the line as a comment for a human reading the assembly.  The real
+   address mapping is built by the JIT byte sink and, later, by the DWARF line
+   program the assembler will emit. */
+void rv_mc_loc(struct rv_mc *m, int line)
+{ fprintf(m->out, "\t.loc 1 %d\n", line); }
+
 /****************************************************************
  * Base-relative load/store with large-offset lowering (mirrors rv_emit.c's
  * emit_mem: a 12-bit signed immediate reaches only -2048..+2047 from the base,
@@ -147,6 +154,7 @@ r3(struct rv_mc *m, const char *mnem, int rd, int rs1, int rs2)
 void rv_mc_add(struct rv_mc *m, int rd, int rs1, int rs2) { r3(m, "add", rd, rs1, rs2); }
 void rv_mc_sub(struct rv_mc *m, int rd, int rs1, int rs2) { r3(m, "sub", rd, rs1, rs2); }
 void rv_mc_mul(struct rv_mc *m, int rd, int rs1, int rs2) { r3(m, "mul", rd, rs1, rs2); }
+void rv_mc_mulh(struct rv_mc *m, int rd, int rs1, int rs2) { r3(m, "mulh", rd, rs1, rs2); }
 void rv_mc_and(struct rv_mc *m, int rd, int rs1, int rs2) { r3(m, "and", rd, rs1, rs2); }
 void rv_mc_or(struct rv_mc *m, int rd, int rs1, int rs2) { r3(m, "or", rd, rs1, rs2); }
 void rv_mc_xor(struct rv_mc *m, int rd, int rs1, int rs2) { r3(m, "xor", rd, rs1, rs2); }
@@ -202,6 +210,8 @@ void rv_mc_fneg(struct rv_mc *m, int f32, int fd, int fs)
 { fprintf(m->out, "\tfneg.%s %s, %s\n", f32 ? "s" : "d", fnn(fd), fnn(fs)); }
 void rv_mc_fabs(struct rv_mc *m, int f32, int fd, int fs)
 { fprintf(m->out, "\tfabs.%s %s, %s\n", f32 ? "s" : "d", fnn(fd), fnn(fs)); }
+void rv_mc_fsqrt(struct rv_mc *m, int f32, int fd, int fs)
+{ fprintf(m->out, "\tfsqrt.%s %s, %s\n", f32 ? "s" : "d", fnn(fd), fnn(fs)); }
 
 void rv_mc_feq(struct rv_mc *m, int f32, int rd, int fs1, int fs2)
 { fprintf(m->out, "\tfeq.%s %s, %s, %s\n", f32 ? "s" : "d", xn(rd), fnn(fs1), fnn(fs2)); }
@@ -214,6 +224,8 @@ void rv_mc_fcvt_f_w(struct rv_mc *m, int f32, int fd, int rs)
 { fprintf(m->out, "\tfcvt.%s.w %s, %s\n", f32 ? "s" : "d", fnn(fd), xn(rs)); }
 void rv_mc_fcvt_w_f(struct rv_mc *m, int f32, int rd, int fs)
 { fprintf(m->out, "\tfcvt.w.%s %s, %s, rtz\n", f32 ? "s" : "d", xn(rd), fnn(fs)); }
+void rv_mc_fround(struct rv_mc *m, int f32, int rd, int fs)
+{ fprintf(m->out, "\tfcvt.w.%s %s, %s, rne\n", f32 ? "s" : "d", xn(rd), fnn(fs)); }
 void rv_mc_fcvt_d_s(struct rv_mc *m, int fd, int fs) { fprintf(m->out, "\tfcvt.d.s %s, %s\n", fnn(fd), fnn(fs)); }
 void rv_mc_fcvt_s_d(struct rv_mc *m, int fd, int fs) { fprintf(m->out, "\tfcvt.s.d %s, %s\n", fnn(fd), fnn(fs)); }
 void rv_mc_fcvt_d_h(struct rv_mc *m, int fd, int fs) { fprintf(m->out, "\tfcvt.d.h %s, %s\n", fnn(fd), fnn(fs)); }
@@ -257,6 +269,20 @@ emit_string_bytes(FILE *out, const char *s, int n)
     fputs("\"\n", out);
 }
 
+/* format a relocation operand "sym", "sym + N", or "sym - N" (the addend is a
+   symbol-relative initializer's byte offset, carried in the init value word) */
+static const char *
+sym_ref(char *buf, size_t n, const char *sym, int64_t addend)
+{
+    if (addend > 0)
+        snprintf(buf, n, "%s + %lld", sym, (long long)addend);
+    else if (addend < 0)
+        snprintf(buf, n, "%s - %lld", sym, (long long)-addend);
+    else
+        snprintf(buf, n, "%s", sym);
+    return buf;
+}
+
 static void
 emit_init_image(FILE *out, struct ir_global *g)
 {
@@ -268,9 +294,10 @@ emit_init_image(FILE *out, struct ir_global *g)
             fprintf(out, "\t.space %d\n", it->offset - cur);
             cur = it->offset;
         }
-        if (it->sym)
-            fprintf(out, "\t.word %s\n", it->sym);
-        else if (it->size == 8) {
+        if (it->sym) {
+            char ref[160];
+            fprintf(out, "\t.word %s\n", sym_ref(ref, sizeof ref, it->sym, it->ival));
+        } else if (it->size == 8) {
             uint64_t b = (uint64_t)it->ival;
             fprintf(out, "\t.word 0x%08x\n", (unsigned)(b & 0xFFFFFFFF));
             fprintf(out, "\t.word 0x%08x\n", (unsigned)(b >> 32));
@@ -286,60 +313,132 @@ emit_init_image(FILE *out, struct ir_global *g)
         fprintf(out, "\t.space %d\n", g->arr_size - cur);
 }
 
+/* true when a global is zero-filled (no initializer): it belongs in .bss
+   (NOBITS), so its bytes cost no file space, rather than in .data. */
+static int
+global_is_bss(struct ir_global *g)
+{
+    return !g->inits && !g->init_string && g->init_count == 0;
+}
+
+static int
+global_elsz(struct ir_global *g)
+{
+    switch (g->base_type) {
+    case IR_I8:  return 1;
+    case IR_I16: return 2;
+    case IR_I64: return 8;
+    case IR_F64: return 8;
+    default:     return 4;          /* incl. IR_F32 (4-byte bit pattern) */
+    }
+}
+
+/* alignment (power-of-two exponent) + optional .globl + label */
+static void
+emit_global_head(FILE *out, struct ir_global *g)
+{
+    int alb = g->base_type == IR_F64 ? 8 : 4, e = 0;
+    if (g->align > alb)
+        alb = g->align;
+    while ((1 << e) < alb)
+        e++;
+    fprintf(out, "\t.align %d\n", e);
+    if (!g->is_local)
+        fprintf(out, "\t.globl %s\n", g->name);
+    fprintf(out, "%s:\n", g->name);
+}
+
+static void
+emit_global_def(FILE *out, struct ir_global *g)
+{
+    int elsz = global_elsz(g);
+
+    if (g->is_strobj) {
+        /* A static Kobold string object: the {refcount, kind, len, cap} header
+           in target endianness, then the text and a trailing NUL.  cap == len:
+           a static string carries no spare capacity.  The header words assemble
+           per-target (little-endian here), where str_core.c reads them with
+           native loads. */
+        fprintf(out, "\t.word 0x%08x\n", 0xffffffffu);  /* KP_RC_STATIC */
+        fprintf(out, "\t.word 0x%08x\n", 1u);           /* KP_OBJ_STRING */
+        fprintf(out, "\t.word %d\n", g->init_strlen);   /* byte length */
+        fprintf(out, "\t.word %d\n", g->init_strlen);   /* capacity (== length) */
+        if (g->init_strlen > 0)
+            emit_string_bytes(out, g->init_string, g->init_strlen);
+        fprintf(out, "\t.byte 0\n");                    /* trailing NUL */
+    } else if (g->inits) {
+        emit_init_image(out, g);
+    } else if (g->init_string) {
+        emit_string_bytes(out, g->init_string, g->init_strlen);
+    } else {
+        int k;
+        for (k = 0; k < g->init_count; k++) {
+            if (g->init_syms && g->init_syms[k]) {
+                char ref[160];
+                fprintf(out, "\t.word %s\n",
+                    sym_ref(ref, sizeof ref, g->init_syms[k], g->init_ivals[k]));
+            } else if (g->base_type == IR_I64 || g->base_type == IR_F64) {
+                uint64_t bits = (uint64_t)g->init_ivals[k];
+                fprintf(out, "\t.word 0x%08x\n", (unsigned)(bits & 0xFFFFFFFF));
+                fprintf(out, "\t.word 0x%08x\n", (unsigned)(bits >> 32));
+            } else if (elsz == 1)
+                fprintf(out, "\t.byte %" PRId64 "\n", g->init_ivals[k]);
+            else if (elsz == 2)
+                fprintf(out, "\t.short %" PRId64 "\n", g->init_ivals[k]);
+            else
+                fprintf(out, "\t.word %" PRId64 "\n", g->init_ivals[k]);
+        }
+        if (g->arr_size > g->init_count)
+            fprintf(out, "\t.space %d\n", (g->arr_size - g->init_count) * elsz);
+    }
+}
+
 static void
 emit_globals(FILE *out, struct ir_program *prog)
 {
     struct ir_global *g;
+    int any_bss = 0;
+    int any_ro = 0;
 
     fputs("\n\t.data\n", out);
     for (g = prog->globals; g; g = g->next) {
-        int elsz;
+        if (global_is_bss(g)) {
+            any_bss = 1;
+            continue;
+        }
+        if (g->is_rodata) {
+            any_ro = 1;
+            continue;
+        }
+        emit_global_head(out, g);
+        emit_global_def(out, g);
+    }
 
-        switch (g->base_type) {
-        case IR_I8:  elsz = 1; break;
-        case IR_I16: elsz = 2; break;
-        case IR_I64: elsz = 8; break;
-        case IR_F64: elsz = 8; break;
-        default:     elsz = 4; break;   /* incl. IR_F32 (4-byte bit pattern) */
+    /* initialized, read-only globals (const): same bytes, .rodata section */
+    if (any_ro) {
+        fputs("\n\t.section .rodata\n", out);
+        for (g = prog->globals; g; g = g->next) {
+            if (global_is_bss(g) || !g->is_rodata)
+                continue;
+            emit_global_head(out, g);
+            emit_global_def(out, g);
         }
+    }
 
-        {
-            int alb = g->base_type == IR_F64 ? 8 : 4, e = 0;
-            if (g->align > alb)
-                alb = g->align;
-            while ((1 << e) < alb)
-                e++;
-            fprintf(out, "\t.align %d\n", e);
-        }
-        if (!g->is_local)
-            fprintf(out, "\t.globl %s\n", g->name);
-        fprintf(out, "%s:\n", g->name);
-        if (g->inits) {
-            emit_init_image(out, g);
-        } else if (g->init_string) {
-            emit_string_bytes(out, g->init_string, g->init_strlen);
-        } else if (g->init_count > 0) {
-            int k;
-            for (k = 0; k < g->init_count; k++) {
-                if (g->init_syms && g->init_syms[k])
-                    fprintf(out, "\t.word %s\n", g->init_syms[k]);
-                else if (g->base_type == IR_I64 || g->base_type == IR_F64) {
-                    uint64_t bits = (uint64_t)g->init_ivals[k];
-                    fprintf(out, "\t.word 0x%08x\n", (unsigned)(bits & 0xFFFFFFFF));
-                    fprintf(out, "\t.word 0x%08x\n", (unsigned)(bits >> 32));
-                } else if (elsz == 1)
-                    fprintf(out, "\t.byte %" PRId64 "\n", g->init_ivals[k]);
-                else if (elsz == 2)
-                    fprintf(out, "\t.short %" PRId64 "\n", g->init_ivals[k]);
-                else
-                    fprintf(out, "\t.word %" PRId64 "\n", g->init_ivals[k]);
-            }
-            if (g->arr_size > g->init_count)
-                fprintf(out, "\t.space %d\n", (g->arr_size - g->init_count) * elsz);
-        } else {
-            int sz = (g->arr_size > 0) ? g->arr_size * elsz : elsz;
-            fprintf(out, "\t.space %d\n", sz);
-        }
+    if (!any_bss)
+        return;
+
+    /* Zero-filled globals: .bss (NOBITS), no file space for their zeros. */
+    fputs("\n\t.bss\n", out);
+    for (g = prog->globals; g; g = g->next) {
+        int elsz = global_elsz(g);
+        int sz;
+
+        if (!global_is_bss(g))
+            continue;
+        emit_global_head(out, g);
+        sz = (g->arr_size > 0) ? g->arr_size * elsz : elsz;
+        fprintf(out, "\t.space %d\n", sz);
     }
 }
 
@@ -356,6 +455,16 @@ target_emit(FILE *out, struct ir_program *prog)
 
     fputs("# tinc: generated RISC-V (RV32IMFD + Zfh) assembly\n", out);
 
+    /* Under -g a front end sets src_file; emit the DWARF .file hint once so the
+       per-statement .loc directives (rv_mc_loc) attach to it.  The assembler
+       turns .file/.loc into the .debug_line/.debug_info sections. */
+    for (fn = prog->funcs; fn; fn = fn->next) {
+        if (fn->src_file) {
+            fprintf(out, "\t.file 1 \"%s\"\n", fn->src_file);
+            break;
+        }
+    }
+
     m = rvt_new(out);
     if (!m) {
         fputs("rv_mc_text: out of memory\n", stderr);
@@ -363,17 +472,28 @@ target_emit(FILE *out, struct ir_program *prog)
     }
     for (fn = prog->funcs; fn; fn = fn->next) {
         char err[128];
+        int fserial = ++serial;
 
         fprintf(out, "\n\t.text\n\t.align 2\n");
         if (!fn->is_local)
             fprintf(out, "\t.globl %s\n", fn->name);
+        /* STT_FUNC + a size so a debugger maps an address to this function and
+           a backtrace knows its extent; the function body stays wholly in
+           .text, so .Lfunc_end - name is its byte length. */
+        fprintf(out, "\t.type %s, @function\n", fn->name);
         fprintf(out, "%s:\n", fn->name);
 
-        rvt_begin_func(m, ++serial);
-        if (rv_select_func(m, fn, err, sizeof err) != 0) {
+        rvt_begin_func(m, fserial);
+        if (rv_select_func(m, fn,
+                           target_aot_trap_guarded ? RV_TRAP_GUARDED
+                                                   : RV_TRAP_HARDWARE,
+                           err, sizeof err) != 0) {
             fprintf(stderr, "rv_mc_text: %s\n", err);
             exit(1);
         }
+        fprintf(out, ".Lfunc_end%d:\n", fserial);
+        fprintf(out, "\t.size %s, .Lfunc_end%d-%s\n",
+                fn->name, fserial, fn->name);
     }
     rvt_free(m);
 

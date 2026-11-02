@@ -6,9 +6,12 @@
    backend/x86_select.h and backend/arm64_select.h.
 
    The RISC-V backend emits one convention (the platform ILP32 psABI; the
-   toolkit's old stack convention was retired), and RV32's integer divide does
-   not fault on a zero divisor by hardware but the backend never synthesised a
-   guard, so there is no trap-policy parameter here (unlike arm64/x86). */
+   toolkit's old stack convention was retired).  RV32's integer divide does not
+   fault on a zero divisor by hardware (it returns -1 / the dividend), so a
+   front end that wants a trap passes RV_TRAP_GUARDED and the selector
+   synthesises a divisor guard calling kp_trap_div_zero, like arm64/x86.
+   RV_TRAP_HARDWARE emits the bare divide (C's undefined behaviour, and
+   Excelsior, which checks a fallible divisor in its own lowering). */
 
 #ifndef RV_SELECT_H
 #define RV_SELECT_H
@@ -18,10 +21,17 @@
 struct rv_mc;
 struct ir_func;
 
-/* Select machine code for one function, emitting through the sink m.  Returns 0
-   on success; on an unsupported opcode fills err and returns -1.  A symbol the
-   sink could not resolve is reported by the sink through its own error channel,
-   which the caller checks after this returns. */
-int rv_select_func(struct rv_mc *m, struct ir_func *fn, char *err, size_t errlen);
+enum {
+    RV_TRAP_HARDWARE = 0,   /* bare divide, no divisor guard (cc, Excelsior) */
+    RV_TRAP_GUARDED = 1,    /* guard the divisor, call kp_trap_div_zero (Kobold) */
+};
+
+/* Select machine code for one function, emitting through the sink m.  tp is the
+   divide-by-zero trap policy (RV_TRAP_*).  Returns 0 on success; on an
+   unsupported opcode fills err and returns -1.  A symbol the sink could not
+   resolve is reported by the sink through its own error channel, which the
+   caller checks after this returns. */
+int rv_select_func(struct rv_mc *m, struct ir_func *fn, int tp,
+                   char *err, size_t errlen);
 
 #endif /* RV_SELECT_H */
