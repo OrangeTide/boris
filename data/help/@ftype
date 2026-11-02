@@ -1,0 +1,20 @@
+Classify a file in the in-world filesystem.
+
+usage: @ftype <path>
+
+Reports the kind of the file at an absolute VFS path: "text", "binary", or
+"ELF". A directory reports "directory". This is a dumbed-down file(1): it only
+tells these apart, so you can see whether @fcat will show a file or whether it
+is a compiled image to download with @fget.
+
+A file is ELF when it begins with the ELF magic bytes. It is binary when it
+holds a NUL byte or too many non-text bytes near its start; otherwise it is
+text.
+
+Wizard only.
+
+Example:
+  @ftype /bin/greet.elf
+      Reports ELF.
+
+See also @fls, @fcat, @fget.

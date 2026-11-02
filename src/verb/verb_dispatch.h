@@ -9,6 +9,7 @@
 #include "verb_handle.h"
 
 struct obj;
+struct vfs;
 
 /* Per-task context the shared host calls read back through vm_task_userdata. A
  * one-shot task keeps this on the stack for its single run; a resident agent
@@ -59,6 +60,13 @@ int verb_dispatch_init(const char *image_dir, verb_broadcast_fn bcast);
 
 /* Free the host-call environment. */
 void verb_dispatch_shutdown(void);
+
+/* Bind the in-world VFS the host-side tools (the @f* authoring commands and the
+ * web file-transfer endpoints) read and write. The VFS must outlive the bind;
+ * pass NULL to unbind before freeing it. verb_dispatch_vfs returns the bound
+ * VFS, or NULL when none is set. */
+void verb_dispatch_set_vfs(struct vfs *v);
+struct vfs *verb_dispatch_vfs(void);
 
 /* Register the durable wizard-capability query: given an effective owner id,
  * return non-zero if that identity's account is permitted to enable wizard

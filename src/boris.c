@@ -52,6 +52,10 @@
 #include <telnetclient.h>
 #include <verb_dispatch.h>
 #include <verb_agent.h>
+#include <vfs.h>
+#include <p9_vfs.h>
+#include <cas.h>
+#include <cas-tree.h>
 #include <unistd.h>
 
 /* make sure WIN32 is defined when building in a Windows environment */
@@ -149,6 +153,57 @@ static void
 sh_quit(struct iox_loop *loop, int signo UNUSED, void *arg UNUSED)
 {
 	iox_loop_stop(loop);
+}
+
+/* The in-world content-addressed VFS: the tree the @f* authoring commands and
+ * the web file-transfer endpoints read and write, and that the CAS-backed 9P
+ * server serves to guests. */
+#define VM_VFS_DEPOT "data/vfs"
+#define VM_VFS_REF   "vfs"
+
+static struct cas      *vm_cas;
+static struct cas_tree *vm_cas_tree;
+static struct vfs      *vm_vfs;
+
+static void
+vm_vfs_shutdown(void)
+{
+	verb_dispatch_set_vfs(NULL);            /* stop host-side use before free */
+	p9_vfs_set_default(NULL);
+	if (vm_vfs) {
+		vfs_commit(vm_vfs, "server shutdown");
+		vfs_free(vm_vfs);
+		vm_vfs = NULL;
+	}
+	if (vm_cas_tree) {
+		cas_tree_free(vm_cas_tree);
+		vm_cas_tree = NULL;
+	}
+	if (vm_cas) {
+		cas_free(vm_cas);
+		vm_cas = NULL;
+	}
+}
+
+/* Open the in-world VFS and hand it to the dispatcher and the 9P server. On
+ * failure the server continues without a VFS (a warning, not fatal). */
+static void
+vm_vfs_startup(void)
+{
+	vm_cas = cas_new(VM_VFS_DEPOT);
+	if (vm_cas)
+		vm_cas_tree = cas_tree_new(vm_cas);
+	if (vm_cas_tree)
+		vm_vfs = vfs_new(vm_cas_tree, VM_VFS_REF);
+	if (!vm_vfs) {
+		LOG_ERROR("could not open the in-world VFS (%s); "
+		          "VFS-backed tools are unavailable", VM_VFS_DEPOT);
+		vm_vfs_shutdown();
+		return;
+	}
+	verb_dispatch_set_vfs(vm_vfs);
+	p9_vfs_set_default(vm_vfs);
+	LOG_INFO("in-world VFS ready (%s, ref %s)", VM_VFS_DEPOT, VM_VFS_REF);
 }
 
 /* VM agent heartbeat: step every resident agent a slice, reap the dead, and
@@ -488,6 +543,12 @@ main(int argc, char **argv)
 	}
 
 	atexit(verb_dispatch_shutdown);
+
+	/* Open the in-world VFS and bind it to the dispatcher and the 9P server.
+	 * Registered after verb_dispatch_shutdown so, LIFO, it tears down first
+	 * (unbinding the VFS before the dispatcher frees its env). */
+	vm_vfs_startup();
+	atexit(vm_vfs_shutdown);
 
 	/* Let the authority model map an effective owner to its account's durable
 	 * wizard capability. Until this is set, no identity may elevate. */

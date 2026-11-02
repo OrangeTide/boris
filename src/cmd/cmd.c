@@ -112,6 +112,12 @@ static const struct command_table {
 	{ "@grant", command_do_grant },
 	{ "@revoke", command_do_revoke },
 	{ "@chown", command_do_chown },
+	{ "@fedit", command_do_fedit },
+	{ "@fls", command_do_fls },
+	{ "@fcat", command_do_fcat },
+	{ "@ftype", command_do_ftype },
+	{ "@fget", command_do_fget },
+	{ "@fput", command_do_fput },
 };
 
 /**

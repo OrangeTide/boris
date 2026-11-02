@@ -1,0 +1,17 @@
+List a directory, or stat a single file, in the in-world filesystem.
+
+usage: @fls [path]
+
+With no argument, lists the VFS root. With a directory path, lists its
+entries; a directory is shown with a trailing '/'. With a file path, shows
+that one file's size. Each line is "<kind> <size> <name>", where kind is
+'d' for a directory or '-' for a file, and a directory's size is shown as
+'-'.
+
+The path must be absolute, for example /src. Wizard only.
+
+Example:
+  @fls /src
+      List the sources under /src.
+
+See also @fcat, @ftype, @fedit, @fget.

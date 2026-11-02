@@ -33,6 +33,7 @@ static char              g_image_dir[VD_DIR_MAX];
 static int             (*g_may_wizard)(const char *owner_id);
 static int               g_create_max;   /* per-task sys_create cap; 0 = unlimited */
 static int               g_owned_max;    /* per-owner object cap; 0 = unlimited */
+static struct vfs       *g_vfs;          /* in-world VFS for host-side tools; may be NULL */
 
 /* sys_setpriv modes, in lockstep with sdk/vm/include/vmsys.h (VM_PRIV_*). */
 #define VERB_PRIV_WIZ_ON    1u   /* enable wizard (if available) */
@@ -686,6 +687,18 @@ verb_dispatch_init(const char *image_dir, verb_broadcast_fn bcast)
 }
 
 void
+verb_dispatch_set_vfs(struct vfs *v)
+{
+	g_vfs = v;
+}
+
+struct vfs *
+verb_dispatch_vfs(void)
+{
+	return g_vfs;
+}
+
+void
 verb_dispatch_set_wizard_check(int (*fn)(const char *owner_id))
 {
 	g_may_wizard = fn;
@@ -714,6 +727,7 @@ verb_dispatch_shutdown(void)
 	g_may_wizard = NULL;
 	g_create_max = 0;
 	g_owned_max = 0;
+	g_vfs = NULL;
 }
 
 /* Set up a loaded task's context and output, hand it its arguments, and run it

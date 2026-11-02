@@ -1,0 +1,20 @@
+Upload a file from your client into the in-world filesystem.
+
+usage: @fput <path>
+
+Uploads a file chosen in the client to the given absolute VFS path, creating
+or overwriting it. Parent directories are created as needed. This is how you
+bring a source or a prebuilt image in from your machine.
+
+This command is only available from the web client. On a terminal client it
+reports that it is unsupported; use @fedit to author a text file in place
+instead.
+
+The path must be an absolute VFS path made of letters, digits, '/', '.', '-',
+and '_'. Wizard only.
+
+Example:
+  @fput /src/util.kp
+      Pick a local file to store at /src/util.kp through the web client.
+
+See also @fget, @fedit, @fcat, @fls.
