@@ -3,18 +3,19 @@
  * This is compile-in-world (doc/vm-hosting-proposal.md P3). It reads a guest
  * source from the VFS, runs the skjegg toolchain over temporary host files, and
  * writes the resulting RV32 ELF back into the VFS. The toolchain stages are
- * themselves RV32 guests (skj-cc-rv.elf, skj-as-rv.elf, skj-ld-rv.elf) run under
- * the embedded runtime, each confined to the build directory through a hostcap
- * mount. No host execve, so the whole pipeline runs inside the security
- * sandbox. Source in, ELF out, both in the VFS tree; the CAS folding is the
- * VFS's.
+ * themselves RV32 guests (skj-cc-rv.elf, skj-as-rv.elf, skj-ld-rv.elf,
+ * skj-kpc-rv.elf, skj-kp-rv.elf) run under the embedded runtime, each confined
+ * to the build directory through a hostcap mount. No host execve, so the whole
+ * pipeline runs inside the security sandbox. Source in, ELF out, both in the
+ * VFS tree; the CAS folding is the VFS's.
  *
- * Two guest languages are recognized by the source extension:
+ * Three guest languages are recognized by the source extension:
  *   .c          C:         skj-cc-rv -> skj-as-rv -> skj-ld-rv
  *   .s, .S      assembly:               skj-as-rv -> skj-ld-rv
- * A compiled program links the C start files and the confined libc, so it must
- * supply main() and is a plain program, not a command verb. (Kobold-Pascal
- * .pas/.kp is planned; its v0.39 guest pipeline is not wired here yet.) */
+ *   .pas, .kp   Kobold:     skj-kpc-rv -> skj-kp-rv -> skj-as-rv -> skj-ld-rv
+ * A C or assembly program links the C start files and the confined libc; a
+ * Kobold program links its own crt and the freestanding runtime archive. Each
+ * supplies its own entry and is a plain program, not a command verb. */
 
 #ifndef VFS_COMPILE_H
 #define VFS_COMPILE_H
@@ -34,16 +35,17 @@ struct vfs;
 
 /* Where the toolchain guests and their link inputs live. These are host paths,
  * not VFS paths: the stage ELFs and the prebuilt link inputs are build products
- * of `make -C sdk/vm toolchain` (toolchain_dir holds skj-{cc,as,ld}-rv.elf;
- * lib_dir holds crt0.o, va_rv.o, soft64_div.o, libc.a, fini.o). A higher layer
+ * of `make -C sdk/vm toolchain` (toolchain_dir holds skj-{cc,as,ld,kp,kpc}-rv.elf;
+ * lib_dir holds the C link inputs crt0.o, va_rv.o, soft64_div.o, libc.a, fini.o
+ * and the Kobold link inputs kp_crt_rv.o, libkpaot-rv-free.a). A higher layer
  * supplies them from mud config. include_dir is the guest C header tree mounted
  * read-only for the C front end; it may be NULL for assembly-only use. workdir
  * is the parent for the per-compile build directory; NULL falls back to /tmp.
  * The compile fails with VFS_COMPILE_ECFG if a field it needs is unset or names
  * a missing file. */
 struct vfs_compile_cfg {
-	const char *toolchain_dir;     /* dir with skj-{cc,as,ld}-rv.elf */
-	const char *lib_dir;           /* dir with crt0.o va_rv.o soft64_div.o libc.a fini.o */
+	const char *toolchain_dir;     /* dir with skj-{cc,as,ld,kp,kpc}-rv.elf */
+	const char *lib_dir;           /* dir with the C and Kobold link inputs */
 	const char *include_dir;       /* guest C headers (read-only mount); may be NULL */
 	const char *workdir;           /* parent for the build dir; NULL => /tmp */
 };

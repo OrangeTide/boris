@@ -1,19 +1,20 @@
-/* test_vfs_compile.c : the in-world C and assembly compile pipeline over the
- * VFS.
+/* test_vfs_compile.c : the in-world C, assembly, and Kobold compile pipeline
+ * over the VFS.
  *
  * The config-error and language cases always run; they need no toolchain. The
  * live compile drives the real toolchain guests, so it runs only when the
  * environment points at a built SDK (a bare `make check` skips it when the
  * toolchain has not been built with `make -C sdk/vm toolchain`):
  *
- *   VFSCC_TCDIR   directory with skj-{cc,as,ld}-rv.elf
- *   VFSCC_LIBDIR  directory with crt0.o va_rv.o soft64_div.o libc.a fini.o
+ *   VFSCC_TCDIR   directory with skj-{cc,as,ld,kp,kpc}-rv.elf
+ *   VFSCC_LIBDIR  directory with the C and Kobold link inputs
  *   VFSCC_INCDIR  guest C header tree (optional; the C cases need it only when
  *                 a source includes a header -- these do not)
  *
- * When the toolchain is present it compiles a C program and an assembly program
- * from the VFS, checks each result is an RV32 ELF, runs it in the VM to its
- * expected exit status, and exercises the broken-source error path. */
+ * When the toolchain is present it compiles a C program, an assembly program,
+ * and a Kobold-Pascal program from the VFS, checks each result is an RV32 ELF,
+ * runs it in the VM to its expected exit status, and exercises the
+ * broken-source error path. */
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -55,6 +56,14 @@ static const char ASMSRC[] =
 	"\tli a0, 5\n"
 	"\tret\n";
 
+/* A Kobold-Pascal guest: Halt(9) sets the exit status, so the program exits 9. */
+static const char PASSRC[] =
+	"program t;\n"
+	"begin\n"
+	"  WriteLn('kobold ok');\n"
+	"  Halt(9);\n"
+	"end.\n";
+
 /* A C source the front end rejects, so the compile stage fails. */
 static const char BROKEN[] =
 	"int main(void) { this is not C $$$ }\n";
@@ -67,16 +76,26 @@ run_image(const uint8_t *elf, size_t len)
 	enum vm_state st;
 	int slices = 0, status;
 
-	if (!t)
+	if (!t) {
+		fprintf(stderr, "run_image: vm_task_new failed\n");
 		return -1;
+	}
 	if (vm_task_load_mem(t, elf, (long)len, "compiled.elf") != 0) {
+		fprintf(stderr, "run_image: load_mem failed (len=%zu)\n", len);
 		vm_task_free(t);
 		return -1;
 	}
 	do {
 		st = vm_task_run(t, 8192);
+		if (st == VM_READY && vm_task_blocked(t)) {
+			fprintf(stderr, "run_image: parked (blocked) after %d slices\n", slices);
+			vm_task_free(t);
+			return -1;
+		}
 	} while (st == VM_READY && ++slices < 200000);
 	if (st != VM_EXITED) {
+		fprintf(stderr, "run_image: state=%d after %d slices (not exited)\n",
+		        (int)st, slices);
 		vm_task_free(t);
 		return -1;
 	}
@@ -193,6 +212,8 @@ main(void)
 			                "a.c compiles and exits 7");
 			compile_and_run(v, &cfg, "/src/b.s", ASMSRC, "/bin/b.elf", 5,
 			                "b.s compiles and exits 5");
+			compile_and_run(v, &cfg, "/src/t.pas", PASSRC, "/bin/t.elf", 9,
+			                "t.pas compiles and exits 9");
 
 			/* A broken C source fails in the compile stage. */
 			EXPECT_EQ(vfs_write(v, "/src/bad.c", BROKEN, sizeof BROKEN - 1),

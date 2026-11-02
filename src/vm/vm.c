@@ -46,10 +46,14 @@
 
 /* The per-task guest sizes handed to the scheduler. A guest commits pages
  * lazily; mem_limit caps the committed total (image, heap, stack, page tables,
- * mmap growth), so it must hold more than heap+stack. */
+ * mmap growth), so it must hold more than heap+stack. The image margin covers
+ * the loaded segments including bss: a Kobold guest's shared crt reserves a
+ * 2 MiB execution stack in bss (for kpcom's deep self-compile), so its image
+ * memsz nears 2.5 MiB. The margin holds that with headroom; because pages
+ * commit lazily, a small guest that never touches the reserve costs nothing. */
 #define VM_HEAP_SIZE   (256u * 1024u)
 #define VM_STACK_SIZE  (64u * 1024u)
-#define VM_IMAGE_MARGIN (2u * 1024u * 1024u)
+#define VM_IMAGE_MARGIN (8u * 1024u * 1024u)
 #define VM_MEM_LIMIT   (VM_IMAGE_MARGIN + VM_HEAP_SIZE + VM_STACK_SIZE)
 
 /* Instructions per scheduler round; one slice per runnable process. */

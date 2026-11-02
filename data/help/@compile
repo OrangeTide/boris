@@ -10,11 +10,13 @@ extension. An explicit <out> must be an absolute VFS path.
 The language is chosen by the source extension:
   .c          C
   .s, .S      assembly
+  .pas, .kp   Kobold-Pascal
 
-A compiled program is a plain program and must supply main(), the same
-shape as the SDK examples. The source path must be absolute, for example
-/src/tool.c, and the source must already exist in the VFS at that path.
-Use @fedit to author one.
+A compiled C or assembly program must supply main(); a Kobold program is a
+normal `program ... begin ... end.` The result is a plain program, the same
+shape as the SDK examples, not a command verb. The source path must be
+absolute, for example /src/tool.c, and the source must already exist in the
+VFS at that path. Use @fedit to author one.
 
 The compile runs the skjegg toolchain as RV32 guests under the embedded
 runtime, each confined to a temporary build directory. It needs no host
@@ -23,12 +25,10 @@ errors are shown to you: a failed stage reports its diagnostics.
 
 To launch the result, bind it with @program and run it with @run.
 
-Kobold-Pascal (.pas, .kp) is planned and not accepted yet.
-
 Wizard only. A compiled program runs code with its owner's authority.
 
 Example:
   @compile /src/tool.c
       Compile /src/tool.c to /bin/tool.elf.
-  @compile /src/tool.c /bin/mytool.elf
-      Compile to an explicit output path.
+  @compile /src/hello.pas /bin/hello.elf
+      Compile a Kobold-Pascal source to an explicit output path.

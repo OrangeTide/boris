@@ -39,6 +39,7 @@ core
 
 # VM guest SDK build artifacts
 /data/vm/
+sdk/vm/build/
 sdk/vm/*.o
 sdk/vm/*.s
 
