@@ -16,9 +16,8 @@
 
 /****************************************************************
  * Minimal ELF builder (see src/vm/test_vm.c for the same shape).
- * One PT_LOAD at 0x1000 holding the code followed by the KPIMPT1 host-call
- * table, which the loader finds by scanning. Import index i is reached with
- * a7 = VM_HOSTCALL_BASE + i.
+ * One PT_LOAD at 0x1000 holding the code. A host call is reached with
+ * a7 = VM_HOSTCALL_BASE + a fixed VM_CALL_* selector.
  ****************************************************************/
 
 #define LOAD_VADDR 0x1000u
@@ -40,42 +39,31 @@ le32(uint8_t *p, uint32_t v)
 }
 
 static uint32_t
-emit_call(uint8_t *seg, uint32_t o, uint32_t idx)
+emit_call(uint8_t *seg, uint32_t o, uint32_t sel)
 {
 	le32(seg + o, 0x001008B7u);             /* lui  a7, 0x100 */
 	o += 4;
-	if (idx) {
-		le32(seg + o, 0x00088893u | (idx << 20));  /* addi a7, a7, idx */
+	if (sel) {
+		le32(seg + o, 0x00088893u | (sel << 20));  /* addi a7, a7, sel */
 		o += 4;
 	}
 	le32(seg + o, 0x00000073u);             /* ecall */
 	return o + 4;
 }
 
+/* Host calls reach the runtime by fixed selector (emit_call), so the image
+ * carries code only: no import table. */
 static long
-build_prog(uint8_t *buf, const uint8_t *seg, uint32_t seglen,
-           const char *const *imports, uint32_t nimports)
+build_prog(uint8_t *buf, const uint8_t *seg, uint32_t seglen)
 {
 	uint8_t *eh = buf;
 	uint8_t *ph = buf + 52;
 	uint32_t code_off = 84;
 	uint8_t *body = buf + code_off;
-	uint32_t pad, tbl, i, total;
+	uint32_t total;
 
 	memcpy(body, seg, seglen);
-	pad = (seglen + 3) & ~3u;
-	for (i = seglen; i < pad; i++)
-		body[i] = 0;
-	tbl = pad;
-	memcpy(body + tbl, "KPIMPT1", 7);
-	body[tbl + 7] = 0;
-	le32(body + tbl + 8, nimports);
-	total = tbl + 12;
-	for (i = 0; i < nimports; i++) {
-		uint32_t l = (uint32_t)strlen(imports[i]) + 1;
-		memcpy(body + total, imports[i], l);
-		total += l;
-	}
+	total = seglen;
 
 	memset(eh, 0, 84);
 	eh[0] = 0x7f; eh[1] = 'E'; eh[2] = 'L'; eh[3] = 'F';
@@ -126,7 +114,6 @@ stub_bcast(const char *room, const char *line)
 static void
 test_getprop(void)
 {
-	static const char *const imp[] = { "sys_getprop", "sys_exit" };
 	static const char *const argv[] = { "greeting" };
 	uint8_t seg[48];
 	uint8_t elf[512];
@@ -144,9 +131,9 @@ test_getprop(void)
 	o += 4;
 	le32(seg + o, 0x04000693u);     /* addi a3, x0, 64 (buf cap) */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* sys_getprop(self, name, buf, 64) -> len */
-	o = emit_call(seg, o, 1);       /* sys_exit with that length */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_GETPROP);       /* sys_getprop(self, name, buf, 64) -> len */
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit with that length */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(verb_dispatch_run_image(elf, len, self, "room", argv, 1), 5,
 	          "getprop returned the property length");
@@ -157,7 +144,6 @@ test_getprop(void)
 static void
 test_setprop(void)
 {
-	static const char *const imp[] = { "sys_setprop", "sys_exit" };
 	static const char *const argv[] = { "mood", "cheerful" };
 	uint8_t seg[48];
 	uint8_t elf[512];
@@ -172,11 +158,11 @@ test_setprop(void)
 	o += 4;
 	le32(seg + o, 0x00100513u);     /* addi a0, x0, 1 -> a0 = VM_HANDLE_SELF */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* sys_setprop(self, name, value) */
+	o = emit_call(seg, o, VM_CALL_SETPROP);       /* sys_setprop(self, name, value) */
 	le32(seg + o, 0x00000513u);     /* addi a0, x0, 0 */
 	o += 4;
-	o = emit_call(seg, o, 1);       /* sys_exit 0 */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit 0 */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(verb_dispatch_run_image(elf, len, self, "room", argv, 2), 0,
 	          "setprop program exited cleanly");
@@ -189,7 +175,6 @@ test_setprop(void)
 static void
 test_broadcast(void)
 {
-	static const char *const imp[] = { "sys_broadcast", "sys_exit" };
 	static const char *const argv[] = { "the idol hums." };
 	uint8_t seg[48];
 	uint8_t elf[512];
@@ -200,11 +185,11 @@ test_broadcast(void)
 	g_bcalls = 0;
 	le32(seg + o, 0x0005A503u);     /* lw   a0, 0(a1) -> a0 = argv[0] msg */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* sys_broadcast */
+	o = emit_call(seg, o, VM_CALL_BROADCAST);       /* sys_broadcast */
 	le32(seg + o, 0x00000513u);     /* addi a0, x0, 0 */
 	o += 4;
-	o = emit_call(seg, o, 1);       /* sys_exit 0 */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit 0 */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(verb_dispatch_run_image(elf, len, self, "church", argv, 1), 0,
 	          "broadcast program exited cleanly");
@@ -224,9 +209,6 @@ test_broadcast(void)
 static void
 test_agent_listen(void)
 {
-	static const char *const imp[] = {
-		"sys_listen", "sys_suspend", "sys_getmsg", "sys_setprop", "sys_exit",
-	};
 	uint8_t seg[160];
 	uint8_t elf[512];
 	uint32_t o = 0, patch, got_off;
@@ -238,26 +220,26 @@ test_agent_listen(void)
 	obj_prop_set_internal(self, "%owner", "chars/agent");
 	const char *got;
 
-	o = emit_call(seg, o, 0);               /* sys_listen */
+	o = emit_call(seg, o, VM_CALL_LISTEN);               /* sys_listen */
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (block for event) */
-	o = emit_call(seg, o, 1);               /* sys_suspend -> blocks */
+	o = emit_call(seg, o, VM_CALL_SUSPEND);               /* sys_suspend -> blocks */
 	le32(seg + o, 0x00002537u); o += 4;     /* lui  a0, 2 (record buffer) */
 	le32(seg + o, 0x04000593u); o += 4;     /* addi a1, x0, 64 */
-	o = emit_call(seg, o, 2);               /* sys_getmsg */
+	o = emit_call(seg, o, VM_CALL_GETMSG);               /* sys_getmsg */
 	le32(seg + o, 0x000015B7u); o += 4;     /* lui  a1, 1 (name page) */
 	patch = o;
 	le32(seg + o, 0x00058593u); o += 4;     /* addi a1, a1, got_off (patched) */
 	le32(seg + o, 0x00002637u); o += 4;     /* lui  a2, 2 (record page) */
 	le32(seg + o, 0x00C60613u); o += 4;     /* addi a2, a2, 12 (payload) */
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (VM_HANDLE_SELF) */
-	o = emit_call(seg, o, 3);               /* sys_setprop(self, "got", payload) */
+	o = emit_call(seg, o, VM_CALL_SETPROP);               /* sys_setprop(self, "got", payload) */
 	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0 */
-	o = emit_call(seg, o, 4);               /* sys_exit */
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit */
 	got_off = o;
 	memcpy(seg + o, "got", 4); o += 4;      /* "got\0" */
 	le32(seg + patch, 0x00058593u | (got_off << 20));
 
-	len = build_prog(elf, seg, o, imp, 5);
+	len = build_prog(elf, seg, o);
 
 	id = verb_agent_launch_image(elf, len, self, "test/agent", "room");
 	EXPECT(id != 0, "agent launched");
@@ -275,9 +257,6 @@ test_agent_listen(void)
 static void
 test_agent_post(void)
 {
-	static const char *const imp[] = {
-		"sys_suspend", "sys_getmsg", "sys_setprop", "sys_exit",
-	};
 	uint8_t seg[160];
 	uint8_t elf[512];
 	uint32_t o = 0, patch_n, patch_v, woke_off, one_off;
@@ -289,10 +268,10 @@ test_agent_post(void)
 	obj_prop_set_internal(self, "%owner", "chars/agent");
 
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (block for event) */
-	o = emit_call(seg, o, 0);               /* sys_suspend -> blocks */
+	o = emit_call(seg, o, VM_CALL_SUSPEND);               /* sys_suspend -> blocks */
 	le32(seg + o, 0x00002537u); o += 4;     /* lui  a0, 2 (record buffer) */
 	le32(seg + o, 0x04000593u); o += 4;     /* addi a1, x0, 64 */
-	o = emit_call(seg, o, 1);               /* sys_getmsg */
+	o = emit_call(seg, o, VM_CALL_GETMSG);               /* sys_getmsg */
 	le32(seg + o, 0x000015B7u); o += 4;     /* lui  a1, 1 (name page) */
 	patch_n = o;
 	le32(seg + o, 0x00058593u); o += 4;     /* addi a1, a1, woke_off (patched) */
@@ -300,9 +279,9 @@ test_agent_post(void)
 	patch_v = o;
 	le32(seg + o, 0x00060613u); o += 4;     /* addi a2, a2, one_off (patched) */
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (VM_HANDLE_SELF) */
-	o = emit_call(seg, o, 2);               /* sys_setprop(self, "woke", "1") */
+	o = emit_call(seg, o, VM_CALL_SETPROP);               /* sys_setprop(self, "woke", "1") */
 	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0 */
-	o = emit_call(seg, o, 3);               /* sys_exit */
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit */
 	woke_off = o;
 	memcpy(seg + o, "woke", 5); o += 5;     /* "woke\0" */
 	one_off = o;
@@ -310,7 +289,7 @@ test_agent_post(void)
 	le32(seg + patch_n, 0x00058593u | (woke_off << 20));
 	le32(seg + patch_v, 0x00060613u | (one_off << 20));
 
-	len = build_prog(elf, seg, o, imp, 4);
+	len = build_prog(elf, seg, o);
 
 	id = verb_agent_launch_image(elf, len, self, "test/seq", "room");
 	EXPECT(id != 0, "sequential task launched");
@@ -330,7 +309,6 @@ test_agent_post(void)
 static void
 test_supervisor(void)
 {
-	static const char *const imp[] = { "sys_exit" };
 	uint8_t seg[16];
 	uint8_t elf[512];
 	uint32_t o;
@@ -349,8 +327,8 @@ test_supervisor(void)
 	EXPECT_EQ(verb_agent_supervise(), 0, "an empty list does nothing");
 
 	/* A running resident is left alone: supervise finds it by its self key. */
-	o = emit_call(seg, 0, 0);               /* sys_exit (a0 = 0) */
-	len = build_prog(elf, seg, o, imp, 1);
+	o = emit_call(seg, 0, VM_CALL_EXIT);               /* sys_exit (a0 = 0) */
+	len = build_prog(elf, seg, o);
 	self = obj_new("test/live");
 	obj_prop_set_internal(self, "%owner", "chars/agent");
 	id = verb_agent_launch_image(elf, len, self, "programs/live", "room");
@@ -366,7 +344,6 @@ test_supervisor(void)
 static void
 test_agent_requires_owner(void)
 {
-	static const char *const imp[] = { "sys_exit" };
 	uint8_t seg[32];
 	uint8_t elf[256];
 	uint32_t o = 0;
@@ -375,8 +352,8 @@ test_agent_requires_owner(void)
 	uint32_t id;
 
 	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0 */
-	o = emit_call(seg, o, 0);               /* sys_exit 0 */
-	len = build_prog(elf, seg, o, imp, 1);
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit 0 */
+	len = build_prog(elf, seg, o);
 
 	id = verb_agent_launch_image(elf, len, self, "test/noowner", "room");
 	EXPECT(id == 0, "agent with an owner-less self is not launched");

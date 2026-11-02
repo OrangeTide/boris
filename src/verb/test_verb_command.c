@@ -12,6 +12,7 @@
 #define LOG_SUBSYSTEM "test_verb_command"
 
 #include "verb_dispatch.h"
+#include "vm_sys.h"
 #include "obj.h"
 #include "muddb.h"
 
@@ -68,13 +69,15 @@ le32(uint8_t *p, uint32_t v)
 	p[3] = (uint8_t)(v >> 24);
 }
 
+/* emit "set a7 = VM_HOSTCALL_BASE + sel, then ecall" at seg+o; sel is a fixed
+ * VM_CALL_* selector. Returns the new offset. */
 static uint32_t
-emit_call(uint8_t *seg, uint32_t o, uint32_t idx)
+emit_call(uint8_t *seg, uint32_t o, uint32_t sel)
 {
 	le32(seg + o, 0x001008B7u);             /* lui  a7, 0x100 */
 	o += 4;
-	if (idx) {
-		le32(seg + o, 0x00088893u | (idx << 20));  /* addi a7, a7, idx */
+	if (sel) {
+		le32(seg + o, 0x00088893u | (sel << 20));  /* addi a7, a7, sel */
 		o += 4;
 	}
 	le32(seg + o, 0x00000073u);             /* ecall */
@@ -82,29 +85,16 @@ emit_call(uint8_t *seg, uint32_t o, uint32_t idx)
 }
 
 static long
-build_prog(uint8_t *buf, const uint8_t *seg, uint32_t seglen,
-           const char *const *imports, uint32_t nimports)
+build_prog(uint8_t *buf, const uint8_t *seg, uint32_t seglen)
 {
 	uint8_t *eh = buf;
 	uint8_t *ph = buf + 52;
 	uint32_t code_off = 84;
 	uint8_t *body = buf + code_off;
-	uint32_t pad, tbl, i, total;
+	uint32_t total;
 
 	memcpy(body, seg, seglen);
-	pad = (seglen + 3) & ~3u;
-	for (i = seglen; i < pad; i++)
-		body[i] = 0;
-	tbl = pad;
-	memcpy(body + tbl, "KPIMPT1", 7);
-	body[tbl + 7] = 0;
-	le32(body + tbl + 8, nimports);
-	total = tbl + 12;
-	for (i = 0; i < nimports; i++) {
-		uint32_t l = (uint32_t)strlen(imports[i]) + 1;
-		memcpy(body + total, imports[i], l);
-		total += l;
-	}
+	total = seglen;
 
 	memset(eh, 0, 84);
 	eh[0] = 0x7f; eh[1] = 'E'; eh[2] = 'L'; eh[3] = 'F';
@@ -327,9 +317,6 @@ install_sdk_look(void)
 static long
 build_getprop_prog(uint8_t *elf)
 {
-	static const char *const imp[] = {
-		"sys_getprop", "sys_broadcast", "sys_exit",
-	};
 	uint8_t seg[64];
 	uint32_t o = 0;
 
@@ -337,12 +324,12 @@ build_getprop_prog(uint8_t *elf)
 	le32(seg + o, 0x00C5A583u); o += 4;     /* lw   a1, 12(a1) -> slot1 str ptr */
 	le32(seg + o, 0x00002637u); o += 4;     /* lui  a2, 2      -> buf page */
 	le32(seg + o, 0x04000693u); o += 4;     /* addi a3, x0, 64 -> cap */
-	o = emit_call(seg, o, 0);               /* sys_getprop -> buf has value */
+	o = emit_call(seg, o, VM_CALL_GETPROP); /* sys_getprop -> buf has value */
 	le32(seg + o, 0x00002537u); o += 4;     /* lui  a0, 2      -> buf ptr */
-	o = emit_call(seg, o, 1);               /* sys_broadcast(buf) */
+	o = emit_call(seg, o, VM_CALL_BROADCAST); /* sys_broadcast(buf) */
 	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0 */
-	o = emit_call(seg, o, 2);               /* sys_exit 0 */
-	return build_prog(elf, seg, o, imp, 3);
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit 0 */
+	return build_prog(elf, seg, o);
 }
 
 /* <obj>: sets prop "mark" = "1" on the resolved object through its handle
@@ -351,7 +338,6 @@ build_getprop_prog(uint8_t *elf)
 static long
 build_setprop_prog(uint8_t *elf)
 {
-	static const char *const imp[] = { "sys_setprop", "sys_exit" };
 	uint8_t seg[80];
 	uint32_t o = 0, pa1, pa2, m, v;
 
@@ -362,20 +348,19 @@ build_setprop_prog(uint8_t *elf)
 	le32(seg + o, 0x00001637u); o += 4;     /* lui  a2, 1 */
 	pa2 = o;
 	le32(seg + o, 0x00060613u); o += 4;     /* addi a2, a2, v (patched) */
-	o = emit_call(seg, o, 0);               /* sys_setprop(handle, "mark", "1") */
-	o = emit_call(seg, o, 1);               /* sys_exit */
+	o = emit_call(seg, o, VM_CALL_SETPROP); /* sys_setprop(handle, "mark", "1") */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit */
 	m = o;
 	memcpy(seg + o, "mark", 5); o += 5;
 	v = o;
 	memcpy(seg + o, "1", 2); o += 2;
 	le32(seg + pa1, 0x00058593u | (m << 20));
 	le32(seg + pa2, 0x00060613u | (v << 20));
-	return build_prog(elf, seg, o, imp, 2);
+	return build_prog(elf, seg, o);
 }
 
 /* Emit "set prop mark=1 on the handle already in a0", with "mark"/"1" embedded
- * at the end of seg and addressed off LOAD_VADDR. setprop is import index 1 and
- * sys_exit index 2 in the callers below. Returns the new offset. */
+ * at the end of seg and addressed off LOAD_VADDR. Returns the new offset. */
 static uint32_t
 emit_mark_write(uint8_t *seg, uint32_t o)
 {
@@ -387,8 +372,8 @@ emit_mark_write(uint8_t *seg, uint32_t o)
 	le32(seg + o, 0x00001637u); o += 4;     /* lui  a2, 1 */
 	pa2 = o;
 	le32(seg + o, 0x00060613u); o += 4;     /* addi a2, a2, v (patched) */
-	o = emit_call(seg, o, 1);               /* sys_setprop(handle, "mark", "1") */
-	o = emit_call(seg, o, 2);               /* sys_exit */
+	o = emit_call(seg, o, VM_CALL_SETPROP); /* sys_setprop(handle, "mark", "1") */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit */
 	m = o;
 	memcpy(seg + o, "mark", 5); o += 5;
 	v = o;
@@ -402,53 +387,44 @@ emit_mark_write(uint8_t *seg, uint32_t o)
 static long
 build_wizpoke_prog(uint8_t *elf)
 {
-	static const char *const imp[] = {
-		"sys_setpriv", "sys_setprop", "sys_exit",
-	};
 	uint8_t seg[80];
 	uint32_t o = 0;
 
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (VM_PRIV_WIZ_ON) */
-	o = emit_call(seg, o, 0);               /* sys_setpriv */
+	o = emit_call(seg, o, VM_CALL_SETPRIV); /* sys_setpriv */
 	le32(seg + o, 0x0045A503u); o += 4;     /* lw   a0, 4(a1) -> slot0 handle */
 	o = emit_mark_write(seg, o);
-	return build_prog(elf, seg, o, imp, 3);
+	return build_prog(elf, seg, o);
 }
 
 /* <obj>: enable then immediately drop wizard, then try to set mark. */
 static long
 build_wizdrop_prog(uint8_t *elf)
 {
-	static const char *const imp[] = {
-		"sys_setpriv", "sys_setprop", "sys_exit",
-	};
 	uint8_t seg[80];
 	uint32_t o = 0;
 
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (WIZ_ON) */
-	o = emit_call(seg, o, 0);
+	o = emit_call(seg, o, VM_CALL_SETPRIV);
 	le32(seg + o, 0x00200513u); o += 4;     /* addi a0, x0, 2 (WIZ_OFF) */
-	o = emit_call(seg, o, 0);
+	o = emit_call(seg, o, VM_CALL_SETPRIV);
 	le32(seg + o, 0x0045A503u); o += 4;     /* lw   a0, 4(a1) -> slot0 handle */
 	o = emit_mark_write(seg, o);
-	return build_prog(elf, seg, o, imp, 3);
+	return build_prog(elf, seg, o);
 }
 
 /* no args: assume the attached object's owner, then set mark on self. */
 static long
 build_tweak_prog(uint8_t *elf)
 {
-	static const char *const imp[] = {
-		"sys_setpriv", "sys_setprop", "sys_exit",
-	};
 	uint8_t seg[80];
 	uint32_t o = 0;
 
 	le32(seg + o, 0x00300513u); o += 4;     /* addi a0, x0, 3 (VM_PRIV_AS_OWNER) */
-	o = emit_call(seg, o, 0);               /* sys_setpriv */
+	o = emit_call(seg, o, VM_CALL_SETPRIV); /* sys_setpriv */
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (VM_HANDLE_SELF) */
 	o = emit_mark_write(seg, o);
-	return build_prog(elf, seg, o, imp, 3);
+	return build_prog(elf, seg, o);
 }
 
 /* no args: create `id` (parented to self when under_self) and exit. The id is
@@ -456,7 +432,6 @@ build_tweak_prog(uint8_t *elf)
 static long
 build_create_prog(uint8_t *elf, const char *id, int under_self)
 {
-	static const char *const imp[] = { "sys_create", "sys_exit" };
 	uint8_t seg[96];
 	uint32_t o = 0, pa1, off;
 	size_t l;
@@ -466,22 +441,19 @@ build_create_prog(uint8_t *elf, const char *id, int under_self)
 	le32(seg + o, 0x000015B7u); o += 4;     /* lui  a1, 1 */
 	pa1 = o;
 	le32(seg + o, 0x00058593u); o += 4;     /* addi a1, a1, off (patched) */
-	o = emit_call(seg, o, 0);               /* sys_create -> handle */
-	o = emit_call(seg, o, 1);               /* sys_exit */
+	o = emit_call(seg, o, VM_CALL_CREATE);  /* sys_create -> handle */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit */
 	off = o;
 	l = strlen(id) + 1;
 	memcpy(seg + o, id, l); o += (uint32_t)l;
 	le32(seg + pa1, 0x00058593u | (off << 20));
-	return build_prog(elf, seg, o, imp, 2);
+	return build_prog(elf, seg, o);
 }
 
 /* no args: create items/tmp, then recycle the handle it returned, and exit. */
 static long
 build_maketmp_prog(uint8_t *elf)
 {
-	static const char *const imp[] = {
-		"sys_create", "sys_recycle", "sys_exit",
-	};
 	uint8_t seg[96];
 	uint32_t o = 0, pa1, off;
 
@@ -489,13 +461,13 @@ build_maketmp_prog(uint8_t *elf)
 	le32(seg + o, 0x000015B7u); o += 4;     /* lui  a1, 1 */
 	pa1 = o;
 	le32(seg + o, 0x00058593u); o += 4;     /* addi a1, a1, off (patched) */
-	o = emit_call(seg, o, 0);               /* sys_create -> handle in a0 */
-	o = emit_call(seg, o, 1);               /* sys_recycle(handle) */
-	o = emit_call(seg, o, 2);               /* sys_exit */
+	o = emit_call(seg, o, VM_CALL_CREATE);  /* sys_create -> handle in a0 */
+	o = emit_call(seg, o, VM_CALL_RECYCLE); /* sys_recycle(handle) */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit */
 	off = o;
 	memcpy(seg + o, "items/tmp", 10); o += 10;
 	le32(seg + pa1, 0x00058593u | (off << 20));
-	return build_prog(elf, seg, o, imp, 3);
+	return build_prog(elf, seg, o);
 }
 
 /* no args: create id1 then id2 (no parent), then exit. For the per-task quota:
@@ -503,7 +475,6 @@ build_maketmp_prog(uint8_t *elf)
 static long
 build_create2_prog(uint8_t *elf, const char *id1, const char *id2)
 {
-	static const char *const imp[] = { "sys_create", "sys_exit" };
 	uint8_t seg[128];
 	uint32_t o = 0, p1, p2, off1, off2;
 	size_t l;
@@ -512,16 +483,16 @@ build_create2_prog(uint8_t *elf, const char *id1, const char *id2)
 	le32(seg + o, 0x000015B7u); o += 4;     /* lui  a1, 1 */
 	p1 = o;
 	le32(seg + o, 0x00058593u); o += 4;     /* addi a1, a1, off1 (patched) */
-	o = emit_call(seg, o, 0);               /* sys_create id1 */
+	o = emit_call(seg, o, VM_CALL_CREATE);  /* sys_create id1 */
 
 	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0 */
 	le32(seg + o, 0x000015B7u); o += 4;     /* lui  a1, 1 */
 	p2 = o;
 	le32(seg + o, 0x00058593u); o += 4;     /* addi a1, a1, off2 (patched) */
-	o = emit_call(seg, o, 0);               /* sys_create id2 */
+	o = emit_call(seg, o, VM_CALL_CREATE);  /* sys_create id2 */
 
 	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0 */
-	o = emit_call(seg, o, 1);               /* sys_exit 0 */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit 0 */
 
 	off1 = o;
 	l = strlen(id1) + 1;
@@ -531,21 +502,20 @@ build_create2_prog(uint8_t *elf, const char *id1, const char *id2)
 	memcpy(seg + o, id2, l); o += (uint32_t)l;
 	le32(seg + p1, 0x00058593u | (off1 << 20));
 	le32(seg + p2, 0x00058593u | (off2 << 20));
-	return build_prog(elf, seg, o, imp, 2);
+	return build_prog(elf, seg, o);
 }
 
 /* <obj>: recycle the resolved object and exit. */
 static long
 build_scrap_prog(uint8_t *elf)
 {
-	static const char *const imp[] = { "sys_recycle", "sys_exit" };
 	uint8_t seg[32];
 	uint32_t o = 0;
 
 	le32(seg + o, 0x0045A503u); o += 4;     /* lw   a0, 4(a1) -> slot0 handle */
-	o = emit_call(seg, o, 0);               /* sys_recycle */
-	o = emit_call(seg, o, 1);               /* sys_exit */
-	return build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_RECYCLE); /* sys_recycle */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit */
+	return build_prog(elf, seg, o);
 }
 
 /* no args: open handles until the table is full (32 objfinds of `findname`),
@@ -555,9 +525,6 @@ static long
 build_overflow_create_prog(uint8_t *elf, const char *findname,
                            const char *newid)
 {
-	static const char *const imp[] = {
-		"sys_objfind", "sys_create", "sys_exit",
-	};
 	uint8_t seg[1024];
 	uint32_t o = 0, ps0, pa1, noff, idoff;
 	size_t l;
@@ -570,17 +537,17 @@ build_overflow_create_prog(uint8_t *elf, const char *findname,
 	for (k = 0; k < 32; k++) {
 		le32(seg + o, 0x00040513u); o += 4;     /* addi a0, s0, 0 (mv a0,s0) */
 		le32(seg + o, 0x00000593u); o += 4;     /* addi a1, x0, 0 */
-		o = emit_call(seg, o, 0);               /* sys_objfind */
+		o = emit_call(seg, o, VM_CALL_OBJFIND); /* sys_objfind */
 	}
 
 	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0 (no parent) */
 	le32(seg + o, 0x000015B7u); o += 4;     /* lui  a1, 1 */
 	pa1 = o;
 	le32(seg + o, 0x00058593u); o += 4;     /* addi a1, a1, idoff (patched) */
-	o = emit_call(seg, o, 1);               /* sys_create -> NOSPACE */
+	o = emit_call(seg, o, VM_CALL_CREATE);  /* sys_create -> NOSPACE */
 
 	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0 */
-	o = emit_call(seg, o, 2);               /* sys_exit 0 */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit 0 */
 
 	noff = o;
 	l = strlen(findname) + 1;
@@ -591,22 +558,21 @@ build_overflow_create_prog(uint8_t *elf, const char *findname,
 
 	le32(seg + ps0, 0x00040413u | (noff << 20));
 	le32(seg + pa1, 0x00058593u | (idoff << 20));
-	return build_prog(elf, seg, o, imp, 3);
+	return build_prog(elf, seg, o);
 }
 
 /* <any>: broadcasts the free-form remainder. */
 static long
 build_bcast_prog(uint8_t *elf)
 {
-	static const char *const imp[] = { "sys_broadcast", "sys_exit" };
 	uint8_t seg[32];
 	uint32_t o = 0;
 
 	le32(seg + o, 0x0045A503u); o += 4;     /* lw   a0, 4(a1) -> slot0 str ptr */
-	o = emit_call(seg, o, 0);               /* sys_broadcast */
+	o = emit_call(seg, o, VM_CALL_BROADCAST); /* sys_broadcast */
 	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0 */
-	o = emit_call(seg, o, 1);               /* sys_exit 0 */
-	return build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit 0 */
+	return build_prog(elf, seg, o);
 }
 
 int

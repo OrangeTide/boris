@@ -651,20 +651,20 @@ verb_dispatch_init(const char *image_dir, verb_broadcast_fn bcast)
 	g_env = vm_env_new();
 	if (!g_env)
 		return -1;
-	if (vm_env_register(g_env, "sys_getprop", hc_getprop, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_setprop", hc_setprop, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_close", hc_close, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_getobj", hc_getobj, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_objfind", hc_objfind, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_next", hc_next, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_move", hc_move, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_setpriv", hc_setpriv, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_create", hc_create, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_recycle", hc_recycle, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_errno", hc_errno, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_contents_count", hc_contents_count,
+	if (vm_env_register(g_env, VM_CALL_GETPROP, hc_getprop, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_SETPROP, hc_setprop, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_CLOSE, hc_close, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_GETOBJ, hc_getobj, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_OBJFIND, hc_objfind, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_NEXT, hc_next, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_MOVE, hc_move, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_SETPRIV, hc_setpriv, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_CREATE, hc_create, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_RECYCLE, hc_recycle, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_ERRNO, hc_errno, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_CONTENTS_COUNT, hc_contents_count,
 	                    NULL) != 0 ||
-	    vm_env_register(g_env, "sys_broadcast", hc_broadcast, NULL) != 0) {
+	    vm_env_register(g_env, VM_CALL_BROADCAST, hc_broadcast, NULL) != 0) {
 		vm_env_free(g_env);
 		g_env = NULL;
 		return -1;
