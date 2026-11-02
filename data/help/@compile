@@ -1,0 +1,34 @@
+Compile a guest source in the VFS into an RV32 ELF.
+
+usage: @compile <src> [<out>]
+
+Reads a guest source from an absolute path in the in-world filesystem
+(the VFS) and produces an RV32 ELF in the VFS. With no <out> the image is
+written to /bin/<name>.elf, where <name> is the source leaf without its
+extension. An explicit <out> must be an absolute VFS path.
+
+The language is chosen by the source extension:
+  .c          C
+  .s, .S      assembly
+
+A compiled program is a plain program and must supply main(), the same
+shape as the SDK examples. The source path must be absolute, for example
+/src/tool.c, and the source must already exist in the VFS at that path.
+Use @fedit to author one.
+
+The compile runs the skjegg toolchain as RV32 guests under the embedded
+runtime, each confined to a temporary build directory. It needs no host
+process execution, so it works with the security sandbox active. Compiler
+errors are shown to you: a failed stage reports its diagnostics.
+
+To launch the result, bind it with @program and run it with @run.
+
+Kobold-Pascal (.pas, .kp) is planned and not accepted yet.
+
+Wizard only. A compiled program runs code with its owner's authority.
+
+Example:
+  @compile /src/tool.c
+      Compile /src/tool.c to /bin/tool.elf.
+  @compile /src/tool.c /bin/mytool.elf
+      Compile to an explicit output path.

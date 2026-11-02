@@ -28,6 +28,11 @@ BIN  ?= ../../_out/x86_64-linux-gnu/bin
 DEST ?= ../../data/vm
 B    := build
 
+# Where the `toolchain` target installs the RV32 toolchain guests and the link
+# inputs @compile stages into a build directory (see the toolchain section).
+TC_DEST := $(DEST)/toolchain
+TC_LIB  := $(DEST)/lib
+
 SKJCC := $(BIN)/skj-cc-rv
 SKJAS := $(BIN)/skj-as-rv
 SKJLD := $(BIN)/skj-ld-rv
@@ -53,9 +58,11 @@ RV_CC ?= riscv64-linux-gnu-gcc
 # effect when the launcher installs no mount, so it is inert under boris (which
 # always writes a mount table) and gives skj-run a host cwd for offline testing.
 # ---------------------------------------------------------------------------
+# time is in the list though the generated skjegg.mk omits it (another gap in
+# that generated list): the RV32 toolchain guests call time().
 LIBC_SRCS := string ctype stdlib printf numfmt stdio_core stdio assert malloc \
              sbrk errno strerror rand strtod scanf coro threads stat fileops \
-             dirent getenv fdio
+             dirent getenv fdio time
 RT_SRCS   := rng
 FS_SRCS   := fs ramfs ambientfs hostcap devfs romfs ninefs p9_guest
 LIBC_FSFLAGS := -DSKJ_FS_INTERPOSE -DFS_WITH_AMBIENT -DFS_WITH_HOSTCAP \
@@ -77,7 +84,7 @@ LIBC_A    := $(B)/libc.a
 # DEST/bin, the runtime's bin: mount.
 COREUTILS := cat cp echo ls mv rm sleep
 
-.PHONY: all libc userland verbs clean
+.PHONY: all libc userland verbs toolchain clean
 all: verbs userland
 
 # ---------------------------------------------------------------------------
@@ -85,7 +92,7 @@ all: verbs userland
 # ---------------------------------------------------------------------------
 libc: $(LIBC_A) $(LIBC_CRT) $(LIBC_FINI)
 
-$(B) $(B)/obj $(B)/bin $(DEST) $(DEST)/bin:
+$(B) $(B)/obj $(B)/bin $(DEST) $(DEST)/bin $(TC_DEST) $(TC_LIB):
 	mkdir -p $@
 
 # The crt: start_rv.S pulls in crt_entry_rv.S, syscall_rv.S and i64_rv.S.
@@ -144,6 +151,68 @@ userland: $(DEST)/jsh.elf $(foreach t,$(COREUTILS),$(DEST)/bin/$(t))
 
 $(eval $(call libc_guest,examples/jsh.c,$(DEST)/jsh.elf,-DSKJEGG))
 $(foreach t,$(COREUTILS),$(eval $(call libc_guest,examples/coreutils/$(t).c,$(DEST)/bin/$(t),)))
+
+# ---------------------------------------------------------------------------
+# The RV32 toolchain as guests: skj-cc-rv / skj-as-rv / skj-ld-rv, built from
+# the vendored skjegg toolchain sources, compiled by the host skj-cc-rv to RV32
+# and linked against the confined libc. @compile runs these stages under the
+# embedded runtime over a hostcap build directory, so compiling a guest in world
+# needs no host execve and stays inside the security sandbox. cpp is folded into
+# skj-cc-rv (no separate preprocessor stage); there is no in-guest archiver.
+#
+# Built on demand, NOT part of `all`: the ELFs are large and only @compile needs
+# them. Run `make -C sdk/vm toolchain` after the main build. The stages install
+# to DEST/toolchain; the link inputs a C or assembly program needs (the crt, the
+# varargs and soft-divide helpers, the libc archive, the finalizer) install to
+# DEST/lib, which @compile stages into each build directory.
+# ---------------------------------------------------------------------------
+TC_CC_SRCS := cc/lex.c cc/parse.c cc/type.c cc/lower.c cc/main.c \
+              cpp/tok.c cpp/macro.c cpp/cond.c cpp/dir.c \
+              ir/ir.c ir/util.c ir/arena.c \
+              backend/regalloc_rv.c backend/rv_select.c backend/rv_mc_text.c
+TC_AS_SRCS := as/rv_main.c as/asm_lex.c as/asm_obj.c as/rv_parse.c \
+              as/rv_encode.c as/rv_macro.c as/rv_elf.c dwarf/dwarf.c \
+              ir/util.c ir/arena.c
+TC_LD_SRCS := ld/rv_main.c ld/rv_elf_read.c ld/rv_link.c ld/rv_elf_write.c \
+              ld/rv_archive.c ld/link.c ld/script.c ld/mapfile.c \
+              ir/util.c ir/arena.c
+
+TC_CC_INC := -I$(SKJ) -I$(SKJ)/cc -I$(SKJ)/cpp -I$(SKJ)/ir -I$(SKJ)/backend
+TC_AS_INC := -I$(SKJ) -I$(SKJ)/as -I$(SKJ)/ir -I$(SKJ)/dwarf
+TC_LD_INC := -I$(SKJ) -I$(SKJ)/ld -I$(SKJ)/ir
+
+# The per-stage objects, under a per-stage tree so as/ and ld/ (both carry an
+# rv_main.c) do not collide.
+TC_CC_OBJS := $(addprefix $(B)/tc/cc/,$(TC_CC_SRCS:.c=.o))
+TC_AS_OBJS := $(addprefix $(B)/tc/as/,$(TC_AS_SRCS:.c=.o))
+TC_LD_OBJS := $(addprefix $(B)/tc/ld/,$(TC_LD_SRCS:.c=.o))
+
+# The link inputs @compile stages per build (the same five the libc guest link
+# uses), installed under DEST/lib.
+TC_LIB_FILES := $(TC_LIB)/crt0.o $(TC_LIB)/va_rv.o $(TC_LIB)/soft64_div.o \
+                $(TC_LIB)/libc.a $(TC_LIB)/fini.o
+
+toolchain: $(TC_DEST)/skj-cc-rv.elf $(TC_DEST)/skj-as-rv.elf \
+           $(TC_DEST)/skj-ld-rv.elf $(TC_LIB_FILES)
+
+$(TC_LIB)/%: $(B)/% | $(TC_LIB)
+	cp $< $@
+
+# Build one toolchain stage ELF. The sources mirror the skjegg layout under a
+# per-stage object tree. -DCC_RISCV selects the RV32 build of the sources.
+#   $(1) stage name   $(2) include flags   $(3) object list
+define tool_guest
+$(B)/tc/$(1)/%.o: $(SKJ)/%.c
+	@mkdir -p $$(dir $$@)
+	$$(SKJCC) -DCC_RISCV $(2) -o $$(@:.o=.s) $$<
+	$$(SKJAS) -o $$@ $$(@:.o=.s)
+$(TC_DEST)/skj-$(1)-rv.elf: $(3) $$(LIBC_CRT) $$(LIBC_A) $$(LIBC_FINI) | $$(TC_DEST)
+	$$(SKJLD) -o $$@ $$(LIBC_CRT) $(3) $$(LIBC_A) $$(LIBC_FINI)
+endef
+
+$(eval $(call tool_guest,cc,$(TC_CC_INC),$(TC_CC_OBJS)))
+$(eval $(call tool_guest,as,$(TC_AS_INC),$(TC_AS_OBJS)))
+$(eval $(call tool_guest,ld,$(TC_LD_INC),$(TC_LD_OBJS)))
 
 # ---------------------------------------------------------------------------
 # Band guests: the command verbs and resident agents. They link boris's entry

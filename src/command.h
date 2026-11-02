@@ -51,5 +51,6 @@ int command_do_fcat(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd,
 int command_do_ftype(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd, const char *arg);
 int command_do_fget(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd, const char *arg);
 int command_do_fput(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd, const char *arg);
+int command_do_compile(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd, const char *arg);
 
 #endif

@@ -178,6 +178,20 @@ security_landlock_apply(void)
 	if (mud_config.vm_image_path)
 		add_path_rule(ruleset_fd, mud_config.vm_image_path, fs_read, handled);
 
+	/* @compile: the toolchain guests and their link inputs are read; the guest
+	 * headers are read; the build directory is read-write (the toolchain writes
+	 * its intermediate and output files there through a hostcap mount). The
+	 * toolchain and lib dirs usually sit under vm_image_path (already granted
+	 * read above), but a redeployment may move them, so grant them explicitly. */
+	if (mud_config.vm_toolchain_dir)
+		add_path_rule(ruleset_fd, mud_config.vm_toolchain_dir, fs_read, handled);
+	if (mud_config.vm_lib_dir)
+		add_path_rule(ruleset_fd, mud_config.vm_lib_dir, fs_read, handled);
+	if (mud_config.vm_include_dir)
+		add_path_rule(ruleset_fd, mud_config.vm_include_dir, fs_read, handled);
+	if (mud_config.vm_tmpdir)
+		add_path_rule(ruleset_fd, mud_config.vm_tmpdir, fs_readwrite, handled);
+
 	/* web server static files */
 	if (mud_config.webserver_port > 0)
 		add_path_rule(ruleset_fd, "bin/www", fs_read, handled);

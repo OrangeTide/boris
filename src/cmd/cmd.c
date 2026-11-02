@@ -118,6 +118,7 @@ static const struct command_table {
 	{ "@ftype", command_do_ftype },
 	{ "@fget", command_do_fget },
 	{ "@fput", command_do_fput },
+	{ "@compile", command_do_compile },
 };
 
 /**

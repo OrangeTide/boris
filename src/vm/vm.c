@@ -41,6 +41,8 @@
 #define VM_MAILBOX_MAX 16       /* events a task may queue before back-pressure */
 #define VM_MSG_MAX     256      /* payload bytes kept per event */
 #define VM_STDIN_BUF   512      /* bytes of unread stdin a task may hold */
+#define VM_MAX_MOUNTS  8        /* host-directory grants a task may be given */
+#define VM_MOUNT_SPEC_MAX 384   /* backing size of one "name:hostdir" spec */
 
 /* The per-task guest sizes handed to the scheduler. A guest commits pages
  * lazily; mem_limit caps the committed total (image, heap, stack, page tables,
@@ -113,6 +115,12 @@ struct vm_task {
 
 	struct vm_env *env;
 	uint32_t      rng;
+
+	/* Host-directory grants installed before load. The run_opts mount arrays
+	 * hold pointers, so the "name:hostdir" specs live here to outlive the
+	 * sched; vm_task_add_mount fills a slot and points an opts entry at it. */
+	char          mount_spec[VM_MAX_MOUNTS][VM_MOUNT_SPEC_MAX];
+	int           n_mount_spec;
 
 	struct vm_task *next;           /* run-queue link */
 };
@@ -954,6 +962,54 @@ proc_by_handle(sched *S, int handle)
 		if (S->procs[i] && (int)S->procs[i]->handle == handle)
 			return S->procs[i];
 	return NULL;
+}
+
+int
+vm_task_add_mount(struct vm_task *t, const char *name, const char *hostdir,
+                  int readonly)
+{
+	int slot;
+
+	/* Mounts are read during load (sched_add_root installs them), so they must
+	 * be set first. */
+	if (t->loaded || !name || !hostdir)
+		return -1;
+	slot = t->n_mount_spec;
+	if (slot >= VM_MAX_MOUNTS)
+		return -1;
+	if (readonly) {
+		if (t->opts.nmounts_ro >= RUN_MAX_MOUNTS)
+			return -1;
+	} else {
+		if (t->opts.nmounts >= RUN_MAX_MOUNTS)
+			return -1;
+	}
+	if ((int)snprintf(t->mount_spec[slot], sizeof t->mount_spec[slot], "%s:%s",
+	                  name, hostdir) >= (int)sizeof t->mount_spec[slot])
+		return -1;              /* the spec did not fit */
+	if (readonly)
+		t->opts.mounts_ro[t->opts.nmounts_ro++] = t->mount_spec[slot];
+	else
+		t->opts.mounts[t->opts.nmounts++] = t->mount_spec[slot];
+	t->n_mount_spec++;
+	return 0;
+}
+
+void
+vm_task_set_limits(struct vm_task *t, uint32_t mem_limit, uint32_t heap_size,
+                   uint32_t stack_size)
+{
+	/* A batch guest (the compile toolchain) needs far more room than an
+	 * interactive verb. Raise the caps before load; a zero field keeps the
+	 * default from vm_task_new. */
+	if (t->loaded)
+		return;
+	if (mem_limit)
+		t->opts.mem_limit = mem_limit;
+	if (heap_size)
+		t->opts.heap_size = heap_size;
+	if (stack_size)
+		t->opts.stack_size = stack_size;
 }
 
 /* Bring up the task's scheduler around a root. When `image` is set the

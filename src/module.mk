@@ -165,13 +165,14 @@ boris_SRCS = \
 	cmd/chown.c \
 	cmd/vfscmd.c \
 	cmd/fedit.c \
+	cmd/compile.c \
 	worldclock/worldclock.c \
 	invite.c \
 	web/server/webclient.c \
 	web/server/weblogin.c \
 	web/server/webserver.c
 boris_LIBS = \
-	verb vm vfs resolve character freelist acs \
+	verb vm compile vfs resolve character freelist acs \
 	crypt daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
 	database security lmdb mth tinyaes \
 	zone_builder zone builder ui stred smolvfs

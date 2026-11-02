@@ -711,6 +711,10 @@ mud_config_init(void)
 	mud_config.vm_resident = strdup("");
 	mud_config.vm_create_max = 64;
 	mud_config.vm_owned_max = 1024;
+	mud_config.vm_toolchain_dir = strdup("data/vm/toolchain");
+	mud_config.vm_lib_dir = strdup("data/vm/lib");
+	mud_config.vm_include_dir = strdup("sdk/toolchain/skjegg/include");
+	mud_config.vm_tmpdir = strdup("data/tmp");
 #ifdef CONFIG_LANDLOCK
 	mud_config.security_landlock = 1;
 #endif
@@ -755,6 +759,10 @@ mud_config_shutdown(void)
 		&mud_config.newuser_room,
 		&mud_config.vm_image_path,
 		&mud_config.vm_resident,
+		&mud_config.vm_toolchain_dir,
+		&mud_config.vm_lib_dir,
+		&mud_config.vm_include_dir,
+		&mud_config.vm_tmpdir,
 	};
 	unsigned i;
 
@@ -802,6 +810,10 @@ mud_config_process(void)
 	config_watch(&cfg, "vm.resident", do_config_string, &mud_config.vm_resident);
 	config_watch(&cfg, "vm.create_max", do_config_uint, &mud_config.vm_create_max);
 	config_watch(&cfg, "vm.owned_max", do_config_uint, &mud_config.vm_owned_max);
+	config_watch(&cfg, "vm.toolchain_dir", do_config_string, &mud_config.vm_toolchain_dir);
+	config_watch(&cfg, "vm.lib_dir", do_config_string, &mud_config.vm_lib_dir);
+	config_watch(&cfg, "vm.include_dir", do_config_string, &mud_config.vm_include_dir);
+	config_watch(&cfg, "vm.tmpdir", do_config_string, &mud_config.vm_tmpdir);
 	config_watch(&cfg, "cache.obj.size", do_config_uint, &mud_config.obj_cache_size);
 	config_watch(&cfg, "cache.character.size", do_config_uint, &mud_config.character_cache_size);
 	config_watch(&cfg, "rpg.enabled", do_config_uint, &mud_config.rpg_enabled);

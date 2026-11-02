@@ -74,6 +74,22 @@ int vm_task_load_mem(struct vm_task *t, const uint8_t *buf, long size,
                      const char *what);
 int vm_task_load_file(struct vm_task *t, const char *path);
 
+/* Grant the task a confined host directory, reached by the guest through the
+ * fs/ mount `name:` (its fs-interpose libc resolves a `name:path` argument to
+ * that directory). A read-only grant fails mutating ops with EROFS. Must be
+ * called before vm_task_load_*; up to a small per-task limit. Returns 0, or -1
+ * if the task is already loaded, the table is full, or the spec does not fit.
+ * This is the seam @compile uses to give a toolchain stage its build dir. */
+int vm_task_add_mount(struct vm_task *t, const char *name, const char *hostdir,
+                      int readonly);
+
+/* Raise the task's memory caps before load. A batch guest such as a compile
+ * stage needs far more heap, stack, and committed memory than an interactive
+ * verb. A zero argument keeps the default. Must be called before
+ * vm_task_load_*. */
+void vm_task_set_limits(struct vm_task *t, uint32_t mem_limit,
+                        uint32_t heap_size, uint32_t stack_size);
+
 /* Write a C-style argument block into the top of the guest stack, then set
  * a0 = argc and a1 = the guest address of the argv pointer array, and lower
  * the stack pointer below the block. Call after loading and before running.

@@ -573,6 +573,12 @@ main(int argc, char **argv)
 
 	atexit(telnetserver_shutdown);
 
+	/* @compile builds in vm_tmpdir; create it before the sandbox locks down so
+	 * landlock can grant a read-write rule on it (a missing path is skipped). */
+	if (mud_config.vm_tmpdir && MKDIR(mud_config.vm_tmpdir) != 0 && errno != EEXIST)
+		LOG_WARNING("could not create vm tmpdir '%s': %s",
+		            mud_config.vm_tmpdir, strerror(errno));
+
 	if (security_init() < 0) {
 		LOG_ERROR("could not initialize security sandbox");
 		return EXIT_FAILURE;

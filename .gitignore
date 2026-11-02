@@ -42,6 +42,9 @@ core
 sdk/vm/*.o
 sdk/vm/*.s
 
+# @compile scratch build directories
+/data/tmp/
+
 # ignore AI junk
 .claude
 CLAUDE.md
