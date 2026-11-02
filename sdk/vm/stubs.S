@@ -1,10 +1,11 @@
 /* stubs.S : host-call stubs.
  *
- * Each stub sets a7 to VM_HOSTCALL_BASE (0x00100000) plus the call's import
+ * Each stub sets a7 to VM_HOSTCALL_BASE (0x00100000) plus the call's selector
  * index and issues an ecall. Integer and pointer arguments are already in
  * a0-a5 and the result comes back in a0, per the host-call ABI, so the C
  * calling convention passes straight through. The index order here must match
- * imports.S, which names the same calls in the same order. */
+ * the host selector band in src/vm (enum vm_call plus the builtins), which
+ * binds each selector by its fixed number, not by name. */
 
 	.text
 
