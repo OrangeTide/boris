@@ -23,4 +23,4 @@ with seccomp and Landlock active. See `doc/vm-skjegg-rebase.md`.
       (`@run`) a program.
 - [x] The toolchain guests are built by `make -C sdk/vm toolchain`; nothing is
       invoked as an external host tool.
-- [ ] Kobold-Pascal (`.pas`/`.kp`) compilation (see kobold-online-compile).
+- [x] Kobold-Pascal (`.pas`/`.kp`) compilation (see kobold-online-compile).
