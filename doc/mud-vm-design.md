@@ -12,6 +12,13 @@ off the Motorola ColdFire V4e emulator and its complicated hypercall,
 capability, and multicore-scheduler model. The new sandbox is an RV32
 emulator plus a small, flat host-call environment adapted from the smolmoo
 MOO server. See `doc/vm-migration-plan.md` for the removal and import work.
+
+**Superseded in part.** Boris has since been re-based onto the skjegg
+compiler suite: the runtime now drives skjegg's embedded emulator, the
+host-call table is a fixed selector band, guest files reach an in-world 9P
+server, and the compile toolchain runs in world as RV32 guests. Read
+`doc/vm-skjegg-rebase.md` for the current shape; the runtime and
+compilation sections below describe the earlier bespoke interpreter.
 :::
 
 ## Introduction
