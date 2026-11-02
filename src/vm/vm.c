@@ -995,6 +995,29 @@ vm_task_add_mount(struct vm_task *t, const char *name, const char *hostdir,
 	return 0;
 }
 
+int
+vm_task_add_p9_mount(struct vm_task *t, const char *name, const char *hostdir)
+{
+	int slot;
+
+	/* The guest reaches the in-world VFS through a 9P mount served by boris's
+	 * CAS-backed p9 server. sched_add_root installs it from run_opts.p9s; the
+	 * server ignores hostdir (it serves the bound VFS), but the launcher opens
+	 * hostdir to validate the grant, so it must name a real, readable directory.
+	 * Must be set before load. */
+	if (t->loaded || !name || !hostdir)
+		return -1;
+	slot = t->n_mount_spec;
+	if (slot >= VM_MAX_MOUNTS || t->opts.np9s >= RUN_MAX_MOUNTS)
+		return -1;
+	if ((int)snprintf(t->mount_spec[slot], sizeof t->mount_spec[slot], "%s:%s",
+	                  name, hostdir) >= (int)sizeof t->mount_spec[slot])
+		return -1;
+	t->opts.p9s[t->opts.np9s++] = t->mount_spec[slot];
+	t->n_mount_spec++;
+	return 0;
+}
+
 void
 vm_task_set_limits(struct vm_task *t, uint32_t mem_limit, uint32_t heap_size,
                    uint32_t stack_size)

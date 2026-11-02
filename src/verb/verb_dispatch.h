@@ -10,6 +10,8 @@
 
 struct obj;
 struct vfs;
+struct vm_task;
+struct vm_env;
 
 /* Per-task context the shared host calls read back through vm_task_userdata. A
  * one-shot task keeps this on the stack for its single run; a resident agent
@@ -106,6 +108,82 @@ int verb_dispatch_run_image(const uint8_t *elf, long len, struct obj *self,
  * is unsafe. Shared by one-shot dispatch and the agent launcher. */
 int verb_program_resolve(const char *prog_id, char *path, size_t pathsz,
                          uint32_t *ram);
+
+/* A no-op teardown hook kept for call-site clarity: a task's open resources are
+ * freed by vm_task_free. Call at task teardown, before vm_task_free. */
+void verb_program_task_end(uint32_t task_id);
+
+/* Open a task for program "programs/<prog_id>": size its RAM, grant it the
+ * in-world 9P mount, load its image (image.vfs from the bound VFS, or image.path
+ * from the image directory), and bind `env`. Fills *ram_out (may be NULL).
+ * Returns the task (free with vm_task_free), or NULL. Used by the foreground
+ * launcher. */
+struct vm_task *verb_program_open(const char *prog_id, struct vm_env *env,
+                                  uint32_t *ram_out);
+
+/* Create or update "programs/<prog_id>" to launch the VFS image at vfs_path (an
+ * absolute VFS path), with ram bytes of guest RAM (0 for the default). Persists
+ * immediately. Returns 0, or -1. The @compile output becomes launchable through
+ * this bind. */
+int verb_program_bind_vfs(const char *prog_id, const char *vfs_path,
+                          uint32_t ram);
+
+/* Register an existing ELF image as "programs/<prog_id>". An image beginning
+ * with '/' is a VFS path (needs a bound VFS and an existing file); otherwise a
+ * host image relative to the image directory. ram is the requested guest RAM (0
+ * for the default). errbuf (may be NULL) gets a diagnostic on failure. Returns
+ * 0, or -1. */
+int verb_program_register(const char *prog_id, const char *image, uint32_t ram,
+                          char *errbuf, size_t errsz);
+
+/* Remove "programs/<prog_id>". Returns 0 on delete, 1 if there was no such
+ * program, or -1 on a bad id or a store failure. */
+int verb_program_unregister(const char *prog_id);
+
+/* Called once per registered program by verb_program_list: prog_id is the name,
+ * image is its bound image (a VFS path when from_vfs, else a host image path or
+ * ""), and ctx is the caller's. */
+typedef void (*verb_program_list_fn)(const char *prog_id, const char *image,
+                                     int from_vfs, void *ctx);
+
+/* Enumerate the registered programs, calling cb for each. Returns 0, or -1. */
+int verb_program_list(verb_program_list_fn cb, void *ctx);
+
+/* A foreground session's stdout sink: a line (or partial line) of the program's
+ * output, to be shown to the player. ctx is the opaque pointer passed to
+ * verb_fg_launch. */
+typedef void (*verb_fg_output_fn)(void *ctx, const char *buf, size_t len);
+
+/* A foreground session's exit hook: status is the guest exit code, faulted is
+ * non-zero for a fault or a forced kill. Called once, from verb_fg_tick, after
+ * which the id is no longer valid. ctx is the verb_fg_launch pointer. */
+typedef void (*verb_fg_exit_fn)(void *ctx, int status, int faulted);
+
+/* Launch "programs/<prog_id>" as a foreground interactive session owned by
+ * actor_id, with the given argv. out receives its stdout; on_exit (may be NULL)
+ * fires once when it ends. Returns a nonzero session id (also the task id), or
+ * 0 on failure. */
+uint32_t verb_fg_launch(const char *prog_id, const char *actor_id,
+                        const char *const *argv, int argc,
+                        verb_fg_output_fn out, verb_fg_exit_fn on_exit,
+                        void *hook_ctx);
+
+/* Feed stdin to a session. Returns 0, or -1 for an unknown id. */
+int verb_fg_feed(uint32_t id, const char *data, uint32_t len);
+
+/* Ask a session to quit: close its stdin (a parked read sees EOF); it is killed
+ * on the next tick if it has not exited. */
+void verb_fg_request_quit(uint32_t id);
+
+/* Tear a session down now, with no exit hook (the caller is going away). */
+void verb_fg_close(uint32_t id);
+
+/* Step every live session by up to quantum instructions, firing exit hooks for
+ * those that end. Call from the server heartbeat. Returns the live count. */
+int verb_fg_tick(int quantum);
+
+/* The number of live foreground sessions. */
+int verb_fg_count(void);
 
 /* verb_dispatch_command outcomes. 0 means a verb ran; the negatives are the
  * failures before (or instead of) a run. A verb's own exit status is not

@@ -83,6 +83,15 @@ int vm_task_load_file(struct vm_task *t, const char *path);
 int vm_task_add_mount(struct vm_task *t, const char *name, const char *hostdir,
                       int readonly);
 
+/* Grant the task a 9P mount served by boris's in-world VFS (its CAS-backed p9
+ * server), reached by the guest through the fs/ mount `name:`. This is how a
+ * launched program reaches the in-world tree. hostdir must name a real, readable
+ * directory (the launcher opens it to validate the grant), but the server
+ * ignores it and serves the bound VFS. Must be called before vm_task_load_*.
+ * Returns 0 or -1. */
+int vm_task_add_p9_mount(struct vm_task *t, const char *name,
+                         const char *hostdir);
+
 /* Raise the task's memory caps before load. A batch guest such as a compile
  * stage needs far more heap, stack, and committed memory than an interactive
  * verb. A zero argument keeps the default. Must be called before

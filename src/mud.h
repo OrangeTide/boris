@@ -9,6 +9,7 @@
 struct charset;
 struct ui_session;
 struct stred_session;
+struct fg_session;
 struct user;
 struct character;
 struct buf;
@@ -50,6 +51,8 @@ struct descriptor_data {
 	/* the string editor nests inside a (suspended) UI session, so it does
 	 * not share the state union with it. */
 	struct stred_session *stred;
+	/* an @run foreground VM session hangs off the descriptor like stred does */
+	struct fg_session *fg;
 	void (*line_input)(DESCRIPTOR_DATA *cl, const char *line);
 	char *prompt_string;
 	unsigned prompt_flag:1;

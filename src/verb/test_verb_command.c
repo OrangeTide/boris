@@ -180,6 +180,20 @@ install_program(const char *id, const uint8_t *elf, long len)
 	obj_release(o);
 }
 
+/* verb_program_list callback: count the entries and remember the last name. */
+static int  g_prog_count;
+static char g_prog_last[64];
+
+static void
+count_prog(const char *prog_id, const char *image, int from_vfs, void *ctx)
+{
+	(void)image;
+	(void)from_vfs;
+	(void)ctx;
+	g_prog_count++;
+	snprintf(g_prog_last, sizeof g_prog_last, "%s", prog_id ? prog_id : "");
+}
+
 static void
 mkobj(const char *id, const char *name_short, const char *container)
 {
@@ -848,6 +862,34 @@ main(void)
 		       "SDK verb read the handle and broadcast the name");
 	} else {
 		LOG_INFO("data/vm/look.elf not built; skipping the SDK cmd case");
+	}
+
+	/* Program registration (the @program layer). These touch only the object
+	 * store, so they run with no SDK build. "lookprog.elf" was staged by
+	 * install_program above, so it is a valid host image to register. */
+	{
+		char err[256] = "";
+
+		EXPECT_EQ(verb_program_register("regprog", "lookprog.elf", 0,
+		                                err, sizeof err), 0,
+		          "register a program with an existing host image");
+		EXPECT_EQ(verb_program_register("bad/id", "lookprog.elf", 0, NULL, 0),
+		          -1, "register rejects an id with a slash");
+		EXPECT_EQ(verb_program_register("missprog", "nope.elf", 0, NULL, 0),
+		          -1, "register rejects a missing host image");
+
+		EXPECT_EQ(verb_program_bind_vfs("vfsprog", "/bin/x.elf", 0), 0,
+		          "bind_vfs sets a VFS image on a program");
+		EXPECT_EQ(verb_program_bind_vfs("vfsprog", "relative", 0), -1,
+		          "bind_vfs rejects a non-absolute VFS path");
+
+		g_prog_count = 0;
+		EXPECT(verb_program_list(count_prog, NULL) >= 0, "list enumerates");
+		EXPECT(g_prog_count > 0, "the listed programs include the registered ones");
+
+		EXPECT_EQ(verb_program_unregister("regprog"), 0, "unregister a program");
+		EXPECT_EQ(verb_program_unregister("regprog"), 1,
+		          "unregister a second time reports no such program");
 	}
 
 	verb_dispatch_shutdown();

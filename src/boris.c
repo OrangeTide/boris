@@ -217,6 +217,7 @@ vm_agent_timer(struct iox_loop *loop, void *arg UNUSED)
 {
 	verb_agent_tick(VM_TICK_QUANTUM);
 	verb_agent_supervise();
+	verb_fg_tick(VM_TICK_QUANTUM);          /* step @run foreground sessions */
 	iox_timer_add(loop, VM_TICK_MS, vm_agent_timer, NULL);
 }
 

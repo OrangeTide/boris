@@ -1,0 +1,39 @@
+Attach a command verb to an object, or clear one.
+
+usage: @setverb <object> <word> <prog-id> [argspec]
+       @setverb <object> <word> -
+
+A command verb binds a word a player can type to a program. It is stored as
+the property verb.<word> on an object; when a player in scope types that
+word, the dispatcher runs the program against the object the verb was found
+on. Scope is searched in order: the actor, the actor's location, the
+actor's held items, then the room contents.
+
+  <object>    the cache id of the object to carry the verb, e.g. rooms/cave.
+  <word>      the command word (letters, digits, dash, underscore).
+  <prog-id>   a bound program, named without the programs/ prefix, e.g. a
+              program built with @compile. It must already exist.
+  [argspec]   an optional pattern for the rest of the command (see below).
+
+The second form, with a single '-' in place of the program, clears the
+object's own verb.<word>.
+
+Argument spec tokens:
+  <obj>           an object name in scope
+  <player>        a player name
+  <atom>          any single word
+  <atom=word>     a specific word; <atom=a|b|c> any of several
+  <any>           all remaining text
+  a bare word     shorthand for <atom=word>
+
+Wizard only. This sets the object's own verb; a verb inherited from a
+prototype is not changed.
+
+Examples:
+  @setverb rooms/cave examine look-kp <obj>
+      Typing "examine ember" in the cave runs program look-kp on the
+      named object.
+  @setverb rooms/cave examine -
+      Remove that verb.
+
+See also @compile, @chown, help addverb, help programs, help kobold.

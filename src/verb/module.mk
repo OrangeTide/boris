@@ -1,7 +1,7 @@
 LIBRARIES += verb
 verb_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
 verb_SRCS  = verb_spec.c verb_dispatch.c verb_agent.c verb_handle.c verb_model.c
-verb_LIBS  = resolve
+verb_LIBS  = resolve vfs
 
 EXECUTABLES        += test_verb_spec
 TEST_TARGETS       += test_verb_spec

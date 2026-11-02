@@ -166,6 +166,9 @@ boris_SRCS = \
 	cmd/vfscmd.c \
 	cmd/fedit.c \
 	cmd/compile.c \
+	cmd/run.c \
+	cmd/program.c \
+	cmd/setverb.c \
 	worldclock/worldclock.c \
 	invite.c \
 	web/server/webclient.c \

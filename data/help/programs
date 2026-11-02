@@ -1,0 +1,31 @@
+Programs, verbs, and agents.
+
+A program is a guest executable stored as an object named programs/<id>.
+It runs inside a sandboxed RV32 virtual machine, so a buggy or hostile
+program cannot reach outside its sandbox and harm the server. Programs are
+written in C or Kobold-Pascal and built with the VM SDK. See help kobold.
+
+A program object points at its image in one of two ways:
+
+  image.path   an ELF on the host, under the runtime's image directory
+               (data/vm by default), put there by the SDK build.
+  image.vfs    an absolute path in the in-world filesystem, produced by
+               @compile. When both are set, the VFS image wins.
+
+A program runs in one of three roles, chosen by how it is built:
+
+  standalone     runs once, does its work, and exits (like greet).
+  command verb   runs once when invoked against an object, reads that
+                 object, and speaks to the room (like look).
+  agent          stays resident, listens for events, and acts on them
+                 (like agent). An agent runs with its object's owner's
+                 authority, so it must have an owner. Set one with @chown.
+
+A command verb is bound to a word a player types with @setverb. For the whole
+loop from source to a working verb, see help addverb.
+
+A standalone program can also be run interactively with @run: the lines you
+type go to its standard input and its output comes back to you, so it can host
+a prompt or a line-driven utility. See help @run.
+
+See also @compile, @chown, @setverb, @run, help addverb, help kobold.

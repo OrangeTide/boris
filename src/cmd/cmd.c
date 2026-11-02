@@ -119,6 +119,9 @@ static const struct command_table {
 	{ "@fget", command_do_fget },
 	{ "@fput", command_do_fput },
 	{ "@compile", command_do_compile },
+	{ "@program", command_do_program },
+	{ "@setverb", command_do_setverb },
+	{ "@run", command_do_run },
 };
 
 /**
