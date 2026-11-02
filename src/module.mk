@@ -3,7 +3,7 @@ SUBDIRS = \
 	thirdparty/smolvfs \
 	crypt \
 	log scrypt util help iox net passwd obj entity rpg combat database \
-	security muddb-tool daemonize verb vm resolve builder zone ui stred
+	security muddb-tool daemonize verb vm vfs resolve builder zone ui stred
 
 LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))

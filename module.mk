@@ -18,7 +18,7 @@ PROJECT_CPPFLAGS += \
 	-Isrc/scrypt -Isrc/log -Isrc/util -Isrc/help \
 	-Isrc/iox -Isrc/net -Isrc/passwd \
 	-Isrc/obj -Isrc/entity -Isrc/rpg -Isrc/database \
-	-Isrc/vm -Isrc/verb -Isrc/resolve
+	-Isrc/vm -Isrc/verb -Isrc/vfs -Isrc/resolve
 PROJECT_LDFLAGS  += -pthread
 PROJECT_LDLIBS   += -pthread
 
