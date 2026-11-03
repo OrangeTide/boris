@@ -28,10 +28,9 @@ as a separate human step.
 
 ## Notes
 
-- `rv32.c` and `rv32.h` are vendored verbatim from skjegg
-  (`/home/jon/Vibe/skjegg/emu/`), which is the merge point for this
-  project's `rv_run` stop-reason API and kobold-pascal's decoded-instruction
-  cache. Re-vendoring from skjegg keeps the core a clean upstream copy with
+- `rv32.c` and `rv32.h` are vendored verbatim from skjegg's `emu/`, the merge
+  point for this project's `rv_run` stop-reason API and kobold-pascal's
+  decoded-instruction cache. Re-vendoring from skjegg keeps the core a clean upstream copy with
   no local diff. The decoded-instruction cache (`rv_dec_enable`/`rv_dec_free`)
   is opt-in and left off; the runtime does not enable it.
 - `elf32.c`/`elf32.h` are ours, adapted to drop the `guest.c` sparse-memory
