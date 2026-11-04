@@ -2,6 +2,64 @@
 
 Highlights per tagged version, newest first.
 
+## 2026-11
+
+### v0.8
+
+#### Added
+
+- OBJ object model: in-memory mutable JSON over a single copy-on-write buffer,
+  with prototype walking, containment and owner indexes, and object lifecycle.
+- muddb persistence layer on LMDB, serving the `objs`, `users`, `chars`,
+  `entities`, and `templates` domains, plus an LRU object cache.
+- Guest VM runtime over a new RV32IMA emulator and ELF32 loader, with a verb
+  dispatch layer that binds guest programs as object verbs and a resolver that
+  maps player commands to objects.
+- Guest toolchain and runtime (skjegg), with C and Kobold/Pascal as first-class
+  guest languages, built offline to the RV32 ELFs the server loads.
+- In-world authoring: CAS-backed 9P server and VFS commands, plus `@compile`,
+  `@run`, `@program`, and `@setverb` to build and bind guest programs live.
+- OLC builder commands (`@redit`, `@medit`, `@oedit`, `@zedit`, `@check`), a
+  UI layer for login, new-user, and main-menu flows, a string editor, and the
+  zone/instance namespace for rooms.
+- SSE web server on the net_stream layer, with a login overlay, invite codes,
+  property editor, ANSI colors, and `@edit`/`@view` commands.
+- seccomp-bpf syscall filter and Landlock filesystem sandbox, gated by
+  `CONFIG_SECCOMP` and `CONFIG_LANDLOCK`.
+- libiox network layer (poll loop, fd watchers, timers, signals) with a TCP
+  layer, replacing the previous event library.
+- RPG foundation: dice engine, character skills, stat and roll commands, a
+  position engine, scene tags, and stress/harm/condition/resist mechanics.
+- Combat scheduling over a per-instance phase queue with millisecond deadlines.
+- Word wrap with greedy and Knuth-Plass algorithms, integrated into the telnet
+  client with NAWS terminal-width sync.
+- MCP client-side editing, legacy charset conversion for non-UTF-8 clients,
+  `muddb-tool` for database import/export, a sample starter world, and the
+  `look`/`go`/`enter` movement commands.
+- `ctest.h` unit-test harness and a valgrind leak-check CI job.
+- Per-card work tracking in `kanban/`, synced one-way to GitLab issues by CI.
+
+#### Changed
+
+- Reorganized the command subsystem from `src/task` to `src/cmd` and migrated
+  the build to the modular-make system.
+- Unified room and object storage under a single `objs` domain and converted
+  room IDs from numeric to string-based.
+- Rebased the guest runtime onto the embedded skjrun scheduler and demoted the
+  content-addressed store from a live backend to an offline export format.
+
+#### Removed
+
+- The ColdFire emulator and the earlier stack VM, retired in favor of the RV32
+  guest VM.
+
+#### Fixed
+
+- Several use-after-free and double-free crashes in telnet, web, and net-layer
+  shutdown and close-during-dispatch paths.
+- JSON string escaping in object storage to prevent record corruption, and a
+  segfault when iterating over corrupt user records.
+
 ## 2020-04
 
 ### v0.7
