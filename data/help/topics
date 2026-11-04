@@ -3,3 +3,5 @@ Help topics:
   help        How to use the help system.
   commands    List of available commands.
   topics      This list.
+  programs    Running guest programs: verbs, agents, and sessions.
+  kobold      Writing Kobold-Pascal programs.

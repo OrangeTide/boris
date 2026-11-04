@@ -57,8 +57,12 @@ the VFS. The compiler, assembler, and linker are themselves RV32 ELFs
 `make -C sdk/vm toolchain`), run as guests under the embedded runtime over a
 hostcap build directory. Because no host process is spawned, in-world
 compilation works with seccomp and Landlock active; the pipeline is
-`src/vfs/vfs_compile.c`. C and assembly are supported; Kobold-Pascal is a
-follow-up.
+`src/vfs/vfs_compile.c`. The source extension selects the language: `.c`,
+`.s`/`.S` (assembly), and `.pas`/`.kp` (Kobold-Pascal). Kobold adds two
+front stages, the front end `skj-kpc-rv.elf` and the KPM1 backend
+`skj-kp-rv.elf`, then shares the assembler and linker; it links the
+freestanding Kobold runtime (`libkpaot-rv-free.a`) and its crt instead of
+the C libc. See `help kobold` for writing Kobold programs.
 
 ## Launching programs
 

@@ -51,14 +51,13 @@ The design has two goals that the earlier ColdFire plan did not meet.
 ## Why RV32
 
 - **Tooling.** A mature RISC-V ecosystem, plus first-party toolchains that
-  already emit RV32 ELFs. The C toolchain (skjegg) is vendored; the kobold
-  (Pascal-family) frontend is planned, not yet vendored. See **Guest
-  Language Support**.
+  already emit RV32 ELFs. The C and Kobold-Pascal toolchains (skjegg) are
+  both vendored and build guests as RV32 ELFs. See **Guest Language
+  Support**.
 - **A shared, self-contained emulator.** The RV32 core (`rv32.c`,
   `rv32.h`) is around 2860 lines, depends only on `<stdint.h>` and
-  `<string.h>`, and is identical across the kobold, smolmoo, and skjegg
-  projects apart from the license header. Boris vendors one copy and owns
-  it.
+  `<string.h>`, and is a verbatim copy of the upstream skjegg core apart
+  from the license header. Boris vendors one copy and owns it.
 - **A clean host seam.** The core is bus-agnostic. It calls host function
   pointers for memory reads and writes, an optional access-probe hook, and
   an `ecall` handler. Boris supplies its own memory backend and host-call
@@ -477,12 +476,12 @@ already works and keeps the online step small.
    in **Host-Call ABI**. This stage can run online, inside the server.
 3. **Execute.** The ELF is loaded into the RV32 emulator and run as a task.
 
-**First implementation cut: stage 3 only.** The initial build runs
-pre-built RV32 ELFs. Compilation and linking happen offline, outside the
-server, with the kobold and skjegg toolchains. Stages 1 and 2 are designed
-now so the ABI and module format do not have to be reworked later, but
-online compilation and linking are deferred. In-server compilation is the
-larger, later scope, and it is what smolmoo's `@program` command does.
+All three stages now run inside the server. The toolchain stages are
+themselves RV32 ELFs run as sandboxed guests, so `@compile` builds a VFS
+source to a VFS ELF with seccomp and Landlock active, `@program` binds it,
+and `@run` executes it. The earlier plan deferred online compilation to a
+later cut; after the skjegg rebase it is live. See [[vm-skjegg-rebase]] for
+the current pipeline.
 
 ## Guest Language Support
 
@@ -502,15 +501,17 @@ freestanding; it provides a heap over the program break, a small string and
 number layer, and the host-call wrappers, and it makes no host calls other
 than those in the flat table.
 
-Status: the C toolchain is vendored in-tree at `sdk/toolchain/skjegg/`
-(`skj-cc-rv`, `skj-as-rv`, `skj-ld-rv`; the [[vm-toolchain-vendor]] card), and
-the guest runtime is in `sdk/vm/`: `crt0.S` (one-shot start: calls `main` on
-the host-set `argc`/`argv`/stack, then exits), `cmd_crt.S` + `cmd_rt.c` (the
-command-verb start and typed-argument accessors), `verb_rt.c` (the agent
-event-loop runtime), `stubs.S` (`ecall`-per-call), `imports.S` (the KPIMPT1
-table), `vm.ld`, and `vmsys.h`. `sdk/vm/Makefile` builds the example programs,
-and `vm-run` loads and runs a program image against the runtime builtins for
-testing. The kobold front end is a later card ([[vm-online-toolchain]]).
+Status: both toolchains are vendored in-tree at `sdk/toolchain/skjegg/` and
+build guests as RV32 ELFs. C goes through `skj-cc-rv`; Kobold-Pascal goes
+through the front end `skj-kpc-rv` and the KPM1 backend `skj-kp-rv`; both
+share `skj-as-rv` and `skj-ld-rv`. All run in-world as the `@compile` stages.
+The boris-owned guest runtime is in `sdk/vm/`: the band start and host-call
+stubs for command verbs and agents (`crt0.S`, `cmd_crt.S`, `cmd_rt.c`,
+`verb_rt.c`, `stubs.S`, `vm.ld`, `vmsys.h`), reaching boris's services through
+a fixed host-call selector band. Plain programs instead link the confined
+skjegg libc (C) or the freestanding Kobold runtime. `sdk/vm/Makefile` builds
+the examples, the libc, and the toolchain guests. See [[vm-skjegg-rebase]] for
+the live implementation.
 
 ## What This Drops From the ColdFire Design
 
