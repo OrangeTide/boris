@@ -32,7 +32,9 @@
 
 #define STB_LOCAL    0
 #define STB_GLOBAL   1
+#define STB_WEAK     2
 #define STT_NOTYPE   0
+#define STT_FUNC     2
 #define STT_SECTION  3
 
 #define SHN_UNDEF    0
@@ -138,6 +140,11 @@ enum {
     SH_RELA_TEXT,
     SH_RELA_RODATA,
     SH_RELA_DATA,
+    SH_DEBUG_LINE,
+    SH_DEBUG_INFO,
+    SH_DEBUG_ABBREV,
+    SH_RELA_DEBUG_LINE,
+    SH_RELA_DEBUG_INFO,
     SH_SHSTRTAB,
     SH_COUNT,
 };
@@ -147,11 +154,14 @@ static int
 rsec_shndx(int rsec)
 {
     switch (rsec) {
-    case RSEC_TEXT:   return SH_TEXT;
-    case RSEC_RODATA: return SH_RODATA;
-    case RSEC_DATA:   return SH_DATA;
-    case RSEC_BSS:    return SH_BSS;
-    default:          return SHN_UNDEF;
+    case RSEC_TEXT:         return SH_TEXT;
+    case RSEC_RODATA:       return SH_RODATA;
+    case RSEC_DATA:         return SH_DATA;
+    case RSEC_BSS:          return SH_BSS;
+    case RSEC_DEBUG_LINE:   return SH_DEBUG_LINE;
+    case RSEC_DEBUG_INFO:   return SH_DEBUG_INFO;
+    case RSEC_DEBUG_ABBREV: return SH_DEBUG_ABBREV;
+    default:                return SHN_UNDEF;
     }
 }
 
@@ -193,6 +203,11 @@ rv_elf_write(struct rv_asm *a, FILE *out)
     shname[SH_RELA_TEXT] = strtab_add(&shstrtab, ".rela.text");
     shname[SH_RELA_RODATA] = strtab_add(&shstrtab, ".rela.rodata");
     shname[SH_RELA_DATA] = strtab_add(&shstrtab, ".rela.data");
+    shname[SH_DEBUG_LINE] = strtab_add(&shstrtab, ".debug_line");
+    shname[SH_DEBUG_INFO] = strtab_add(&shstrtab, ".debug_info");
+    shname[SH_DEBUG_ABBREV] = strtab_add(&shstrtab, ".debug_abbrev");
+    shname[SH_RELA_DEBUG_LINE] = strtab_add(&shstrtab, ".rela.debug_line");
+    shname[SH_RELA_DEBUG_INFO] = strtab_add(&shstrtab, ".rela.debug_info");
     shname[SH_SHSTRTAB] = strtab_add(&shstrtab, ".shstrtab");
 
     /* Symbol table: null, section syms, local defined, global/undefined. */
@@ -219,8 +234,9 @@ rv_elf_write(struct rv_asm *a, FILE *out)
         esyms[nesyms] = (struct elf_sym){
             .st_name = (uint32_t)strtab_add(&strtab, a->st.syms[k].name),
             .st_value = a->st.syms[k].value,
-            .st_size = 0,
-            .st_info = ELF32_ST_INFO(STB_LOCAL, STT_NOTYPE),
+            .st_size = a->st.syms[k].size,
+            .st_info = ELF32_ST_INFO(STB_LOCAL,
+                a->st.syms[k].is_func ? STT_FUNC : STT_NOTYPE),
             .st_other = 0,
             .st_shndx = (uint16_t)rsec_shndx(a->st.syms[k].section),
         };
@@ -240,8 +256,10 @@ rv_elf_write(struct rv_asm *a, FILE *out)
         esyms[nesyms] = (struct elf_sym){
             .st_name = (uint32_t)strtab_add(&strtab, a->st.syms[k].name),
             .st_value = a->st.syms[k].defined ? a->st.syms[k].value : 0,
-            .st_size = 0,
-            .st_info = ELF32_ST_INFO(STB_GLOBAL, STT_NOTYPE),
+            .st_size = a->st.syms[k].size,
+            .st_info = ELF32_ST_INFO(
+                a->st.syms[k].weak ? STB_WEAK : STB_GLOBAL,
+                a->st.syms[k].is_func ? STT_FUNC : STT_NOTYPE),
             .st_other = 0,
             .st_shndx = shndx,
         };
@@ -291,6 +309,12 @@ rv_elf_write(struct rv_asm *a, FILE *out)
     sec_off[RSEC_TEXT] = offset;   offset += (uint32_t)len[RSEC_TEXT];
     sec_off[RSEC_RODATA] = offset; offset += (uint32_t)len[RSEC_RODATA];
     sec_off[RSEC_DATA] = offset;   offset += (uint32_t)len[RSEC_DATA];
+    sec_off[RSEC_DEBUG_LINE] = offset;
+    offset += (uint32_t)len[RSEC_DEBUG_LINE];
+    sec_off[RSEC_DEBUG_INFO] = offset;
+    offset += (uint32_t)len[RSEC_DEBUG_INFO];
+    sec_off[RSEC_DEBUG_ABBREV] = offset;
+    offset += (uint32_t)len[RSEC_DEBUG_ABBREV];
     sec_off[RSEC_BSS] = offset;    /* NOBITS: no file bytes */
 
     symtab_off = offset;           offset += (uint32_t)symtab_size;
@@ -299,6 +323,11 @@ rv_elf_write(struct rv_asm *a, FILE *out)
     rela_off[RSEC_TEXT] = offset;  offset += (uint32_t)rela_size[RSEC_TEXT];
     rela_off[RSEC_RODATA] = offset; offset += (uint32_t)rela_size[RSEC_RODATA];
     rela_off[RSEC_DATA] = offset;  offset += (uint32_t)rela_size[RSEC_DATA];
+    rela_off[RSEC_DEBUG_LINE] = offset;
+    offset += (uint32_t)rela_size[RSEC_DEBUG_LINE];
+    rela_off[RSEC_DEBUG_INFO] = offset;
+    offset += (uint32_t)rela_size[RSEC_DEBUG_INFO];
+    rela_off[RSEC_DEBUG_ABBREV] = offset;  /* no relocations, size 0 */
 
     shstrtab_off = offset;         offset += (uint32_t)shstrtab.len;
     shdr_off = offset;
@@ -371,15 +400,36 @@ rv_elf_write(struct rv_asm *a, FILE *out)
     put32(shdr[SH_STRTAB] + 20, (uint32_t)strtab.len);
     put32(shdr[SH_STRTAB] + 36, 1);
 
-    /* SH_RELA_TEXT / RODATA / DATA */
+    /* SH_DEBUG_LINE / INFO / ABBREV: non-alloc PROGBITS, byte-aligned. */
     {
-        struct { int sh; int rsec; int target_sh; } rela[3] = {
-            { SH_RELA_TEXT,   RSEC_TEXT,   SH_TEXT },
-            { SH_RELA_RODATA, RSEC_RODATA, SH_RODATA },
-            { SH_RELA_DATA,   RSEC_DATA,   SH_DATA },
+        struct { int sh; int rsec; } dbg[3] = {
+            { SH_DEBUG_LINE,   RSEC_DEBUG_LINE },
+            { SH_DEBUG_INFO,   RSEC_DEBUG_INFO },
+            { SH_DEBUG_ABBREV, RSEC_DEBUG_ABBREV },
         };
         int i;
         for (i = 0; i < 3; i++) {
+            int sh = dbg[i].sh;
+            put32(shdr[sh] + 0, (uint32_t)shname[sh]);
+            put32(shdr[sh] + 4, SHT_PROGBITS);
+            put32(shdr[sh] + 8, 0);     /* no SHF_ALLOC: debug, not loaded */
+            put32(shdr[sh] + 16, sec_off[dbg[i].rsec]);
+            put32(shdr[sh] + 20, (uint32_t)len[dbg[i].rsec]);
+            put32(shdr[sh] + 32, 1);    /* byte-aligned */
+        }
+    }
+
+    /* SH_RELA_TEXT / RODATA / DATA / DEBUG_LINE / DEBUG_INFO */
+    {
+        struct { int sh; int rsec; int target_sh; } rela[5] = {
+            { SH_RELA_TEXT,   RSEC_TEXT,   SH_TEXT },
+            { SH_RELA_RODATA, RSEC_RODATA, SH_RODATA },
+            { SH_RELA_DATA,   RSEC_DATA,   SH_DATA },
+            { SH_RELA_DEBUG_LINE, RSEC_DEBUG_LINE, SH_DEBUG_LINE },
+            { SH_RELA_DEBUG_INFO, RSEC_DEBUG_INFO, SH_DEBUG_INFO },
+        };
+        int i;
+        for (i = 0; i < 5; i++) {
             int sh = rela[i].sh;
             put32(shdr[sh] + 0, (uint32_t)shname[sh]);
             put32(shdr[sh] + 4, SHT_RELA);
@@ -407,6 +457,13 @@ rv_elf_write(struct rv_asm *a, FILE *out)
         fwrite(a->sections[RSEC_RODATA].data, 1, len[RSEC_RODATA], out);
     if (len[RSEC_DATA] > 0)
         fwrite(a->sections[RSEC_DATA].data, 1, len[RSEC_DATA], out);
+    if (len[RSEC_DEBUG_LINE] > 0)
+        fwrite(a->sections[RSEC_DEBUG_LINE].data, 1, len[RSEC_DEBUG_LINE], out);
+    if (len[RSEC_DEBUG_INFO] > 0)
+        fwrite(a->sections[RSEC_DEBUG_INFO].data, 1, len[RSEC_DEBUG_INFO], out);
+    if (len[RSEC_DEBUG_ABBREV] > 0)
+        fwrite(a->sections[RSEC_DEBUG_ABBREV].data, 1,
+               len[RSEC_DEBUG_ABBREV], out);
 
     for (k = 0; k < nsyms_total; k++) {
         uint8_t sbuf[16];
@@ -422,6 +479,10 @@ rv_elf_write(struct rv_asm *a, FILE *out)
         fwrite(rela_buf[RSEC_RODATA], 1, rela_size[RSEC_RODATA], out);
     if (rela_size[RSEC_DATA] > 0)
         fwrite(rela_buf[RSEC_DATA], 1, rela_size[RSEC_DATA], out);
+    if (rela_size[RSEC_DEBUG_LINE] > 0)
+        fwrite(rela_buf[RSEC_DEBUG_LINE], 1, rela_size[RSEC_DEBUG_LINE], out);
+    if (rela_size[RSEC_DEBUG_INFO] > 0)
+        fwrite(rela_buf[RSEC_DEBUG_INFO], 1, rela_size[RSEC_DEBUG_INFO], out);
 
     fwrite(shstrtab.data, 1, shstrtab.len, out);
 

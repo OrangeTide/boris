@@ -246,13 +246,27 @@ handle_include(struct cpp *p, const char *line)
             name[i++] = *s++;
         name[i] = '\0';
     } else {
-        /* macro-expanded include — expand and retry */
+        /* macro-expanded include — expand once and retry. macro_expand fully
+           expands the token stream, so if the result is still not a <...> or
+           "..." form it is a malformed include, not something to expand again:
+           recursing unconditionally here spins forever on input like
+           `#include foo` where foo is undefined (it detokenizes back to `foo`).
+           Retry only when the expansion produced a bracketed form, which the
+           branches above consume and terminate. */
         struct pp_token *tokens = pp_tokenize(s, (int)strlen(s));
         struct pp_token *expanded = macro_expand(p, tokens);
         char buf[4096];
+        const char *t;
         pp_detokenize(expanded, buf, sizeof buf);
         pp_free_tokens(expanded);
-        handle_include(p, buf);
+        t = skip_ws(buf);
+        if (*t == '<' || *t == '"') {
+            handle_include(p, buf);
+        } else {
+            cpp_error(p, "%s:%d: invalid #include",
+                      p->file ? p->file->path : "<unknown>",
+                      p->file ? p->file->line : 0);
+        }
         return;
     }
 
@@ -489,15 +503,15 @@ process_directive(struct cpp *p, const char *line, int len)
 }
 
 static void
-strip_block_comments(struct cpp *p)
+strip_block_comments(struct cpp *p, char *buf)
 {
-    char *src = p->linebuf;
-    char *dst = p->linebuf;
+    char *src = buf;
+    char *dst = buf;
 
     if (p->in_comment) {
         char *close = strstr(src, "*/");
         if (!close) {
-            p->linebuf[0] = '\0';
+            buf[0] = '\0';
             return;
         }
         src = close + 2;
@@ -667,18 +681,38 @@ cpp_get_filename(struct cpp *p)
 }
 
 int
+cpp_get_emit_line(struct cpp *p)
+{
+    return p->emit_line;
+}
+
+const char *
+cpp_get_emit_file(struct cpp *p)
+{
+    return p->emit_file;
+}
+
+int
 cpp_next_line(struct cpp *p, char *buf, int bufsize)
 {
     for (;;) {
+        int start_line;
+        const char *start_file;
+
         if (!p->file)
             return 0;
+
+        /* The emitted content starts at the current source line; read_logical_line
+           advances p->file->line past it, so capture it now. */
+        start_line = p->file->line;
+        start_file = p->file->path;
 
         if (!read_logical_line(p, p->linebuf, sizeof p->linebuf)) {
             file_pop(p);
             continue;
         }
 
-        strip_block_comments(p);
+        strip_block_comments(p, p->linebuf);
 
         const char *s = skip_ws(p->linebuf);
         if (*s == '#') {
@@ -691,16 +725,41 @@ cpp_next_line(struct cpp *p, char *buf, int bufsize)
         if (!cond_active(p))
             continue;
 
-        /* expand macros in the line */
-        struct pp_token *tokens = pp_tokenize(p->linebuf,
-                                              (int)strlen(p->linebuf));
-        struct pp_token *expanded = macro_expand(p, tokens);
+        /* Expand macros in the line.  A function-like macro call may span
+           source lines, so if macro_expand reports its argument list did not
+           close, pull the next logical line(s) into linebuf and retry from the
+           joined text until the call closes or the input ends. */
+        struct pp_token *expanded;
+        for (;;) {
+            p->macro_need_more = 0;
+            struct pp_token *tokens = pp_tokenize(p->linebuf,
+                                                  (int)strlen(p->linebuf));
+            expanded = macro_expand(p, tokens);
+            if (!p->macro_need_more)
+                break;
+
+            char more[sizeof p->linebuf];
+            if (!read_logical_line(p, more, sizeof more)) {
+                warn("unterminated macro arguments");
+                break;
+            }
+            strip_block_comments(p, more);
+
+            int cur = (int)strlen(p->linebuf);
+            if (cur >= (int)sizeof p->linebuf - 1)
+                break;      /* no room to join; take what we have */
+            /* a line break inside an argument list is whitespace */
+            snprintf(p->linebuf + cur, sizeof p->linebuf - cur, " %s", more);
+            pp_free_tokens(expanded);
+        }
         int len = pp_detokenize(expanded, buf, bufsize - 1);
         pp_free_tokens(expanded);
         if (len == 0)
             continue;
         buf[len++] = '\n';
         buf[len] = '\0';
+        p->emit_line = start_line;
+        p->emit_file = start_file;
         return len;
     }
 }

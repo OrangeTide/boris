@@ -522,7 +522,7 @@ ld_default_script(struct arena *a, struct ld_script *script)
     static const char default_script[] =
         "OUTPUT_FORMAT(\"elf32-m68k\")\n"
         "ENTRY(_start)\n"
-        "MEMORY { RAM (rwx) : ORIGIN = 0x80000000, LENGTH = 1M }\n"
+        "MEMORY { RAM (rwx) : ORIGIN = 0x80000000, LENGTH = 0x4000000 }\n"
         "SECTIONS {\n"
         "    .text : { *(.text .text.*) } > RAM\n"
         "    .rodata : { *(.rodata .rodata.*) } > RAM\n"

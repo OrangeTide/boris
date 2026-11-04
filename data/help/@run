@@ -1,0 +1,31 @@
+Run a program interactively as a foreground session.
+
+usage: @run <program> [args]
+
+Launches the program object programs/<program> and attaches it to your
+session: the lines you type go to the program's standard input, and the
+program's output comes back to you a line at a time. Unlike a verb, which
+runs to completion the moment you type it, a foreground program keeps running
+and can read your later input, so it can host a prompt, a menu, or any
+line-driven utility.
+
+While a program is running, every line you type is sent to it instead of to
+the command parser. To leave, type a line of just:
+
+  ~.
+
+That closes the program's input (it sees end of file) and, if it does not
+exit on its own, ends it. A program that reads until end of file will also
+stop here.
+
+  <program>   the name of a program object, as bound by @compile
+  [args]      optional words passed to the program as its arguments
+
+Wizard only for now. A foreground program runs with your authority. Output is
+delivered on the server heartbeat, so a reply may lag your input by a moment.
+
+Example:
+  @run calc
+      Run the example RPN calculator; "3 4 +" prints "= 7", q quits.
+
+See also @compile, help programs, help kobold.

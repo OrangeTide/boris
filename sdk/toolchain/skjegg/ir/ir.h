@@ -184,33 +184,120 @@ enum ir_op {
 
     /* Source-line marker (imm = the line).  Produces no code and defines no
        value; a backend that tracks debug info records the current output
-       position against the line.  Not yet emitted or lowered. */
+       position against the line.  The source file is carried once per function
+       in ir_func.src_file, not repeated here.  Emitted by a front end under -g
+       (cc, kobold) and observed by every backend: the selector sinks record it
+       (a comment in the AOT text sink, an address-to-line entry in the JIT byte
+       sink), the direct ColdFire and MIPS emitters currently skip it. */
     IR_LOC,
+
+    /* two-integer return: the value plus a second result (an error signal) in a
+       second return register, the ABI for a failable routine (see the Kobold
+       front end, doc/languages/kobold/kp-errors.md).  RETV2 puts operand a in the first return
+       register (the value) and operand b in the second (the error), then
+       returns.  CALL2 and CALLI2 make the call, leave the value in dst as an
+       ordinary single def, and store the second return register to local slot
+       `slot` (the error).  Keeping the error in a slot rather than a second
+       temp means the register allocator still sees one def per call.  Integer
+       or pointer value and error only.  Appended after IR_LOC so the existing
+       opcode numbers are undisturbed; the KPM1 reader maps by mnemonic, so the
+       value is internal. */
+    IR_RETV2,
+    IR_CALL2, IR_CALLI2,
+
+    /* Threaded-code dispatch (Kobold computed goto, doc/languages/kobold).
+       LABADDR materializes the address of a local code label (carried in
+       `label`, as IR_JMP does) into `dst` -- the IR_LEA analog for a label.
+       IJMP is an indirect jump through the address in operand `a`, a block
+       terminator -- the IR_JMP analog through a register.  Appended last so the
+       existing opcode numbers are undisturbed; the KPM1 reader maps by
+       mnemonic, so the value is internal.
+
+       LABADDR64 / IJMP64 are the 64-bit-pointer twins, for an LP64 front end
+       (skj-cc on x86-64 and arm64) where a label address is a full 64-bit
+       value: they differ from the 32-bit forms only in the spill/reload width
+       of the result and the jump operand, exactly as IR_LEA64 does for IR_LEA.
+       An ILP32 front end (skj-kp, and skj-cc on the 32-bit targets) uses the
+       plain LABADDR / IJMP. */
+    IR_LABADDR, IR_IJMP,
+    IR_LABADDR64, IR_IJMP64,
 };
 
 /****************************************************************
  * IR data structures
  ****************************************************************/
 
+/* Extended inline asm operand (cc: asm(template : outputs : inputs : clobbers)).
+   The template in ir_insn.sym references operand N as %N, outputs numbered
+   first, then inputs.  A plain "r"-class operand is materialised in any GP
+   register; a name in braces ("{$v0}") pins it to that physical register. */
+struct ir_asm_op {
+    char *constraint;   /* "=r", "r", "+r", "0", "i", "{$reg}" */
+    char *pin_reg;      /* physical register to pin to, or NULL for any GP reg;
+                           set from a "{$reg}" constraint or a register-bound
+                           local variable (register T x __asm__("$reg")) */
+    int temp;           /* input value temp, or output result temp */
+    int size;           /* operand width in bytes (the C type size); the 64-bit
+                           backends pick a 32- or 64-bit register name by it */
+    int is_output;
+    int is_inout;       /* "+": read and written (one operand) */
+};
+
+struct ir_asm_info {
+    int noutputs;
+    int ninputs;                /* ops[] holds noutputs outputs then ninputs inputs */
+    struct ir_asm_op *ops;
+    char **clobbers;
+    int nclobbers;
+    int is_volatile;
+};
+
 struct ir_insn {
     int op;
     int dst;
     int a, b;
-    long imm;
+    int64_t imm;        /* 64-bit: holds a LIC64 value or an f64's bits, which do
+                           not fit a 32-bit long on an ILP32 host (rv32) */
     char *sym;
+    struct ir_asm_info *asm_info;  /* IR_ASM only: NULL = basic (verbatim sym) */
     int slot;
     int label;
     int nargs;
+    int vararg;         /* on an IR_ARG/IR_ARG64/IR_FARG: this is an unnamed
+                           argument of a variadic call.  Only the RISC-V backend
+                           reads it (to place unnamed args on the stack); the
+                           other backends keep their psABI placement. */
+    int argalign;       /* on an IR_ARG: the byte alignment this argument's slot
+                           requires in the outgoing argument structure (8 for
+                           the first word of a by-value struct with 8-aligned
+                           members).  Only the MIPS backend reads it, to start
+                           such a struct on an even word; 0 means word alignment. */
     struct ir_insn *next;
 };
 
 struct ir_func {
     struct arena *arena;
     char *name;
+    char *from_unit;    /* non-null: this definition was absorbed from that unit into a
+                           self-contained bundle, so the linker folds it against another
+                           copy of the same symbol (identical, or a link error). NULL for a
+                           module's own definition, which is unique. */
+    const char *src_file; /* source file this function was compiled from, set by a
+                             front end under -g for the debug-info line table; NULL
+                             when debug info is off.  The per-statement line lives
+                             on each IR_LOC marker (its imm). */
     int is_local;
     int nparams;
     int nslots;
     int *slot_size;
+    int *slot_align;    /* per-slot natural alignment in bytes, or NULL if the
+                           front end did not set it.  A backend that cares about
+                           a slot's alignment (the MIPS o32 argument structure,
+                           where a doubleword scalar is 8-aligned but a word-
+                           sized aggregate is only 4-aligned) reads it here; with
+                           NULL or a 0 entry it falls back to inferring 8 from an
+                           8-multiple size, which is exact for a scalar-only
+                           front end. */
     int *param_class;   /* per-param: 0 = integer/pointer, 1 = float (for the
                            register calling convention); NULL if unset */
     signed char *param_neb; /* psABI: register slots for param i (1 for a
@@ -262,12 +349,20 @@ struct ir_init {
 
 struct ir_global {
     char *name;
+    char *from_unit;    /* non-null: absorbed from that unit into a bundle (see ir_func). */
     int base_type;
     int arr_size;
     int align;          /* required byte alignment; 0 = base_type default */
     struct ir_init *inits;  /* non-null: aggregate byte image (see ir_init) */
     int is_ptr;
     int is_local;
+    int is_export;      /* a unit's exported var: visible to other modules at link */
+    int is_rodata;      /* an immutable global (string literal, real pool, const): read-only */
+    int is_strobj;      /* a static string object: the backend emits the {refcount,kind,len,cap}
+                           header in target endianness, then init_string as the text + NUL.
+                           Keeps the Kobold string descriptor endian-correct on a big-endian
+                           target (ColdFire), where a baked little-endian header would be
+                           byte-swapped.  base_type stays IR_I8; init_strlen is the text length. */
     int64_t *init_ivals;
     char **init_syms;
     int init_count;
@@ -289,8 +384,14 @@ struct ir_func *ir_new_func(struct arena *a, const char *name);
 int ir_new_temp(struct ir_func *fn);
 int ir_new_label(struct ir_func *fn);
 struct ir_insn *ir_emit(struct ir_func *fn, int op);
+struct ir_insn *ir_loc(struct ir_func *fn, int line);  /* IR_LOC marker (-g) */
 int ir_op_is_float_def(int op);
 int ir_op_is_i64_def(int op);
+
+/* Write each float temp's register storage format into out[0..fn->ntemps): 1 for
+   f32 (single) format, 0 for f64.  See the definition for how the two front ends'
+   float models are told apart. */
+void ir_classify_f32(struct ir_func *fn, unsigned char *out);
 
 /****************************************************************
  * Register allocation
@@ -308,5 +409,15 @@ void regalloc(struct ir_func *fn);
  ****************************************************************/
 
 void target_emit(FILE *out, struct ir_program *prog);
+
+/* The overflow-trap policy of an AOT target_emit.  0 (the default) is the hardware
+   policy the C compiler wants: a divide relies on the CPU fault and a checked
+   arithmetic op, which C never emits, is left to wrap.  A front end whose semantics
+   trap on overflow (Kobold) sets this to 1 before target_emit so the checked ops
+   call the trap helper instead, matching that language's JIT.  It is a mode, not
+   per-call data, so it rides a flag rather than a wider target_emit signature; the
+   backends that have a hardware mode (x86-64, arm64) read it, and rv always guards.
+   Defined in ir.c so every driver links one copy. */
+extern int target_aot_trap_guarded;
 
 #endif /* IR_H */

@@ -16,10 +16,9 @@
  * ELF builder
  *
  * Wrap a segment of guest bytes in a minimal ELF32 little-endian RISC-V
- * executable: one PT_LOAD at 0x1000 holding the code followed by the KPIMPT1
- * host-call import table, which the loader finds by scanning the image. Import
- * index i is reached from guest code with a7 = VM_HOSTCALL_BASE + i. Building
- * images inline keeps the tests self-contained, with no toolchain.
+ * executable: one PT_LOAD at 0x1000 holding the code. A host call is reached
+ * from guest code with a7 = VM_HOSTCALL_BASE + a fixed VM_CALL_* selector.
+ * Building images inline keeps the tests self-contained, with no toolchain.
  ****************************************************************/
 
 #define LOAD_VADDR 0x1000u
@@ -40,49 +39,48 @@ le32(uint8_t *p, uint32_t v)
 	p[3] = (uint8_t)(v >> 24);
 }
 
-/* Emit "set a7 = VM_HOSTCALL_BASE + idx, then ecall" at seg+o; return the new
- * offset. VM_HOSTCALL_BASE is 0x00100000, which is lui a7, 0x100. */
+/* Emit "set a7 = VM_HOSTCALL_BASE + sel, then ecall" at seg+o; return the new
+ * offset. sel is a fixed VM_CALL_* selector. VM_HOSTCALL_BASE is 0x00100000,
+ * which is lui a7, 0x100. */
 static uint32_t
-emit_call(uint8_t *seg, uint32_t o, uint32_t idx)
+emit_call(uint8_t *seg, uint32_t o, uint32_t sel)
 {
 	le32(seg + o, 0x001008B7u);             /* lui  a7, 0x100 */
 	o += 4;
-	if (idx) {
-		le32(seg + o, 0x00088893u | (idx << 20));  /* addi a7, a7, idx */
+	if (sel) {
+		le32(seg + o, 0x00088893u | (sel << 20));  /* addi a7, a7, sel */
 		o += 4;
 	}
 	le32(seg + o, 0x00000073u);             /* ecall */
 	return o + 4;
 }
 
-/* Assemble the full image. Returns its total length. */
+/* Emit "set a7 = nr, then ecall" at seg+o for a raw Linux-number syscall (the
+ * Tier-0 seam, not the host-call table). nr must fit a 12-bit immediate.
+ * addi a7, x0, nr is 0x00000893 | (nr << 20). Returns the new offset. */
+static uint32_t
+emit_syscall(uint8_t *seg, uint32_t o, uint32_t nr)
+{
+	le32(seg + o, 0x00000893u | (nr << 20));        /* addi a7, x0, nr */
+	o += 4;
+	le32(seg + o, 0x00000073u);                     /* ecall */
+	return o + 4;
+}
+
+/* Assemble the full image. Returns its total length. Host calls reach the
+ * runtime by fixed selector (emit_call), so the image carries code only: no
+ * import table. */
 static long
-build_prog(uint8_t *buf, const uint8_t *seg, uint32_t seglen,
-           const char *const *imports, uint32_t nimports)
+build_prog(uint8_t *buf, const uint8_t *seg, uint32_t seglen)
 {
 	uint8_t *eh = buf;
 	uint8_t *ph = buf + 52;
 	uint32_t code_off = 84;
 	uint8_t *body = buf + code_off;
-	uint32_t pad, tbl, i, total;
+	uint32_t total;
 
-	/* Code, then the KPIMPT1 import table right after it, both in one PT_LOAD
-	 * so the loader finds the table by scanning the loaded image. The table is
-	 * the magic, a count, then the packed NUL-terminated names. */
 	memcpy(body, seg, seglen);
-	pad = (seglen + 3) & ~3u;
-	for (i = seglen; i < pad; i++)
-		body[i] = 0;
-	tbl = pad;
-	memcpy(body + tbl, "KPIMPT1", 7);
-	body[tbl + 7] = 0;
-	le32(body + tbl + 8, nimports);
-	total = tbl + 12;
-	for (i = 0; i < nimports; i++) {
-		uint32_t l = (uint32_t)strlen(imports[i]) + 1;
-		memcpy(body + total, imports[i], l);
-		total += l;
-	}
+	total = seglen;
 
 	/* ELF header and the one program header. No section headers: the loader
 	 * reads only program headers, and the guest assembler cannot emit the
@@ -118,14 +116,13 @@ build_prog(uint8_t *buf, const uint8_t *seg, uint32_t seglen,
 static long
 build_exit_elf(uint8_t *buf, uint32_t status)
 {
-	static const char *const imp[] = { "sys_exit" };
 	uint8_t seg[16];
 	uint32_t o = 0;
 
 	le32(seg + o, 0x00000513u | (status << 20));    /* addi a0, x0, status */
 	o += 4;
-	o = emit_call(seg, o, 0);                        /* sys_exit */
-	return build_prog(buf, seg, o, imp, 1);
+	o = emit_call(seg, o, VM_CALL_EXIT);                        /* sys_exit */
+	return build_prog(buf, seg, o);
 }
 
 /****************************************************************
@@ -181,7 +178,6 @@ test_oneshot_exit(void)
 static void
 test_write_output(void)
 {
-	static const char *const imp[] = { "sys_write", "sys_exit" };
 	uint8_t seg[64];
 	uint8_t elf[512];
 	uint32_t o, dataoff;
@@ -194,17 +190,17 @@ test_write_output(void)
 	le32(seg + 8, 0x00100513u);     /* addi a0, x0, 1 (fd) */
 	le32(seg + 12, 0x00300613u);    /* addi a2, x0, 3 (len) */
 	o = 16;
-	o = emit_call(seg, o, 0);       /* sys_write */
+	o = emit_call(seg, o, VM_CALL_WRITE);       /* sys_write */
 	le32(seg + o, 0x00000513u);     /* addi a0, x0, 0 */
 	o += 4;
-	o = emit_call(seg, o, 1);       /* sys_exit */
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit */
 	dataoff = o;
 	seg[o++] = 'h';
 	seg[o++] = 'i';
 	seg[o++] = '\n';
 	le32(seg + 4, 0x00058593u | (dataoff << 20));   /* a1 = 0x1000 + dataoff */
 
-	len = build_prog(elf, seg, o, imp, 2);
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 	vm_task_set_output(t, capture, &out);
 
@@ -226,7 +222,7 @@ test_instruction_cap(void)
 	struct vm_task *t;
 
 	le32(seg + 0, 0x0000006Fu);     /* jal x0, 0  -> jump to self */
-	len = build_prog(elf, seg, sizeof seg, NULL, 0);
+	len = build_prog(elf, seg, sizeof seg);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<spin>"), 0, "loaded image");
@@ -246,7 +242,7 @@ test_fault(void)
 
 	le32(seg + 0, 0x400002B7u);     /* lui x5, 0x40000 -> x5 = 0x40000000 */
 	le32(seg + 4, 0x0002A023u);     /* sw  x0, 0(x5)   -> out of range    */
-	len = build_prog(elf, seg, sizeof seg, NULL, 0);
+	len = build_prog(elf, seg, sizeof seg);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<fault>"), 0, "loaded image");
@@ -254,32 +250,30 @@ test_fault(void)
 	vm_task_free(t);
 }
 
-/* A host call the guest imports but no one provides faults the task when
- * called, rather than passing silently. */
+/* A selector no one serves faults the task when called, rather than passing
+ * silently. A game selector with no env bound is the natural unserved call. */
 static void
 test_unbound_call(void)
 {
-	static const char *const imp[] = { "no_such_call" };
 	uint8_t seg[16];
 	uint8_t elf[512];
 	uint32_t o;
 	long len;
 	struct vm_task *t;
 
-	o = emit_call(seg, 0, 0);
-	len = build_prog(elf, seg, o, imp, 1);
+	o = emit_call(seg, 0, VM_CALL_GETPROP);
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<unbound>"), 0, "loaded image");
-	EXPECT_EQ(vm_task_run(t, 1000), VM_FAULTED, "unbound call faults the task");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_FAULTED, "unserved call faults the task");
 	vm_task_free(t);
 }
 
-/* A host call registered in a vm_env is bound by name and runs. */
+/* A host call registered in a vm_env at a game selector runs. */
 static void
 test_env_call(void)
 {
-	static const char *const imp[] = { "test_echo", "sys_exit" };
 	uint8_t seg[32];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -289,15 +283,15 @@ test_env_call(void)
 
 	le32(seg + o, 0x02900513u);     /* addi a0, x0, 41 */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* test_echo -> a0 = 42 */
-	o = emit_call(seg, o, 1);       /* sys_exit with a0 = 42 */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_GETPROP);  /* echo -> a0 = 42 */
+	o = emit_call(seg, o, VM_CALL_EXIT);     /* sys_exit with a0 = 42 */
+	len = build_prog(elf, seg, o);
 
 	env = vm_env_new();
-	EXPECT_EQ(vm_env_register(env, "test_echo", echo_plus1, NULL), 0,
+	EXPECT_EQ(vm_env_register(env, VM_CALL_GETPROP, echo_plus1, NULL), 0,
 	          "registered a host call");
-	EXPECT_EQ(vm_env_register(env, "sys_exit", echo_plus1, NULL), -1,
-	          "cannot shadow a builtin");
+	EXPECT_EQ(vm_env_register(env, VM_CALL_EXIT, echo_plus1, NULL), -1,
+	          "cannot register a builtin selector");
 
 	t = vm_task_new(0);
 	vm_task_set_env(t, env);
@@ -312,7 +306,6 @@ test_env_call(void)
 static void
 test_random(void)
 {
-	static const char *const imp[] = { "sys_random", "sys_exit" };
 	uint8_t seg[32];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -321,9 +314,9 @@ test_random(void)
 
 	le32(seg + o, 0x06400513u);     /* addi a0, x0, 100 (bound) */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* sys_random -> a0 in [0,100) */
-	o = emit_call(seg, o, 1);       /* sys_exit with that value */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_RANDOM);       /* sys_random -> a0 in [0,100) */
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit with that value */
+	len = build_prog(elf, seg, o);
 
 	t = vm_task_new(0);
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<random>"), 0, "loaded image");
@@ -337,16 +330,15 @@ test_random(void)
 static void
 test_now(void)
 {
-	static const char *const imp[] = { "sys_now", "sys_exit" };
 	uint8_t seg[24];
 	uint8_t elf[512];
 	uint32_t o = 0;
 	long len;
 	struct vm_task *t;
 
-	o = emit_call(seg, o, 0);       /* sys_now -> a0 = seconds */
-	o = emit_call(seg, o, 1);       /* sys_exit with that value */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_NOW);       /* sys_now -> a0 = seconds */
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit with that value */
+	len = build_prog(elf, seg, o);
 
 	t = vm_task_new(0);
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<now>"), 0, "loaded image");
@@ -359,7 +351,6 @@ test_now(void)
 static void
 test_argc(void)
 {
-	static const char *const imp[] = { "sys_exit" };
 	static const char *const argv[] = { "a", "bb", "ccc" };
 	uint8_t seg[16];
 	uint8_t elf[512];
@@ -367,8 +358,8 @@ test_argc(void)
 	long len;
 	struct vm_task *t;
 
-	o = emit_call(seg, 0, 0);       /* sys_exit with a0 = argc */
-	len = build_prog(elf, seg, o, imp, 1);
+	o = emit_call(seg, 0, VM_CALL_EXIT);       /* sys_exit with a0 = argc */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<argc>"), 0, "loaded image");
@@ -382,7 +373,6 @@ test_argc(void)
 static void
 test_argv_strings(void)
 {
-	static const char *const imp[] = { "sys_write", "sys_exit" };
 	static const char *const argv[] = { "hi\n" };
 	uint8_t seg[64];
 	uint8_t elf[512];
@@ -397,11 +387,11 @@ test_argv_strings(void)
 	o += 4;
 	le32(seg + o, 0x00300613u);     /* addi a2, x0, 3 (len) */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* sys_write */
+	o = emit_call(seg, o, VM_CALL_WRITE);       /* sys_write */
 	le32(seg + o, 0x00000513u);     /* addi a0, x0, 0 */
 	o += 4;
-	o = emit_call(seg, o, 1);       /* sys_exit */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit */
+	len = build_prog(elf, seg, o);
 
 	t = vm_task_new(0);
 	vm_task_set_output(t, capture, &out);
@@ -410,6 +400,55 @@ test_argv_strings(void)
 	EXPECT_EQ(vm_task_run(t, 1000), VM_EXITED, "ran to a clean exit");
 	EXPECT(out.len == 3 && memcmp(out.data, "hi\n", 3) == 0,
 	       "guest read and wrote argv[0]");
+	vm_task_free(t);
+}
+
+/* The Linux initial stack: argc sits at [sp] and the argv pointers at [sp+4].
+ * A program that reads argc off the stack reports it, independent of a0. */
+static void
+test_initial_stack_argc(void)
+{
+	static const char *const argv[] = { "p", "q", "r", "s" };
+	uint8_t seg[16];
+	uint8_t elf[512];
+	uint32_t o = 0;
+	long len;
+	struct vm_task *t;
+
+	le32(seg + o, 0x00012503u); o += 4;     /* lw a0, 0(sp)  -> a0 = argc */
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit(argc) */
+	len = build_prog(elf, seg, o);
+	t = vm_task_new(0);
+
+	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<stack-argc>"), 0, "loaded image");
+	EXPECT_EQ(vm_task_set_args(t, argv, 4), 0, "argument block written");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_EXITED, "ran to a clean exit");
+	EXPECT_EQ(vm_task_exit_status(t), 4, "argc read off the stack at sp");
+	vm_task_free(t);
+}
+
+/* The argv pointers at [sp+4] point at the argv strings: exit with argv[0][0]. */
+static void
+test_initial_stack_argv(void)
+{
+	static const char *const argv[] = { "Zed", "x" };
+	uint8_t seg[16];
+	uint8_t elf[512];
+	uint32_t o = 0;
+	long len;
+	struct vm_task *t;
+
+	le32(seg + o, 0x00412583u); o += 4;     /* lw  a1, 4(sp)  -> a1 = argv[0] ptr */
+	le32(seg + o, 0x0005C503u); o += 4;     /* lbu a0, 0(a1)  -> a0 = argv[0][0] */
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit(argv[0][0]) */
+	len = build_prog(elf, seg, o);
+	t = vm_task_new(0);
+
+	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<stack-argv>"), 0, "loaded image");
+	EXPECT_EQ(vm_task_set_args(t, argv, 2), 0, "argument block written");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_EXITED, "ran to a clean exit");
+	EXPECT_EQ(vm_task_exit_status(t), 'Z',
+	          "argv[0] pointer off the stack reaches the string");
 	vm_task_free(t);
 }
 
@@ -423,7 +462,6 @@ test_argv_strings(void)
 static void
 test_typed_args_count(void)
 {
-	static const char *const imp[] = { "sys_exit" };
 	struct vm_typed_arg args[] = {
 		{ .type = TA_OBJ, .ival = 42 },
 		{ .type = TA_STR, .str = "x" },
@@ -434,8 +472,8 @@ test_typed_args_count(void)
 	long len;
 	struct vm_task *t;
 
-	o = emit_call(seg, 0, 0);       /* sys_exit with a0 = slot count */
-	len = build_prog(elf, seg, o, imp, 1);
+	o = emit_call(seg, 0, VM_CALL_EXIT);       /* sys_exit with a0 = slot count */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<ta_count>"), 0, "loaded image");
@@ -450,7 +488,6 @@ test_typed_args_count(void)
 static void
 test_typed_args_handle(void)
 {
-	static const char *const imp[] = { "sys_exit" };
 	struct vm_typed_arg args[] = {
 		{ .type = TA_OBJ, .ival = 42 },
 		{ .type = TA_STR, .str = "x" },
@@ -463,8 +500,8 @@ test_typed_args_handle(void)
 
 	le32(seg + o, 0x0045A503u);     /* lw   a0, 4(a1) -> slot[0].value */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* sys_exit with that handle */
-	len = build_prog(elf, seg, o, imp, 1);
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit with that handle */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<ta_handle>"), 0, "loaded image");
@@ -479,7 +516,6 @@ test_typed_args_handle(void)
 static void
 test_typed_args_string(void)
 {
-	static const char *const imp[] = { "sys_write", "sys_exit" };
 	struct vm_typed_arg args[] = {
 		{ .type = TA_STR, .str = "hi\n" },
 	};
@@ -496,11 +532,11 @@ test_typed_args_string(void)
 	o += 4;
 	le32(seg + o, 0x00300613u);     /* addi a2, x0, 3 (len) */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* sys_write */
+	o = emit_call(seg, o, VM_CALL_WRITE);       /* sys_write */
 	le32(seg + o, 0x00000513u);     /* addi a0, x0, 0 */
 	o += 4;
-	o = emit_call(seg, o, 1);       /* sys_exit */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit */
+	len = build_prog(elf, seg, o);
 
 	t = vm_task_new(0);
 	vm_task_set_output(t, capture, &out);
@@ -568,7 +604,6 @@ test_load_file(void)
 static void
 test_yield_resume(void)
 {
-	static const char *const imp[] = { "sys_exit" };
 	uint8_t seg[24];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -579,8 +614,8 @@ test_yield_resume(void)
 	o += 4;
 	le32(seg + o, 0x00500513u);     /* addi a0, x0, 5 */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* sys_exit */
-	len = build_prog(elf, seg, o, imp, 1);
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<yield>"), 0, "loaded image");
@@ -591,23 +626,23 @@ test_yield_resume(void)
 	vm_task_free(t);
 }
 
-/* sys_suspend is the canonical cooperative yield: it parks the task through
- * the host-call ABI, and the task resumes on the next run. */
+/* sys_suspend(VM_SUSPEND_YIELD) is the canonical cooperative yield: it parks
+ * the task through the host-call ABI, and the task resumes on the next run.
+ * (a0 is 0 at the call, so this is the yield case.) */
 static void
 test_suspend_resume(void)
 {
-	static const char *const imp[] = { "sys_suspend", "sys_exit" };
 	uint8_t seg[24];
 	uint8_t elf[512];
 	uint32_t o = 0;
 	long len;
 	struct vm_task *t;
 
-	o = emit_call(seg, o, 0);       /* sys_suspend */
+	o = emit_call(seg, o, VM_CALL_SUSPEND);       /* sys_suspend -> yield */
 	le32(seg + o, 0x00500513u);     /* addi a0, x0, 5 */
 	o += 4;
-	o = emit_call(seg, o, 1);       /* sys_exit */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<suspend>"), 0, "loaded image");
@@ -619,11 +654,11 @@ test_suspend_resume(void)
 }
 
 /* sys_suspend(VM_SUSPEND_SLEEP, 0): with a zero span the deadline is already
- * reached, so the next run delivers a timer event and the task drains it. */
+ * past, so the next run delivers a timer event and the task drains it. A zero
+ * span keeps the fire deterministic without leaning on the wall clock. */
 static void
 test_suspend_sleep_fires(void)
 {
-	static const char *const imp[] = { "sys_suspend", "sys_getmsg", "sys_exit" };
 	uint8_t seg[64];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -632,12 +667,12 @@ test_suspend_sleep_fires(void)
 
 	le32(seg + o, 0x00200513u); o += 4;     /* addi a0, x0, 2 (SLEEP) */
 	le32(seg + o, 0x00000593u); o += 4;     /* addi a1, x0, 0 (0 ms) */
-	o = emit_call(seg, o, 0);               /* sys_suspend -> sleeps */
+	o = emit_call(seg, o, VM_CALL_SUSPEND);               /* sys_suspend -> sleeps */
 	le32(seg + o, 0x00002537u); o += 4;     /* lui  a0, 2 */
 	le32(seg + o, 0x04000593u); o += 4;     /* addi a1, x0, 64 */
-	o = emit_call(seg, o, 1);               /* sys_getmsg -> a0 = kind */
-	o = emit_call(seg, o, 2);               /* sys_exit */
-	len = build_prog(elf, seg, o, imp, 3);
+	o = emit_call(seg, o, VM_CALL_GETMSG);               /* sys_getmsg -> a0 = kind */
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<sleep0>"), 0, "loaded image");
@@ -652,7 +687,6 @@ test_suspend_sleep_fires(void)
 static void
 test_suspend_sleep_pending(void)
 {
-	static const char *const imp[] = { "sys_suspend", "sys_exit" };
 	uint8_t seg[32];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -661,9 +695,9 @@ test_suspend_sleep_pending(void)
 
 	le32(seg + o, 0x00200513u); o += 4;     /* addi a0, x0, 2 (SLEEP) */
 	le32(seg + o, 0x001005B7u); o += 4;     /* lui  a1, 0x100 (~1048 s) */
-	o = emit_call(seg, o, 0);               /* sys_suspend -> long sleep */
-	o = emit_call(seg, o, 1);               /* sys_exit (not reached) */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_SUSPEND);               /* sys_suspend -> long sleep */
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit (not reached) */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<sleepN>"), 0, "loaded image");
@@ -678,7 +712,6 @@ test_suspend_sleep_pending(void)
 static void
 test_suspend_sleep_event_wake(void)
 {
-	static const char *const imp[] = { "sys_suspend", "sys_getmsg", "sys_exit" };
 	uint8_t seg[64];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -687,12 +720,12 @@ test_suspend_sleep_event_wake(void)
 
 	le32(seg + o, 0x00200513u); o += 4;     /* addi a0, x0, 2 (SLEEP) */
 	le32(seg + o, 0x001005B7u); o += 4;     /* lui  a1, 0x100 (~1048 s) */
-	o = emit_call(seg, o, 0);               /* sys_suspend -> long sleep */
+	o = emit_call(seg, o, VM_CALL_SUSPEND);               /* sys_suspend -> long sleep */
 	le32(seg + o, 0x00002537u); o += 4;     /* lui  a0, 2 */
 	le32(seg + o, 0x04000593u); o += 4;     /* addi a1, x0, 64 */
-	o = emit_call(seg, o, 1);               /* sys_getmsg -> a0 = kind */
-	o = emit_call(seg, o, 2);               /* sys_exit */
-	len = build_prog(elf, seg, o, imp, 3);
+	o = emit_call(seg, o, VM_CALL_GETMSG);               /* sys_getmsg -> a0 = kind */
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<sleepev>"), 0, "loaded image");
@@ -720,7 +753,6 @@ emit_getmsg_setup(uint8_t *seg, uint32_t o)
 static void
 test_mailbox_deliver(void)
 {
-	static const char *const imp[] = { "sys_getmsg", "sys_exit" };
 	uint8_t seg[64];
 	uint8_t elf[512];
 	uint32_t o;
@@ -728,9 +760,9 @@ test_mailbox_deliver(void)
 	struct vm_task *t;
 
 	o = emit_getmsg_setup(seg, 0);
-	o = emit_call(seg, o, 0);       /* sys_getmsg -> a0 = kind */
-	o = emit_call(seg, o, 1);       /* sys_exit with that kind */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_GETMSG);       /* sys_getmsg -> a0 = kind */
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit with that kind */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<mail>"), 0, "loaded image");
@@ -746,7 +778,6 @@ test_mailbox_deliver(void)
 static void
 test_mailbox_empty(void)
 {
-	static const char *const imp[] = { "sys_getmsg", "sys_exit" };
 	uint8_t seg[64];
 	uint8_t elf[512];
 	uint32_t o;
@@ -754,9 +785,9 @@ test_mailbox_empty(void)
 	struct vm_task *t;
 
 	o = emit_getmsg_setup(seg, 0);
-	o = emit_call(seg, o, 0);       /* sys_getmsg on empty -> a0 = 0 */
-	o = emit_call(seg, o, 1);       /* sys_exit */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_GETMSG);       /* sys_getmsg on empty -> a0 = 0 */
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<empty>"), 0, "loaded image");
@@ -770,7 +801,6 @@ test_mailbox_empty(void)
 static void
 test_mailbox_block_wake(void)
 {
-	static const char *const imp[] = { "sys_suspend", "sys_getmsg", "sys_exit" };
 	uint8_t seg[64];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -779,11 +809,11 @@ test_mailbox_block_wake(void)
 
 	le32(seg + o, 0x00100513u);     /* addi a0, x0, 1 (VM_SUSPEND_EVENT) */
 	o += 4;
-	o = emit_call(seg, o, 0);       /* sys_suspend -> blocks, mailbox empty */
+	o = emit_call(seg, o, VM_CALL_SUSPEND);       /* sys_suspend -> blocks, mailbox empty */
 	o = emit_getmsg_setup(seg, o);
-	o = emit_call(seg, o, 1);       /* sys_getmsg -> a0 = kind */
-	o = emit_call(seg, o, 2);       /* sys_exit */
-	len = build_prog(elf, seg, o, imp, 3);
+	o = emit_call(seg, o, VM_CALL_GETMSG);       /* sys_getmsg -> a0 = kind */
+	o = emit_call(seg, o, VM_CALL_EXIT);       /* sys_exit */
+	len = build_prog(elf, seg, o);
 	t = vm_task_new(0);
 
 	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<block>"), 0, "loaded image");
@@ -804,7 +834,6 @@ test_mailbox_block_wake(void)
 static void
 test_mailbox_fifo(void)
 {
-	static const char *const imp[] = { "sys_getmsg", "sys_write", "sys_exit" };
 	uint8_t seg[128];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -815,7 +844,7 @@ test_mailbox_fifo(void)
 
 	for (i = 0; i < 2; i++) {
 		o = emit_getmsg_setup(seg, o);
-		o = emit_call(seg, o, 0);               /* sys_getmsg */
+		o = emit_call(seg, o, VM_CALL_GETMSG);               /* sys_getmsg */
 		le32(seg + o, 0x000025B7u);             /* lui  a1, 2 */
 		o += 4;
 		le32(seg + o, 0x00C58593u);             /* addi a1, a1, 12 -> payload */
@@ -824,12 +853,12 @@ test_mailbox_fifo(void)
 		o += 4;
 		le32(seg + o, 0x00100613u);             /* addi a2, x0, 1 (len) */
 		o += 4;
-		o = emit_call(seg, o, 1);               /* sys_write one payload byte */
+		o = emit_call(seg, o, VM_CALL_WRITE);               /* sys_write one payload byte */
 	}
 	le32(seg + o, 0x00000513u);             /* addi a0, x0, 0 */
 	o += 4;
-	o = emit_call(seg, o, 2);               /* sys_exit */
-	len = build_prog(elf, seg, o, imp, 3);
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit */
+	len = build_prog(elf, seg, o);
 
 	t = vm_task_new(0);
 	vm_task_set_output(t, capture, &out);
@@ -858,10 +887,191 @@ test_mailbox_full(void)
 	vm_task_free(t);
 }
 
+/* sys_brk over the raw Linux seam: query the base with brk(0), then grow it by
+ * 0x80 and report the delta as the exit status. A served brk returns the new
+ * break, so the delta is exactly 0x80 (128). */
+static void
+test_brk(void)
+{
+	uint8_t seg[64];
+	uint8_t elf[512];
+	uint32_t o = 0;
+	long len;
+	struct vm_task *t;
+
+	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0  (brk query)    */
+	o = emit_syscall(seg, o, 214);          /* sys_brk -> a0 = base           */
+	le32(seg + o, 0x00050413u); o += 4;     /* addi s0, a0, 0  (s0 = base)    */
+	le32(seg + o, 0x08040513u); o += 4;     /* addi a0, s0, 0x80 (want base+128) */
+	o = emit_syscall(seg, o, 214);          /* sys_brk -> a0 = new break      */
+	le32(seg + o, 0x40850533u); o += 4;     /* sub  a0, a0, s0 (a0 = delta)   */
+	le32(seg + o, 0x0ff57513u); o += 4;     /* andi a0, a0, 0xff              */
+	o = emit_syscall(seg, o, 93);           /* sys_exit(delta & 0xff)         */
+
+	len = build_prog(elf, seg, o);
+	t = vm_task_new(0);
+	EXPECT(t != NULL, "task allocated");
+	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<brk>"), 0, "loaded image");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_EXITED, "ran to a clean exit");
+	EXPECT_EQ(vm_task_exit_status(t), 0x80,
+	          "brk grew by the requested 128 bytes");
+	vm_task_free(t);
+}
+
+/* writev gathers two iovec entries to the output sink in order. */
+static void
+test_writev(void)
+{
+	uint8_t seg[128];
+	uint8_t elf[512];
+	uint32_t o, iv, d0, d1;
+	long len;
+	struct outbuf out = { .len = 0 };
+	struct vm_task *t;
+
+	le32(seg + 0, 0x000015B7u);     /* lui  a1, 1       -> a1 = 0x1000        */
+	le32(seg + 4, 0x00058593u);     /* addi a1, a1, iv  (iovec ptr, patched)  */
+	le32(seg + 8, 0x00100513u);     /* addi a0, x0, 1   (fd = 1)              */
+	le32(seg + 12, 0x00200613u);    /* addi a2, x0, 2   (iovcnt = 2)          */
+	o = 16;
+	o = emit_syscall(seg, o, 66);   /* sys_writev                             */
+	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0                 */
+	o = emit_syscall(seg, o, 93);   /* sys_exit                               */
+
+	/* The iovec table (two 8-byte entries), 4-aligned, then the data bytes. */
+	iv = (o + 3) & ~3u;
+	d0 = iv + 16;                   /* "ab"                                   */
+	d1 = d0 + 2;                    /* "cd\n"                                 */
+	le32(seg + iv + 0, LOAD_VADDR + d0);    /* iov[0].base                    */
+	le32(seg + iv + 4, 2);                  /* iov[0].len                     */
+	le32(seg + iv + 8, LOAD_VADDR + d1);    /* iov[1].base                    */
+	le32(seg + iv + 12, 3);                 /* iov[1].len                     */
+	seg[d0 + 0] = 'a'; seg[d0 + 1] = 'b';
+	seg[d1 + 0] = 'c'; seg[d1 + 1] = 'd'; seg[d1 + 2] = '\n';
+	le32(seg + 4, 0x00058593u | (iv << 20));        /* a1 = 0x1000 + iv       */
+
+	len = build_prog(elf, seg, d1 + 3);
+	t = vm_task_new(0);
+	vm_task_set_output(t, capture, &out);
+	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<writev>"), 0, "loaded image");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_EXITED, "ran to a clean exit");
+	EXPECT_EQ(out.len, 5, "five bytes gathered");
+	EXPECT(out.len == 5 && memcmp(out.data, "abcd\n", 5) == 0,
+	       "writev concatenates the entries in order");
+	vm_task_free(t);
+}
+
+/* A guest that reads up to 8 bytes from stdin into 0x2000, echoes what it read
+ * to stdout, and exits. Imports: 0 = sys_read, 1 = sys_write, 2 = sys_exit. */
+static long
+build_stdin_echo(uint8_t *elf)
+{
+	uint8_t seg[64];
+	uint32_t o = 0;
+
+	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0  (fd 0)       */
+	le32(seg + o, 0x000025B7u); o += 4;     /* lui  a1, 2      (buf 0x2000) */
+	le32(seg + o, 0x00800613u); o += 4;     /* addi a2, x0, 8  (len 8)      */
+	o = emit_call(seg, o, VM_CALL_READ);               /* sys_read -> a0 = count       */
+	le32(seg + o, 0x00050613u); o += 4;     /* addi a2, a0, 0  (len = count)*/
+	le32(seg + o, 0x000025B7u); o += 4;     /* lui  a1, 2      (buf 0x2000) */
+	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1  (fd 1)       */
+	o = emit_call(seg, o, VM_CALL_WRITE);               /* sys_write(1, buf, count)     */
+	le32(seg + o, 0x00000513u); o += 4;     /* addi a0, x0, 0               */
+	o = emit_call(seg, o, VM_CALL_EXIT);               /* sys_exit(0)                  */
+	return build_prog(elf, seg, o);
+}
+
+/* A read on empty stdin parks the task; feeding input wakes it and the read
+ * returns the bytes. */
+static void
+test_stdin_block_then_feed(void)
+{
+	uint8_t elf[512];
+	long len = build_stdin_echo(elf);
+	struct outbuf out = { .len = 0 };
+	struct vm_task *t = vm_task_new(0);
+
+	vm_task_set_output(t, capture, &out);
+	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<stdin>"), 0, "loaded image");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_READY, "read parks on empty stdin");
+	EXPECT(vm_task_blocked(t), "the task is blocked waiting for input");
+	EXPECT_EQ(out.len, (size_t)0, "nothing echoed yet");
+
+	EXPECT_EQ(vm_task_feed_stdin(t, "hello", 5), 5, "fed five bytes");
+	EXPECT(!vm_task_blocked(t), "the feed woke the task");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_EXITED, "it resumed and exited");
+	EXPECT(out.len == 5 && memcmp(out.data, "hello", 5) == 0,
+	       "the read returned the fed bytes");
+	vm_task_free(t);
+}
+
+/* Input fed before the read waits in the buffer; the read returns it at once,
+ * without parking. */
+static void
+test_stdin_buffered_then_read(void)
+{
+	uint8_t elf[512];
+	long len = build_stdin_echo(elf);
+	struct outbuf out = { .len = 0 };
+	struct vm_task *t = vm_task_new(0);
+
+	vm_task_set_output(t, capture, &out);
+	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<stdin>"), 0, "loaded image");
+	EXPECT_EQ(vm_task_feed_stdin(t, "hi", 2), 2, "buffered two bytes");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_EXITED, "read served from the buffer");
+	EXPECT(out.len == 2 && memcmp(out.data, "hi", 2) == 0,
+	       "the read returned the buffered bytes without parking");
+	vm_task_free(t);
+}
+
+/* Closing stdin makes a parked read return 0 (end of file). */
+static void
+test_stdin_eof(void)
+{
+	uint8_t elf[512];
+	long len = build_stdin_echo(elf);
+	struct outbuf out = { .len = 0 };
+	struct vm_task *t = vm_task_new(0);
+
+	vm_task_set_output(t, capture, &out);
+	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<stdin>"), 0, "loaded image");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_READY, "read parks on empty stdin");
+	EXPECT(vm_task_blocked(t), "the task is blocked");
+
+	vm_task_close_stdin(t);
+	EXPECT(!vm_task_blocked(t), "closing stdin woke the task");
+	EXPECT_EQ(vm_task_run(t, 1000), VM_EXITED, "it resumed and exited");
+	EXPECT_EQ(out.len, (size_t)0, "the read returned end of file, echoing nothing");
+	vm_task_free(t);
+}
+
+/* Unix semantics: a read on stdin that is already closed returns 0 at once, it
+ * does not park. The task runs straight through to exit on its first slice. */
+static void
+test_stdin_eof_before_read(void)
+{
+	uint8_t elf[512];
+	long len = build_stdin_echo(elf);
+	struct outbuf out = { .len = 0 };
+	struct vm_task *t = vm_task_new(0);
+
+	vm_task_set_output(t, capture, &out);
+	EXPECT_EQ(vm_task_load_mem(t, elf, len, "<stdin>"), 0, "loaded image");
+
+	vm_task_close_stdin(t);
+	EXPECT_EQ(vm_task_run(t, 1000), VM_EXITED, "read at EOF does not park");
+	EXPECT(!vm_task_blocked(t), "the task never blocked");
+	EXPECT_EQ(out.len, (size_t)0, "the read returned end of file, echoing nothing");
+	vm_task_free(t);
+}
+
 int
 main(void)
 {
 	test_oneshot_exit();
+	test_brk();
+	test_writev();
 	test_write_output();
 	test_instruction_cap();
 	test_fault();
@@ -876,6 +1086,12 @@ main(void)
 	test_suspend_sleep_event_wake();
 	test_argc();
 	test_argv_strings();
+	test_initial_stack_argc();
+	test_initial_stack_argv();
+	test_stdin_block_then_feed();
+	test_stdin_buffered_then_read();
+	test_stdin_eof();
+	test_stdin_eof_before_read();
 	test_typed_args_count();
 	test_typed_args_handle();
 	test_typed_args_string();

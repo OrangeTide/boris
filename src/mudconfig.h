@@ -50,6 +50,10 @@ struct mud_config {
 	char *vm_resident; /* comma-separated resident program ids to keep running */
 	unsigned vm_create_max; /* max objects one verb task may create; 0 = unlimited */
 	unsigned vm_owned_max; /* max objects one owner may hold; 0 = unlimited */
+	char *vm_toolchain_dir; /* directory with skj-{cc,as,ld}-rv.elf for @compile */
+	char *vm_lib_dir; /* directory with the C link inputs @compile stages */
+	char *vm_include_dir; /* guest C header tree @compile mounts read-only */
+	char *vm_tmpdir; /* parent for @compile build dirs (a boris-owned path) */
 };
 
 typedef struct mud_config MUD_CONFIG;

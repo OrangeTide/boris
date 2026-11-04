@@ -1,0 +1,26 @@
+Edit or create a file in the in-world filesystem.
+
+usage: @fedit <path>
+
+Opens the online string editor on the file at an absolute path in the
+in-world filesystem (the VFS). The editor is seeded with the file's current
+contents; a path that does not exist yet starts empty and is created when
+you save. This is how you author a Kobold source for @compile without host
+access.
+
+In the editor, type to add lines; /s saves, /a aborts, /h shows the help.
+On save the file is written and committed to the VFS. On abort the file is
+left unchanged.
+
+  <path>    an absolute VFS path, for example /src/foo.kp
+
+Wizard only. It writes the shared in-world tree that programs launch and
+compile from. A file larger than the editor's buffer (16 KB) cannot be
+edited here. This is the line editor boris ships; a full-screen editor may
+be offered later for capable terminal clients.
+
+Example:
+  @fedit /src/greet.kp
+      Edit (or create) the Kobold source, then @compile /src/greet.kp greet.
+
+See also @compile, @setverb, help kobold.

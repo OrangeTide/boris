@@ -198,10 +198,10 @@ verb_agent_init(struct vm_env *env)
 		return 0;
 	if (!env)
 		return -1;
-	if (vm_env_register(env, "sys_listen", hc_listen, NULL) != 0 ||
-	    vm_env_register(env, "sys_notify", hc_notify, NULL) != 0 ||
-	    vm_env_register(env, "sys_post", hc_post, NULL) != 0 ||
-	    vm_env_register(env, "sys_taskid", hc_taskid, NULL) != 0)
+	if (vm_env_register(env, VM_CALL_LISTEN, hc_listen, NULL) != 0 ||
+	    vm_env_register(env, VM_CALL_NOTIFY, hc_notify, NULL) != 0 ||
+	    vm_env_register(env, VM_CALL_POST, hc_post, NULL) != 0 ||
+	    vm_env_register(env, VM_CALL_TASKID, hc_taskid, NULL) != 0)
 		return -1;
 	g_am.env = env;
 	g_am.up = 1;

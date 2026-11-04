@@ -28,6 +28,11 @@
 struct rv_mc;
 
 /* ---- Control flow by label id (forward references allowed). */
+/* Debug info (-g): a source-line marker.  The text sink records it as a
+   comment; the JIT byte sink records the current code offset against the line
+   for the address-to-line table. */
+void rv_mc_loc(struct rv_mc *m, int line);
+
 int rv_mc_new_label(struct rv_mc *m);
 void rv_mc_label(struct rv_mc *m, int id);
 void rv_mc_j(struct rv_mc *m, int id);
@@ -55,6 +60,7 @@ void rv_mc_srai(struct rv_mc *m, int rd, int rs, int shamt);
 void rv_mc_add(struct rv_mc *m, int rd, int rs1, int rs2);
 void rv_mc_sub(struct rv_mc *m, int rd, int rs1, int rs2);
 void rv_mc_mul(struct rv_mc *m, int rd, int rs1, int rs2);
+void rv_mc_mulh(struct rv_mc *m, int rd, int rs1, int rs2);   /* signed high 32 of the product */
 void rv_mc_and(struct rv_mc *m, int rd, int rs1, int rs2);
 void rv_mc_or(struct rv_mc *m, int rd, int rs1, int rs2);
 void rv_mc_xor(struct rv_mc *m, int rd, int rs1, int rs2);
@@ -101,6 +107,7 @@ void rv_mc_fmul(struct rv_mc *m, int f32, int fd, int fs1, int fs2);
 void rv_mc_fdiv(struct rv_mc *m, int f32, int fd, int fs1, int fs2);
 void rv_mc_fneg(struct rv_mc *m, int f32, int fd, int fs);
 void rv_mc_fabs(struct rv_mc *m, int f32, int fd, int fs);
+void rv_mc_fsqrt(struct rv_mc *m, int f32, int fd, int fs);
 void rv_mc_feq(struct rv_mc *m, int f32, int rd, int fs1, int fs2);
 void rv_mc_flt(struct rv_mc *m, int f32, int rd, int fs1, int fs2);
 void rv_mc_fle(struct rv_mc *m, int f32, int rd, int fs1, int fs2);
@@ -108,6 +115,7 @@ void rv_mc_fle(struct rv_mc *m, int f32, int rd, int fs1, int fs2);
 /* ---- Float conversions and integer<->float bit moves. */
 void rv_mc_fcvt_f_w(struct rv_mc *m, int f32, int fd, int rs);  /* fcvt.{s,d}.w (int->float) */
 void rv_mc_fcvt_w_f(struct rv_mc *m, int f32, int rd, int fs);  /* fcvt.w.{s,d} rtz (float->int) */
+void rv_mc_fround(struct rv_mc *m, int f32, int rd, int fs);    /* fcvt.w.{s,d} rne (float->int, round to nearest) */
 void rv_mc_fcvt_d_s(struct rv_mc *m, int fd, int fs);           /* single -> double */
 void rv_mc_fcvt_s_d(struct rv_mc *m, int fd, int fs);           /* double -> single */
 void rv_mc_fcvt_d_h(struct rv_mc *m, int fd, int fs);           /* half -> double */

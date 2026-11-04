@@ -8,6 +8,8 @@
 #   bad_login    - connect, attempt login with bad creds, see error
 #   new_user     - create account, login, reach main menu
 #   enter_game   - login, enter game world, run help, quit
+#   help_kobold  - login, enter game, render the kobold help topic, and
+#                  confirm it is listed in "help topics"
 #   charset_command - login, set charset, run chartest, reset
 #   redit_longdesc  - @redit a room, edit long desc in the string editor,
 #                     save, reopen and confirm the multi-line text persists
@@ -227,6 +229,68 @@ switch -- $test {
 		expect {
 			eof { pass "enter_game: entered game, look and movement work" }
 			timeout { fail "enter_game: no disconnect after quit" }
+		}
+	}
+
+	help_kobold {
+		# login with the account created by new_user
+		send "1\r"
+		expect {
+			"Username:" {}
+			timeout { fail "help_kobold: no username prompt" }
+		}
+		send "testuser\r"
+		expect {
+			"Password:" {}
+			timeout { fail "help_kobold: no password prompt" }
+		}
+		send "testpass123\r"
+		expect {
+			"Main Menu" {}
+			-re "Invalid|invalid" { fail "help_kobold: login rejected" }
+			timeout { fail "help_kobold: no main menu after login" }
+		}
+		expect {
+			"Choose:" {}
+			timeout { fail "help_kobold: no menu prompt" }
+		}
+		# enter the game
+		send "1\r"
+		expect {
+			"> " {}
+			timeout { fail "help_kobold: no command prompt" }
+		}
+		# the kobold help topic must render: first line through the footer
+		send "help kobold\r"
+		expect {
+			"Writing Kobold-Pascal programs." {}
+			-re "unknown help topic" {
+				fail "help_kobold: kobold topic file not found"
+			}
+			timeout { fail "help_kobold: kobold topic did not render" }
+		}
+		expect {
+			-re "See also .*help programs" {}
+			timeout { fail "help_kobold: kobold topic truncated before footer" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "help_kobold: no prompt after help kobold" }
+		}
+		# and it must be discoverable in the topics index
+		send "help topics\r"
+		expect {
+			-re "kobold.*Writing Kobold-Pascal" {}
+			timeout { fail "help_kobold: topics index does not list kobold" }
+		}
+		expect {
+			"> " {}
+			timeout { fail "help_kobold: no prompt after help topics" }
+		}
+		send "quit\r"
+		expect {
+			eof { pass "help_kobold: kobold topic renders and is listed" }
+			timeout { fail "help_kobold: no disconnect after quit" }
 		}
 	}
 

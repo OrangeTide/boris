@@ -6,17 +6,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "vm_sys.h"
+
 /* Default per-task memory image size. */
 #define VM_MEM_DEFAULT (128u * 1024u)
 
 /* Host-call ABI. A guest reaches a host call with an ecall whose a7 holds
- * VM_HOSTCALL_BASE plus the call's index among the program's imports, integer
- * and pointer arguments in a0-a5, and the result written back to a0. The
- * image carries a KPIMPT1 import-name table, located by scanning the loaded
- * image for its magic; at load the runtime binds each name to a host function
- * and then dispatches by index. One flat namespace: the always-present builtins
- * plus whatever the host adds to a vm_env. */
-#define VM_HOSTCALL_BASE 0x00100000u
+ * VM_HOSTCALL_BASE plus a fixed selector (see vm_sys.h), integer and pointer
+ * arguments in a0-a5, and the result written back to a0. The selectors are
+ * fixed, not bound per image: the runtime always serves the builtins
+ * (VM_CALL_EXIT/WRITE/RANDOM/NOW/SUSPEND/GETMSG/READ), and the host registers
+ * the game-specific calls into a vm_env at their selectors. A call to a
+ * selector no one serves faults. */
 
 /* A task's execution state. */
 enum vm_state {
@@ -72,6 +73,31 @@ void vm_task_set_output(struct vm_task *t, vm_output_fn fn, void *ctx);
 int vm_task_load_mem(struct vm_task *t, const uint8_t *buf, long size,
                      const char *what);
 int vm_task_load_file(struct vm_task *t, const char *path);
+
+/* Grant the task a confined host directory, reached by the guest through the
+ * fs/ mount `name:` (its fs-interpose libc resolves a `name:path` argument to
+ * that directory). A read-only grant fails mutating ops with EROFS. Must be
+ * called before vm_task_load_*; up to a small per-task limit. Returns 0, or -1
+ * if the task is already loaded, the table is full, or the spec does not fit.
+ * This is the seam @compile uses to give a toolchain stage its build dir. */
+int vm_task_add_mount(struct vm_task *t, const char *name, const char *hostdir,
+                      int readonly);
+
+/* Grant the task a 9P mount served by boris's in-world VFS (its CAS-backed p9
+ * server), reached by the guest through the fs/ mount `name:`. This is how a
+ * launched program reaches the in-world tree. hostdir must name a real, readable
+ * directory (the launcher opens it to validate the grant), but the server
+ * ignores it and serves the bound VFS. Must be called before vm_task_load_*.
+ * Returns 0 or -1. */
+int vm_task_add_p9_mount(struct vm_task *t, const char *name,
+                         const char *hostdir);
+
+/* Raise the task's memory caps before load. A batch guest such as a compile
+ * stage needs far more heap, stack, and committed memory than an interactive
+ * verb. A zero argument keeps the default. Must be called before
+ * vm_task_load_*. */
+void vm_task_set_limits(struct vm_task *t, uint32_t mem_limit,
+                        uint32_t heap_size, uint32_t stack_size);
 
 /* Write a C-style argument block into the top of the guest stack, then set
  * a0 = argc and a1 = the guest address of the argv pointer array, and lower
@@ -129,9 +155,20 @@ uint32_t vm_task_id(const struct vm_task *t);
 int vm_task_post(struct vm_task *t, uint32_t kind, uint32_t sender,
                  const char *str, uint32_t len);
 
-/* Whether the task is parked in sys_suspend waiting for a mailbox event. The
- * scheduler does not run a blocked task until vm_task_post wakes it, so it
- * costs no cycles while idle. */
+/* Feed bytes to a task's stdin (fd 0). If the task is parked in a blocking
+ * read, the bytes complete that read (filling its buffer and setting its
+ * result) and wake it; otherwise they wait in a bounded buffer for the next
+ * read. Returns the count accepted, short only when the buffer is full. */
+int vm_task_feed_stdin(struct vm_task *t, const void *data, uint32_t len);
+
+/* Close a task's stdin: a blocking read parked on empty input, and every later
+ * read, then returns 0 (end of file) rather than parking. */
+void vm_task_close_stdin(struct vm_task *t);
+
+/* Whether the task is parked waiting for input: a mailbox event (sys_suspend)
+ * or a blocking read on fd 0. The scheduler does not run a blocked task until a
+ * delivery (vm_task_post or vm_task_feed_stdin) wakes it, so it costs no cycles
+ * while idle. */
 int vm_task_blocked(const struct vm_task *t);
 
 /* Number of events waiting in the task's mailbox. */
@@ -169,25 +206,43 @@ uint32_t vm_arg_cstr(struct vm_task *t, uint32_t gaddr, char *buf, uint32_t bufs
 /****************************************************************
  * Host-call environment
  *
- * The set of host calls a program may import, resolved by name at load. The
- * runtime always provides a fixed set of builtins (sys_exit, sys_write,
- * sys_random, sys_now, sys_suspend, sys_getmsg). Everything game-specific -- object
- * access, broadcast, privilege -- is registered here by the host, so this
- * library stays free of the game's object store. A program that imports a
- * name no one provides faults if it calls it.
+ * The set of game-specific host calls, each bound to a fixed selector (see
+ * vm_sys.h). The runtime always serves the builtins (sys_exit, sys_write,
+ * sys_read, sys_random, sys_now, sys_suspend, sys_getmsg); everything
+ * game-specific -- object access, broadcast, privilege -- is registered here
+ * by the host, so this library stays free of the game's object store. A call
+ * to a selector no one serves faults.
  ****************************************************************/
 
 struct vm_env *vm_env_new(void);
 void vm_env_free(struct vm_env *e);
 
-/* Register a host call under name. The name is copied. Returns 0, or -1 if
- * the table is full, the name is already taken, or it shadows a builtin. */
-int vm_env_register(struct vm_env *e, const char *name,
+/* Register a host call at selector `call` (a VM_CALL_* value). Returns 0, or
+ * -1 if the selector is out of range or names a builtin the runtime serves. */
+int vm_env_register(struct vm_env *e, int call,
                     vm_hostcall_fn fn, void *ctx);
 
 /* Bind a task to an environment before loading its image. NULL leaves only
  * the builtins available. The env must outlive the task. */
 void vm_task_set_env(struct vm_task *t, struct vm_env *e);
+
+/* Stream backend for file descriptors the VM core does not own itself.
+ *
+ * The builtin sys_write and sys_read, and the freestanding write/read ecall
+ * seam, handle the session streams directly: fd 1 and 2 write to the output
+ * sink, fd 0 reads end-of-file. Any other descriptor is the host's: when an
+ * env carries a stream backend, the VM routes a read or write on such an fd to
+ * it, so files (the VFS fd table) share the one read/write call with the
+ * streams, as the hosting design intends. Without a backend, a non-stream fd is
+ * EBADF. The VM never interprets the fd or the bytes; it only forwards, so the
+ * core stays independent of the game and its filesystem.
+ *
+ * fn moves len bytes between guest address gbuf and descriptor fd (is_write
+ * selects the direction) and returns the count moved, or a negative
+ * errno-style code the guest sees verbatim in a0. */
+typedef long (*vm_stream_fn)(struct vm_task *t, void *ctx, int fd,
+                             uint32_t gbuf, uint32_t len, int is_write);
+void vm_env_set_stream(struct vm_env *e, vm_stream_fn fn, void *ctx);
 
 /****************************************************************
  * Cooperative scheduler

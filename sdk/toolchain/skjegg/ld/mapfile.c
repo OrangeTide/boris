@@ -60,6 +60,69 @@ mapfile_close(struct mapfile *mf)
     }
 }
 
+#elif defined(__skj__) /* skj guest libc: no mmap, read into a malloc buffer */
+
+#include <stdio.h>      /* SEEK_SET / SEEK_END */
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+int
+mapfile_open(struct mapfile *mf, const char *path)
+{
+    mf->data = NULL;
+    mf->len = 0;
+
+    int fd = open(path, O_RDONLY, 0);
+
+    if (fd < 0) return ERR;
+
+    /* Size the file with lseek, the idiom io_free.c's ReadFileStr uses in
+       guest, so this branch needs no fstat or struct stat. */
+    long size = lseek(fd, 0, SEEK_END);
+
+    if (size < 0 || lseek(fd, 0, SEEK_SET) != 0) {
+        close(fd);
+        return ERR;
+    }
+
+    char *buf = malloc((size_t)(size ? size : 1));
+
+    if (!buf) {
+        close(fd);
+        return ERR;
+    }
+
+    long got = 0;
+
+    while (got < size) {
+        int r = read(fd, buf + got, (int)(size - got));
+
+        if (r <= 0) break;
+        got += r;
+    }
+
+    close(fd);
+
+    if (got != size) {
+        free(buf);
+        return ERR;
+    }
+
+    mf->data = (const unsigned char *)buf;
+    mf->len = (size_t)size;
+    return OK;
+}
+
+void
+mapfile_close(struct mapfile *mf)
+{
+    if (mf->data) {
+        free((void *)mf->data);
+        mf->data = NULL;
+    }
+}
+
 #else /* POSIX */
 
 #include <sys/types.h>

@@ -1,0 +1,18 @@
+Download a file from the in-world filesystem to your client.
+
+usage: @fget <path>
+
+Downloads the file at an absolute VFS path to the client as a saved file. This
+is useful for compiled images and other binaries that @fcat will not print.
+
+This command is only available from the web client. On a terminal client it
+reports that it is unsupported; use @fcat to read a text file instead.
+
+The path must be an absolute VFS path made of letters, digits, '/', '.', '-',
+and '_'. Wizard only.
+
+Example:
+  @fget /bin/greet.elf
+      Save the compiled image through the web client.
+
+See also @fput, @fcat, @ftype, @fls.

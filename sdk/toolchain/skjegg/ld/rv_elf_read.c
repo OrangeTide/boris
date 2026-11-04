@@ -132,11 +132,13 @@ rv_parse_elf(struct arena *a, struct ld_object *obj, const uint8_t *buf,
             const uint8_t *s = buf + sym_off + (uint32_t)i * 16;
             uint32_t st_name = get32(s + 0);
             uint32_t st_value = get32(s + 4);
+            uint32_t st_size = get32(s + 8);
             uint8_t st_info = s[12];
             uint16_t st_shndx = get16(s + 14);
 
             obj->syms[i].name = strtab + st_name;
             obj->syms[i].value = st_value;
+            obj->syms[i].size = st_size;
             obj->syms[i].shndx = (int)st_shndx;
             obj->syms[i].binding = ELF32_ST_BIND(st_info);
             obj->syms[i].type = ELF32_ST_TYPE(st_info);

@@ -1,0 +1,37 @@
+Register, unregister, and list program objects.
+
+usage: @program register <id> <image> [ram]
+       @program unregister <id>
+       @program list
+
+A program object (programs/<id>) names an RV32 ELF image that @run and the
+verb dispatcher launch. @compile produces one from source; @program is the
+manual counterpart for an image that was already built.
+
+register
+  Bind programs/<id> to an existing image. If <image> begins with '/' it is
+  an absolute VFS path and the in-world filesystem must hold that file;
+  otherwise it is a host image relative to the image directory
+  (vm.image_path), which must hold that file. [ram] is the guest RAM in
+  bytes, 0 or omitted for the default. Re-registering an id switches it
+  between a host and a VFS image cleanly. The object persists across
+  restarts.
+
+unregister
+  Delete programs/<id> from the store.
+
+list
+  Show the registered programs and the image each is bound to.
+
+The program id is a single name with no '/'. Wizard only: a launched
+program runs code with its owner's authority.
+
+Examples:
+  @program register tool /bin/tool.elf
+      Bind programs/tool to a VFS image.
+  @program register hello hello.elf
+      Bind programs/hello to a host image under the image directory.
+  @program list
+  @program unregister tool
+
+See also @compile, @run, help programs.

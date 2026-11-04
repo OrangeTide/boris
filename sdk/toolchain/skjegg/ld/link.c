@@ -41,7 +41,7 @@ sym_find(struct linker *ld, const char *name)
 
 static int
 sym_add(struct linker *ld, const char *name, uint32_t value,
-        int defined, int obj_idx, int sec_idx)
+        int defined, int weak, int obj_idx, int sec_idx)
 {
     if (ld->nsyms >= ld->sym_cap) {
         ld->sym_cap = ld->sym_cap ? ld->sym_cap * 2 : 64;
@@ -55,8 +55,12 @@ sym_add(struct linker *ld, const char *name, uint32_t value,
     ld->syms[idx].name = name;
     ld->syms[idx].value = value;
     ld->syms[idx].defined = defined;
+    ld->syms[idx].weak = weak;
     ld->syms[idx].obj_idx = obj_idx;
     ld->syms[idx].sec_idx = sec_idx;
+    ld->syms[idx].type = STT_NOTYPE;
+    ld->syms[idx].size = 0;
+    ld->syms[idx].binding = STB_GLOBAL;
     return idx;
 }
 
@@ -72,29 +76,57 @@ collect_symbols(struct linker *ld)
             struct ld_input_sym *isym = &obj->syms[si];
             obj->sym_map[si] = -1;
 
+            int is_def = (isym->shndx != SHN_UNDEF);
+            int is_weak = (isym->binding == STB_WEAK);
+
             if (isym->binding == STB_LOCAL) {
                 int gidx = sym_add(ld, isym->name, isym->value,
-                                   isym->shndx != SHN_UNDEF, oi,
-                                   isym->shndx);
+                                   is_def, 0, oi, isym->shndx);
+                ld->syms[gidx].type = isym->type;
+                ld->syms[gidx].size = isym->size;
+                ld->syms[gidx].binding = STB_LOCAL;
                 obj->sym_map[si] = gidx;
                 continue;
             }
 
             int existing = sym_find(ld, isym->name);
             if (existing >= 0) {
-                if (isym->shndx != SHN_UNDEF) {
-                    if (ld->syms[existing].defined)
-                        die("duplicate symbol: %s", isym->name);
-                    ld->syms[existing].defined = 1;
-                    ld->syms[existing].value = isym->value;
-                    ld->syms[existing].obj_idx = oi;
-                    ld->syms[existing].sec_idx = isym->shndx;
+                struct ld_symbol *g = &ld->syms[existing];
+                if (is_def) {
+                    if (g->defined) {
+                        /* A strong definition overrides a weak one; two strong
+                           definitions collide; a weak definition never
+                           displaces an existing one. */
+                        if (g->weak && !is_weak) {
+                            g->value = isym->value;
+                            g->weak = 0;
+                            g->obj_idx = oi;
+                            g->sec_idx = isym->shndx;
+                            g->type = isym->type;
+                            g->size = isym->size;
+                        } else if (!g->weak && !is_weak) {
+                            die("duplicate symbol: %s", isym->name);
+                        }
+                    } else {
+                        /* first definition of a so-far-undefined symbol */
+                        g->defined = 1;
+                        g->value = isym->value;
+                        g->weak = is_weak;
+                        g->obj_idx = oi;
+                        g->sec_idx = isym->shndx;
+                        g->type = isym->type;
+                        g->size = isym->size;
+                    }
+                } else if (!g->defined && !is_weak) {
+                    /* a strong reference forces the symbol to be resolved */
+                    g->weak = 0;
                 }
                 obj->sym_map[si] = existing;
             } else {
                 int gidx = sym_add(ld, isym->name, isym->value,
-                                   isym->shndx != SHN_UNDEF, oi,
-                                   isym->shndx);
+                                   is_def, is_weak, oi, isym->shndx);
+                ld->syms[gidx].type = isym->type;
+                ld->syms[gidx].size = isym->size;
                 obj->sym_map[si] = gidx;
             }
         }
@@ -172,10 +204,12 @@ outsec_append(struct ld_output_sec *os, const uint8_t *data,
         memset(os->data + os->size, 0, pad);
     os->size += pad;
 
-    if (data)
-        memcpy(os->data + os->size, data, size);
-    else
-        memset(os->data + os->size, 0, size);
+    if (size > 0) {
+        if (data)
+            memcpy(os->data + os->size, data, size);
+        else
+            memset(os->data + os->size, 0, size);
+    }
     os->size += size;
 }
 
@@ -203,8 +237,9 @@ process_assigns(struct linker *ld, struct ld_output_sec *os,
         if (existing >= 0) {
             ld->syms[existing].value = cursor;
             ld->syms[existing].defined = 1;
+            ld->syms[existing].weak = 0;
         } else {
-            sym_add(ld, sa->name, cursor, 1, -1, -1);
+            sym_add(ld, sa->name, cursor, 1, 0, -1, -1);
         }
     }
 }
@@ -221,7 +256,9 @@ ld_layout(struct linker *ld)
 
     /* advance region cursors past ELF/phdr headers (included in segment) */
     int nphdrs = sc->nphdrs > 0 ? sc->nphdrs : 1;
-    uint32_t headers_size = 52 + (uint32_t)nphdrs * 32;
+    uint32_t eh = ld->ehdr_size ? ld->ehdr_size : 52;
+    uint32_t pe = ld->phent_size ? ld->phent_size : 32;
+    uint32_t headers_size = eh + (uint32_t)nphdrs * pe;
     for (int i = 0; i < sc->nregions; i++)
         sc->regions[i].cursor = sc->regions[i].origin + headers_size;
 
@@ -355,14 +392,145 @@ ld_find_output_sec(struct linker *ld, struct ld_input_sec *isec)
     return NULL;
 }
 
+/* Merge the input non-alloc debug sections (.debug_*) by name into ld->debug[],
+ * concatenating same-named sections across objects.  Each input section's base
+ * offset within its merged section is recorded in isec->assigned_vaddr (debug
+ * sections are non-alloc, so that field is otherwise unused for them), which is
+ * what lets the arch linker place a reloc inside the merged buffer.  Shared. */
+void
+ld_build_debug(struct linker *ld)
+{
+    for (int oi = 0; oi < ld->nobjs; oi++) {
+        struct ld_object *obj = &ld->objs[oi];
+        for (int s = 0; s < obj->nsections; s++) {
+            struct ld_input_sec *isec = &obj->sections[s];
+            struct ld_debug_sec *d = NULL;
+
+            if (isec->type != SHT_PROGBITS)
+                continue;
+            if (strncmp(isec->name, ".debug_", 7) != 0)
+                continue;
+
+            for (int k = 0; k < ld->ndebug; k++) {
+                if (strcmp(ld->debug[k].name, isec->name) == 0) {
+                    d = &ld->debug[k];
+                    break;
+                }
+            }
+            if (!d) {
+                if (ld->ndebug >= MAX_DEBUG_SECS)
+                    die("too many debug sections (%s)", isec->name);
+                d = &ld->debug[ld->ndebug++];
+                d->name = isec->name;
+            }
+
+            if (d->size + isec->size > d->cap) {
+                d->cap = (d->size + isec->size) * 2;
+                d->data = realloc(d->data, d->cap);
+                if (!d->data)
+                    die("out of memory");
+            }
+            isec->assigned_vaddr = d->size;     /* base within merged buffer */
+            if (isec->size > 0)
+                memcpy(d->data + d->size, isec->data, isec->size);
+            d->size += isec->size;
+        }
+    }
+}
+
 /* Report any global symbol that stayed undefined after relocation.  Shared. */
 void
 ld_check_undefined(struct linker *ld)
 {
     for (int i = 0; i < ld->nsyms; i++) {
-        if (!ld->syms[i].defined && ld->syms[i].name[0] != '\0')
+        /* a weak symbol that stayed undefined resolves to 0, not an error */
+        if (!ld->syms[i].defined && !ld->syms[i].weak &&
+            ld->syms[i].name[0] != '\0')
             die("undefined symbol: %s", ld->syms[i].name);
     }
+}
+
+/* Order two global symbols for the map: by address, then by name.  Shared. */
+static int
+map_sym_cmp(const void *pa, const void *pb)
+{
+    const struct ld_symbol *a = *(const struct ld_symbol *const *)pa;
+    const struct ld_symbol *b = *(const struct ld_symbol *const *)pb;
+    if (a->value < b->value) return -1;
+    if (a->value > b->value) return 1;
+    return strcmp(a->name, b->name);
+}
+
+/* Write a link map: the entry point, the memory regions, each output section
+ * with the input sections that built it, and the defined global symbols by
+ * address.  Called after the link (addresses are final).  Shared by every
+ * target, since it reads only the arch-neutral layout result.  Shared. */
+void
+ld_write_map(struct linker *ld, const char *path)
+{
+    FILE *f = fopen(path, "w");
+    if (!f)
+        die("cannot create %s", path);
+
+    struct ld_script *sc = &ld->script;
+
+    fprintf(f, "Skjegg link map\n\n");
+    fprintf(f, "Entry point: 0x%08x\n\n", ld->entry_vaddr);
+
+    if (sc->nregions > 0) {
+        fprintf(f, "Memory configuration:\n");
+        for (int r = 0; r < sc->nregions; r++) {
+            struct ld_mem_region *mr = &sc->regions[r];
+            fprintf(f, "  %-12s origin 0x%08x  length 0x%08x (%u bytes)\n",
+                    mr->name, mr->origin, mr->length, mr->length);
+        }
+        fprintf(f, "\n");
+    }
+
+    fprintf(f, "Output sections:\n");
+    for (int s = 0; s < sc->nsections; s++) {
+        struct ld_output_sec *os = &sc->sections[s];
+        if (os->discard || os->size == 0)
+            continue;
+        fprintf(f, "  %-12s 0x%08x  0x%08x%s\n", os->name, os->vaddr,
+                os->size, os->nobits ? "  (nobits)" : "");
+        /* the input sections that landed in this output section */
+        for (int o = 0; o < ld->nobjs; o++) {
+            struct ld_object *obj = &ld->objs[o];
+            for (int i = 0; i < obj->nsections; i++) {
+                struct ld_input_sec *isec = &obj->sections[i];
+                if (!isec->matched)
+                    continue;
+                if (ld_find_output_sec(ld, isec) != os)
+                    continue;
+                fprintf(f, "    0x%08x  0x%08x  %s(%s)\n",
+                        isec->assigned_vaddr, isec->size, obj->path,
+                        isec->name);
+            }
+        }
+    }
+    fprintf(f, "\n");
+
+    /* defined global symbols, by address */
+    const struct ld_symbol **order =
+        arena_alloc(&ld->arena, (size_t)ld->nsyms * sizeof *order);
+    int n = 0;
+    for (int i = 0; i < ld->nsyms; i++) {
+        if (ld->syms[i].defined && ld->syms[i].name[0] != '\0')
+            order[n++] = &ld->syms[i];
+    }
+    qsort(order, (size_t)n, sizeof *order, map_sym_cmp);
+
+    fprintf(f, "Symbols:\n");
+    for (int i = 0; i < n; i++) {
+        const struct ld_symbol *sym = order[i];
+        const char *from = "";
+        if (sym->obj_idx >= 0 && sym->obj_idx < ld->nobjs)
+            from = ld->objs[sym->obj_idx].path;
+        fprintf(f, "  0x%08x  %-24s %s\n", sym->value, sym->name, from);
+    }
+
+    fclose(f);
 }
 
 int
@@ -382,8 +550,9 @@ ld_link(struct linker *ld)
                     obj->path, rel->sym_idx);
 
             struct ld_symbol *gsym = &ld->syms[gi];
-            if (!gsym->defined)
+            if (!gsym->defined && !gsym->weak)
                 die("%s: undefined symbol '%s'", obj->path, gsym->name);
+            /* a weak-undefined symbol has value 0, so the reloc resolves to 0 */
 
             struct ld_input_sec *isec = &obj->sections[rel->section];
             if (!isec->matched)
@@ -421,6 +590,53 @@ ld_link(struct linker *ld)
             default:
                 die("%s: unsupported relocation type %d", obj->path,
                     rel->type);
+            }
+        }
+    }
+
+    /* Debug sections are non-alloc, so the loop above skipped them (their
+       input sections never matched an output section).  Merge them and apply
+       the absolute address relocations (low_pc / high_pc / line-program
+       set_address, all R_68K_32 against the text section symbol, now resolved)
+       into the merged buffers, so the linked executable carries final big-
+       endian addresses. */
+    ld_build_debug(ld);
+    for (int oi = 0; oi < ld->nobjs; oi++) {
+        struct ld_object *obj = &ld->objs[oi];
+
+        for (int ri = 0; ri < obj->nrelocs; ri++) {
+            struct ld_reloc *rel = &obj->relocs[ri];
+            struct ld_input_sec *isec = &obj->sections[rel->section];
+            struct ld_debug_sec *d = NULL;
+            struct ld_symbol *gsym;
+            uint8_t *patch;
+            int gi;
+
+            if (isec->type != SHT_PROGBITS
+                || strncmp(isec->name, ".debug_", 7) != 0)
+                continue;
+            for (int k = 0; k < ld->ndebug; k++) {
+                if (strcmp(ld->debug[k].name, isec->name) == 0) {
+                    d = &ld->debug[k];
+                    break;
+                }
+            }
+            if (!d)
+                continue;
+
+            gi = obj->sym_map[rel->sym_idx];
+            if (gi < 0)
+                die("%s: debug reloc references unmapped symbol", obj->path);
+            gsym = &ld->syms[gi];
+            patch = d->data + isec->assigned_vaddr + rel->offset;
+
+            switch (rel->type) {
+            case R_68K_32:
+                put32(patch, gsym->value + (uint32_t)rel->addend);
+                break;
+            default:
+                die("%s: unsupported debug relocation type %d in %s",
+                    obj->path, rel->type, isec->name);
             }
         }
     }

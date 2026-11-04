@@ -286,8 +286,9 @@ rv_ld_link(struct linker *ld)
                 die("%s: reloc references unmapped symbol %d",
                     obj->path, rel->sym_idx);
             struct ld_symbol *gsym = &ld->syms[gi];
-            if (!gsym->defined)
+            if (!gsym->defined && !gsym->weak)
                 die("%s: undefined symbol '%s'", obj->path, gsym->name);
+            /* a weak-undefined symbol has value 0, so the reloc resolves to 0 */
 
             uint32_t file_off = (isec->assigned_vaddr - os->vaddr) +
                                 rel->offset;
@@ -390,6 +391,64 @@ rv_ld_link(struct linker *ld)
             default:
                 die("%s: unsupported relocation type %d", obj->path,
                     rel->type);
+            }
+        }
+    }
+
+    /* Debug sections are non-alloc, so the loop above skipped them (their
+       input sections never matched an output section).  Merge them and apply
+       the absolute address relocations (the set_address / low_pc / high_pc
+       R_RISCV_32 against the text section symbol, now resolved) into the merged
+       buffers, so the linked executable carries final addresses. */
+    ld_build_debug(ld);
+    for (int oi = 0; oi < ld->nobjs; oi++) {
+        struct ld_object *obj = &ld->objs[oi];
+
+        for (int ri = 0; ri < obj->nrelocs; ri++) {
+            struct ld_reloc *rel = &obj->relocs[ri];
+            struct ld_input_sec *isec = &obj->sections[rel->section];
+            struct ld_debug_sec *d = NULL;
+            struct ld_symbol *gsym;
+            uint8_t *patch;
+            uint32_t S;
+            int32_t A;
+            int gi;
+
+            if (rel->type == R_RISCV_RELAX || rel->type == R_RISCV_NONE)
+                continue;
+            if (isec->type != SHT_PROGBITS
+                || strncmp(isec->name, ".debug_", 7) != 0)
+                continue;
+            for (int k = 0; k < ld->ndebug; k++) {
+                if (strcmp(ld->debug[k].name, isec->name) == 0) {
+                    d = &ld->debug[k];
+                    break;
+                }
+            }
+            if (!d)
+                continue;
+
+            gi = obj->sym_map[rel->sym_idx];
+            if (gi < 0)
+                die("%s: debug reloc references unmapped symbol", obj->path);
+            gsym = &ld->syms[gi];
+            S = gsym->value;
+            A = rel->addend;
+            patch = d->data + isec->assigned_vaddr + rel->offset;
+
+            switch (rel->type) {
+            case R_RISCV_32:
+                wr32(patch, S + (uint32_t)A);
+                break;
+            case R_RISCV_ADD32:
+                wr32(patch, rd32(patch) + S + (uint32_t)A);
+                break;
+            case R_RISCV_SUB32:
+                wr32(patch, rd32(patch) - (S + (uint32_t)A));
+                break;
+            default:
+                die("%s: unsupported debug relocation type %d in %s",
+                    obj->path, rel->type, isec->name);
             }
         }
     }

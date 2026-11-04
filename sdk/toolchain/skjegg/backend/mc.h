@@ -145,6 +145,12 @@ void mc_nop(struct mc *m);
 void mc_call_reg(struct mc *m, int reg);
 void mc_jmp_reg(struct mc *m, int reg);
 
+/* ---- Materialize the address of a local code label (the IR_LABADDR analog of
+   mc_lea_sym) into an integer register, for a computed/threaded jump.  The text
+   sink emits `mov reg, .L<label>`; the byte sink emits a RIP-relative lea with a
+   deferred fixup to the label, resolved like a branch target. */
+void mc_lea_label(struct mc *m, int reg, int id);
+
 /* ---- Call a named function.  The sink turns it into the right form: the text
    sink always emits `call name` (the linker resolves it); the byte sink emits a
    direct rel32 + relocation for a function defined in this program, or loads a

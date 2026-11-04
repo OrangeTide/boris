@@ -2,20 +2,47 @@
 
 #include "asm_obj.h"
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "util.h"
 
 /****************************************************************
  * Section helpers
  ****************************************************************/
 
+/* Ensure the section can hold `need` more bytes, growing to fit.  A section
+ * length is an int, so a request that would push it past INT_MAX is a fatal
+ * error (a hostile or corrupt `.zero`/`.space` count), not a silent wrap; the
+ * growth arithmetic runs in size_t so the capacity doubling never overflows. */
+static void
+sec_reserve(struct section *s, int need)
+{
+    size_t want, ncap;
+
+    if (need < 0 || s->len < 0)
+        die("section fill count out of range");
+    want = (size_t)s->len + (size_t)need;
+    if (want > (size_t)INT_MAX)
+        die("section too large");
+    if (want <= (size_t)s->cap)
+        return;
+    ncap = s->cap ? (size_t)s->cap : 256;
+    while (ncap < want)
+        ncap *= 2;                      /* size_t: no signed overflow */
+    if (ncap > (size_t)INT_MAX)
+        ncap = want;                    /* a single huge request: grow to fit */
+    s->data = realloc(s->data, ncap);
+    if (!s->data)
+        die("out of memory growing section");
+    s->cap = (int)ncap;
+}
+
 void
 sec_emit8(struct section *s, uint8_t val)
 {
-    if (s->len + 1 > s->cap) {
-        s->cap = s->cap ? s->cap * 2 : 256;
-        s->data = realloc(s->data, s->cap);
-    }
+    sec_reserve(s, 1);
     s->data[s->len++] = val;
 }
 
@@ -57,9 +84,11 @@ sec_align(struct section *s, int alignment)
 void
 sec_space(struct section *s, int nbytes)
 {
-    int k;
-    for (k = 0; k < nbytes; k++)
-        sec_emit8(s, 0);
+    if (nbytes <= 0)
+        return;
+    sec_reserve(s, nbytes);
+    memset(s->data + s->len, 0, (size_t)nbytes);
+    s->len += nbytes;
 }
 
 void
@@ -112,7 +141,10 @@ sym_add(struct symtab *st, const char *name)
     st->syms[idx].section = -1;
     st->syms[idx].value = 0;
     st->syms[idx].global = 0;
+    st->syms[idx].weak = 0;
     st->syms[idx].defined = 0;
+    st->syms[idx].is_func = 0;
+    st->syms[idx].size = 0;
     return idx;
 }
 
@@ -128,4 +160,30 @@ void
 sym_set_global(struct symtab *st, int idx)
 {
     st->syms[idx].global = 1;
+}
+
+/* A weak symbol binds like a global for symbol-table ordering (it is not a
+   local), but the ELF writer emits STB_WEAK so the linker lets a strong
+   definition override it and an unresolved weak reference stay 0. */
+void
+sym_set_weak(struct symtab *st, int idx)
+{
+    st->syms[idx].global = 1;
+    st->syms[idx].weak = 1;
+}
+
+/* .type sym,@function : the symbol names code, so the ELF writer types it
+   STT_FUNC.  A debugger's address-to-function map and a backtrace both read
+   this in .symtab; the DWARF line table (file:line) is separate. */
+void
+sym_set_func(struct symtab *st, int idx)
+{
+    st->syms[idx].is_func = 1;
+}
+
+/* .size sym,expr : the symbol's extent in bytes, written as st_size. */
+void
+sym_set_size(struct symtab *st, int idx, uint32_t size)
+{
+    st->syms[idx].size = size;
 }

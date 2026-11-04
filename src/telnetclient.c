@@ -1231,6 +1231,20 @@ telnetclient_set_stred(DESCRIPTOR_DATA *cl, struct stred_session *stred)
 	cl->stred = stred;
 }
 
+/* telnetclient_get_fg returns the @run foreground VM session for the client. */
+struct fg_session *
+telnetclient_get_fg(DESCRIPTOR_DATA *cl)
+{
+	return cl ? cl->fg : NULL;
+}
+
+/* telnetclient_set_fg sets the @run foreground VM session for the client. */
+void
+telnetclient_set_fg(DESCRIPTOR_DATA *cl, struct fg_session *fg)
+{
+	cl->fg = fg;
+}
+
 /* telnetclient_get_login_username returns the username entered during login. */
 const char *
 telnetclient_get_login_username(DESCRIPTOR_DATA *cl)

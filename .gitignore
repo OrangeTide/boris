@@ -39,8 +39,12 @@ core
 
 # VM guest SDK build artifacts
 /data/vm/
+sdk/vm/build/
 sdk/vm/*.o
 sdk/vm/*.s
+
+# @compile scratch build directories
+/data/tmp/
 
 # ignore AI junk
 .claude

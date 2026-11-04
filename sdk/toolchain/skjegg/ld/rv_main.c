@@ -13,16 +13,16 @@ cleanup_ld(void *p)
 }
 
 static void
-usage(void)
+usage(FILE *out, int code)
 {
-    fprintf(stderr,
-            "usage: skj-ld-rv [-V] [-T script.ld] [-e entry] -o output"
-            " input.o [...]\n"
+    fprintf(out,
+            "usage: skj-ld-rv [-V] [-T script.ld] [-e entry] [-Map map]"
+            " -o output input.o [...]\n"
             "\n"
             "RISC-V RV32 static linker.  Reads ELF32 little-endian EM_RISCV\n"
             "relocatable objects and writes an ET_EXEC based at 0x10000 for\n"
             "qemu-riscv32 user mode and the in-tree emulator (skj-run).\n");
-    exit(1);
+    exit(code);
 }
 
 int
@@ -31,6 +31,7 @@ main(int argc, char **argv)
     const char *script_path;
     const char *entry_override;
     const char *output_path;
+    const char *map_path;
     const char **inputs;
     int ninputs;
     struct linker ld;
@@ -40,21 +41,27 @@ main(int argc, char **argv)
     script_path = NULL;
     entry_override = NULL;
     output_path = NULL;
+    map_path = NULL;
     inputs = NULL;
     ninputs = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-V") == 0) {
             printf("skj-ld-rv %s\n", SKJ_VERSION);
             return 0;
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            usage(stdout, 0);
         } else if (strcmp(argv[i], "-T") == 0) {
-            if (++i >= argc) usage();
+            if (++i >= argc) usage(stderr, 1);
             script_path = argv[i];
         } else if (strcmp(argv[i], "-e") == 0) {
-            if (++i >= argc) usage();
+            if (++i >= argc) usage(stderr, 1);
             entry_override = argv[i];
         } else if (strcmp(argv[i], "-o") == 0) {
-            if (++i >= argc) usage();
+            if (++i >= argc) usage(stderr, 1);
             output_path = argv[i];
+        } else if (strcmp(argv[i], "-Map") == 0) {
+            if (++i >= argc) usage(stderr, 1);
+            map_path = argv[i];
         } else if (argv[i][0] == '-') {
             die("unknown option: %s", argv[i]);
         } else {
@@ -65,7 +72,7 @@ main(int argc, char **argv)
     }
 
     if (!output_path || ninputs == 0)
-        usage();
+        usage(stderr, 1);
 
     if (setjmp(util_die_env) != 0) {
         free(inputs);
@@ -116,6 +123,8 @@ main(int argc, char **argv)
     free(archives);
 
     rv_ld_link(&ld);
+    if (map_path)
+        ld_write_map(&ld, map_path);
     rv_ld_write_exec(&ld, output_path);
 
     util_cleanup_run();

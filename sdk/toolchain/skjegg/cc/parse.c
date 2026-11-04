@@ -65,9 +65,17 @@ static struct cc_token
 expect(int kind)
 {
     struct cc_token t = next();
-    if (t.kind != kind)
-        die("parse error at line %d: unexpected token %d (expected %d)",
-            t.line, t.kind, kind);
+    if (t.kind != kind) {
+        const char *gn = cc_tok_name(t.kind), *en = cc_tok_name(kind);
+        cc_lex_print_context(t.line, 5);
+        if (t.sval && *t.sval)
+            die("parse error at line %d in %s: unexpected %s [%d] \"%s\" "
+                "(expected %s [%d])", t.line, cc_lex_file(),
+                gn ? gn : "token", t.kind, t.sval, en ? en : "token", kind);
+        die("parse error at line %d in %s: unexpected %s [%d] "
+            "(expected %s [%d])", t.line, cc_lex_file(),
+            gn ? gn : "token", t.kind, en ? en : "token", kind);
+    }
     return t;
 }
 
@@ -89,6 +97,7 @@ node(int kind, int line)
     memset(n, 0, sizeof *n);
     n->kind = kind;
     n->line = line;
+    n->col = cc_lex_col();      /* column of the token being parsed, for -g */
     return n;
 }
 
@@ -111,7 +120,10 @@ pop_scope(void)
 static void
 add_sym(const char *name, int kind, struct cc_type *type, long eval)
 {
-    struct symbol *s = arena_alloc(parse_arena, sizeof *s);
+    struct symbol *s;
+    if (!name)                  /* a nameless declarator binds no symbol */
+        return;
+    s = arena_alloc(parse_arena, sizeof *s);
     s->name = arena_strdup(parse_arena,name);
     s->sym_kind = kind;
     s->type = type;
@@ -135,6 +147,8 @@ find_sym(const char *name)
 static struct cc_type *
 find_tag(const char *name)
 {
+    if (!name)                  /* an anonymous reference matches no named tag */
+        return NULL;
     for (struct tag *t = tags; t; t = t->next) {
         if (strcmp(t->name, name) == 0)
             return t->type;
@@ -145,7 +159,10 @@ find_tag(const char *name)
 static void
 add_tag(const char *name, struct cc_type *type)
 {
-    struct tag *t = arena_alloc(parse_arena, sizeof *t);
+    struct tag *t;
+    if (!name)                  /* nothing can look an anonymous tag back up */
+        return;
+    t = arena_alloc(parse_arena, sizeof *t);
     t->name = arena_strdup(parse_arena,name);
     t->type = type;
     t->next = tags;
@@ -154,7 +171,7 @@ add_tag(const char *name, struct cc_type *type)
 
 /* forward declarations */
 static struct cc_type *parse_declspec(int *is_static, int *is_extern, int *is_typedef);
-static long const_eval(struct cc_node *n);
+static long long const_eval(struct cc_node *n);
 
 /* _Alignas requested by the declspec just parsed (0 = none); read by the
    declaration immediately after parse_declspec returns. */
@@ -166,13 +183,15 @@ static struct cc_node *parse_stmt(void);
 static struct cc_node *parse_expr(void);
 static struct cc_node *parse_assign_expr(void);
 static struct cc_node *parse_initializer(void);
+static void parse_static_assert(void);
+static struct cc_node *parse_asm_operands(int have_expr);
 
 /* is the next token the start of a type specifier? */
 static int
 is_type_start(struct cc_token t)
 {
     switch (t.kind) {
-    case TOK_VOID: case TOK_CHAR: case TOK_SHORT: case TOK_INT:
+    case TOK_VOID: case TOK_BOOL: case TOK_CHAR: case TOK_SHORT: case TOK_INT:
     case TOK_LONG: case TOK_FLOAT16: case TOK_FLOAT: case TOK_DOUBLE:
     case TOK_SIGNED: case TOK_UNSIGNED:
     case TOK_STRUCT: case TOK_UNION: case TOK_ENUM:
@@ -195,6 +214,10 @@ parse_fields(void)
 {
     struct cc_field *head = NULL, *tail = NULL;
     while (!consume(TOK_RBRACE)) {
+        if (peek().kind == TOK_STATIC_ASSERT) {
+            parse_static_assert();
+            continue;
+        }
         int dummy1 = 0, dummy2 = 0;
         struct cc_type *base = parse_declspec(&dummy1, &dummy2, NULL);
         for (;;) {
@@ -288,6 +311,20 @@ layout_union(struct cc_type *t)
     t->align = max_align;
 }
 
+/* Return a const-qualified copy of a type.  A copy, not an in-place stamp,
+   because the base scalars are shared singletons and a typedef or tag type is
+   shared through its table; qualifying one in place would qualify every use.
+   Type comparison in cc is structural (by kind and size), so the copy behaves
+   identically to the original apart from the qualifier. */
+static struct cc_type *
+cc_type_const(struct cc_type *t)
+{
+    struct cc_type *u = arena_alloc(parse_arena, sizeof *u);
+    *u = *t;
+    u->is_const = 1;
+    return u;
+}
+
 /* parse declaration specifiers (type + storage class) */
 static struct cc_type *
 parse_declspec(int *is_static, int *is_extern, int *is_typedef)
@@ -295,6 +332,8 @@ parse_declspec(int *is_static, int *is_extern, int *is_typedef)
     int saw_type = 0;
     int is_unsigned = 0;
     int is_signed = 0;
+    int is_bool = 0;
+    int saw_const = 0;
     int base = -1;
     int long_count = 0;
     struct cc_type *result = NULL;
@@ -327,7 +366,11 @@ parse_declspec(int *is_static, int *is_extern, int *is_typedef)
             next();
             declspec_inline = 1;        /* an inline definition may be omitted */
             continue;
-        case TOK_CONST: case TOK_VOLATILE:
+        case TOK_CONST:
+            next();
+            saw_const = 1;
+            continue;
+        case TOK_VOLATILE:
         case TOK_RESTRICT:
             next();
             continue;
@@ -365,6 +408,14 @@ parse_declspec(int *is_static, int *is_extern, int *is_typedef)
         case TOK_VOID:
             next();
             base = TY_VOID;
+            saw_type = 1;
+            continue;
+        case TOK_BOOL:
+            /* _Bool: a 1-byte unsigned integer that holds only 0 or 1 */
+            next();
+            base = TY_CHAR;
+            is_unsigned = 1;
+            is_bool = 1;
             saw_type = 1;
             continue;
         case TOK_CHAR:
@@ -413,17 +464,27 @@ parse_declspec(int *is_static, int *is_extern, int *is_typedef)
                 next();
             }
             if (consume(TOK_LBRACE)) {
-                result = arena_alloc(parse_arena, sizeof *result);
-                memset(result, 0, sizeof *result);
-                result->kind = is_union ? TY_UNION : TY_STRUCT;
-                result->tag = tag_name;
+                int kind = is_union ? TY_UNION : TY_STRUCT;
+                /* Register the tag as incomplete BEFORE parsing the body, so a
+                   self-referential field (`struct header *next` inside
+                   `struct header`) resolves to this very type and sees its
+                   fields once completed, rather than spawning a fieldless stub.
+                   An existing incomplete tag (a forward declaration) is
+                   completed in place so pointers taken to it see the body. */
+                result = tag_name ? find_tag(tag_name) : NULL;
+                if (!result || result->fields || result->kind != kind) {
+                    result = arena_alloc(parse_arena, sizeof *result);
+                    memset(result, 0, sizeof *result);
+                    result->kind = kind;
+                    result->tag = tag_name;
+                    if (tag_name)
+                        add_tag(tag_name, result);
+                }
                 result->fields = parse_fields();
                 if (is_union)
                     layout_union(result);
                 else
                     layout_struct(result);
-                if (tag_name)
-                    add_tag(tag_name, result);
             } else {
                 result = find_tag(tag_name);
                 if (!result) {
@@ -450,8 +511,12 @@ parse_declspec(int *is_static, int *is_extern, int *is_typedef)
                 while (!consume(TOK_RBRACE)) {
                     struct cc_token name = expect(TOK_IDENT);
                     if (consume(TOK_ASSIGN)) {
-                        struct cc_node *e = parse_assign_expr();
-                        eval = e->ival;
+                        /* fold the whole constant expression, not just a bare
+                           literal: `1 << n`, `A | B`, or a prior enum constant
+                           (which parses to a literal) all reduce here.  Reading
+                           e->ival directly took only ND_INTLIT and silently
+                           made every computed enumerator 0. */
+                        eval = (long)const_eval(parse_assign_expr());
                     }
                     add_sym(name.sval, SYM_ENUM_CONST, cc_type_int(), eval);
                     eval++;
@@ -506,11 +571,20 @@ done:
         memset(result, 0, sizeof *result);
         result->kind = base;
         result->is_unsigned = is_unsigned;
+        result->is_bool = is_bool;
     }
+    /* a leading const (const int, const struct S, const T) qualifies the base;
+       a const after a * (int * const) is a pointer qualifier, in the
+       declarator */
+    if (saw_const)
+        result = cc_type_const(result);
     return result;
 }
 
-static long
+/* NULL until lowering installs its type resolver; see cc.h. */
+struct cc_type *(*cc_const_sizeof_typer)(struct cc_node *n) = NULL;
+
+static long long
 const_eval(struct cc_node *n)
 {
     if (!n)
@@ -519,8 +593,8 @@ const_eval(struct cc_node *n)
     case ND_INTLIT:
         return n->ival;
     case ND_BINOP: {
-        long a = const_eval(n->a);
-        long b = const_eval(n->b);
+        long long a = const_eval(n->a);
+        long long b = const_eval(n->b);
         switch (n->op) {
         case TOK_PLUS:    return a + b;
         case TOK_MINUS:   return a - b;
@@ -546,7 +620,7 @@ const_eval(struct cc_node *n)
         }
     }
     case ND_UNOP: {
-        long a = const_eval(n->a);
+        long long a = const_eval(n->a);
         switch (n->op) {
         case TOK_MINUS: return -a;
         case TOK_TILDE: return ~a;
@@ -561,15 +635,68 @@ const_eval(struct cc_node *n)
     case ND_SIZEOF: {
         struct cc_type *t = n->decl_type ? n->decl_type
                           : (n->a ? n->a->type : NULL);
+        /* An expression operand carries no type at parse time; during lowering
+           the typing hook resolves it, so sizeof a declared array or struct
+           folds to its real size rather than defaulting to int. */
+        if (!t && n->a && cc_const_sizeof_typer)
+            t = cc_const_sizeof_typer(n->a);
         if (!t)
             t = cc_type_int();
         return n->op == TOK_ALIGNOF ? cc_type_align(t) : cc_type_size(t);
     }
     case ND_CAST:
         return const_eval(n->a);
+    case ND_INDEX:
+        /* a constant index of a string literal is the byte at that position,
+           e.g. "abc"[1] is 'b' (index slen is the terminating NUL) */
+        if (n->a && n->a->kind == ND_STRLIT) {
+            long long i = const_eval(n->b);
+            if (i < 0 || i > n->a->slen)
+                die("string literal index %lld out of range at line %d",
+                    i, n->line);
+            return i == n->a->slen ? 0 : (unsigned char)n->a->sval[i];
+        }
+        die("expected constant expression at line %d", n->line);
+        return 0;
     default:
         die("expected constant expression at line %d", n->line);
         return 0;
+    }
+}
+
+/* Public entry: fold an integer constant expression. Used by the lowering to
+   evaluate a scalar static/global initializer that is a constant expression
+   rather than a bare literal. Dies (like the array-size path) when the node is
+   not a constant expression, which is the correct diagnostic for a static
+   initializer. */
+long long
+cc_const_eval(struct cc_node *n)
+{
+    return const_eval(n);
+}
+
+/* C11 _Static_assert ( constant-expression , string-literal ) ; evaluated at
+   parse time. The message string is optional (the C23 form). A failed
+   assertion dies with the message; a passing one produces no AST node. Appears
+   at file scope, as a block item, and as a struct/union member. */
+static void
+parse_static_assert(void)
+{
+    int ln = cc_lex_line();
+    expect(TOK_STATIC_ASSERT);
+    expect(TOK_LPAREN);
+    long long val = const_eval(parse_assign_expr());
+    const char *msg = NULL;
+    if (consume(TOK_COMMA)) {
+        struct cc_token m = expect(TOK_STRLIT);
+        msg = m.sval;
+    }
+    expect(TOK_RPAREN);
+    expect(TOK_SEMI);
+    if (val == 0) {
+        if (msg)
+            die("static assertion failed at line %d: %s", ln, msg);
+        die("static assertion failed at line %d", ln);
     }
 }
 
@@ -580,10 +707,14 @@ parse_declarator(struct cc_type *base, char **name_out)
     /* pointer prefixes */
     while (consume(TOK_STAR)) {
         base = cc_type_ptr(parse_arena,base);
-        /* skip qualifiers after * */
+        /* qualifiers after a * apply to the pointer itself (int * const p is a
+           const pointer).  base is the fresh pointer type, safe to stamp. */
         while (peek().kind == TOK_CONST || peek().kind == TOK_VOLATILE ||
-               peek().kind == TOK_RESTRICT)
+               peek().kind == TOK_RESTRICT) {
+            if (peek().kind == TOK_CONST)
+                base->is_const = 1;
             next();
+        }
     }
 
     struct cc_type *inner = NULL;
@@ -611,14 +742,26 @@ parse_declarator(struct cc_type *base, char **name_out)
 
     /* postfix: arrays and function params */
     for (;;) {
-        if (consume(TOK_LBRACK)) {
-            int len = -1;
-            if (peek().kind != TOK_RBRACK) {
-                struct cc_node *e = parse_assign_expr();
-                len = (int)const_eval(e);
+        if (peek().kind == TOK_LBRACK) {
+            /* Collect the whole run of dimensions in source order, then wrap
+               them innermost-last so the first-written dimension is the
+               outermost: `int a[3][2]` is array[3] of array[2] of int, not the
+               reverse.  Only the first dimension may be unspecified (`[]`). */
+            int dims[32];
+            int ndim = 0;
+            while (consume(TOK_LBRACK)) {
+                int len = -1;
+                if (peek().kind != TOK_RBRACK) {
+                    struct cc_node *e = parse_assign_expr();
+                    len = (int)const_eval(e);
+                }
+                expect(TOK_RBRACK);
+                if (ndim >= 32)
+                    die("too many array dimensions at line %d", cc_lex_line());
+                dims[ndim++] = len;
             }
-            expect(TOK_RBRACK);
-            base = cc_type_array(parse_arena,base, len);
+            for (int i = ndim - 1; i >= 0; i--)
+                base = cc_type_array(parse_arena, base, dims[i]);
         } else if (consume(TOK_LPAREN)) {
             struct cc_type *ft = cc_type_func(parse_arena,base);
             struct cc_param *phead = NULL, *ptail = NULL;
@@ -642,6 +785,16 @@ parse_declarator(struct cc_type *base, char **name_out)
                         struct cc_type *pt = parse_declspec(&d1, &d2, NULL);
                         char *pname = NULL;
                         pt = parse_declarator(pt, &pname);
+                        /* C99 6.7.5.3p7: a parameter of array type is adjusted
+                           to a pointer to its element, and a parameter of
+                           function type to a pointer to the function.  Without
+                           this, a forwarded array (notably va_list, an array of
+                           one tag) meets a by-value aggregate parameter and the
+                           call ABI mismatches. */
+                        if (pt && pt->kind == TY_ARRAY)
+                            pt = cc_type_ptr(parse_arena, pt->base);
+                        else if (pt && pt->kind == TY_FUNC)
+                            pt = cc_type_ptr(parse_arena, pt);
                         struct cc_param *pp = arena_alloc(parse_arena, sizeof *pp);
                         memset(pp, 0, sizeof *pp);
                         pp->name = pname;
@@ -729,10 +882,18 @@ parse_primary(void)
     switch (t.kind) {
     case TOK_INTLIT: {
         struct cc_node *n = node(ND_INTLIT, t.line);
+        struct cc_type *bt;
         n->ival = t.ival;
-        n->type = t.is_llong ? cc_type_long_long()
-                : t.is_long  ? cc_type_long()
-                :              cc_type_int();
+        bt = t.is_llong ? cc_type_long_long()
+           : t.is_long  ? cc_type_long()
+           :              cc_type_int();
+        if (t.is_unsigned) {        /* a copy, since the base types are shared */
+            struct cc_type *u = arena_alloc(parse_arena, sizeof *u);
+            *u = *bt;
+            u->is_unsigned = 1;
+            bt = u;
+        }
+        n->type = bt;
         return n;
     }
     case TOK_FLOATLIT: {
@@ -754,7 +915,12 @@ parse_primary(void)
         struct cc_node *n = node(ND_STRLIT, t.line);
         n->sval = t.sval;
         n->slen = t.slen;
-        n->type = cc_type_ptr(parse_arena,cc_type_char());
+        /* A string literal is an array char[len+1] (the +1 is the trailing
+           NUL), not a pointer, so sizeof measures the storage.  It decays to
+           char* in value contexts through the ordinary TY_ARRAY decay, and the
+           lowering returns the string's address directly (it never reads this
+           type), so every value use is unchanged. */
+        n->type = cc_type_array(parse_arena, cc_type_char(), t.slen + 1);
         return n;
     }
     case TOK_IDENT: {
@@ -769,6 +935,42 @@ parse_primary(void)
         n->name = t.sval;
         return n;
     }
+    case TOK_GENERIC: {
+        /* C11 _Generic ( assignment-expression , generic-assoc-list ). Each
+           association is `type-name : expr` or `default : expr`; the node holds
+           the controlling expression in a and the association list in b (each a
+           node with decl_type = the type-name, NULL for default, and a = the
+           result expression). The branch is chosen at lowering, where the
+           controlling expression's type is known. */
+        struct cc_node *n = node(ND_GENERIC, t.line);
+        expect(TOK_LPAREN);
+        n->a = parse_assign_expr();
+        expect(TOK_COMMA);
+        struct cc_node *head = NULL, *tail = NULL;
+        int ndefault = 0;
+        for (;;) {
+            struct cc_node *assoc = node(ND_GENERIC, t.line);
+            if (consume(TOK_DEFAULT)) {
+                assoc->decl_type = NULL;
+                if (++ndefault > 1)
+                    die("_Generic: more than one default association "
+                        "at line %d", assoc->line);
+            } else {
+                int d1 = 0, d2 = 0;
+                struct cc_type *ty = parse_declspec(&d1, &d2, NULL);
+                assoc->decl_type = parse_declarator(ty, NULL);
+            }
+            expect(TOK_COLON);
+            assoc->a = parse_assign_expr();
+            if (!head) head = assoc; else tail->next = assoc;
+            tail = assoc;
+            if (!consume(TOK_COMMA))
+                break;
+        }
+        expect(TOK_RPAREN);
+        n->b = head;
+        return n;
+    }
     case TOK_LPAREN: {
         /* could be cast or grouping */
         struct cc_token ahead = peek();
@@ -777,6 +979,15 @@ parse_primary(void)
             struct cc_type *ty = parse_declspec(&d1, &d2, NULL);
             ty = parse_declarator(ty, NULL);
             expect(TOK_RPAREN);
+            if (peek().kind == TOK_LBRACE) {
+                /* compound literal (type){ init }: an anonymous object of the
+                   named type, not a cast of a braced expression */
+                struct cc_node *n = node(ND_COMPOUND_LIT, t.line);
+                n->decl_type = ty;
+                n->type = ty;
+                n->a = parse_initializer();
+                return n;
+            }
             struct cc_node *n = node(ND_CAST, t.line);
             n->decl_type = ty;
             n->a = parse_cast();
@@ -809,6 +1020,22 @@ parse_postfix(void)
         } else if (consume(TOK_LPAREN)) {
             struct cc_node *r = node(ND_CALL, ln);
             r->a = n;
+            if (n->kind == ND_VAR &&
+                strcmp(n->name, "__builtin_va_arg") == 0) {
+                /* __builtin_va_arg(ap, type): the second operand is a type
+                   name, not an expression (what the real <stdarg.h> va_arg
+                   expands to).  Parse it and carry it on the call node; the
+                   lowering classifies it and types the result. */
+                r->b = parse_assign_expr();
+                expect(TOK_COMMA);
+                int vd1 = 0, vd2 = 0;
+                struct cc_type *vty = parse_declspec(&vd1, &vd2, NULL);
+                vty = parse_declarator(vty, NULL);
+                r->decl_type = vty;
+                expect(TOK_RPAREN);
+                n = r;
+                continue;
+            }
             struct cc_node *head = NULL, *tail = NULL;
             if (!consume(TOK_RPAREN)) {
                 for (;;) {
@@ -872,6 +1099,17 @@ parse_unary(void)
         next();
         struct cc_node *n = node(ND_ADDR, ln);
         n->a = parse_cast();
+        return n;
+    }
+    case TOK_ANDAND: {
+        /* GNU labels as values: &&label is the address of a label, a void*.
+           A prefix && is unambiguous (logical-and is strictly binary). */
+        struct cc_token lab;
+        struct cc_node *n;
+        next();
+        lab = expect(TOK_IDENT);
+        n = node(ND_LABELADDR, ln);
+        n->name = lab.sval;
         return n;
     }
     case TOK_STAR: {
@@ -1047,6 +1285,18 @@ parse_local_decl(struct cc_type *base, int is_static, int is_extern)
         n->decl_type = dt;
         n->is_static = is_static;
         n->is_extern = is_extern;
+        /* GNU local register variable: register T x __asm__("$reg").  The
+           asm("...") binding follows the declarator; the register name is
+           carried on sval/slen for the lowering to pin asm operands to. */
+        if (peek().kind == TOK_ASM) {
+            struct cc_token r;
+            next();
+            expect(TOK_LPAREN);
+            r = expect(TOK_STRLIT);
+            expect(TOK_RPAREN);
+            n->sval = r.sval;
+            n->slen = r.slen;
+        }
         if (name)
             add_sym(name, SYM_VAR, dt, 0);
         if (consume(TOK_ASSIGN))
@@ -1057,6 +1307,36 @@ parse_local_decl(struct cc_type *base, int is_static, int is_extern)
             break;
     }
     expect(TOK_SEMI);
+    return head;
+}
+
+/* One extended-asm section (outputs, inputs, or clobbers), stopping at the
+   next ':' or ')'.  The introducing ':' is already consumed.  An operand is
+   "constraint"(expr) when have_expr; a clobber is just "string".  Returns a
+   ->next-chained list of ND_ASM_OP nodes, or NULL for an empty section. */
+static struct cc_node *
+parse_asm_operands(int have_expr)
+{
+    struct cc_node *head = NULL, *tail = NULL;
+
+    if (peek().kind == TOK_COLON || peek().kind == TOK_RPAREN)
+        return NULL;                    /* empty section */
+    for (;;) {
+        int ln = cc_lex_line();
+        struct cc_node *op = node(ND_ASM_OP, ln);
+        struct cc_token c = expect(TOK_STRLIT);
+        op->sval = c.sval;
+        op->slen = c.slen;
+        if (have_expr) {
+            expect(TOK_LPAREN);
+            op->a = parse_assign_expr();
+            expect(TOK_RPAREN);
+        }
+        if (!head) head = op; else tail->next = op;
+        tail = op;
+        if (!consume(TOK_COMMA))
+            break;
+    }
     return head;
 }
 
@@ -1175,22 +1455,39 @@ parse_stmt(void)
     case TOK_GOTO: {
         next();
         struct cc_node *n = node(ND_GOTO, ln);
-        struct cc_token lab = expect(TOK_IDENT);
-        n->name = lab.sval;
+        if (consume(TOK_STAR)) {
+            /* GNU computed goto: goto *expr, where expr is a label address.
+               The target expression is carried in a; name stays null. */
+            n->a = parse_expr();
+        } else {
+            struct cc_token lab = expect(TOK_IDENT);
+            n->name = lab.sval;
+        }
         expect(TOK_SEMI);
         return n;
     }
     case TOK_ASM: {
-        /* basic inline asm: asm [volatile] ( string-literal ) ;
-           The string is passed through verbatim.  Extended asm (operand
-           constraints and % substitution) is not supported. */
-        next();
+        /* inline asm: asm [volatile] ( template [: outputs [: inputs
+           [: clobbers]]] ) ;  With no colon sections it is basic asm (the
+           template is emitted verbatim).  Extended asm numbers its operands
+           %0.. (outputs first); each operand is "constraint"(expr), each
+           clobber a string. */
         struct cc_node *n = node(ND_ASM, ln);
-        consume(TOK_VOLATILE);          /* the qualifier is accepted, no effect */
+        struct cc_token s;
+        next();
+        n->ival = consume(TOK_VOLATILE) ? 1 : 0;
         expect(TOK_LPAREN);
-        struct cc_token s = expect(TOK_STRLIT);
+        s = expect(TOK_STRLIT);
         n->sval = s.sval;
         n->slen = s.slen;
+        if (consume(TOK_COLON)) {           /* outputs section */
+            n->a = parse_asm_operands(1);   /* "constraint"(expr) list */
+            if (consume(TOK_COLON)) {       /* inputs section */
+                n->b = parse_asm_operands(1);
+                if (consume(TOK_COLON))     /* clobbers: bare strings */
+                    n->c = parse_asm_operands(0);
+            }
+        }
         expect(TOK_RPAREN);
         expect(TOK_SEMI);
         return n;
@@ -1231,6 +1528,10 @@ parse_block(void)
     struct cc_node *n = node(ND_BLOCK, ln);
     struct cc_node *head = NULL, *tail = NULL;
     while (!consume(TOK_RBRACE)) {
+        if (peek().kind == TOK_STATIC_ASSERT) {
+            parse_static_assert();
+            continue;
+        }
         struct cc_node *s = parse_stmt();
         while (s) {
             struct cc_node *nxt = s->next;
@@ -1249,6 +1550,11 @@ parse_block(void)
 static struct cc_node *
 parse_top_decl(void)
 {
+    if (peek().kind == TOK_STATIC_ASSERT) {
+        parse_static_assert();
+        return NULL;
+    }
+
     int is_static = 0, is_extern = 0, is_typedef = 0;
     struct cc_type *base = parse_declspec(&is_static, &is_extern, &is_typedef);
     int dspec_align = declspec_alignas;
@@ -1261,12 +1567,21 @@ parse_top_decl(void)
     char *name = NULL;
     struct cc_type *dt = parse_declarator(base, &name);
 
+    /* A top-level declarator with no name is invalid (the nameless bare
+       struct/enum declaration was already consumed by the TOK_SEMI above), and
+       a NULL name would otherwise reach add_sym / add_global as a NUL string. */
+    if (!name)
+        die("parse error at line %d: declarator has no name", cc_lex_line());
+
     /* typedef */
     if (is_typedef) {
         add_sym(name, SYM_TYPEDEF, dt, 0);
         while (consume(TOK_COMMA)) {
             char *n2 = NULL;
             struct cc_type *dt2 = parse_declarator(base, &n2);
+            if (!n2)
+                die("parse error at line %d: declarator has no name",
+                    cc_lex_line());
             add_sym(n2, SYM_TYPEDEF, dt2, 0);
         }
         expect(TOK_SEMI);
@@ -1276,6 +1591,7 @@ parse_top_decl(void)
     /* function definition? */
     if (dt->kind == TY_FUNC && peek().kind == TOK_LBRACE) {
         struct cc_node *n = node(ND_FUNC_DEF, cc_lex_line());
+        n->file = cc_lex_file();        /* the file this function is defined in */
         n->name = name;
         n->decl_type = dt;
         n->is_static = is_static;
@@ -1308,7 +1624,11 @@ parse_top_decl(void)
     while (consume(TOK_COMMA)) {
         char *n2 = NULL;
         struct cc_type *dt2 = parse_declarator(base, &n2);
-        struct cc_node *n = node(ND_GLOBAL_DECL, cc_lex_line());
+        struct cc_node *n;
+        if (!n2)
+            die("parse error at line %d: declarator has no name",
+                cc_lex_line());
+        n = node(ND_GLOBAL_DECL, cc_lex_line());
         n->name = n2;
         n->decl_type = dt2;
         n->is_static = is_static;
@@ -1330,6 +1650,12 @@ cc_parse_program(struct arena *a)
     struct cc_node *head = NULL, *tail = NULL;
 
     parse_arena = a;
+    /* Reset the file-scope symbol and tag tables, which hold pointers into the
+       parse arena: a prior compile's die() (or an in-process reuse) would
+       otherwise leave cur_scope and tags chained onto that compile's freed
+       arena, and find_sym / find_tag would walk into it. */
+    cur_scope = NULL;
+    tags = NULL;
     prog = node(ND_PROGRAM, 1);
     push_scope();
 

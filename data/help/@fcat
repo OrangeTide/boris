@@ -1,0 +1,16 @@
+Show the contents of a text file in the in-world filesystem.
+
+usage: @fcat <path>
+
+Prints the file at an absolute VFS path. It refuses a binary or ELF file
+(use @ftype to check a file's kind, or @fget to download it), so a compiled
+image cannot flood your connection. A very large text file is shown only up
+to the first 64 KB, with a note.
+
+Wizard only.
+
+Example:
+  @fcat /src/greet.kp
+      Show the Kobold source.
+
+See also @fls, @ftype, @fedit, @fget.

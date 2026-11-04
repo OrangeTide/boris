@@ -47,4 +47,21 @@ char *xstrdup(const char *s);
 char *xstrndup(const char *s, size_t n);
 char *slurp(const char *path);
 
+/****************************************************************
+ * String set (open addressing, borrowed keys)
+ ****************************************************************/
+
+struct strset {
+    const char **slots;   /* open-addressing table; NULL marks an empty slot */
+    size_t cap;           /* slot count, a power of two (0 until first add) */
+    size_t count;         /* live keys */
+};
+
+void strset_init(struct strset *s);
+/* Add key (not copied; must outlive the set).  Returns 1 if newly added, 0 if
+   it was already present. */
+int strset_add(struct strset *s, const char *key);
+int strset_contains(const struct strset *s, const char *key);
+void strset_free(struct strset *s);
+
 #endif /* UTIL_H */

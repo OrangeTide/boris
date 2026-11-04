@@ -12,6 +12,11 @@ static struct cc_type ty_int_s   = { .kind = TY_INT };
 static struct cc_type ty_long_s  = { .kind = TY_LONG };
 static struct cc_type ty_llong_s = { .kind = TY_LONG_LONG };
 
+/* the unsigned counterparts, for a common type that comes out unsigned */
+static struct cc_type ty_uint_s   = { .kind = TY_INT,       .is_unsigned = 1 };
+static struct cc_type ty_ulong_s  = { .kind = TY_LONG,      .is_unsigned = 1 };
+static struct cc_type ty_ullong_s = { .kind = TY_LONG_LONG, .is_unsigned = 1 };
+
 struct cc_type *
 cc_type_void(void)
 {
@@ -162,4 +167,64 @@ int
 cc_type_is_scalar(struct cc_type *t)
 {
     return cc_type_is_arith(t) || cc_type_is_ptr(t);
+}
+
+/* Integer promotion (C 6.3.1.1).  A value of an integer type whose rank is
+   below int, and any enum, converts to int: int is 32-bit here, so it holds
+   every value of char, short, and their unsigned forms, and the promoted type
+   is signed int in each case.  int and wider keep their type and signedness; a
+   non-integer is returned unchanged.  The result is always one of int /
+   unsigned int / long / unsigned long / long long / unsigned long long for an
+   integer input. */
+struct cc_type *
+cc_type_promote(struct cc_type *t)
+{
+    if (!t)
+        return &ty_int_s;
+    switch (t->kind) {
+    case TY_CHAR:
+    case TY_SHORT:
+    case TY_ENUM:
+        return &ty_int_s;
+    default:
+        return t;
+    }
+}
+
+/* the unsigned type of the same rank as a promoted signed integer type */
+static struct cc_type *
+unsigned_of(struct cc_type *t)
+{
+    switch (t->kind) {
+    case TY_INT:       return &ty_uint_s;
+    case TY_LONG:      return &ty_ulong_s;
+    case TY_LONG_LONG: return &ty_ullong_s;
+    default:           return t;
+    }
+}
+
+/* The usual arithmetic conversions for two integer operands (C 6.3.1.8).
+   Both operands are promoted first, then a common type is chosen by rank
+   (the kind order int < long < long long) and signedness.  Callers handle the
+   floating cases before this; the inputs are integer or enum.  The returned
+   type carries the common signedness, which is what selects a signed vs
+   unsigned divide, modulo, right shift, or relational compare. */
+struct cc_type *
+cc_type_usual_arith(struct cc_type *a, struct cc_type *b)
+{
+    a = cc_type_promote(a);
+    b = cc_type_promote(b);
+
+    if (a->is_unsigned == b->is_unsigned)
+        return a->kind >= b->kind ? a : b;      /* same sign: higher rank */
+
+    /* one signed, one unsigned */
+    struct cc_type *s = a->is_unsigned ? b : a;
+    struct cc_type *u = a->is_unsigned ? a : b;
+
+    if (u->kind >= s->kind)
+        return u;                               /* unsigned rank >= signed */
+    if (cc_type_size(s) > cc_type_size(u))
+        return s;                               /* signed represents all of u */
+    return unsigned_of(s);                       /* else unsigned of signed */
 }

@@ -78,8 +78,15 @@ enum rv_section_id {
     RSEC_DATA,
     RSEC_RODATA,
     RSEC_BSS,
+    RSEC_DEBUG_LINE,    /* DWARF line table, built from .file/.loc at finalize */
+    RSEC_DEBUG_INFO,    /* DWARF compilation unit */
+    RSEC_DEBUG_ABBREV,  /* DWARF abbreviations for the CU */
     RSEC_COUNT,
 };
+
+/* First non-alloc (debug) section: these carry no SHF_ALLOC, so the layout and
+   the linker treat them apart from text/data. */
+#define RSEC_FIRST_DEBUG RSEC_DEBUG_LINE
 
 /****************************************************************
  * Conditional-branch relaxation
@@ -105,6 +112,13 @@ struct rv_numlabel {
     int count;
 };
 
+/* One DWARF line-table row: the source line live at a .text offset, collected
+   from a `.loc` directive in the emit pass (where the offset is known). */
+struct rv_locrow {
+    uint32_t offset;        /* .text section-relative offset of the statement */
+    int line;
+};
+
 /****************************************************************
  * Assembler state
  ****************************************************************/
@@ -128,6 +142,12 @@ struct rv_asm {
     struct rv_numlabel *numlabels;  /* numeric local labels, keyed by number */
     int n_numlabels;
     int numlabel_cap;
+
+    /* DWARF debug info, collected from .file/.loc (only present under -g). */
+    const char *debug_file;         /* .file operand, the source name */
+    struct rv_locrow *locrows;      /* .loc rows, in emit order (ascending) */
+    int n_locrows;
+    int locrow_cap;
 
     struct arena arena;
 };
@@ -156,6 +176,12 @@ int rv_encode(struct rv_asm *a, const char *mnemonic,
  ****************************************************************/
 
 void rv_elf_write(struct rv_asm *a, FILE *out);
+
+/* After assembly, build the DWARF debug sections from the collected .file/.loc
+   rows (a no-op when none were seen).  Emits .debug_line/.debug_info/
+   .debug_abbrev into their sections with the R_RISCV_32 relocations the address
+   fields need.  Called by the driver between rv_assemble and rv_elf_write. */
+void rv_emit_debug(struct rv_asm *a);
 
 /****************************************************************
  * Register name lookup (shared by parser and encoder helpers)

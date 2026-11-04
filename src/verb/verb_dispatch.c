@@ -8,10 +8,12 @@
 #include "resolve.h"
 #include "verb_model.h"
 #include "verb_spec.h"
+#include "vfs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define VD_QUANTUM      8192    /* instructions per scheduling slice */
 #define VD_MAX_SLICES   64      /* run cap is VD_QUANTUM * VD_MAX_SLICES */
@@ -33,6 +35,38 @@ static char              g_image_dir[VD_DIR_MAX];
 static int             (*g_may_wizard)(const char *owner_id);
 static int               g_create_max;   /* per-task sys_create cap; 0 = unlimited */
 static int               g_owned_max;    /* per-owner object cap; 0 = unlimited */
+static struct vfs       *g_vfs;          /* in-world VFS for host-side tools; may be NULL */
+
+#define VD_MAX_FG       32      /* concurrent foreground interactive sessions */
+
+/* The 9P mount name a launched program reaches the in-world VFS through, and
+ * the host directory passed with it. boris's p9 server ignores the directory
+ * (it serves the bound VFS), but the launcher opens it to validate the grant,
+ * so it must be a real, readable directory; the image directory is both and is
+ * already permitted under the security sandbox. */
+#define VD_WORLD_MOUNT  "world"
+
+/* One foreground interactive session: a long-lived task bound to a player's
+ * descriptor through the host's output/exit hooks. Unlike a one-shot it keeps
+ * its verb_ctx and self reference alive for its whole life, so the authority
+ * strings the ctx points at are copied into the session rather than borrowed
+ * from a caller's stack. */
+struct verb_fg {
+	int               used;
+	uint32_t          id;             /* the task id, used to feed and quit */
+	int               quitting;       /* stdin closed; kill if still live next tick */
+	struct vm_task   *task;
+	OBJ              *self;           /* pinned; released on reap */
+	struct verb_ctx   ctx;
+	char              actor[OBJ_PATH_MAX];       /* ctx.actor_id / eff_owner */
+	char              room[OBJ_PATH_MAX];        /* ctx.room_id (output location) */
+	char              real_owner[OBJ_PATH_MAX];  /* ctx.real_owner */
+	verb_fg_output_fn out;
+	verb_fg_exit_fn   on_exit;
+	void             *hook_ctx;
+};
+static struct verb_fg g_fg[VD_MAX_FG];
+static void fg_reap(struct verb_fg *s);
 
 /* sys_setpriv modes, in lockstep with sdk/vm/include/vmsys.h (VM_PRIV_*). */
 #define VERB_PRIV_WIZ_ON    1u   /* enable wizard (if available) */
@@ -651,20 +685,20 @@ verb_dispatch_init(const char *image_dir, verb_broadcast_fn bcast)
 	g_env = vm_env_new();
 	if (!g_env)
 		return -1;
-	if (vm_env_register(g_env, "sys_getprop", hc_getprop, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_setprop", hc_setprop, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_close", hc_close, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_getobj", hc_getobj, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_objfind", hc_objfind, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_next", hc_next, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_move", hc_move, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_setpriv", hc_setpriv, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_create", hc_create, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_recycle", hc_recycle, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_errno", hc_errno, NULL) != 0 ||
-	    vm_env_register(g_env, "sys_contents_count", hc_contents_count,
+	if (vm_env_register(g_env, VM_CALL_GETPROP, hc_getprop, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_SETPROP, hc_setprop, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_CLOSE, hc_close, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_GETOBJ, hc_getobj, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_OBJFIND, hc_objfind, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_NEXT, hc_next, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_MOVE, hc_move, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_SETPRIV, hc_setpriv, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_CREATE, hc_create, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_RECYCLE, hc_recycle, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_ERRNO, hc_errno, NULL) != 0 ||
+	    vm_env_register(g_env, VM_CALL_CONTENTS_COUNT, hc_contents_count,
 	                    NULL) != 0 ||
-	    vm_env_register(g_env, "sys_broadcast", hc_broadcast, NULL) != 0) {
+	    vm_env_register(g_env, VM_CALL_BROADCAST, hc_broadcast, NULL) != 0) {
 		vm_env_free(g_env);
 		g_env = NULL;
 		return -1;
@@ -683,6 +717,18 @@ verb_dispatch_init(const char *image_dir, verb_broadcast_fn bcast)
 		return -1;
 	}
 	return 0;
+}
+
+void
+verb_dispatch_set_vfs(struct vfs *v)
+{
+	g_vfs = v;
+}
+
+struct vfs *
+verb_dispatch_vfs(void)
+{
+	return g_vfs;
 }
 
 void
@@ -707,6 +753,11 @@ verb_dispatch_may_wizard(const char *owner_id)
 void
 verb_dispatch_shutdown(void)
 {
+	int i;
+
+	for (i = 0; i < VD_MAX_FG; i++)  /* free foreground tasks before their env */
+		if (g_fg[i].used)
+			fg_reap(&g_fg[i]);
 	verb_agent_shutdown();          /* free agent tasks before their env */
 	vm_env_free(g_env);
 	g_env = NULL;
@@ -714,6 +765,7 @@ verb_dispatch_shutdown(void)
 	g_may_wizard = NULL;
 	g_create_max = 0;
 	g_owned_max = 0;
+	g_vfs = NULL;
 }
 
 /* Set up a loaded task's context and output, hand it its arguments, and run it
@@ -823,6 +875,452 @@ verb_dispatch_oneshot(const char *prog_id, OBJ *self, const char *room_id,
 	rc = run_task(t, self, room_id, argv, argc);
 	vm_task_free(t);
 	return rc;
+}
+
+/* A task's open resources are freed by vm_task_free (sched_destroy tears down
+ * the guest's fs mounts and its p9 servers). Kept as a named teardown hook so
+ * the call sites read clearly and a future per-task cleanup has a home. */
+void
+verb_program_task_end(uint32_t task_id)
+{
+	(void)task_id;
+}
+
+/* Open a task for program "programs/<prog_id>": size its RAM, grant it the
+ * in-world 9P mount, load its image, and bind `env`. A program may carry
+ * image.vfs (an absolute VFS path, loaded from the bound VFS) or image.path (a
+ * host image relative to the image directory); the VFS image wins when a VFS is
+ * bound. Fills *ram_out (may be NULL). Returns the task (free with
+ * vm_task_free), or NULL. */
+struct vm_task *
+verb_program_open(const char *prog_id, struct vm_env *env, uint32_t *ram_out)
+{
+	char key[VD_NAME_MAX];
+	char vpath[VFS_PATH_MAX];
+	char hpath[VD_DIR_MAX];
+	OBJ *prog;
+	const char *v;
+	uint32_t ram = 0;
+	struct vm_task *t;
+	int from_vfs = 0;
+
+	if (!prog_id)
+		return NULL;
+	snprintf(key, sizeof key, "programs/%s", prog_id);
+	prog = obj_get(key);
+	if (!prog)
+		return NULL;
+	v = obj_prop_get(prog, "ram.size");
+	ram = v ? (uint32_t)strtoul(v, NULL, 10) : 0;
+
+	/* A VFS image wins when one is bound; else fall back to the host image. */
+	vpath[0] = hpath[0] = '\0';
+	v = g_vfs ? obj_prop_get(prog, "image.vfs") : NULL;
+	if (v && v[0] == '/') {
+		snprintf(vpath, sizeof vpath, "%s", v);
+		from_vfs = 1;
+	} else {
+		v = obj_prop_get(prog, "image.path");
+		if (!v || !path_is_safe(v)) {
+			obj_release(prog);
+			return NULL;
+		}
+		snprintf(hpath, sizeof hpath, "%s", v);
+	}
+	obj_release(prog);
+
+	t = vm_task_new(ram);
+	if (!t)
+		return NULL;
+	vm_task_set_env(t, env);
+	/* Give the program the in-world tree as a 9P mount. A band command verb
+	 * links no fs table, so the grant is a harmless no-op there; a libc program
+	 * reaches files through it. */
+	if (g_vfs)
+		vm_task_add_p9_mount(t, VD_WORLD_MOUNT, g_image_dir);
+	if (from_vfs) {
+		void *elf = NULL;
+		size_t elen = 0;
+		int ok;
+
+		if (vfs_read(g_vfs, vpath, &elf, &elen) != VFS_OK) {
+			vm_task_free(t);
+			return NULL;
+		}
+		ok = vm_task_load_mem(t, elf, (long)elen, vpath) == 0;
+		free(elf);
+		if (!ok) {
+			vm_task_free(t);
+			return NULL;
+		}
+	} else {
+		char full[VD_PATH_MAX];
+
+		snprintf(full, sizeof full, "%s/%s", g_image_dir, hpath);
+		if (vm_task_load_file(t, full) != 0) {
+			vm_task_free(t);
+			return NULL;
+		}
+	}
+	if (ram_out)
+		*ram_out = ram;
+	return t;
+}
+
+/* Create or update "programs/<prog_id>" so it launches the VFS image at
+ * vfs_path, with ram bytes of guest RAM (0 for the default). Persists
+ * immediately. Returns 0, or -1 on a bad argument or a store failure. This is
+ * the P3 bind step: a compiled image in the VFS becomes a launchable program. */
+int
+verb_program_bind_vfs(const char *prog_id, const char *vfs_path, uint32_t ram)
+{
+	char key[VD_NAME_MAX];
+	OBJ *prog;
+	int rc = 0;
+
+	if (!prog_id || !prog_id[0] || strchr(prog_id, '/') ||
+	    !vfs_path || vfs_path[0] != '/')
+		return -1;
+	snprintf(key, sizeof key, "programs/%s", prog_id);
+	prog = obj_get(key);
+	if (!prog)
+		prog = obj_create(key);
+	if (!prog)
+		return -1;
+	if (obj_prop_set(prog, "image.vfs", vfs_path) != OBJ_OK)
+		rc = -1;
+	if (obj_prop_set(prog, "image.path", "") != OBJ_OK)
+		rc = -1;
+	if (ram && obj_prop_set_int(prog, "ram.size", (int)ram) != OBJ_OK)
+		rc = -1;
+	obj_mark_dirty(prog);
+	obj_release(prog);
+	if (rc == 0 && obj_save(key) != OBJ_OK)
+		rc = -1;
+	return rc;
+}
+
+/* Register an existing ELF image as "programs/<prog_id>". An image beginning
+ * with '/' is a VFS path (needs a bound VFS and an existing file); otherwise a
+ * host image relative to the image directory (a safe relative path naming an
+ * existing file). The chosen kind is set and the other cleared, so a re-register
+ * switches cleanly. Returns 0, or -1 with errbuf (may be NULL) filled. */
+int
+verb_program_register(const char *prog_id, const char *image, uint32_t ram,
+                      char *errbuf, size_t errsz)
+{
+	char key[VD_NAME_MAX];
+	OBJ *prog;
+	int from_vfs, rc = 0;
+
+	if (!prog_id || !prog_id[0] || strchr(prog_id, '/')) {
+		if (errbuf && errsz)
+			snprintf(errbuf, errsz, "a program id must be a single name");
+		return -1;
+	}
+	if (!image || !image[0]) {
+		if (errbuf && errsz)
+			snprintf(errbuf, errsz, "no image given");
+		return -1;
+	}
+	from_vfs = image[0] == '/';
+	if (from_vfs) {
+		struct vfs_stat st;
+
+		if (!g_vfs) {
+			if (errbuf && errsz)
+				snprintf(errbuf, errsz, "no in-world VFS for a VFS image");
+			return -1;
+		}
+		if (vfs_stat(g_vfs, image, &st) != VFS_OK) {
+			if (errbuf && errsz)
+				snprintf(errbuf, errsz, "no such VFS file: %s", image);
+			return -1;
+		}
+	} else {
+		char full[VD_PATH_MAX];
+
+		if (!path_is_safe(image)) {
+			if (errbuf && errsz)
+				snprintf(errbuf, errsz, "a host image must be a relative path "
+				         "that does not escape the image directory");
+			return -1;
+		}
+		snprintf(full, sizeof full, "%s/%s", g_image_dir, image);
+		if (access(full, R_OK) != 0) {
+			if (errbuf && errsz)
+				snprintf(errbuf, errsz, "no such host image: %s", full);
+			return -1;
+		}
+	}
+
+	snprintf(key, sizeof key, "programs/%s", prog_id);
+	prog = obj_get(key);
+	if (!prog)
+		prog = obj_create(key);
+	if (!prog) {
+		if (errbuf && errsz)
+			snprintf(errbuf, errsz, "cannot create programs/%s", prog_id);
+		return -1;
+	}
+	if (from_vfs) {
+		if (obj_prop_set(prog, "image.vfs", image) != OBJ_OK)
+			rc = -1;
+		if (obj_prop_set(prog, "image.path", "") != OBJ_OK)
+			rc = -1;
+	} else {
+		if (obj_prop_set(prog, "image.path", image) != OBJ_OK)
+			rc = -1;
+		if (obj_prop_set(prog, "image.vfs", "") != OBJ_OK)
+			rc = -1;
+	}
+	if (obj_prop_set_int(prog, "ram.size", (int)ram) != OBJ_OK)
+		rc = -1;
+	obj_mark_dirty(prog);
+	obj_release(prog);
+	if (rc == 0 && obj_save(key) != OBJ_OK)
+		rc = -1;
+	if (rc != 0 && errbuf && errsz && !errbuf[0])
+		snprintf(errbuf, errsz, "could not persist programs/%s", prog_id);
+	return rc;
+}
+
+int
+verb_program_unregister(const char *prog_id)
+{
+	char key[VD_NAME_MAX];
+	OBJ *prog;
+
+	if (!prog_id || !prog_id[0] || strchr(prog_id, '/'))
+		return -1;
+	snprintf(key, sizeof key, "programs/%s", prog_id);
+	prog = obj_get(key);
+	if (!prog)
+		return 1;                       /* no such program */
+	obj_release(prog);
+	return obj_delete(key) == OBJ_OK ? 0 : -1;
+}
+
+/* obj_foreach_key wrapper: look each program key up, read its bound image, and
+ * forward to the caller's verb_program_list_fn. */
+struct vd_list_ctx {
+	verb_program_list_fn cb;
+	void *ctx;
+};
+
+static void
+vd_list_one(const char *key, void *vctx)
+{
+	struct vd_list_ctx *s = vctx;
+	OBJ *prog;
+	const char *vfs, *host, *prog_id;
+
+	prog = obj_get(key);
+	if (!prog)
+		return;
+	vfs = obj_prop_get(prog, "image.vfs");
+	host = obj_prop_get(prog, "image.path");
+	prog_id = strchr(key, '/');
+	prog_id = prog_id ? prog_id + 1 : key;
+	if (vfs && vfs[0] == '/')
+		s->cb(prog_id, vfs, 1, s->ctx);
+	else
+		s->cb(prog_id, host && host[0] ? host : "", 0, s->ctx);
+	obj_release(prog);
+}
+
+int
+verb_program_list(verb_program_list_fn cb, void *ctx)
+{
+	struct vd_list_ctx s;
+
+	if (!cb)
+		return -1;
+	s.cb = cb;
+	s.ctx = ctx;
+	return obj_foreach_key("programs/", vd_list_one, &s);
+}
+
+/****************************************************************
+ * Foreground interactive sessions
+ ****************************************************************/
+
+static struct verb_fg *
+fg_by_id(uint32_t id)
+{
+	int i;
+
+	for (i = 0; i < VD_MAX_FG; i++)
+		if (g_fg[i].used && g_fg[i].id == id)
+			return &g_fg[i];
+	return NULL;
+}
+
+/* Free the task and its context and clear the slot. Does not call the exit
+ * hook; the caller decides whether to. */
+static void
+fg_reap(struct verb_fg *s)
+{
+	verb_handle_clear(&s->ctx.handles);     /* release handles the run opened */
+	verb_program_task_end(vm_task_id(s->task));
+	vm_task_free(s->task);
+	if (s->self)
+		obj_release(s->self);           /* self is borrowed by the handle table */
+	memset(s, 0, sizeof *s);
+}
+
+/* vm_output_fn: forward a line of the task's stdout to the host sink. */
+static void
+fg_out(void *ctx, const char *buf, size_t len)
+{
+	struct verb_fg *s = ctx;
+
+	if (s->out)
+		s->out(s->hook_ctx, buf, len);
+}
+
+uint32_t
+verb_fg_launch(const char *prog_id, const char *actor_id,
+               const char *const *argv, int argc,
+               verb_fg_output_fn out, verb_fg_exit_fn on_exit, void *hook_ctx)
+{
+	struct verb_fg *s = NULL;
+	struct vm_task *t;
+	OBJ *self;
+	const char *owner;
+	char *loc;
+	int i;
+
+	if (!g_env || !prog_id || !actor_id || !out)
+		return 0;
+	for (i = 0; i < VD_MAX_FG; i++)
+		if (!g_fg[i].used) {
+			s = &g_fg[i];
+			break;
+		}
+	if (!s)
+		return 0;                       /* table full */
+	self = obj_get(actor_id);
+	if (!self)
+		return 0;
+	t = verb_program_open(prog_id, g_env, NULL);
+	if (!t) {
+		obj_release(self);
+		return 0;
+	}
+
+	memset(s, 0, sizeof *s);
+	snprintf(s->actor, sizeof s->actor, "%s", actor_id);
+	loc = obj_location(actor_id);           /* the player's room, NULL in limbo */
+	if (loc) {
+		snprintf(s->room, sizeof s->room, "%s", loc);
+		free(loc);
+	}
+	owner = obj_prop_get(self, "%owner");
+	if (owner)
+		snprintf(s->real_owner, sizeof s->real_owner, "%s", owner);
+
+	s->ctx.self = self;
+	s->ctx.actor_id = s->actor;
+	s->ctx.room_id = s->room[0] ? s->room : NULL;
+	s->ctx.real_owner = s->real_owner[0] ? s->real_owner : NULL;
+	authority_set_owner(&s->ctx, s->actor);         /* runs as the player */
+	verb_handle_set_self(&s->ctx.handles, self);
+
+	s->task = t;
+	s->self = self;
+	s->out = out;
+	s->on_exit = on_exit;
+	s->hook_ctx = hook_ctx;
+	s->id = vm_task_id(t);
+
+	vm_task_set_userdata(t, &s->ctx);
+	vm_task_set_output(t, fg_out, s);
+	if (vm_task_set_args(t, argv, argc) != 0) {
+		fg_reap(s);
+		return 0;
+	}
+	s->used = 1;
+	return s->id;
+}
+
+int
+verb_fg_feed(uint32_t id, const char *data, uint32_t len)
+{
+	struct verb_fg *s = fg_by_id(id);
+
+	if (!s)
+		return -1;
+	return vm_task_feed_stdin(s->task, data, len);
+}
+
+void
+verb_fg_request_quit(uint32_t id)
+{
+	struct verb_fg *s = fg_by_id(id);
+
+	if (!s)
+		return;
+	vm_task_close_stdin(s->task);           /* a parked read sees EOF */
+	s->quitting = 1;                        /* killed next tick if still live */
+}
+
+void
+verb_fg_close(uint32_t id)
+{
+	struct verb_fg *s = fg_by_id(id);
+
+	if (s)
+		fg_reap(s);                     /* silent: no exit hook */
+}
+
+int
+verb_fg_tick(int quantum)
+{
+	int i, live = 0;
+
+	if (quantum < 1)
+		quantum = 1;
+	for (i = 0; i < VD_MAX_FG; i++) {
+		struct verb_fg *s = &g_fg[i];
+		enum vm_state st;
+
+		if (!s->used)
+			continue;
+		st = vm_task_run(s->task, quantum);
+		if (st == VM_EXITED || st == VM_FAULTED) {
+			int status = st == VM_EXITED ? vm_task_exit_status(s->task) : -1;
+			int faulted = st == VM_FAULTED;
+			verb_fg_exit_fn cb = s->on_exit;
+			void *ctx = s->hook_ctx;
+
+			fg_reap(s);             /* free before the hook runs */
+			if (cb)
+				cb(ctx, status, faulted);
+		} else if (s->quitting) {
+			/* It had its grace tick after stdin closed and did not exit. */
+			verb_fg_exit_fn cb = s->on_exit;
+			void *ctx = s->hook_ctx;
+
+			fg_reap(s);
+			if (cb)
+				cb(ctx, -1, 1);
+		} else {
+			live++;
+		}
+	}
+	return live;
+}
+
+int
+verb_fg_count(void)
+{
+	int i, n = 0;
+
+	for (i = 0; i < VD_MAX_FG; i++)
+		if (g_fg[i].used)
+			n++;
+	return n;
 }
 
 /* Bind one matched segment into a slot. Object and player tokens resolve a name

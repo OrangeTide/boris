@@ -1,0 +1,66 @@
+Writing Kobold-Pascal programs.
+
+Kobold-Pascal is a small, statically typed language in the Pascal family and
+the first-class language for in-world programs. It has a familiar, readable
+syntax and strong typing, and it has no raw pointers: host objects are reached
+through opaque, typed handles, which keeps a script safe to run in the sandbox.
+A Kobold program compiles to an RV32 ELF and runs in the VM like any other
+guest. See help programs for the program, verb, and agent roles.
+
+Writing one in world:
+
+  1. Author the source in the in-world filesystem with @fedit, in a file whose
+     name ends .pas (or .kp), for example /src/hello.pas:
+
+         program hello;
+         begin
+           WriteLn('Hello from Kobold');
+         end.
+
+  2. Compile it to an RV32 ELF with @compile:
+
+         @compile /src/hello.pas
+
+     This writes /bin/hello.elf. @compile runs the Kobold front end, the KPM1
+     backend, the assembler, and the linker as sandboxed guests, so it works
+     with the security sandbox active. Compiler errors are shown to you.
+
+  3. Bind the image to a program object with @program, then launch it with
+     @run, an interactive session where the lines you type are the program's
+     input and its output comes back to you. To attach a program as a command
+     verb on an object, use @setverb.
+
+The language at a glance:
+
+  Types     integer, real, boolean, char; enum and subranges; set of;
+            array[lo..hi] of T and dynamic array of T; record (including
+            variant); string; map of T; and opaque host handles.
+  Control   if/then/else, while, for..to/downto, repeat/until, case, with,
+            break, continue. `and` and `or` short-circuit on booleans and are
+            bitwise on integers. The language is case-insensitive.
+  Routines  value, var, and const parameters; nested procedures and functions;
+            methods attached through a receiver parameter.
+  Handles   typed, opaque references to host objects, declared with the
+            `interface` syntax; a method call dispatches into the host. A
+            script cannot inspect or forge the underlying object.
+  Coroutines  `start E` creates a coroutine (a `process` value); resume it by
+            calling it; `yield` suspends it. This suits per-tick behaviour.
+  Output    WriteLn and its siblings are overloaded routines chosen by argument
+            type; a script can add its own overloads.
+
+Full reference:
+
+The complete Kobold-Pascal manuals are kept with the toolchain, under
+sdk/toolchain/skjegg/doc/kobold/, for builders working on the server:
+
+  kp-tutorial.md   the language step by step, each step a runnable program
+  kp-examples.md   annotated example programs
+  kp-language.md   the language reference
+  kp-grammar.md    the grammar
+  kp-sandbox.md    compiling to a freestanding RV32 ELF for the VM
+  kp-guide.md      a one-page overview
+
+Those manuals show the upstream command-line tools rather than the in-world
+commands. In boris, use @fedit, @compile, @program, and @run as above.
+
+See also @compile, @program, @setverb, @run, and help programs.

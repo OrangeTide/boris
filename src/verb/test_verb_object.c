@@ -10,6 +10,7 @@
 #define LOG_SUBSYSTEM "test_verb_object"
 
 #include "verb_dispatch.h"
+#include "vm_sys.h"
 #include "obj.h"
 #include "muddb.h"
 
@@ -47,8 +48,8 @@ cleanup_tmpdir(void)
 
 /****************************************************************
  * Minimal ELF builder (same shape as test_verb_dispatch.c): one PT_LOAD at
- * 0x1000 holding the code and the KPIMPT1 import table, which the loader finds
- * by scanning. Import index i is reached with a7 = VM_HOSTCALL_BASE + i.
+ * 0x1000 holding the code. Host calls reach the runtime by fixed selector
+ * (a7 = VM_HOSTCALL_BASE + a VM_CALL_* value); there is no import table.
  ****************************************************************/
 
 #define LOAD_VADDR 0x1000u
@@ -69,13 +70,14 @@ le32(uint8_t *p, uint32_t v)
 	p[3] = (uint8_t)(v >> 24);
 }
 
+/* Emit "set a7 = VM_HOSTCALL_BASE + sel, then ecall"; sel is a VM_CALL_*. */
 static uint32_t
-emit_call(uint8_t *seg, uint32_t o, uint32_t idx)
+emit_call(uint8_t *seg, uint32_t o, uint32_t sel)
 {
 	le32(seg + o, 0x001008B7u);             /* lui  a7, 0x100 */
 	o += 4;
-	if (idx) {
-		le32(seg + o, 0x00088893u | (idx << 20));  /* addi a7, a7, idx */
+	if (sel) {
+		le32(seg + o, 0x00088893u | (sel << 20));  /* addi a7, a7, sel */
 		o += 4;
 	}
 	le32(seg + o, 0x00000073u);             /* ecall */
@@ -83,29 +85,16 @@ emit_call(uint8_t *seg, uint32_t o, uint32_t idx)
 }
 
 static long
-build_prog(uint8_t *buf, const uint8_t *seg, uint32_t seglen,
-           const char *const *imports, uint32_t nimports)
+build_prog(uint8_t *buf, const uint8_t *seg, uint32_t seglen)
 {
 	uint8_t *eh = buf;
 	uint8_t *ph = buf + 52;
 	uint32_t code_off = 84;
 	uint8_t *body = buf + code_off;
-	uint32_t pad, tbl, i, total;
+	uint32_t total;
 
 	memcpy(body, seg, seglen);
-	pad = (seglen + 3) & ~3u;
-	for (i = seglen; i < pad; i++)
-		body[i] = 0;
-	tbl = pad;
-	memcpy(body + tbl, "KPIMPT1", 7);
-	body[tbl + 7] = 0;
-	le32(body + tbl + 8, nimports);
-	total = tbl + 12;
-	for (i = 0; i < nimports; i++) {
-		uint32_t l = (uint32_t)strlen(imports[i]) + 1;
-		memcpy(body + total, imports[i], l);
-		total += l;
-	}
+	total = seglen;
 
 	memset(eh, 0, 84);
 	eh[0] = 0x7f; eh[1] = 'E'; eh[2] = 'L'; eh[3] = 'F';
@@ -181,7 +170,6 @@ run_with_self(const uint8_t *elf, long len, const char *self_id,
 static void
 test_getobj_ok(void)
 {
-	static const char *const imp[] = { "sys_getobj", "sys_getprop", "sys_exit" };
 	static const char *const argv[] = { "link", "name.short" };
 	uint8_t seg[64];
 	uint8_t elf[512];
@@ -191,13 +179,13 @@ test_getobj_ok(void)
 	le32(seg + o, 0x0045A603u); o += 4;     /* lw   a2, 4(a1) -> argv[1] name */
 	le32(seg + o, 0x0005A583u); o += 4;     /* lw   a1, 0(a1) -> argv[0] "link" */
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (VM_HANDLE_SELF) */
-	o = emit_call(seg, o, 0);               /* sys_getobj(self, "link") -> a0 */
+	o = emit_call(seg, o, VM_CALL_GETOBJ);  /* sys_getobj(self, "link") -> a0 */
 	le32(seg + o, 0x00060593u); o += 4;     /* mv   a1, a2 (name.short ptr) */
 	le32(seg + o, 0x00002637u); o += 4;     /* lui  a2, 2 (buf page) */
 	le32(seg + o, 0x04000693u); o += 4;     /* addi a3, x0, 64 (buf cap) */
-	o = emit_call(seg, o, 1);               /* sys_getprop(handle, name, buf, 64) */
-	o = emit_call(seg, o, 2);               /* sys_exit with the length */
-	len = build_prog(elf, seg, o, imp, 3);
+	o = emit_call(seg, o, VM_CALL_GETPROP); /* sys_getprop(handle, name, buf, 64) */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit with the length */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(run_with_self(elf, len, "chars/1", argv, 2), 4,
 	          "getobj followed link to the ruby (name.short length 4)");
@@ -208,7 +196,6 @@ test_getobj_ok(void)
 static void
 test_getobj_missing(void)
 {
-	static const char *const imp[] = { "sys_getobj", "sys_exit" };
 	static const char *const argv[] = { "nosuchprop" };
 	uint8_t seg[48];
 	uint8_t elf[512];
@@ -217,9 +204,9 @@ test_getobj_missing(void)
 
 	le32(seg + o, 0x0005A583u); o += 4;     /* lw   a1, 0(a1) -> argv[0] */
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (VM_HANDLE_SELF) */
-	o = emit_call(seg, o, 0);               /* sys_getobj -> a0 = 0 */
-	o = emit_call(seg, o, 1);               /* sys_exit 0 */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_GETOBJ);  /* sys_getobj -> a0 = 0 */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit 0 */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(run_with_self(elf, len, "chars/1", argv, 1), 0,
 	          "getobj on an absent property yields no handle");
@@ -230,7 +217,6 @@ test_getobj_missing(void)
 static void
 test_objfind_ok(void)
 {
-	static const char *const imp[] = { "sys_objfind", "sys_getprop", "sys_exit" };
 	static const char *const argv[] = { "goblin", "name.short" };
 	uint8_t seg[64];
 	uint8_t elf[512];
@@ -240,13 +226,13 @@ test_objfind_ok(void)
 	le32(seg + o, 0x0045A603u); o += 4;     /* lw   a2, 4(a1) -> argv[1] name */
 	le32(seg + o, 0x0005A503u); o += 4;     /* lw   a0, 0(a1) -> argv[0] "goblin" */
 	le32(seg + o, 0x00000593u); o += 4;     /* addi a1, x0, 0 (players_only = 0) */
-	o = emit_call(seg, o, 0);               /* sys_objfind("goblin", 0) -> a0 */
+	o = emit_call(seg, o, VM_CALL_OBJFIND); /* sys_objfind("goblin", 0) -> a0 */
 	le32(seg + o, 0x00060593u); o += 4;     /* mv   a1, a2 (name.short ptr) */
 	le32(seg + o, 0x00002637u); o += 4;     /* lui  a2, 2 (buf page) */
 	le32(seg + o, 0x04000693u); o += 4;     /* addi a3, x0, 64 (buf cap) */
-	o = emit_call(seg, o, 1);               /* sys_getprop(handle, name, buf, 64) */
-	o = emit_call(seg, o, 2);               /* sys_exit with the length */
-	len = build_prog(elf, seg, o, imp, 3);
+	o = emit_call(seg, o, VM_CALL_GETPROP); /* sys_getprop(handle, name, buf, 64) */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit with the length */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(run_with_self(elf, len, "chars/1", argv, 2), 6,
 	          "objfind matched the Goblin occupant (name.short length 6)");
@@ -256,7 +242,6 @@ test_objfind_ok(void)
 static void
 test_objfind_none(void)
 {
-	static const char *const imp[] = { "sys_objfind", "sys_exit" };
 	static const char *const argv[] = { "dragon" };
 	uint8_t seg[48];
 	uint8_t elf[512];
@@ -265,9 +250,9 @@ test_objfind_none(void)
 
 	le32(seg + o, 0x0005A503u); o += 4;     /* lw   a0, 0(a1) -> argv[0] */
 	le32(seg + o, 0x00000593u); o += 4;     /* addi a1, x0, 0 (players_only = 0) */
-	o = emit_call(seg, o, 0);               /* sys_objfind -> a0 = 0 */
-	o = emit_call(seg, o, 1);               /* sys_exit 0 */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_OBJFIND); /* sys_objfind -> a0 = 0 */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit 0 */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(run_with_self(elf, len, "chars/1", argv, 1), 0,
 	          "objfind on an unknown name yields no handle");
@@ -278,7 +263,6 @@ test_objfind_none(void)
 static void
 test_next_found(void)
 {
-	static const char *const imp[] = { "sys_next", "sys_exit" };
 	uint8_t seg[48];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -286,9 +270,9 @@ test_next_found(void)
 
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (container = self) */
 	le32(seg + o, 0x00000593u); o += 4;     /* addi a1, x0, 0 (ordinal 0) */
-	o = emit_call(seg, o, 0);               /* sys_next(self, 0) -> a0 = handle */
-	o = emit_call(seg, o, 1);               /* sys_exit with the handle */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_NEXT);    /* sys_next(self, 0) -> a0 = handle */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit with the handle */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(run_with_self(elf, len, "rooms/cave", NULL, 0), 2,
 	          "next(0) opened a handle to the first member");
@@ -298,7 +282,6 @@ test_next_found(void)
 static void
 test_next_end(void)
 {
-	static const char *const imp[] = { "sys_next", "sys_exit" };
 	uint8_t seg[48];
 	uint8_t elf[512];
 	uint32_t o = 0;
@@ -306,9 +289,9 @@ test_next_end(void)
 
 	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (container = self) */
 	le32(seg + o, 0x00500593u); o += 4;     /* addi a1, x0, 5 (ordinal past end) */
-	o = emit_call(seg, o, 0);               /* sys_next(self, 5) -> a0 = 0 */
-	o = emit_call(seg, o, 1);               /* sys_exit 0 */
-	len = build_prog(elf, seg, o, imp, 2);
+	o = emit_call(seg, o, VM_CALL_NEXT);    /* sys_next(self, 5) -> a0 = 0 */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit 0 */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(run_with_self(elf, len, "rooms/cave", NULL, 0), 0,
 	          "next past the last member yields no handle");
@@ -333,9 +316,6 @@ expect_location(const char *member, const char *want, const char *label)
 static void
 test_move(void)
 {
-	static const char *const into_imp[] = {
-		"sys_objfind", "sys_move", "sys_exit",
-	};
 	static const char *const argv[] = { "ruby" };
 	uint8_t seg[48];
 	uint8_t elf[512];
@@ -344,11 +324,11 @@ test_move(void)
 
 	le32(seg + o, 0x0005A503u); o += 4;     /* lw   a0, 0(a1) -> argv[0] "ruby" */
 	le32(seg + o, 0x00000593u); o += 4;     /* addi a1, x0, 0 (players_only 0) */
-	o = emit_call(seg, o, 0);               /* sys_objfind("ruby", 0) -> a0 member */
+	o = emit_call(seg, o, VM_CALL_OBJFIND); /* sys_objfind("ruby", 0) -> a0 member */
 	le32(seg + o, 0x00100593u); o += 4;     /* addi a1, x0, 1 (container = self) */
-	o = emit_call(seg, o, 1);               /* sys_move(member, self) -> a0 = 0 */
-	o = emit_call(seg, o, 2);               /* sys_exit 0 */
-	len = build_prog(elf, seg, o, into_imp, 3);
+	o = emit_call(seg, o, VM_CALL_MOVE);    /* sys_move(member, self) -> a0 = 0 */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit 0 */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(run_with_self(elf, len, "chars/1", argv, 1), 0,
 	          "move into self succeeded");
@@ -357,11 +337,11 @@ test_move(void)
 	o = 0;
 	le32(seg + o, 0x0005A503u); o += 4;     /* lw   a0, 0(a1) -> argv[0] "ruby" */
 	le32(seg + o, 0x00000593u); o += 4;     /* addi a1, x0, 0 (players_only 0) */
-	o = emit_call(seg, o, 0);               /* sys_objfind("ruby", 0) -> a0 member */
+	o = emit_call(seg, o, VM_CALL_OBJFIND); /* sys_objfind("ruby", 0) -> a0 member */
 	le32(seg + o, 0x00000593u); o += 4;     /* addi a1, x0, 0 (container = none) */
-	o = emit_call(seg, o, 1);               /* sys_move(member, none) -> limbo */
-	o = emit_call(seg, o, 2);               /* sys_exit 0 */
-	len = build_prog(elf, seg, o, into_imp, 3);
+	o = emit_call(seg, o, VM_CALL_MOVE);    /* sys_move(member, none) -> limbo */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit 0 */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(run_with_self(elf, len, "chars/1", argv, 1), 0,
 	          "move to limbo succeeded");
@@ -374,9 +354,6 @@ test_move(void)
 static void
 test_errno(void)
 {
-	static const char *const imp[] = {
-		"sys_objfind", "sys_errno", "sys_exit",
-	};
 	static const char *const miss[] = { "dragon" };
 	static const char *const amb[] = { "coin" };
 	static const char *const ok[] = { "goblin" };
@@ -387,10 +364,10 @@ test_errno(void)
 
 	le32(seg + o, 0x0005A503u); o += 4;     /* lw   a0, 0(a1) -> argv[0] name */
 	le32(seg + o, 0x00000593u); o += 4;     /* addi a1, x0, 0 (players_only 0) */
-	o = emit_call(seg, o, 0);               /* sys_objfind -> a0 handle (0 miss) */
-	o = emit_call(seg, o, 1);               /* sys_errno -> a0 = code */
-	o = emit_call(seg, o, 2);               /* sys_exit with the code */
-	len = build_prog(elf, seg, o, imp, 3);
+	o = emit_call(seg, o, VM_CALL_OBJFIND); /* sys_objfind -> a0 handle (0 miss) */
+	o = emit_call(seg, o, VM_CALL_ERRNO);   /* sys_errno -> a0 = code */
+	o = emit_call(seg, o, VM_CALL_EXIT);    /* sys_exit with the code */
+	len = build_prog(elf, seg, o);
 
 	/* VM_ERR_NOTFOUND=2, VM_ERR_AMBIGUOUS=3, VM_ERR_NONE=0 (sdk vmsys.h). */
 	EXPECT_EQ(run_with_self(elf, len, "chars/1", miss, 1), 2,
@@ -405,16 +382,15 @@ test_errno(void)
 static void
 test_contents_count(void)
 {
-	static const char *const imp[] = { "sys_contents_count", "sys_exit" };
 	uint8_t seg[32];
 	uint8_t elf[512];
 	uint32_t o = 0;
 	long len;
 
-	le32(seg + o, 0x00100513u); o += 4;     /* addi a0, x0, 1 (VM_HANDLE_SELF) */
-	o = emit_call(seg, o, 0);               /* sys_contents_count -> a0 = count */
-	o = emit_call(seg, o, 1);               /* sys_exit with the count */
-	len = build_prog(elf, seg, o, imp, 2);
+	le32(seg + o, 0x00100513u); o += 4;             /* addi a0, x0, 1 (VM_HANDLE_SELF) */
+	o = emit_call(seg, o, VM_CALL_CONTENTS_COUNT);  /* sys_contents_count -> a0 = count */
+	o = emit_call(seg, o, VM_CALL_EXIT);            /* sys_exit with the count */
+	len = build_prog(elf, seg, o);
 
 	EXPECT_EQ(run_with_self(elf, len, "items/bag", NULL, 0), 2,
 	          "contents_count returns the number of members");

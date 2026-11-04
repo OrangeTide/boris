@@ -11,6 +11,9 @@
 #include <telnetclient.h>
 #include <room.h>
 #include <obj.h>
+#include <user.h>
+#include <verb_dispatch.h>
+#include <vfs.h>
 #include <net.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -566,6 +569,116 @@ handle_prop_post(struct web_client *wc, const char *qs,
 }
 
 /****************************************************************
+ * VFS file transfer handlers (for @fget / @fput)
+ ****************************************************************/
+
+/* Validate the session token and that it belongs to a wizard, mirroring the
+ * command-side gate. Returns the session's web_client, or NULL after sending
+ * the HTTP error. */
+static struct web_client *
+vfs_authorize(struct web_client *wc, const char *qs, char *path, size_t pathsz)
+{
+    char session[WC_SESSION_LEN + 1];
+    struct web_client *target;
+
+    if (!qs_get(qs, "path", path, pathsz) ||
+        !qs_get(qs, "sid", session, sizeof(session))) {
+        http_respond_text(wc->stream, 400, "Bad Request",
+                          "missing path or sid\n");
+        return NULL;
+    }
+    target = webclient_find_session(session);
+    if (!target || !target->cl || target->state != WC_SSE ||
+        !user_is_wizard(telnetclient_user(target->cl))) {
+        http_respond_text(wc->stream, 403, "Forbidden", "invalid session\n");
+        return NULL;
+    }
+    return target;
+}
+
+/* GET /download?path=...&sid=...  -- stream a VFS file to the browser as an
+ * attachment. Web clients only; a plain terminal never reaches here (its
+ * @fget prints an unsupported message instead). */
+static void
+handle_download(struct web_client *wc, const char *qs)
+{
+    char path[VFS_PATH_MAX];
+    struct web_client *target;
+    struct vfs *v;
+    struct vfs_stat st;
+    void *data = NULL;
+    size_t len = 0;
+    const char *leaf;
+
+    target = vfs_authorize(wc, qs, path, sizeof path);
+    if (!target)
+        return;
+    v = verb_dispatch_vfs();
+    if (!v) {
+        http_respond_text(wc->stream, 503, "Service Unavailable",
+                          "no in-world VFS\n");
+        return;
+    }
+    if (vfs_stat(v, path, &st) != VFS_OK || st.kind != VFS_KIND_FILE) {
+        http_respond_text(wc->stream, 404, "Not Found", "no such file\n");
+        return;
+    }
+    if (vfs_read(v, path, &data, &len) != VFS_OK) {
+        http_respond_text(wc->stream, 500, "Internal Server Error",
+                          "read failed\n");
+        return;
+    }
+    leaf = strrchr(path, '/');
+    leaf = (leaf && leaf[1]) ? leaf + 1 : path;
+    net_writef(wc->stream,
+               "HTTP/1.1 200 OK\r\n"
+               "Content-Type: application/octet-stream\r\n"
+               "Content-Disposition: attachment; filename=\"%s\"\r\n"
+               "Content-Length: %lu\r\n"
+               "Connection: close\r\n"
+               "\r\n",
+               leaf, (unsigned long)len);
+    if (len)
+        net_write(wc->stream, data, (int)len);
+    net_close_when_done(wc->stream);
+    free(data);
+    if (target->cl)
+        telnetclient_printf(target->cl, "Downloaded %s (%lu bytes).\n",
+                            path, (unsigned long)len);
+}
+
+/* POST /upload?path=...&sid=...  with the file bytes as the body -- write them
+ * into the VFS and commit. Web clients only. */
+static void
+handle_upload(struct web_client *wc, const char *qs, const char *body,
+              int body_len)
+{
+    char path[VFS_PATH_MAX];
+    struct web_client *target;
+    struct vfs *v;
+
+    target = vfs_authorize(wc, qs, path, sizeof path);
+    if (!target)
+        return;
+    v = verb_dispatch_vfs();
+    if (!v) {
+        http_respond_text(wc->stream, 503, "Service Unavailable",
+                          "no in-world VFS\n");
+        return;
+    }
+    if (vfs_write(v, path, body, (size_t)body_len) != VFS_OK) {
+        http_respond_text(wc->stream, 500, "Internal Server Error",
+                          "write failed\n");
+        return;
+    }
+    vfs_commit(v, "fput");
+    http_respond_text(wc->stream, 200, "OK", "OK\n");
+    if (target->cl)
+        telnetclient_printf(target->cl, "Uploaded %s (%d bytes).\n",
+                            path, body_len);
+}
+
+/****************************************************************
  * HTTP request dispatch
  ****************************************************************/
 
@@ -600,6 +713,8 @@ process_request(struct web_client *wc, int hdr_end)
 			serve_file(wc->stream, "/editor.html");
 		} else if (strcmp(path, "/prop") == 0) {
 			handle_prop_get(wc, qs);
+		} else if (strcmp(path, "/download") == 0) {
+			handle_download(wc, qs);
 		} else if (strncmp(path, "/invite/", 8) == 0) {
 			serve_file(wc->stream, "/index.html");
 		} else {
@@ -619,6 +734,11 @@ process_request(struct web_client *wc, int hdr_end)
 		if (strcmp(path, "/prop") == 0) {
 			handle_prop_post(wc, qs,
 			                 wc->reqbuf + hdr_end, content_length);
+			return;
+		}
+		if (strcmp(path, "/upload") == 0) {
+			handle_upload(wc, qs,
+			              wc->reqbuf + hdr_end, content_length);
 			return;
 		}
 	}

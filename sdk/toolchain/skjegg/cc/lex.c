@@ -11,6 +11,8 @@ static const char *src_buf;
 static const char *src_file;
 static const char *p;
 static int line;
+static const char *line_start;  /* start of the current physical line, for columns */
+static int cur_tok_col;         /* column of the token cc_lex_next last returned */
 static int peeked;
 static struct cc_token peek_tok;
 
@@ -20,6 +22,7 @@ struct kw {
 };
 
 static const struct kw keywords[] = {
+    { "_Bool",    TOK_BOOL },
     { "_Float16", TOK_FLOAT16 },
     { "asm",      TOK_ASM },
     { "__asm",    TOK_ASM },
@@ -57,6 +60,9 @@ static const struct kw keywords[] = {
     { "alignof",  TOK_ALIGNOF },
     { "_Alignas", TOK_ALIGNAS },
     { "alignas",  TOK_ALIGNAS },
+    { "_Static_assert", TOK_STATIC_ASSERT },
+    { "static_assert",  TOK_STATIC_ASSERT },
+    { "_Generic", TOK_GENERIC },
     { "static",   TOK_STATIC },
     { "struct",   TOK_STRUCT },
     { "switch",   TOK_SWITCH },
@@ -77,13 +83,103 @@ cc_lex_init(struct arena *a, const char *src, const char *filename)
     src_file = filename ? filename : "<input>";
     p = src;
     line = 1;
+    line_start = src;
+    cur_tok_col = 1;
     peeked = 0;
+}
+
+int
+cc_lex_col(void)
+{
+    return cur_tok_col;
 }
 
 int
 cc_lex_line(void)
 {
     return line;
+}
+
+const char *
+cc_lex_file(void)
+{
+    return src_file;
+}
+
+/* A readable name for a token kind, for diagnostics; NULL for a kind this
+   table does not cover (the caller prints the number). */
+const char *
+cc_tok_name(int kind)
+{
+    const struct kw *k;
+
+    switch (kind) {
+    case TOK_EOF:      return "end of file";
+    case TOK_INTLIT:   return "integer literal";
+    case TOK_FLOATLIT: return "floating literal";
+    case TOK_STRLIT:   return "string literal";
+    case TOK_CHARLIT:  return "character literal";
+    case TOK_IDENT:    return "identifier";
+    case TOK_LPAREN:   return "'('";
+    case TOK_RPAREN:   return "')'";
+    case TOK_LBRACE:   return "'{'";
+    case TOK_RBRACE:   return "'}'";
+    case TOK_LBRACK:   return "'['";
+    case TOK_RBRACK:   return "']'";
+    case TOK_SEMI:     return "';'";
+    case TOK_COMMA:    return "','";
+    case TOK_DOT:      return "'.'";
+    case TOK_ARROW:    return "'->'";
+    case TOK_ELLIPSIS: return "'...'";
+    case TOK_ASSIGN:   return "'='";
+    case TOK_QUESTION: return "'?'";
+    case TOK_COLON:    return "':'";
+    default:           break;
+    }
+    for (k = keywords; k->s; k++)
+        if (k->k == kind)
+            return k->s;
+    return NULL;
+}
+
+/* Print, to stderr, the (preprocessed) source lines from max(1, n - before)
+   through n, each with its line number, as context for a parse diagnostic. */
+void
+cc_lex_print_context(int n, int before)
+{
+    const char *s = src_buf;
+    int cur = 1, from = n - before;
+
+    if (!s || n < 1)
+        return;
+    if (from < 1)
+        from = 1;
+
+    /* The buffer carries GNU line markers (see skip_ws), so the logical source
+       line is not the physical line: a `# N "file"` line sets the next line to
+       N and is itself neither printed nor counted. */
+    while (*s) {
+        const char *eol = s;
+        while (*eol && *eol != '\n')
+            eol++;
+        if (*s == '#') {                /* a line marker: reset cur, skip it */
+            const char *q = s + 1;
+            int ln = 0, got = 0;
+            while (*q == ' ' || *q == '\t')
+                q++;
+            while (*q >= '0' && *q <= '9') { ln = ln * 10 + (*q++ - '0'); got = 1; }
+            if (got)
+                cur = ln;
+            s = (*eol == '\n') ? eol + 1 : eol;
+            continue;
+        }
+        if (cur >= from && cur <= n)
+            fprintf(stderr, "  %5d | %.*s\n", cur, (int)(eol - s), s);
+        s = (*eol == '\n') ? eol + 1 : eol;
+        cur++;
+        if (cur > n)
+            break;
+    }
 }
 
 static void
@@ -95,6 +191,50 @@ skip_ws(void)
         if (*p == '\n') {
             line++;
             p++;
+            line_start = p;
+            continue;
+        }
+        /* GNU line marker `# <line> "<file>"` injected by cc/main.c: reset the
+           line counter (and current file) to the true source position, so a
+           token after an #include-expanded region is numbered by its source
+           line, not its position in the flattened stream.  A `#` cannot occur
+           anywhere else in preprocessed C. */
+        if (*p == '#') {
+            const char *q = p + 1;
+            while (*q == ' ' || *q == '\t')
+                q++;
+            if (*q >= '0' && *q <= '9') {
+                int ln = 0;
+                while (*q >= '0' && *q <= '9')
+                    ln = ln * 10 + (*q++ - '0');
+                while (*q == ' ' || *q == '\t')
+                    q++;
+                if (*q == '"') {
+                    const char *fs = ++q;
+                    while (*q && *q != '"')
+                        q++;
+                    {
+                        int flen = (int)(q - fs);
+                        char *fn = arena_alloc(lex_arena, (size_t)flen + 1);
+                        memcpy(fn, fs, (size_t)flen);
+                        fn[flen] = '\0';
+                        src_file = fn;
+                    }
+                    if (*q == '"')
+                        q++;
+                }
+                while (*q && *q != '\n')
+                    q++;
+                if (*q == '\n')
+                    q++;
+                p = q;
+                line = ln;        /* the next line is source line `ln` */
+                line_start = p;
+                continue;
+            }
+            /* not a marker: skip the line defensively */
+            while (*p && *p != '\n')
+                p++;
             continue;
         }
         if (p[0] == '/' && p[1] == '/') {
@@ -105,8 +245,10 @@ skip_ws(void)
         if (p[0] == '/' && p[1] == '*') {
             p += 2;
             while (*p && !(p[0] == '*' && p[1] == '/')) {
-                if (*p == '\n')
+                if (*p == '\n') {
                     line++;
+                    line_start = p + 1;
+                }
                 p++;
             }
             if (*p)
@@ -129,11 +271,13 @@ is_ident_char(char c)
     return isalnum((unsigned char)c) || c == '_';
 }
 
-static long
-parse_int_literal(int *is_long, int *is_llong)
+static long long
+parse_int_literal(int *is_long, int *is_llong, int *is_unsigned)
 {
-    long val = 0;
+    unsigned long long val = 0;
+    int base = 10;
     if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+        base = 16;
         p += 2;
         while (isxdigit((unsigned char)*p)) {
             int d = *p >= 'a' ? *p - 'a' + 10 :
@@ -142,6 +286,7 @@ parse_int_literal(int *is_long, int *is_llong)
             p++;
         }
     } else if (p[0] == '0' && isdigit((unsigned char)p[1])) {
+        base = 8;
         while (*p >= '0' && *p <= '7') {
             val = val * 8 + (*p - '0');
             p++;
@@ -152,27 +297,50 @@ parse_int_literal(int *is_long, int *is_llong)
             p++;
         }
     }
-    /* suffixes: u, l, ul, ll, ull.  Count the l's to size the literal. */
-    int nl = 0;
+    /* suffixes: u, l, ul, ll, ull. */
+    int nl = 0, nu = 0;
     while (*p == 'u' || *p == 'U' || *p == 'l' || *p == 'L') {
         if (*p == 'l' || *p == 'L')
             nl++;
+        else
+            nu++;
         p++;
     }
-    int too_big_for_int = val > 2147483647L;
-    if (is_long)
-        /* an l suffix, or a value too big for a signed 32-bit int */
-        *is_long = (nl >= 1) || too_big_for_int;
-    if (is_llong)
-        /* an ll suffix, or a value too big for the target's long as well */
-        *is_llong = (nl >= 2) || (too_big_for_int && CC_LONG_SIZE < 8);
-    return val;
+
+    /* Pick the smallest type that holds the value, following C's rank order.
+       A u suffix allows only the unsigned types; a decimal constant without a
+       u suffix allows only the signed types; a hex or octal constant allows
+       both (signed first at each width). This is what makes 0xdeadbeef an
+       unsigned int rather than a wider signed type. */
+    unsigned long long imax = 0x7fffffffULL, uimax = 0xffffffffULL;
+    unsigned long long lmax  = CC_LONG_SIZE >= 8 ? 0x7fffffffffffffffULL : imax;
+    unsigned long long ulmax = CC_LONG_SIZE >= 8 ? 0xffffffffffffffffULL : uimax;
+    unsigned long long llmax = 0x7fffffffffffffffULL;
+    int suf_u = nu > 0, allow_s = !suf_u, allow_u = suf_u || base != 10;
+    int start = nl >= 2 ? 2 : nl >= 1 ? 1 : 0;
+    int w, chosen = -1, uns = 0;
+
+    for (w = start; w <= 2 && chosen < 0; w++) {
+        unsigned long long smax = w == 0 ? imax  : w == 1 ? lmax  : llmax;
+        unsigned long long umax = w == 0 ? uimax : w == 1 ? ulmax : 0xffffffffffffffffULL;
+        if (allow_s && val <= smax) { chosen = w; uns = 0; }
+        else if (allow_u && val <= umax) { chosen = w; uns = 1; }
+    }
+    if (chosen < 0) { chosen = 2; uns = 1; }    /* does not fit: widest unsigned */
+
+    if (is_long)     *is_long = (chosen == 1);
+    if (is_llong)    *is_llong = (chosen == 2);
+    if (is_unsigned) *is_unsigned = uns;
+    return (long long)val;
 }
 
 static int
 parse_escape(void)
 {
     p++;
+    if (*p == '\0')             /* a backslash at end of input: do not read
+                                   past the NUL terminator */
+        return 0;
     switch (*p++) {
     case 'a':  return '\a';
     case 'b':  return '\b';
@@ -212,6 +380,7 @@ lex_token(void)
 
     skip_ws();
     t.line = line;
+    t.col = (int)(p - line_start) + 1;
 
     if (*p == '\0') {
         t.kind = TOK_EOF;
@@ -230,6 +399,28 @@ lex_token(void)
                 t.kind = k->k;
                 return t;
             }
+        }
+        if (len == 13 && memcmp(start, "__attribute__", 13) == 0) {
+            /* GNU __attribute__((...)): skip it and its balanced parens so the
+               parser never sees it.  skj-cc honours no attributes, so dropping
+               them is safe; this lets it compile sources that carry hints like
+               __attribute__((noreturn)).  A run of attributes falls out of the
+               tail recursion.  String literals inside an attribute are rare and
+               not handled; the plain paren count suffices for the hints in use. */
+            skip_ws();
+            if (*p == '(') {
+                int depth = 0;
+                do {
+                    if (*p == '(')
+                        depth++;
+                    else if (*p == ')')
+                        depth--;
+                    else if (*p == '\n')
+                        line++;
+                    p++;
+                } while (*p && depth > 0);
+            }
+            return lex_token();
         }
         t.kind = TOK_IDENT;
         t.sval = arena_strndup(lex_arena,start, len);
@@ -271,7 +462,7 @@ lex_token(void)
             }
         } else {
             t.kind = TOK_INTLIT;
-            t.ival = parse_int_literal(&t.is_long, &t.is_llong);
+            t.ival = parse_int_literal(&t.is_long, &t.is_llong, &t.is_unsigned);
         }
         return t;
     }
@@ -279,6 +470,12 @@ lex_token(void)
     /* character literal */
     if (*p == '\'') {
         p++;
+        if (*p == '\0') {       /* unterminated at end of input: stop rather
+                                   than read past the NUL terminator */
+            t.kind = TOK_CHARLIT;
+            t.ival = 0;
+            return t;
+        }
         if (*p == '\\')
             t.ival = parse_escape();
         else
@@ -428,11 +625,15 @@ lex_token(void)
 struct cc_token
 cc_lex_next(void)
 {
+    struct cc_token t;
     if (peeked) {
         peeked = 0;
+        cur_tok_col = peek_tok.col;
         return peek_tok;
     }
-    return lex_token();
+    t = lex_token();
+    cur_tok_col = t.col;
+    return t;
 }
 
 struct cc_token

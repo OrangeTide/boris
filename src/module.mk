@@ -3,7 +3,7 @@ SUBDIRS = \
 	thirdparty/smolvfs \
 	crypt \
 	log scrypt util help iox net passwd obj entity rpg combat database \
-	security muddb-tool daemonize verb rv32 vm resolve builder zone ui stred
+	security muddb-tool daemonize verb vm vfs resolve builder zone ui stred
 
 LIBRARIES    += hashtable
 hashtable_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
@@ -163,13 +163,19 @@ boris_SRCS = \
 	cmd/check.c \
 	cmd/grant.c \
 	cmd/chown.c \
+	cmd/vfscmd.c \
+	cmd/fedit.c \
+	cmd/compile.c \
+	cmd/run.c \
+	cmd/program.c \
+	cmd/setverb.c \
 	worldclock/worldclock.c \
 	invite.c \
 	web/server/webclient.c \
 	web/server/weblogin.c \
 	web/server/webserver.c
 boris_LIBS = \
-	verb vm rv32 resolve character freelist acs \
+	verb vm compile vfs resolve character freelist acs \
 	crypt daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
 	database security lmdb mth tinyaes \
-	zone_builder zone builder ui stred
+	zone_builder zone builder ui stred smolvfs

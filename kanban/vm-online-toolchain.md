@@ -1,25 +1,26 @@
 ---
 title: In-Server Compile and Link (stages 1-2)
-status: backlog
+status: done
 gitlab-sync: OrangeTide/boris#108
 ---
 
-Later work, after the first cut runs pre-built ELFs. Bring stages 1 and 2 of
-the compilation pipeline inside the server so a builder can author a program
-and attach it without a server rebuild, following smolmoo's `@program`
-model. See doc/mud-vm-design.md "Compilation Pipeline".
+Bring the compilation pipeline inside the server so a builder can author a
+program and attach it without a server rebuild.
 
-Do not start until the runtime (vm-task-runtime, vm-hostcall-abi,
-verb-agent-model) is stable. This adds a toolchain dependency and build
-wiring, so it is deliberately deferred.
+Done, though not by the KPM1-module and name-binding route this card first
+imagined. After the skjegg rebase the compiler, assembler, and linker are
+themselves RV32 ELFs, run as guests under the embedded runtime over a hostcap
+build directory (`src/vfs/vfs_compile.c`). `@compile <src> [<out>]` compiles a
+VFS source to a VFS ELF; `@program` binds it to a program object and `@run`
+launches it. Because no host process is spawned, in-world compilation works
+with seccomp and Landlock active. See `doc/vm-skjegg-rebase.md`.
 
 ## Tasks
 
-- [ ] Stage 1: compile a guest source (kobold or C) to a KPM1 module inside
-      the server.
-- [ ] Stage 2: link and resolve a KPM1 module into a self-contained RV32
-      ELF, binding host-call imports by name.
-- [ ] An in-game command to compile, link, store, and attach a program to an
-      object.
-- [ ] Decide what of the kobold and skjegg toolchains is built by the boris
-      GNUmakefile versus invoked as an external tool.
+- [x] Compile a guest C or assembly source to an RV32 ELF inside the server.
+- [x] Link it into a self-contained RV32 ELF against the confined libc.
+- [x] In-game commands to compile (`@compile`), bind (`@program`), and launch
+      (`@run`) a program.
+- [x] The toolchain guests are built by `make -C sdk/vm toolchain`; nothing is
+      invoked as an external host tool.
+- [x] Kobold-Pascal (`.pas`/`.kp`) compilation (see kobold-online-compile).
