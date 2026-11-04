@@ -127,6 +127,20 @@ find_issue_by_title() {
         }'
 }
 
+write_sync_ref() {
+    # persist a gitlab-sync ref into a card's frontmatter. Fill an existing
+    # empty "gitlab-sync:" line if present; otherwise insert the field after
+    # the status line so a card that omitted the field still links and the
+    # ref is not lost (which would recreate the issue on every run).
+    _card="$1"
+    _ref="$2"
+    if grep -q '^gitlab-sync: *$' "$_card"; then
+        sed -i "s|^gitlab-sync: *\$|gitlab-sync: ${_ref}|" "$_card"
+    else
+        sed -i "/^status:/a gitlab-sync: ${_ref}" "$_card"
+    fi
+}
+
 sync_card() {
     card="$1"
     slug="$(basename "$card" .md)"
@@ -180,8 +194,8 @@ sync_card() {
         # extract project path from CI or default
         project_path="${CI_PROJECT_PATH:-OrangeTide/boris}"
         ref="${project_path}#${iid}"
-        # write ref back into card -- use | delimiter to avoid / in path
-        sed -i "s|^gitlab-sync:$|gitlab-sync: ${ref}|" "$card"
+        # write ref back into card so the link persists across runs
+        write_sync_ref "$card" "$ref"
         CARDS_CHANGED=1
         # bring the (possibly reused) issue's state in line with the card
         state_event="$(card_status_to_gitlab "$status")"
@@ -200,10 +214,16 @@ for card in kanban/*.md; do
 done
 
 if [ "$CARDS_CHANGED" -eq 1 ]; then
-    echo "committing new gitlab-sync refs..."
     git config user.email "${GITLAB_USER_EMAIL:-ci@boris}"
     git config user.name "${GITLAB_USER_NAME:-kanban-sync}"
     git add kanban/*.md
+    if git diff --cached --quiet; then
+        # Nothing staged: every created ref was already present in the cards, so
+        # there is nothing to persist. Not an error -- skip the commit and push.
+        echo "no gitlab-sync ref changes to commit"
+        exit 0
+    fi
+    echo "committing new gitlab-sync refs..."
     if ! git commit -m "kanban: populate gitlab-sync refs [skip ci]"; then
         echo "FATAL: failed to commit gitlab-sync refs." >&2
         exit 1
