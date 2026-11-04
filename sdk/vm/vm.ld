@@ -2,7 +2,7 @@
  *
  * A flat 128KB image matching the runtime in src/vm: code and data from
  * 0x400 (0x0-0x3FF left for host use), the stack set by the host growing down
- * from 0x20000. Adapted from skjegg's runtime/smolmoo_rv.ld. The assembler
+ * from 0x20000. Adapted from skjegg's RV32 runtime linker script. The assembler
  * merges everything into .text/.rodata/.data/.bss, so there is no separate
  * .text.entry input; ENTRY(_start) names the entry point instead. */
 

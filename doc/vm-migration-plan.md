@@ -17,9 +17,9 @@ kobold sandbox described in `doc/mud-vm-design.md`. This document drove the
 Settled with the project owner before this plan was written.
 
 - **Emulator.** Vendor one copy of the shared RV32 core (`rv32.c`,
-  `rv32.h`). It is identical across the kobold, smolmoo, and skjegg
-  projects apart from the license header. Boris owns its copy.
-- **Runtime and syscall model.** Design around smolmoo's MUD requirements:
+  `rv32.h`). It is a verbatim copy of the upstream skjegg core apart from
+  the license header. Boris owns its copy.
+- **Runtime and syscall model.** Design around boris's MUD requirements:
   the one-shot-program versus verb-program split, the object-access and
   movement calls, the mailbox event model, and cooperative single-threaded
   scheduling.
@@ -36,7 +36,7 @@ Settled with the project owner before this plan was written.
 
 ## Licensing
 
-The imported sources (kobold-pascal, smolmoo, skjegg) are the project
+The imported sources (kobold-pascal, skjegg) are the project
 owner's own code under `0BSD OR CC0-1.0`. The owner is authorized to
 relicense them into boris's license. Relicensing and any edit to a source
 file's license or copyright header is a human step performed by the owner,
@@ -101,7 +101,7 @@ scripting. It stays.
 ## Part 2 -- Import the RV32 Sandbox
 
 Bring in and own the pieces named in `doc/mud-vm-design.md`. Sources are the
-owner's projects at `kobold-pascal`, `smolmoo`, and `skjegg`. Copy, adapt,
+owner's `kobold-pascal` and `skjegg` projects. Copy, adapt,
 and own; do not vendor as an upstream dependency.
 
 ### Emulator core -> `src/rv32/`
@@ -113,16 +113,15 @@ and own; do not vendor as an upstream dependency.
 
 ### Runtime -> `src/vm/`
 
-Adapt, do not copy verbatim. The reference implementations are woven into
-`smolmoo.c` and `rv_user.c`.
+Adapt, do not copy verbatim. The reference implementation is kobold's
+`rv_user.c`.
 
 - Task lifecycle and the cooperative scheduler: allocate, set up, step,
   and reap tasks; per-task private memory image; instruction budget per
   tick.
 - The `ecall` dispatcher and the flat, name-bound host-call table. The
   reference is `do_ecall` and `bind_hostcalls` in kobold's `rv_user.c`
-  (name binding through the import-table metadata segment) and the syscall
-  switch in smolmoo's `vm_ecall`.
+  (name binding through the import-table metadata segment).
 - The host-call set from `doc/mud-vm-design.md`, implemented against
   boris's object store, room and player model, and ACS layer.
 - Verb and agent dispatch: resolution order, typed argument matching, the
@@ -132,11 +131,11 @@ Adapt, do not copy verbatim. The reference implementations are woven into
 ### Guest SDK -> `sdk/vm/`
 
 - The C runtime start (`_start`) and the `ecall` host-call stubs.
-- The event-loop runtime that a verb program links (smolmoo's `verbmain`
-  is the pattern: register with `sys_listen`, drain the mailbox, call the
-  program's event handler, synthesize a timer on dwell).
+- The event-loop runtime that a verb program links: register with
+  `sys_listen`, drain the mailbox, call the program's event handler,
+  synthesize a timer on dwell.
 - The guest header defining the host-call names and the argument and event
-  record layouts (smolmoo's `mulibc.h` is the reference contract).
+  record layouts.
 - The linker script and a few example programs (one one-shot, one agent).
 
 ### Offline toolchain (not vendored into the server for the first cut)
@@ -186,7 +185,7 @@ programs from source with the offline toolchain. Document the build in
 
 ### Later -- Online compilation and linking
 
-Stages 1 and 2 of the pipeline inside the server, following smolmoo's
+Stages 1 and 2 of the pipeline inside the server, through an in-world
 `@program` model: compile kobold and C to KPM1, link to an RV32 ELF, store
 it, and attach it, without a server rebuild. Its own card.
 

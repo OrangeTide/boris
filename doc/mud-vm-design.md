@@ -10,8 +10,9 @@ Do not build anything that depends on the current shapes surviving.
 This document replaces the earlier ColdFire sandbox design. Boris pivoted
 off the Motorola ColdFire V4e emulator and its complicated hypercall,
 capability, and multicore-scheduler model. The new sandbox is an RV32
-emulator plus a small, flat host-call environment adapted from the smolmoo
-MOO server. See `doc/vm-migration-plan.md` for the removal and import work.
+emulator plus a small, flat host-call environment modeled on a working
+RV32-based MOO server. See `doc/vm-migration-plan.md` for the removal and
+import work.
 
 **Superseded in part.** Boris has since been re-based onto the skjegg
 compiler suite: the runtime now drives skjegg's embedded emulator, the
@@ -44,9 +45,9 @@ The design has two goals that the earlier ColdFire plan did not meet.
 
 2. **A proven MUD execution model.** The split between ordinary programs
    and event-driven programs, the object-manipulation calls, and the
-   verb dispatch order are adapted from smolmoo, a working RV32-based MOO
-   server. Boris designs around the same requirements rather than
-   reinventing them.
+   verb dispatch order are adapted from a working RV32-based MOO server.
+   Boris designs around the same requirements rather than reinventing
+   them.
 
 ## Why RV32
 
@@ -166,7 +167,7 @@ separate, later concern tracked in the `multithreading` card.
 
 ## Program vs Verb: One Runtime, One Table
 
-The central design point, adapted from smolmoo, is that the difference
+The central design point is that the difference
 between an ordinary program and an event-driven verb program is **not a VM
 feature**. It is a link-time choice of who supplies `main()`.
 
@@ -252,8 +253,8 @@ enum.
 
 ## Host-Call Set
 
-The set below is adapted from smolmoo's syscall table, which is small on
-purpose. It is the design target. Names and grouping are stable in intent;
+The set below is a small syscall table, deliberately so. It is the design
+target. Names and grouping are stable in intent;
 signatures will be pinned as the runtime is built. All are reached through
 the flat name-bound table above.
 
@@ -325,9 +326,9 @@ concrete need appears. `sys_write` currently goes to the task's output sink.
 |---------------|-----------------------------------------------------------|
 | `sys_setpriv` | switch effective owner, or enable/drop the wizard flag     |
 
-Argument passing for larger inputs follows smolmoo: the host writes a
-fixed-layout argument block and a string area into guest memory before a
-program runs, and marshals event records into the string area on
+Argument passing for larger inputs follows the reference model: the host
+writes a fixed-layout argument block and a string area into guest memory
+before a program runs, and marshals event records into the string area on
 `sys_getmsg`. Input reaches a program only this way. There is no ambient
 file access and no blocking read.
 
@@ -362,7 +363,7 @@ ELF reference.
   successor to the ColdFire `program.continuous` property). A supervisor keeps
   them running, relaunching any that exit or fault, throttled so a program that
   keeps dying is respawned at a bounded rate. This is the sysvinit respawn
-  model rather than smolmoo's awake-object scan; a store-driven scan can replace
+  model rather than an awake-object scan; a store-driven scan can replace
   the config list once the object model lands.
 
 Not everything long-running is a verb program. A sequential task bound to

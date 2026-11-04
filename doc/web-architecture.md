@@ -15,7 +15,7 @@ Server pushes events as `data:` lines with a single-character command prefix.
 Multi-line messages are split across multiple `data:` lines within the same
 event (SSE reassembles them on the client side).
 
-#### Framing protocol (smolmoo-style)
+#### Framing protocol
 
 The first character of each `data:` line determines message type:
 
@@ -147,8 +147,6 @@ external HTTP library.
 
 HTTP parsing is minimal: extract method, path, headers, and body for
 three endpoints (`/events`, `/cmd`, `/api/prop`) plus static file serving.
-
-Based on the approach proven in smolmoo.c.
 
 ## TLS
 
