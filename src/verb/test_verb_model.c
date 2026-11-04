@@ -46,7 +46,7 @@ mkobj(const char *id, const char *parent, const char *container)
 	if (!o)
 		return;
 	if (parent)
-		obj_prop_set_internal(o, "%parent", parent);
+		obj_prop_set_ref_internal(o, "%parent", parent);
 	obj_mark_dirty(o);
 	obj_save(id);
 	obj_release(o);

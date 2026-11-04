@@ -209,7 +209,7 @@ test_prop_resolve_inherited(void)
 	struct mock_backend m = {0};
 	/* parent has name, child has only %parent */
 	mock_put(&m, "base", "{\"name\":\"base-name\",\"color\":\"red\"}");
-	mock_put(&m, "child", "{\"%parent\":\"base\",\"color\":\"blue\"}");
+	mock_put(&m, "child", "{\"%parent~\":\"base\",\"color\":\"blue\"}");
 	struct obj_cache_ops ops = { .load = mock_load };
 	OBJ_CACHE *c = obj_cache_new(4, &ops, &m);
 
@@ -231,7 +231,7 @@ test_prop_resolve_tombstone(void)
 {
 	struct mock_backend m = {0};
 	mock_put(&m, "base", "{\"name\":\"base-name\"}");
-	mock_put(&m, "child", "{\"%parent\":\"base\",\"!name\":1}");
+	mock_put(&m, "child", "{\"%parent~\":\"base\",\"!name\":1}");
 	struct obj_cache_ops ops = { .load = mock_load };
 	OBJ_CACHE *c = obj_cache_new(4, &ops, &m);
 
@@ -251,12 +251,12 @@ test_prop_resolve_depth_limit(void)
 	/* chain 0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6; name only at depth 6.
 	 * MAX_PROTO_DEPTH is 5, so it should NOT resolve. */
 	mock_put(&m, "n6", "{\"name\":\"deep\"}");
-	mock_put(&m, "n5", "{\"%parent\":\"n6\"}");
-	mock_put(&m, "n4", "{\"%parent\":\"n5\"}");
-	mock_put(&m, "n3", "{\"%parent\":\"n4\"}");
-	mock_put(&m, "n2", "{\"%parent\":\"n3\"}");
-	mock_put(&m, "n1", "{\"%parent\":\"n2\"}");
-	mock_put(&m, "n0", "{\"%parent\":\"n1\"}");
+	mock_put(&m, "n5", "{\"%parent~\":\"n6\"}");
+	mock_put(&m, "n4", "{\"%parent~\":\"n5\"}");
+	mock_put(&m, "n3", "{\"%parent~\":\"n4\"}");
+	mock_put(&m, "n2", "{\"%parent~\":\"n3\"}");
+	mock_put(&m, "n1", "{\"%parent~\":\"n2\"}");
+	mock_put(&m, "n0", "{\"%parent~\":\"n1\"}");
 	struct obj_cache_ops ops = { .load = mock_load };
 	OBJ_CACHE *c = obj_cache_new(16, &ops, &m);
 

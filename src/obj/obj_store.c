@@ -131,6 +131,23 @@ obj_resolve_prop(const char *id, const char *propname)
 	return v;
 }
 
+char *
+obj_resolve_prop_ref(const char *id, const char *name)
+{
+	char marked[OBJ_PATH_MAX + 2];
+	size_t n;
+
+	if (!id || !name)
+		return NULL;
+	n = strlen(name);
+	if (n + 2 > sizeof(marked))
+		return NULL;
+	memcpy(marked, name, n);
+	marked[n] = OBJ_REF_MARK;
+	marked[n + 1] = '\0';
+	return obj_resolve_prop(id, marked);
+}
+
 int
 obj_foreach_key(const char *prefix,
 	void (*cb)(const char *key, void *ctx), void *ctx)
@@ -255,7 +272,7 @@ would_cycle(const char *member, const char *container)
 		o = obj_get(cur);
 		if (!o)
 			break;                  /* chain ends at an unloadable id */
-		loc = obj_prop_get(o, "%location");
+		loc = obj_prop_get_ref(o, "%location");
 		next = (loc && *loc) ? strdup(loc) : NULL;
 		obj_release(o);
 		free(cur);
@@ -310,14 +327,14 @@ obj_move(const char *member, const char *container)
 		}
 	}
 
-	loc = obj_prop_get(m, "%location");
+	loc = obj_prop_get_ref(m, "%location");
 	if (loc && *loc)
 		old = strdup(loc);
 
 	/* Set the forward pointer in memory before staging the record, so the
 	 * serialized object carries the new %location. */
-	rc = to_limbo ? obj_prop_delete_internal(m, "%location")
-		: obj_prop_set_internal(m, "%location", container);
+	rc = to_limbo ? obj_prop_delete_ref_internal(m, "%location")
+		: obj_prop_set_ref_internal(m, "%location", container);
 	if (rc != OBJ_OK) {
 		LOG_ERROR("obj_move: could not set %%location on %s", member);
 		goto fail_revert;
@@ -353,9 +370,9 @@ fail_revert:
 	/* Restore the in-memory %location so the cache matches the unchanged
 	 * store. */
 	if (old)
-		obj_prop_set_internal(m, "%location", old);
+		obj_prop_set_ref_internal(m, "%location", old);
 	else
-		obj_prop_delete_internal(m, "%location");
+		obj_prop_delete_ref_internal(m, "%location");
 	free(old);
 	if (c)
 		obj_release(c);
@@ -374,7 +391,7 @@ obj_location(const char *member)
 	m = obj_get(member);
 	if (!m)
 		return NULL;
-	loc = obj_prop_get(m, "%location");
+	loc = obj_prop_get_ref(m, "%location");
 	if (loc && *loc)
 		out = strdup(loc);
 	obj_release(m);

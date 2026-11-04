@@ -30,12 +30,12 @@ put_zoneinfo(const char *zone_path, const char *title, const char *tmpl,
 	if (parent_path) {
 		char pk[OBJ_PATH_MAX];
 		if (zone_info_key(parent_path, pk, sizeof pk) == 0)
-			obj_prop_set_internal(z, "%parent", pk);
+			obj_prop_set_ref_internal(z, "%parent", pk);
 	}
 	if (title)
 		obj_prop_set(z, "title", title);
 	if (tmpl)
-		obj_prop_set(z, "template", tmpl);
+		obj_prop_set_ref(z, "template", tmpl);
 	if (builders)
 		obj_prop_set(z, "builders", builders);
 	obj_prop_set(z, "creator", "rhea");

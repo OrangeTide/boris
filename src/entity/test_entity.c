@@ -130,7 +130,7 @@ test_prop_resolve_inheritance(void)
 	mock_put(&m, "goblin-template",
 		"{\"%kind\":\"creature\",\"hp\":\"10\",\"name\":\"goblin\"}");
 	mock_put(&m, "gob1",
-		"{\"%kind\":\"creature\",\"%parent\":\"goblin-template\",\"name\":\"Gob-1\"}");
+		"{\"%kind\":\"creature\",\"%parent~\":\"goblin-template\",\"name\":\"Gob-1\"}");
 	struct obj_cache_ops ops = { .load = mock_load, .save = mock_save };
 	OBJ_CACHE *c = obj_cache_new(4, &ops, &m);
 
@@ -194,8 +194,8 @@ test_create(void)
 	check("obj pinned", e.obj != NULL);
 	check("%kind written", obj_prop_get(e.obj, "%kind")
 		&& strcmp(obj_prop_get(e.obj, "%kind"), "npc") == 0);
-	check("%parent written", obj_prop_get(e.obj, "%parent")
-		&& strcmp(obj_prop_get(e.obj, "%parent"), "templates/goblin") == 0);
+	check("%parent written", obj_prop_get_ref(e.obj, "%parent")
+		&& strcmp(obj_prop_get_ref(e.obj, "%parent"), "templates/goblin") == 0);
 
 	/* creating the same id again while it is live fails */
 	struct entity dup;

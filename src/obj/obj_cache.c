@@ -409,7 +409,7 @@ obj_cache_prop_resolve(OBJ_CACHE *c, OBJ *obj, const char *propname)
 		char *v = obj_prop_get(current, propname);
 		if (v) { result = strdup(v); break; }
 
-		char *parent_ref = obj_prop_get(current, "%parent");
+		char *parent_ref = obj_prop_get_ref(current, "%parent");
 		if (!parent_ref) break;
 
 		/* copy parent_ref before resolve -- obj_prop_get returns a

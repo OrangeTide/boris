@@ -41,7 +41,7 @@ warn_dangling_exits(const struct builder_ops *ops, OBJ *obj,
 
 		if (strncmp(key, "exit.", 5) != 0)
 			continue;
-		if (len < 3 || strcmp(key + len - 3, ".to") != 0)
+		if (len < 4 || strcmp(key + len - 4, ".to~") != 0)
 			continue;
 		if (!val || !val[0])
 			continue;
@@ -224,7 +224,7 @@ room_create(const struct builder_ops *ops, const struct acs_info *actor,
 
 	obj_prop_set_internal(room, "%kind", "room");
 	if (template_ref && template_ref[0])
-		obj_prop_set_internal(room, "%parent", template_ref);
+		obj_prop_set_ref_internal(room, "%parent", template_ref);
 	if (name && name[0])
 		obj_prop_set(room, "name", name);
 	if (short_desc && short_desc[0])

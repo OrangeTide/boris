@@ -708,6 +708,10 @@ obj_prop_set(OBJ *obj, const char *propname, const char *value)
 	 * use obj_prop_delete/obj_prop_set to drive the mechanism. */
 	if (propname && propname[0] == '!')
 		return OBJ_ERR_PROTECTED;
+	/* Reference keys are written only through obj_prop_set_ref, which
+	 * validates the value as a path-id. */
+	if (obj_prop_is_ref(propname))
+		return OBJ_ERR_PROTECTED;
 	rc = obj_prop_set_internal(obj, propname, value);
 	if (rc != OBJ_OK)
 		return rc;
@@ -755,34 +759,45 @@ obj_prop_delete_internal(OBJ *obj, const char *propname)
 	return OBJ_OK;
 }
 
-int
-obj_prop_delete(OBJ *obj, const char *propname)
+/* Delete `key` with prototype-aware tombstone semantics, no name protection.
+ * Shared by obj_prop_delete and obj_prop_delete_ref. */
+static int
+prop_delete_core(OBJ *obj, const char *key)
 {
 	char stack_buf[128];
 	char *tomb;
 	int rc;
 
-	if (propname && propname[0] == '%')
-		return OBJ_ERR_PROTECTED;
-	if (propname && propname[0] == '!')
-		return OBJ_ERR_PROTECTED;
-
 	/* If this object has no prototype parent, a delete is a plain
 	 * delete -- no tombstone needed because nothing would be inherited
 	 * anyway. */
-	if (find_prop(obj, "%parent") < 0)
-		return obj_prop_delete_internal(obj, propname);
+	if (find_prop(obj, "%parent") < 0 && find_prop(obj, "%parent~") < 0)
+		return obj_prop_delete_internal(obj, key);
 
 	/* Prototype-aware delete: insert a tombstone so prototype-chain
 	 * walking stops here, and hard-delete any local value. */
-	obj_prop_delete_internal(obj, propname);
-	tomb = tombstone_name(propname, stack_buf, sizeof(stack_buf));
+	obj_prop_delete_internal(obj, key);
+	tomb = tombstone_name(key, stack_buf, sizeof(stack_buf));
 	if (!tomb)
 		return OBJ_ERR_NOMEM;
 	rc = obj_prop_set_internal(obj, tomb, "1");
 	if (tomb != stack_buf)
 		free(tomb);
 	return rc;
+}
+
+int
+obj_prop_delete(OBJ *obj, const char *propname)
+{
+	if (propname && propname[0] == '%')
+		return OBJ_ERR_PROTECTED;
+	if (propname && propname[0] == '!')
+		return OBJ_ERR_PROTECTED;
+	/* Reference keys are deleted only through obj_prop_delete_ref. */
+	if (obj_prop_is_ref(propname))
+		return OBJ_ERR_PROTECTED;
+
+	return prop_delete_core(obj, propname);
 }
 
 int
@@ -801,6 +816,176 @@ obj_prop_is_tombstoned(OBJ *obj, const char *propname)
 	if (tomb != stack_buf)
 		free(tomb);
 	return present;
+}
+
+/****************************************************************
+ * Object references (keys marked with a trailing OBJ_REF_MARK)
+ ****************************************************************/
+
+/* build "<name>~" into out. Returns a heap pointer if name is too long for
+ * stack_buf; NULL on allocation failure. Caller frees the returned pointer
+ * only if it differs from stack_buf. */
+static char *
+ref_name(const char *name, char *stack_buf, size_t stack_len)
+{
+	size_t n = strlen(name);
+	char *buf;
+
+	if (n + 2 <= stack_len) {
+		memcpy(stack_buf, name, n);
+		stack_buf[n] = OBJ_REF_MARK;
+		stack_buf[n + 1] = '\0';
+		return stack_buf;
+	}
+	buf = malloc(n + 2);
+	if (!buf)
+		return NULL;
+	memcpy(buf, name, n);
+	buf[n] = OBJ_REF_MARK;
+	buf[n + 1] = '\0';
+	return buf;
+}
+
+/* A well-formed path-id is non-empty, shorter than OBJ_PATH_MAX, and free of
+ * control characters, whitespace, and the JSON string hazards. The path
+ * grammar beyond this is the identity module's concern (doc/object-identity). */
+static bool
+ref_value_valid(const char *value)
+{
+	size_t n, i;
+
+	if (!value)
+		return false;
+	n = strlen(value);
+	if (n == 0 || n >= OBJ_PATH_MAX)
+		return false;
+	for (i = 0; i < n; i++) {
+		unsigned char c = (unsigned char)value[i];
+
+		if (c < 0x20 || c == 0x7f)
+			return false;
+		if (c == ' ' || c == '\t')
+			return false;
+		if (c == '"' || c == '\\')
+			return false;
+	}
+	return true;
+}
+
+int
+obj_prop_is_ref(const char *propname)
+{
+	size_t n;
+
+	if (!propname || propname[0] == '!')
+		return 0;
+	n = strlen(propname);
+	return n > 0 && propname[n - 1] == OBJ_REF_MARK;
+}
+
+char *
+obj_prop_get_ref(OBJ *obj, const char *name)
+{
+	char stack_buf[128];
+	char *mk, *val;
+
+	if (!obj || !name)
+		return NULL;
+	mk = ref_name(name, stack_buf, sizeof(stack_buf));
+	if (!mk)
+		return NULL;
+	val = obj_prop_get(obj, mk);
+	if (mk != stack_buf)
+		free(mk);
+	return val;
+}
+
+int
+obj_prop_set_ref_internal(OBJ *obj, const char *name, const char *value)
+{
+	char stack_buf[128];
+	char *mk;
+	int rc;
+
+	if (!obj || !name)
+		return OBJ_ERR;
+	if (!ref_value_valid(value))
+		return OBJ_ERR;
+	mk = ref_name(name, stack_buf, sizeof(stack_buf));
+	if (!mk)
+		return OBJ_ERR_NOMEM;
+	rc = obj_prop_set_internal(obj, mk, value);
+	if (mk != stack_buf)
+		free(mk);
+	return rc;
+}
+
+int
+obj_prop_set_ref(OBJ *obj, const char *name, const char *value)
+{
+	char mk_buf[128];
+	char tomb_buf[128];
+	char *mk, *tomb;
+	int rc;
+
+	if (name && (name[0] == '%' || name[0] == '!'))
+		return OBJ_ERR_PROTECTED;
+
+	rc = obj_prop_set_ref_internal(obj, name, value);
+	if (rc != OBJ_OK)
+		return rc;
+
+	/* Setting a reference clears any prior tombstone for its marked key. */
+	mk = ref_name(name, mk_buf, sizeof(mk_buf));
+	if (!mk)
+		return OBJ_ERR_NOMEM;
+	tomb = tombstone_name(mk, tomb_buf, sizeof(tomb_buf));
+	if (mk != mk_buf)
+		free(mk);
+	if (!tomb)
+		return OBJ_ERR_NOMEM;
+	obj_prop_delete_internal(obj, tomb);
+	if (tomb != tomb_buf)
+		free(tomb);
+	return OBJ_OK;
+}
+
+int
+obj_prop_delete_ref(OBJ *obj, const char *name)
+{
+	char stack_buf[128];
+	char *mk;
+	int rc;
+
+	if (!obj || !name)
+		return OBJ_ERR;
+	if (name[0] == '%' || name[0] == '!')
+		return OBJ_ERR_PROTECTED;
+	mk = ref_name(name, stack_buf, sizeof(stack_buf));
+	if (!mk)
+		return OBJ_ERR_NOMEM;
+	rc = prop_delete_core(obj, mk);
+	if (mk != stack_buf)
+		free(mk);
+	return rc;
+}
+
+int
+obj_prop_delete_ref_internal(OBJ *obj, const char *name)
+{
+	char stack_buf[128];
+	char *mk;
+	int rc;
+
+	if (!obj || !name)
+		return OBJ_ERR;
+	mk = ref_name(name, stack_buf, sizeof(stack_buf));
+	if (!mk)
+		return OBJ_ERR_NOMEM;
+	rc = obj_prop_delete_internal(obj, mk);
+	if (mk != stack_buf)
+		free(mk);
+	return rc;
 }
 
 int

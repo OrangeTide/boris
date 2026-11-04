@@ -281,7 +281,7 @@ character_new(void)
 	/* seed identity and the player-character prototype */
 	snprintf(numbuf, sizeof numbuf, "%ld", id);
 	obj_prop_set(obj, "id", numbuf);
-	obj_prop_set_internal(obj, "%parent", CHARACTER_PROTOTYPE);
+	obj_prop_set_ref_internal(obj, "%parent", CHARACTER_PROTOTYPE);
 	obj_mark_dirty(obj);
 
 	ch = handle_new(obj, (unsigned)id);

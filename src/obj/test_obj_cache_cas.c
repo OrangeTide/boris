@@ -443,14 +443,14 @@ test_parent_links(void)
 		"{\"name\":\"goblin\",\"speed\":\"fast\"}");
 	put_json(objs, "programs/base", "{\"color\":\"green\"}");
 	put_json(objs, "rooms/church",
-		"{\"%parent\":\"programs/base\",\"name\":\"church\"}");
+		"{\"%parent~\":\"programs/base\",\"name\":\"church\"}");
 	obj_cache_cas_commit(objs, "seed objs");
 
 	put_json(chars, "1",
-		"{\"%parent\":\"objs/templates/goblin\","
+		"{\"%parent~\":\"objs/templates/goblin\","
 		"\"name\":\"grik\"}");
 	put_json(chars, "2",
-		"{\"%parent\":\"objs/templates/goblin\","
+		"{\"%parent~\":\"objs/templates/goblin\","
 		"\"!speed\":\"1\"}");
 	obj_cache_cas_commit(chars, "seed chars");
 

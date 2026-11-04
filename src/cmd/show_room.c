@@ -262,7 +262,7 @@ show_room(DESCRIPTOR_DATA *cl, OBJ *r)
 			OBJ *exit_room;
 
 			snprintf(exitname, sizeof exitname, "exit.%s.to", dirs[i]);
-			exit_room_id = obj_prop_get(r, exitname);
+			exit_room_id = obj_prop_get_ref(r, exitname);
 			if (!exit_room_id)
 				continue;
 
@@ -311,7 +311,7 @@ show_room(DESCRIPTOR_DATA *cl, OBJ *r)
 
 		for (i = 0; dirs[i]; i++) {
 			snprintf(exitname, sizeof exitname, "exit.%s.to", dirs[i]);
-			if (obj_prop_get(r, exitname)) {
+			if (obj_prop_get_ref(r, exitname)) {
 				telnetclient_printf(cl, " %s", dirs[i]);
 				found = 1;
 			}

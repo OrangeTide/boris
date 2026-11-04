@@ -115,7 +115,7 @@ test_create_and_attrs(void)
 
 	v = character_attr_get(ch, "id");
 	check("id prop is 1", v && !strcmp(v, "1"));
-	v = obj_prop_get(character_obj(ch), "%parent");
+	v = obj_prop_get_ref(character_obj(ch), "%parent");
 	check("prototype seeded", v && !strcmp(v, "templates/pc"));
 
 	check("set name.short", character_attr_set(ch, "name.short", "Bob"));
@@ -141,7 +141,7 @@ test_room_bridge(void)
 	check("enter start", character_attr_set(ch, "room.current", "start"));
 	v = character_attr_get(ch, "room.current");
 	check("room.current is bare 'start'", v && !strcmp(v, "start"));
-	v = obj_prop_get(character_obj(ch), "%location");
+	v = obj_prop_get_ref(character_obj(ch), "%location");
 	check("%location is rooms/start", v && !strcmp(v, "rooms/start"));
 	check("start count 1", obj_contents_count("rooms/start") == 1);
 	check("start lists chars/2", room_has("rooms/start", "chars/2"));

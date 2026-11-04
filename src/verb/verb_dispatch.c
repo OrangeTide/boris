@@ -528,7 +528,7 @@ hc_create(struct vm_task *t, void *ctx)
 		return;
 	}
 	if (pkey)
-		obj_prop_set_internal(o, "%parent", pkey);
+		obj_prop_set_ref_internal(o, "%parent", pkey);
 	if (vc->eff_owner) {
 		/* Stamp ownership and register it in the owner index (also persists
 		 * the record, including %parent). */

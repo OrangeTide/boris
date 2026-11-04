@@ -600,6 +600,78 @@ test_json_with_escapes(void)
 	obj_free(obj);
 }
 
+static void
+test_prop_ref(void)
+{
+	OBJ *obj = obj_new("room");
+	char *v;
+	int rc;
+
+	check("ref obj created", obj != NULL);
+
+	/* set_ref / get_ref round trip */
+	rc = obj_prop_set_ref(obj, "exit.e.to", "zone/darkwood/square");
+	check("set_ref ok", rc == OBJ_OK);
+	v = obj_prop_get_ref(obj, "exit.e.to");
+	check("get_ref value",
+		v != NULL && strcmp(v, "zone/darkwood/square") == 0);
+
+	/* the value is stored under the marked key */
+	v = obj_prop_get(obj, "exit.e.to~");
+	check("stored under marked key",
+		v != NULL && strcmp(v, "zone/darkwood/square") == 0);
+	check("unmarked key absent", obj_prop_get(obj, "exit.e.to") == NULL);
+
+	/* is_ref recognizes the marked key, not the bare name */
+	check("is_ref marked", obj_prop_is_ref("exit.e.to~") == 1);
+	check("is_ref bare", obj_prop_is_ref("exit.e.to") == 0);
+	check("is_ref tombstone", obj_prop_is_ref("!exit.e.to~") == 0);
+
+	/* generic setter/deleter refuse a marked key */
+	check("generic set refuses marked key",
+		obj_prop_set(obj, "exit.e.to~", "x") == OBJ_ERR_PROTECTED);
+	check("generic delete refuses marked key",
+		obj_prop_delete(obj, "exit.e.to~") == OBJ_ERR_PROTECTED);
+
+	/* set_ref refuses protected logical names and bad values */
+	check("set_ref refuses %name",
+		obj_prop_set_ref(obj, "%parent", "x") == OBJ_ERR_PROTECTED);
+	check("set_ref refuses empty value",
+		obj_prop_set_ref(obj, "bad", "") == OBJ_ERR);
+	check("set_ref refuses space in value",
+		obj_prop_set_ref(obj, "bad", "a b") == OBJ_ERR);
+
+	/* structural reference through the privileged setter */
+	rc = obj_prop_set_ref_internal(obj, "%parent", "templates/room/cave");
+	check("set_ref_internal ok", rc == OBJ_OK);
+	v = obj_prop_get_ref(obj, "%parent");
+	check("get_ref structural",
+		v != NULL && strcmp(v, "templates/room/cave") == 0);
+
+	/* serialize and reload: marked keys survive the round trip */
+	{
+		char buf[512];
+		size_t out;
+		OBJ *re;
+
+		check("serialize", obj_get_json(obj, buf, sizeof buf, &out)
+			== OBJ_OK);
+		re = obj_new_from_json("room", buf);
+		check("reload", re != NULL);
+		v = obj_prop_get_ref(re, "exit.e.to");
+		check("reloaded ref value",
+			v != NULL && strcmp(v, "zone/darkwood/square") == 0);
+		obj_free(re);
+	}
+
+	/* delete_ref removes it */
+	check("delete_ref ok", obj_prop_delete_ref(obj, "exit.e.to") == OBJ_OK);
+	check("ref gone after delete",
+		obj_prop_get_ref(obj, "exit.e.to") == NULL);
+
+	obj_free(obj);
+}
+
 int
 main(void)
 {
@@ -625,6 +697,7 @@ main(void)
 	test_escaped_len();
 	test_prop_set_with_special_chars();
 	test_json_with_escapes();
+	test_prop_ref();
 
 	free(dump_buf);
 

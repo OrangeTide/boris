@@ -1,6 +1,6 @@
 LIBRARIES += obj
 obj_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
-obj_SRCS   = obj.c obj_cache.c obj_cache_muddb.c obj_cache_cas.c obj_store.c
+obj_SRCS   = obj.c obj_cache.c obj_cache_muddb.c obj_cache_cas.c obj_store.c objref.c
 obj_LIBS   = hashtable smolvfs
 
 EXECUTABLES  += test_obj
