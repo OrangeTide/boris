@@ -41,6 +41,11 @@ struct builder_ops {
 	 * hook's concern. */
 	int (*may_edit)(void *ctx, const struct acs_info *actor,
 		const char *actor_name, const char *key);
+	/* record a snapshot of the just-committed edit (doc/snapshot-restore-spec.md
+	 * section 4). Called after a successful commit, best-effort: a failure
+	 * here never fails the save. NULL means no history is recorded. */
+	void (*snapshot)(void *ctx, const char *key, OBJ *obj,
+		const char *actor_name);
 	void *ctx;
 };
 

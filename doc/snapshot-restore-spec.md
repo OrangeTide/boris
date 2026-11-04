@@ -389,7 +389,12 @@ argument shapes in the table in section 3.1.
    with no tolerant fallback. Done.
 1. The in-process snapshot bridge: a hook in `builder_save()` that mirrors the
    just-written keys into an `obj_cache_cas` cache and appends a commit to the
-   `world` ref, with the attribution comment. Dirty-only.
+   `world` ref, with the attribution comment. Dirty-only. Done:
+   `src/builder/builder_snapshot.c` holds the bridge (one cache on the `objs`
+   domain and `world` ref, `data/world-depot`); `builder_save` calls it through
+   a new optional `ops->snapshot` hook after a successful commit, best-effort
+   (section 4.4); `builder_ops.c` wires the default hook and `boris.c` opens and
+   closes the depot at startup/exit. Tested in `test_builder_snapshot.c`.
 2. The scoped cas-to-muddb import (the rollback gap in
    `snapshot-proposal.md`), taking a root, a source prefix, a destination
    prefix, and the rewrite flag; it writes and deletes LMDB keys, rebuilds the

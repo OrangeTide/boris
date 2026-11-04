@@ -177,12 +177,19 @@ builder_save(const struct builder_ops *ops, const struct builder_req *req,
 	warn_dangling_exits(ops, req->obj, res);
 	warn_missing_zone(ops, req, res);
 
-	/* 7. commit. Hook point for later versioning (#14) and audit logging. */
+	/* 7. commit. */
 	if (ops->commit(ops->ctx, req->commit_key, req->obj) != 0) {
 		snprintf(res->message, sizeof res->message,
 			"commit failed for %s", req->commit_key);
 		return res->status = BUILDER_ERR;
 	}
+
+	/* 8. snapshot the accepted edit (doc/snapshot-restore-spec.md section 4).
+	 * Best-effort history: the commit above already succeeded, so a snapshot
+	 * failure never changes the result. */
+	if (ops->snapshot)
+		ops->snapshot(ops->ctx, req->commit_key, req->obj,
+			req->actor_name);
 
 	return res->status = BUILDER_OK;
 }
