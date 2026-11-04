@@ -19,7 +19,7 @@ Support".
       (`a7 = 0x00100000 + index`), matching vm-hostcall-abi.
 - [x] Guest header (`sdk/vm/include/vmsys.h`) declaring the host-call names.
 - [x] Import table (`sdk/vm/imports.S`) and a linker script (`sdk/vm/vm.ld`,
-      128KB flat from `skjegg`'s smolmoo_rv.ld). One one-shot example
+      128KB flat from `skjegg`'s RV32 runtime linker script). One one-shot example
       (`examples/hello.c`) plus `sdk/vm/Makefile` to build it.
 - [x] `vm-run` harness (`src/vm/vm-run.c`) loads and runs a program image
       against the runtime builtins; validated hello end to end (prints its

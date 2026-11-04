@@ -8,10 +8,10 @@ Phase 1 of the VM pivot. Bring in and own the RV32 CPU emulator core and
 ELF32 loader, and wire the host seam without any game integration yet. See
 doc/mud-vm-design.md "Emulator" and doc/vm-migration-plan.md Part 2.
 
-The core is self-contained (`<stdint.h>` and `<string.h>` only) and
-identical across the kobold, smolmoo, and skjegg projects apart from the
-license header. The owner relicenses the imported files into boris's license
-as a separate human step.
+The core is self-contained (`<stdint.h>` and `<string.h>` only) and a
+verbatim copy of the upstream skjegg core apart from the license header.
+The owner relicenses the imported files into boris's license as a separate
+human step.
 
 ## Tasks
 
