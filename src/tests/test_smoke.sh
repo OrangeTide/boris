@@ -200,6 +200,7 @@ run_test menu_quit
 run_test bad_login
 run_test new_user
 run_test enter_game
+run_test help_kobold
 run_test charset_command
 run_test redit_longdesc
 run_test redit_check
