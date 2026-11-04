@@ -1,6 +1,7 @@
 ---
 title: Read-only /obj branch of the in-world 9P server
 status: backlog
+gitlab-sync: OrangeTide/boris#119
 ---
 
 The in-world 9P server (`src/vfs/p9_vfs.c`) serves the content-addressed VFS

@@ -1,6 +1,7 @@
 ---
 title: Kobold-Pascal in-world @compile
 status: done
+gitlab-sync: OrangeTide/boris#118
 ---
 
 `@compile` now supports Kobold-Pascal (`.pas`, `.kp`) alongside C and
