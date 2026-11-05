@@ -1,6 +1,6 @@
 LIBRARIES += builder
 builder_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
-builder_SRCS   = builder_save.c builder_ops.c builder_snapshot.c world_restore.c
+builder_SRCS   = builder_save.c builder_ops.c builder_snapshot.c world_restore.c builder_history.c
 builder_LIBS   = obj acs log smolvfs
 builder_EXPORTED_CPPFLAGS = -I$(builder_DIR)
 

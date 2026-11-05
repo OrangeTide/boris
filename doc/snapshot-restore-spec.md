@@ -357,10 +357,17 @@ argument shapes in the table in section 3.1.
 
 ## 14. Open questions
 
-- **Cursor persistence.** Is the per-(builder, zone) undo and redo cursor
-  connection-lifetime (like the scratch OBJ) or persisted per account? A
-  persisted cursor lets undo survive a reconnect but needs a storage key,
-  the same question `doc/scratch-obj-spec.md` section 8 defers.
+- **Cursor persistence.** Resolved for now to a process-lifetime map keyed by
+  (builder, zone) (step 6): the cursor survives a reconnect within one server
+  run and resets on restart, with no new struct field or on-disk storage key. A
+  per-account persisted cursor (surviving restart) remains the open upgrade,
+  the same storage-key question `doc/scratch-obj-spec.md` section 8 defers.
+- **Snapshot on restore / deletions.** The dirty-only bridge (section 4.1) is
+  additive: it never removes an object from the CAS tree, and a restore records
+  no snapshot. So the world tip can lag live across deletions and across an
+  undo. A deletion-aware snapshot that records restores as commits would make
+  the tip a faithful mirror of live (closing both step-6 limitations) and make
+  undo auditable per section 6.1.
 - **Scratch lifetime.** When is a published or abandoned scratch area
   reclaimed, and is there a quota on scratch areas per builder
   (`doc/zone-spec.md` section 5 quotas)?
@@ -439,5 +446,21 @@ argument shapes in the table in section 3.1.
    log. Tested in `test_builder_snapshot.c` (aggressive keep bound prunes the
    log while the current world survives).
 6. The `world-backup-commands` in-game surface (section 10), ACS-gated and
-   zone-scoped.
+   zone-scoped. Done: `src/builder/builder_history.c` holds the workflow engine
+   over the bridge and `world_restore`, and `src/cmd/history_cmd.c` is the thin
+   telnet layer (`@history`, `@undo`, `@redo`, `@restore`, `@checkout`,
+   `@publish` gate on `fB|fW` plus `zone_may_edit`; `@checkpoint` gates on
+   `fW`). A trailing `force` word is the wizard override past an integrity
+   failure. The undo/redo cursor is a process-lifetime map keyed by (builder,
+   zone) (the section 14 question, resolved to process-lifetime: survives
+   reconnect within a run, resets on restart, no new struct field or storage
+   key). `@checkpoint` pins under a namespaced ref (`cp-<label>`) since a ref
+   name cannot hold `/`; that ref is spared world-log truncation. Two
+   limitations are carried as documented follow-ups, both rooted in the
+   dirty-only, additive bridge (section 4.1): a restore writes live but records
+   no new snapshot, so the cursor navigates the log frozen at the first step and
+   a real edit re-anchors it; and `@checkout`/`@publish` copy the source from
+   the current world tip (the last snapshot), which mirrors live except
+   immediately after an undo of that same subtree. Deletion-aware,
+   restore-recording snapshots are the fix that closes both (section 14).
 7. Tests per section 12, wired into `module.mk`.

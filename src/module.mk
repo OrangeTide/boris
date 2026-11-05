@@ -153,6 +153,7 @@ boris_SRCS = \
 	cmd/charset.c \
 	cmd/edit.c \
 	cmd/zone_cmd.c \
+	cmd/history_cmd.c \
 	cmd/dig.c \
 	cmd/builder_edit.c \
 	cmd/olc.c \
