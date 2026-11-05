@@ -55,6 +55,25 @@ void builder_snapshot_record(const char *key, OBJ *obj, const char *actor_name);
 int builder_snapshot_enabled(void);
 
 /*
+ * Configure history retention and garbage collection on the "world" log
+ * (doc/snapshot-restore-spec.md section 8). Per-save snapshots grow the log by
+ * one entry per edit, so retention is mandatory; builder_snapshot_init applies
+ * defaults, and this overrides them (used by tests and, later, config).
+ *
+ *   keep_count        keep at least the last N log entries (0 disables).
+ *   keep_age_s        also keep entries younger than this many seconds (0
+ *                     disables). The two bounds form a union; the newest entry
+ *                     always survives. Both 0 disables pruning.
+ *   gc_every_commits  run a prune-and-sweep after this many commits (0 off).
+ *   grace_s           spare unreachable objects younger than this at a sweep.
+ *                     Must exceed the longest a save may sit uncommitted.
+ *
+ * A no-op when the bridge is disabled.
+ */
+void builder_snapshot_set_retention(int keep_count, long keep_age_s,
+	unsigned gc_every_commits, long grace_s);
+
+/*
  * The cas_tree backing the history depot, or NULL when the bridge is disabled.
  * The restore path reads snapshots through this shared handle, because the
  * depot lock is exclusive and a second cas on the same depot would block.

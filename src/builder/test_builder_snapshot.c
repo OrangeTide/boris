@@ -142,6 +142,61 @@ test_record_and_readback(void)
 	cas_free(store);
 }
 
+/* retention prunes the world log to the keep bound while the current world
+ * stays intact (spec section 8). */
+static void
+test_retention(void)
+{
+	char depot[512];
+	struct cas *store;
+	struct cas_tree *ct;
+	OBJ_CACHE *reader;
+	struct log_capture cap = {0};
+	OBJ *o;
+	int i;
+
+	depot_path(depot, sizeof depot, "retention-depot");
+	check("retention init ok", builder_snapshot_init(depot) == 0);
+
+	/* keep only the last two edits, prune and sweep on every commit, no
+	 * grace (safe: the bridge leaves nothing uncommitted). */
+	builder_snapshot_set_retention(2, 0, 1, 0);
+
+	for (i = 0; i < 5; i++) {
+		char key[64], json[96];
+
+		snprintf(key, sizeof key, "zone/world/r%d", i);
+		snprintf(json, sizeof json, "{\"name\":\"R%d\"}", i);
+		o = obj_new_from_json(key, json);
+		builder_snapshot_record(key, o, "tester");
+		obj_free(o);
+	}
+
+	builder_snapshot_shutdown();
+
+	store = cas_new(depot);
+	ct = store ? cas_tree_new(store) : NULL;
+	check("retention reader opened", ct != NULL);
+	if (!ct) {
+		cas_free(store);
+		return;
+	}
+	cas_tree_set_flags(ct, CAS_TREE_USE_HTREE);
+
+	cas_tree_log_read(ct, "world", log_cb, &cap);
+	check("log pruned to keep_count", cap.count == 2);
+
+	reader = obj_cache_cas_new(ct, "world", "objs", 8);
+	o = reader ? obj_cache_get(reader, "zone/world/r4") : NULL;
+	check("newest object survives retention", o != NULL);
+	if (o)
+		obj_cache_release(reader, o);
+
+	obj_cache_cas_free(reader);
+	cas_tree_free(ct);
+	cas_free(store);
+}
+
 static void
 test_noop_after_shutdown(void)
 {
@@ -165,6 +220,7 @@ main(void)
 
 	test_noop_before_init();
 	test_record_and_readback();
+	test_retention();
 	test_noop_after_shutdown();
 
 	cleanup_tmpdir();

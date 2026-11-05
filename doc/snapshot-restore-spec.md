@@ -428,7 +428,16 @@ argument shapes in the table in section 3.1.
    needs a full scan of objects outside the subtree, since there is no
    reverse-reference index. Tested in `test_world_restore.c` (outbound and
    inbound, each refused then forced).
-5. Retention and GC wiring (section 8).
+5. Retention and GC wiring (section 8). Done: `builder_snapshot_init`
+   configures the `world` cache with `obj_cache_cas_retention` and
+   `obj_cache_cas_gc_policy`, so each commit's auto-GC prunes the log with
+   `cas_tree_log_truncate` then sweeps. Defaults are compile-time stand-ins for
+   the per-server config left open in section 14 (keep the last 1000 edits or
+   30 days, prune-and-sweep every 16 commits, 1 hour grace);
+   `builder_snapshot_set_retention` overrides them. Named checkpoint refs are
+   untouched: truncation acts only on the `world` ref and GC marks every ref's
+   log. Tested in `test_builder_snapshot.c` (aggressive keep bound prunes the
+   log while the current world survives).
 6. The `world-backup-commands` in-game surface (section 10), ACS-gated and
    zone-scoped.
 7. Tests per section 12, wired into `module.mk`.

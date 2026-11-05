@@ -20,6 +20,20 @@
  * after every record, so at most a handful sit uncommitted; this is headroom. */
 #define SNAPSHOT_CACHE_SLOTS 64
 
+/*
+ * Default retention and GC for the "world" log (section 8). These are the
+ * compile-time stand-ins for the per-server config the spec leaves open
+ * (section 14); builder_snapshot_set_retention overrides them. Keep the last
+ * SNAPSHOT_KEEP_COUNT edits or anything within SNAPSHOT_KEEP_AGE, whichever is
+ * larger, and prune-and-sweep every SNAPSHOT_GC_EVERY commits, sparing objects
+ * younger than SNAPSHOT_GC_GRACE. The bridge commits on every record, so no
+ * save sits uncommitted and the grace is pure headroom.
+ */
+#define SNAPSHOT_KEEP_COUNT 1000
+#define SNAPSHOT_KEEP_AGE   (30L * 24 * 3600)	/* 30 days */
+#define SNAPSHOT_GC_EVERY   16
+#define SNAPSHOT_GC_GRACE   3600L		/* 1 hour */
+
 static struct cas *snap_store;
 static struct cas_tree *snap_tree;
 static OBJ_CACHE *snap_cache;
@@ -58,9 +72,22 @@ builder_snapshot_init(const char *depot_path)
 		return -1;
 	}
 
+	builder_snapshot_set_retention(SNAPSHOT_KEEP_COUNT, SNAPSHOT_KEEP_AGE,
+		SNAPSHOT_GC_EVERY, SNAPSHOT_GC_GRACE);
+
 	LOG_INFO("Snapshot bridge opened at %s (ref %s).", depot_path,
 		BUILDER_SNAPSHOT_REF);
 	return 0;
+}
+
+void
+builder_snapshot_set_retention(int keep_count, long keep_age_s,
+	unsigned gc_every_commits, long grace_s)
+{
+	if (!snap_cache)
+		return;
+	obj_cache_cas_retention(snap_cache, keep_count, (time_t)keep_age_s);
+	obj_cache_cas_gc_policy(snap_cache, gc_every_commits, (time_t)grace_s);
 }
 
 void
