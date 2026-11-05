@@ -417,7 +417,17 @@ argument shapes in the table in section 3.1.
    non-reference `id` property, where present, is left as-is per the
    references-only rule. Tested in `test_world_restore.c` (a rewrite unit test
    plus an end-to-end checkout).
-4. The integrity pass, outbound and inbound (section 6.4).
+4. The integrity pass, outbound and inbound (section 6.4). Done in
+   `world_restore.c`: before the apply transaction, `check_outbound` verifies
+   every reference of every written object resolves in the resulting tree
+   (targets inside the subtree are the written keys, targets outside must exist
+   in live), and `check_inbound` scans the live objects outside the subtree for
+   any reference pointing into it that the copy would orphan. A violation
+   refuses the copy and logs the offending `key[ref] -> value`, unless the new
+   `force` argument (the wizard override) is set, which still logs. Inbound
+   needs a full scan of objects outside the subtree, since there is no
+   reverse-reference index. Tested in `test_world_restore.c` (outbound and
+   inbound, each refused then forced).
 5. Retention and GC wiring (section 8).
 6. The `world-backup-commands` in-game surface (section 10), ACS-gated and
    zone-scoped.

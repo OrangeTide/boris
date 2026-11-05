@@ -194,7 +194,7 @@ run(void)
 
 	/* 4. restore the zone in place from the snapshot root. */
 	check("restore ok", world_restore(builder_snapshot_tree(), root0,
-		"zone/world", "zone/world", 0) == WORLD_RESTORE_OK);
+		"zone/world", "zone/world", 0, 0) == WORLD_RESTORE_OK);
 
 	/* 5. the live world matches the snapshot again. */
 	nm = name_of("zone/world/hall");
@@ -266,6 +266,8 @@ checkout(void)
 	char root[CAS_HASH_HEX + 1];
 	char *v;
 
+	/* the shared template the square inherits from must resolve */
+	put_json("templates/room", "{\"name\":\"Room\"}");
 	put_json("zone/town/square",
 		"{\"name\":\"Square\",\"%parent~\":\"templates/room\","
 		"\"exit.n.to~\":\"zone/town/market\","
@@ -282,7 +284,7 @@ checkout(void)
 		== CAS_OK);
 
 	check("checkout ok", world_restore(builder_snapshot_tree(), root,
-		"zone/town", "zone/scratch/w", 1) == WORLD_RESTORE_OK);
+		"zone/town", "zone/scratch/w", 1, 0) == WORLD_RESTORE_OK);
 
 	/* destination objects exist with references remapped where internal */
 	check("square copied", exists("zone/scratch/w/square"));
@@ -316,6 +318,69 @@ checkout(void)
 	free(v);
 }
 
+/* outbound integrity: a snapshot whose object references a room that will not
+ * exist is refused, and the refusal leaves the live store untouched; a wizard
+ * force applies it anyway. */
+static void
+outbound_integrity(void)
+{
+	char root[CAS_HASH_HEX + 1];
+
+	put_json("zone/bad/room",
+		"{\"name\":\"Bad\",\"exit.n.to~\":\"zone/bad/ghost\"}");
+	record("zone/bad/room");
+	check("captured bad root",
+		cas_tree_ref_read(builder_snapshot_tree(), "world", root)
+		== CAS_OK);
+
+	/* remove it from live so the restore is a fresh write of the snapshot */
+	check("bad room destroyed",
+		obj_destroy("zone/bad/room") == OBJ_OK);
+
+	check("restore refused on dangling outbound",
+		world_restore(builder_snapshot_tree(), root, "zone/bad",
+			"zone/bad", 0, 0) == WORLD_RESTORE_ERR);
+	check("nothing written on refusal", !exists("zone/bad/room"));
+
+	check("forced restore applies",
+		world_restore(builder_snapshot_tree(), root, "zone/bad",
+			"zone/bad", 0, 1) == WORLD_RESTORE_OK);
+	check("forced restore wrote the object", exists("zone/bad/room"));
+}
+
+/* inbound integrity: restoring a zone to a root that lacks a room an external
+ * object still references is refused (the restore would orphan that external
+ * reference), and a wizard force applies it. */
+static void
+inbound_integrity(void)
+{
+	char root_early[CAS_HASH_HEX + 1];
+
+	/* snapshot the zone before the referenced room exists */
+	put_json("zone/vic/other", "{\"name\":\"Other\"}");
+	record("zone/vic/other");
+	check("captured early root",
+		cas_tree_ref_read(builder_snapshot_tree(), "world", root_early)
+		== CAS_OK);
+
+	/* now add the room and an external object that points at it */
+	put_json("zone/vic/target", "{\"name\":\"Target\"}");
+	put_json("zone/keep/anchor",
+		"{\"name\":\"Anchor\",\"exit.e.to~\":\"zone/vic/target\"}");
+
+	/* restoring zone/vic to the early root would delete target, orphaning
+	 * the anchor's exit */
+	check("restore refused on dangling inbound",
+		world_restore(builder_snapshot_tree(), root_early, "zone/vic",
+			"zone/vic", 0, 0) == WORLD_RESTORE_ERR);
+	check("target survives refusal", exists("zone/vic/target"));
+
+	check("forced restore applies",
+		world_restore(builder_snapshot_tree(), root_early, "zone/vic",
+			"zone/vic", 0, 1) == WORLD_RESTORE_OK);
+	check("target removed by forced restore", !exists("zone/vic/target"));
+}
+
 int
 main(void)
 {
@@ -342,6 +407,8 @@ main(void)
 	test_rewrite_primitive();
 	run();
 	checkout();
+	outbound_integrity();
+	inbound_integrity();
 
 	builder_snapshot_shutdown();
 	obj_shutdown();

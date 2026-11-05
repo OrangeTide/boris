@@ -21,21 +21,29 @@ struct cas_tree;
  *              (e.g. "zone/world"). Everything under "<src_prefix>/" is read.
  *   dst_prefix the destination subtree prefix in the live tree.
  *   rewrite    when nonzero, rewrite intra-subtree references as keys move from
- *              src_prefix to dst_prefix.
+ *              src_prefix to dst_prefix. Required for a cross-path copy.
+ *   force      when nonzero, apply even if the integrity pass finds dangling
+ *              references (the wizard override, spec section 9). The offenders
+ *              are still logged.
  *
- * The restore reads the source objects from CAS, then in one transaction
- * writes them into live, deletes live keys under the destination that are
- * absent from the source, rebuilds the contents and owner indexes, and
+ * The restore reads the source objects from CAS, rewrites their keys and
+ * references for the destination, checks referential integrity, then in one
+ * transaction writes them into live, deletes live keys under the destination
+ * that are absent from the source, rebuilds the contents and owner indexes, and
  * invalidates the object cache (obj_apply_restore).
  *
- * Step 2 implements the in-place case (src_prefix == dst_prefix, rewrite off),
- * which is undo, redo, and same-path restore. Cross-path copy with reference
- * rewrite (checkout and publish) lands with the rewrite pass (spec step 3);
- * until then a cross-path or rewrite request returns WORLD_RESTORE_ERR.
+ * Integrity (section 6.4) refuses, unless forced, a copy that would leave a
+ * dangling reference: outbound (a written object's reference that no longer
+ * resolves) or inbound (an external object's reference into the subtree that
+ * the copy would orphan).
+ *
+ * Same prefixes with rewrite off is the in-place case (undo, redo, same-path
+ * restore). Different prefixes require rewrite on (checkout, publish); a
+ * cross-path request without rewrite returns WORLD_RESTORE_ERR.
  *
  * Returns WORLD_RESTORE_OK, or WORLD_RESTORE_ERR with nothing changed.
  */
 int world_restore(struct cas_tree *ct, const char *root_hash,
-	const char *src_prefix, const char *dst_prefix, int rewrite);
+	const char *src_prefix, const char *dst_prefix, int rewrite, int force);
 
 #endif

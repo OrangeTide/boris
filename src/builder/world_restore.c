@@ -231,9 +231,123 @@ in_keyset(char *const *keys, size_t n, const char *key)
 	return 0;
 }
 
+/* value is inside the destination subtree: equal to prefix or under "prefix/" */
+static int
+under_subtree(const char *value, const char *prefix, size_t plen)
+{
+	if (strncmp(value, prefix, plen) != 0)
+		return 0;
+	return value[plen] == '\0' || value[plen] == '/';
+}
+
+/* does an object exist at key in the current live store? */
+static int
+live_exists(const char *key)
+{
+	OBJ *o = obj_get(key);
+
+	if (o) {
+		obj_release(o);
+		return 1;
+	}
+	return 0;
+}
+
+/*
+ * Resolve a reference value against the tree that will exist after the copy:
+ * targets inside the destination subtree are exactly the written keys; targets
+ * outside it are unchanged, so they must exist in the current live store.
+ */
+static int
+resolves_after(const char *value, char *const *put_keys, size_t n_put,
+	const char *dst, size_t dlen)
+{
+	if (under_subtree(value, dst, dlen))
+		return in_keyset(put_keys, n_put, value);
+	return live_exists(value);
+}
+
+/*
+ * Outbound integrity: every reference of every written object must resolve in
+ * the resulting tree. Logs each offender and returns the count (section 6.4).
+ */
+static int
+check_outbound(char *const *put_keys, OBJ *const *put_objs, size_t n_put,
+	const char *dst, size_t dlen)
+{
+	size_t i;
+	int bad = 0;
+
+	for (i = 0; i < n_put; i++) {
+		OBJ_ITER *it = obj_iter_begin(put_objs[i]);
+		const char *key, *val;
+
+		if (!it)
+			continue;
+		while (obj_iter_next(it, &key, &val)) {
+			if (!obj_prop_is_ref(key) || !val || !val[0])
+				continue;
+			if (resolves_after(val, put_keys, n_put, dst, dlen))
+				continue;
+			LOG_WARNING("restore: dangling outbound reference "
+				"%s[%s] -> %s", put_keys[i], key, val);
+			bad++;
+		}
+		obj_iter_end(it);
+	}
+	return bad;
+}
+
+/*
+ * Inbound integrity: every reference from an object OUTSIDE the destination
+ * subtree that points INTO it must still resolve once the subtree is replaced
+ * by the written keys. Requires scanning the live objects outside the subtree,
+ * since there is no reverse-reference index. Logs each offender and returns the
+ * count (section 6.4).
+ */
+static int
+check_inbound(char *const *put_keys, size_t n_put, const char *dst, size_t dlen)
+{
+	struct keylist all = {0};
+	size_t i;
+	int bad = 0;
+
+	obj_foreach_key(NULL, keylist_collect, &all);
+
+	for (i = 0; i < all.count; i++) {
+		const char *k = all.keys[i];
+		OBJ *o;
+		OBJ_ITER *it;
+		const char *key, *val;
+
+		if (under_subtree(k, dst, dlen))
+			continue; /* inside the subtree: covered by outbound */
+		o = obj_get(k);
+		if (!o)
+			continue;
+		it = obj_iter_begin(o);
+		while (it && obj_iter_next(it, &key, &val)) {
+			if (!obj_prop_is_ref(key) || !val || !val[0])
+				continue;
+			if (!under_subtree(val, dst, dlen))
+				continue; /* not pointing into the subtree */
+			if (in_keyset(put_keys, n_put, val))
+				continue;
+			LOG_WARNING("restore: dangling inbound reference "
+				"%s[%s] -> %s", k, key, val);
+			bad++;
+		}
+		obj_iter_end(it);
+		obj_release(o);
+	}
+
+	keylist_free(&all);
+	return bad;
+}
+
 int
 world_restore(struct cas_tree *ct, const char *root_hash,
-	const char *src_prefix, const char *dst_prefix, int rewrite)
+	const char *src_prefix, const char *dst_prefix, int rewrite, int force)
 {
 	char subtree_path[OBJ_PATH_MAX];
 	char dir_hash[CAS_HASH_HEX + 1];
@@ -323,7 +437,21 @@ world_restore(struct cas_tree *ct, const char *root_hash,
 				del_keys[n_del++] = live.keys[i];
 	}
 
-	/* 4. apply writes, deletes, index rebuild, and cache invalidation in one
+	/* 4. referential integrity (section 6.4): refuse a copy that would leave a
+	 * dangling reference, unless the caller forces it. */
+	if (!force) {
+		int bad = check_outbound(dst_keys, src.objs, src.count,
+				dst_prefix, dlen)
+			+ check_inbound(dst_keys, src.count, dst_prefix, dlen);
+
+		if (bad) {
+			LOG_ERROR("restore refused: %d dangling reference(s) "
+				"for \"%s\"", bad, dst_prefix);
+			goto done;
+		}
+	}
+
+	/* 5. apply writes, deletes, index rebuild, and cache invalidation in one
 	 * transaction. */
 	if (obj_apply_restore((const char *const *)dst_keys,
 		(OBJ *const *)src.objs, src.count, del_keys, n_del) != OBJ_OK) {
