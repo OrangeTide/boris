@@ -28,6 +28,7 @@
 #define LOG_SUBSYSTEM "muddb-tool"
 
 #include "muddb.h"
+#include "muddb_export.h"
 #include "obj.h"
 #include "objref.h"
 #include "obj_cache_cas.h"
@@ -79,27 +80,6 @@ usage(const char *argv0)
 }
 
 /* --- file I/O helpers --------------------------------------------------- */
-
-static int
-write_file(const char *path, const char *data, size_t len)
-{
-	FILE *fp;
-
-	fp = fopen(path, "w");
-	if (!fp) {
-		LOG_ERROR("fopen(%s): %s", path, strerror(errno));
-		return -1;
-	}
-	if (fwrite(data, 1, len, fp) != len) {
-		LOG_ERROR("fwrite(%s): %s", path, strerror(errno));
-		fclose(fp);
-		return -1;
-	}
-	/* end with a newline for human readability */
-	fputc('\n', fp);
-	fclose(fp);
-	return 0;
-}
 
 static char *
 read_file(const char *path, size_t *out_len)
@@ -184,81 +164,7 @@ key_is_safe(const char *key)
 	return 1;
 }
 
-/* create all parent directories for a file path */
-static int
-mkdirs_parents(const char *filepath)
-{
-	char tmp[PATH_MAX];
-	char *slash;
-
-	snprintf(tmp, sizeof(tmp), "%s", filepath);
-
-	for (slash = tmp + 1; (slash = strchr(slash, '/')) != NULL; slash++) {
-		*slash = '\0';
-		if (mkdir(tmp, 0777) != 0 && errno != EEXIST) {
-			LOG_ERROR("mkdir(%s): %s", tmp, strerror(errno));
-			*slash = '/';
-			return -1;
-		}
-		*slash = '/';
-	}
-	return 0;
-}
-
 /* --- export ------------------------------------------------------------- */
-
-static int
-export_domain(MUDDB *db, const char *domain, const char *outdir)
-{
-	MUDDB_ITER *it;
-	const char *key;
-	char path[PATH_MAX];
-	char buf[JSON_BUFSZ];
-	int count = 0;
-
-	snprintf(path, sizeof(path), "%s/%s", outdir, domain);
-	if (mkdirs(path) != 0)
-		return -1;
-
-	it = muddb_iter_begin(db, domain);
-	if (!it)
-		return 0; /* domain may be empty or not exist -- not an error */
-
-	while ((key = muddb_iter_next(it)) != NULL) {
-		OBJ *obj;
-
-		if (!key_is_safe(key)) {
-			LOG_ERROR("skipping unsafe key \"%s\" in domain \"%s\"",
-				key, domain);
-			continue;
-		}
-
-		obj = muddb_iter_value(it);
-		if (!obj) {
-			LOG_ERROR("could not read %s/%s", domain, key);
-			continue;
-		}
-
-		if (obj_get_json(obj, buf, sizeof(buf), NULL) != OBJ_OK) {
-			LOG_ERROR("could not serialize %s/%s", domain, key);
-			obj_free(obj);
-			continue;
-		}
-		obj_free(obj);
-
-		snprintf(path, sizeof(path), "%s/%s/%s.json",
-			outdir, domain, key);
-		if (mkdirs_parents(path) != 0) {
-			continue;
-		}
-		if (write_file(path, buf, strlen(buf)) == 0)
-			count++;
-	}
-	muddb_iter_end(it);
-
-	printf("  %s: %d objects\n", domain, count);
-	return 0;
-}
 
 /* well-known domains -- must match the DOMAIN_* constants in boris.h */
 static const char *known_domains[] = {
@@ -268,15 +174,12 @@ static const char *known_domains[] = {
 	NULL
 };
 
-static int
-export_all_domains(MUDDB *db, const char *outdir)
+/* print one domain's record count (progress callback for muddb_export) */
+static void
+export_report(const char *domain, int count, void *ctx)
 {
-	const char **dp;
-
-	for (dp = known_domains; *dp; dp++)
-		export_domain(db, *dp, outdir);
-
-	return 0;
+	(void)ctx;
+	printf("  %s: %d objects\n", domain, count);
 }
 
 static int
@@ -284,7 +187,6 @@ cmd_export(const char *dbpath, const char *outdir,
            int argc, char **argv)
 {
 	MUDDB *db;
-	int i;
 
 	db = muddb_open(dbpath, 0);
 	if (!db) {
@@ -292,18 +194,11 @@ cmd_export(const char *dbpath, const char *outdir,
 		return 1;
 	}
 
-	if (mkdirs(outdir) != 0) {
+	printf("Exporting %s -> %s\n", dbpath, outdir);
+	if (muddb_export(db, outdir, (const char *const *)argv, (size_t)argc,
+		export_report, NULL) != 0) {
 		muddb_close(db);
 		return 1;
-	}
-
-	printf("Exporting %s -> %s\n", dbpath, outdir);
-
-	if (argc == 0) {
-		export_all_domains(db, outdir);
-	} else {
-		for (i = 0; i < argc; i++)
-			export_domain(db, argv[i], outdir);
 	}
 
 	muddb_close(db);

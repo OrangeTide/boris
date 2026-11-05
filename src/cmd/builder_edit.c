@@ -11,6 +11,7 @@
 #include "zone.h"
 #include "zone_builder.h"
 #include "builder.h"
+#include "builder_snapshot.h"
 #include "olc.h"
 
 #include <ctype.h>
@@ -450,6 +451,9 @@ command_do_destroy(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd U
 			key);
 		return 0;
 	}
+	/* mirror the deletion into history so the world tip stops carrying it
+	 * (best-effort, like the save-side snapshot) */
+	builder_snapshot_forget(key, a.name);
 	telnetclient_printf(cl, "Destroyed %s. "
 		"(Exits pointing here may now dangle.)\n", key);
 	return 1;

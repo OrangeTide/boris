@@ -64,6 +64,20 @@ obj_initialize(struct muddb *db, unsigned cache_size)
 	return 0;
 }
 
+struct muddb *
+obj_db(void)
+{
+	return store_muddb();
+}
+
+int
+obj_sync(void)
+{
+	if (!obj_global_cache)
+		return OBJ_OK;
+	return obj_cache_flush_all(obj_global_cache) == 0 ? OBJ_OK : OBJ_ERR;
+}
+
 void
 obj_shutdown(void)
 {

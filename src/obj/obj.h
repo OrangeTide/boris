@@ -109,6 +109,14 @@ void obj_iter_end(OBJ_ITER *it);
 /* global object cache, backed by muddb */
 int obj_initialize(struct muddb *db, unsigned cache_size);
 void obj_shutdown(void);
+
+/* The muddb handle backing the global object cache, or NULL before
+ * obj_initialize. For callers that read the store directly, such as export. */
+struct muddb *obj_db(void);
+
+/* Flush every dirty cached object to the backing store, so a direct read of
+ * muddb (e.g. export) reflects live edits. Returns OBJ_OK or OBJ_ERR. */
+int obj_sync(void);
 OBJ *obj_get(const char *id);
 void obj_release(OBJ *obj);
 

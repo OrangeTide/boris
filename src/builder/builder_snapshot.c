@@ -120,11 +120,13 @@ builder_snapshot_tree(void)
 	return snap_tree;
 }
 
-/* Build the attribution comment: who changed what, and which zone it falls
- * under (section 4.2). Keys are "zone/<slug>/..."; anything else has no zone.
- * Best-effort text, truncated to fit. */
+/* Build the attribution comment: who did what to which key, and which zone it
+ * falls under (section 4.2). Keys are "zone/<slug>/..."; anything else has no
+ * zone. verb is the past-tense action ("edited", "removed"). Best-effort text,
+ * truncated to fit. */
 static void
-build_comment(char *buf, size_t bufsz, const char *key, const char *actor_name)
+build_comment(char *buf, size_t bufsz, const char *verb, const char *key,
+	const char *actor_name)
 {
 	const char *who = (actor_name && actor_name[0]) ? actor_name : "?";
 	char slug[64];
@@ -142,9 +144,9 @@ build_comment(char *buf, size_t bufsz, const char *key, const char *actor_name)
 	}
 
 	if (slug[0])
-		snprintf(buf, bufsz, "%s edited %s (zone %s)", who, key, slug);
+		snprintf(buf, bufsz, "%s %s %s (zone %s)", who, verb, key, slug);
 	else
-		snprintf(buf, bufsz, "%s edited %s", who, key);
+		snprintf(buf, bufsz, "%s %s %s", who, verb, key);
 }
 
 void
@@ -164,11 +166,34 @@ builder_snapshot_record(const char *key, OBJ *obj, const char *actor_name)
 		return;
 	}
 
-	build_comment(comment, sizeof comment, key, actor_name);
+	build_comment(comment, sizeof comment, "edited", key, actor_name);
 	if (obj_cache_cas_commit(snap_cache, comment) != OBJ_CACHE_OK) {
 		LOG_WARNING("snapshot bridge: could not commit %s", key);
 		return;
 	}
+}
+
+void
+builder_snapshot_forget(const char *key, const char *actor_name)
+{
+	char comment[OBJ_PATH_MAX + 96];
+
+	if (!snap_cache)
+		return; /* bridge disabled: no history, world still correct */
+	if (!key || !key[0]) {
+		LOG_WARNING("snapshot bridge: bad forget request");
+		return;
+	}
+
+	if (obj_cache_cas_del(snap_cache, key) != OBJ_CACHE_OK) {
+		LOG_WARNING("snapshot bridge: could not drop %s", key);
+		return;
+	}
+
+	build_comment(comment, sizeof comment, "removed", key, actor_name);
+	if (obj_cache_cas_commit(snap_cache, comment) != OBJ_CACHE_OK)
+		LOG_WARNING("snapshot bridge: could not commit removal of %s",
+			key);
 }
 
 /* A growable list of keys gathered from obj_foreach_key. */
@@ -203,11 +228,86 @@ keygrab_cb(const char *key, void *ctx)
 		g->oom = 1;
 }
 
+static int
+in_keygrab(const struct keygrab *g, const char *key)
+{
+	size_t i;
+
+	for (i = 0; i < g->count; i++)
+		if (g->keys[i] && strcmp(g->keys[i], key) == 0)
+			return 1;
+	return 0;
+}
+
+/* Resolve the tree hash of a slash-separated directory path under root; every
+ * component must be a directory. Returns 0 with the hash in out, or -1. */
+static int
+snap_resolve_dir(const char *root, const char *path, char *out)
+{
+	char cur[CAS_HASH_HEX + 1];
+	const char *p = path;
+
+	memcpy(cur, root, CAS_HASH_HEX);
+	cur[CAS_HASH_HEX] = '\0';
+	while (*p) {
+		const char *slash = strchr(p, '/');
+		size_t clen = slash ? (size_t)(slash - p) : strlen(p);
+		char comp[CAS_TREE_NAME_MAX + 1];
+		struct cas_tree_entry e;
+
+		if (clen == 0 || clen > CAS_TREE_NAME_MAX)
+			return -1;
+		memcpy(comp, p, clen);
+		comp[clen] = '\0';
+		if (cas_tree_lookup(snap_tree, cur, comp, &e) != CAS_OK)
+			return -1;
+		if ((e.mode & CAS_TREE_S_IFMT) != CAS_TREE_S_IFDIR)
+			return -1;
+		memcpy(cur, e.hash, CAS_HASH_HEX);
+		cur[CAS_HASH_HEX] = '\0';
+		p = slash ? slash + 1 : p + clen;
+	}
+	memcpy(out, cur, CAS_HASH_HEX + 1);
+	return 0;
+}
+
+/* Collect the committed leaf keys under the directory dir_hash into g, with rel
+ * the key path of that directory (relative to the domain). */
+static int
+collect_committed(const char *dir_hash, const char *rel, struct keygrab *g)
+{
+	struct cas_tree_dir dir;
+	int i, rc = 0;
+
+	cas_tree_dir_init(&dir);
+	if (cas_tree_load(snap_tree, dir_hash, &dir) != CAS_OK) {
+		cas_tree_dir_free(&dir);
+		return -1;
+	}
+	for (i = 0; i < dir.count && rc == 0; i++) {
+		struct cas_tree_entry *e = &dir.entries[i];
+		char child[OBJ_PATH_MAX];
+
+		if ((size_t)snprintf(child, sizeof child, "%s/%s", rel, e->name)
+			>= sizeof child) {
+			rc = -1;
+			break;
+		}
+		if ((e->mode & CAS_TREE_S_IFMT) == CAS_TREE_S_IFDIR)
+			rc = collect_committed(e->hash, child, g);
+		else
+			keygrab_cb(child, g);	/* append this leaf key */
+	}
+	cas_tree_dir_free(&dir);
+	return rc;
+}
+
 int
 builder_snapshot_subtree(const char *prefix, const char *comment)
 {
-	struct keygrab g = {0};
-	char scan[OBJ_PATH_MAX];
+	struct keygrab live = {0}, had = {0};
+	char scan[OBJ_PATH_MAX], dirpath[OBJ_PATH_MAX];
+	char root[CAS_HASH_HEX + 1], dirhash[CAS_HASH_HEX + 1];
 	size_t i;
 	int rc = 0;
 
@@ -222,25 +322,49 @@ builder_snapshot_subtree(const char *prefix, const char *comment)
 		return -1;
 	}
 
-	obj_foreach_key(scan, keygrab_cb, &g);
+	/* the live objects under the path */
+	obj_foreach_key(scan, keygrab_cb, &live);
 
-	for (i = 0; i < g.count; i++) {
-		OBJ *o = obj_get(g.keys[i]);
+	/* the keys the committed tip still holds under the path, so the ones no
+	 * longer live can be dropped. This is the recomputed wipe: rather than
+	 * tracking deletions, the snapshot replaces the subtree with exactly the
+	 * live set, matching the in-place wipe the LMDB restore already does. */
+	if ((size_t)snprintf(dirpath, sizeof dirpath, "%s/%s",
+		BUILDER_SNAPSHOT_DOMAIN, prefix) < sizeof dirpath
+		&& cas_tree_ref_read(snap_tree, BUILDER_SNAPSHOT_REF, root)
+			== CAS_OK
+		&& snap_resolve_dir(root, dirpath, dirhash) == 0)
+		collect_committed(dirhash, prefix, &had);
+
+	for (i = 0; i < had.count; i++) {
+		if (!in_keygrab(&live, had.keys[i])
+			&& obj_cache_cas_del(snap_cache, had.keys[i])
+				!= OBJ_CACHE_OK) {
+			LOG_WARNING("snapshot bridge: could not drop %s",
+				had.keys[i]);
+			rc = -1;
+		}
+		free(had.keys[i]);
+	}
+	free(had.keys);
+
+	for (i = 0; i < live.count; i++) {
+		OBJ *o = obj_get(live.keys[i]);
 
 		if (o) {
-			if (obj_cache_cas_put(snap_cache, g.keys[i], o)
+			if (obj_cache_cas_put(snap_cache, live.keys[i], o)
 				!= OBJ_CACHE_OK) {
 				LOG_WARNING("snapshot bridge: could not mirror %s",
-					g.keys[i]);
+					live.keys[i]);
 				rc = -1;
 			}
 			obj_release(o);
 		}
-		free(g.keys[i]);
+		free(live.keys[i]);
 	}
-	free(g.keys);
+	free(live.keys);
 
-	if (g.oom) {
+	if (live.oom || had.oom) {
 		LOG_WARNING("snapshot bridge: out of memory scanning %s", prefix);
 		rc = -1;
 	}

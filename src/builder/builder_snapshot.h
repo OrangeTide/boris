@@ -51,6 +51,15 @@ void builder_snapshot_shutdown(void);
  */
 void builder_snapshot_record(const char *key, OBJ *obj, const char *actor_name);
 
+/*
+ * Record that key was deleted from live: drop it from the "world" ref and
+ * append a commit attributed to actor_name. The counterpart of
+ * builder_snapshot_record for a destroy, so history stops carrying an object
+ * the live store no longer has. A no-op when the bridge is disabled, and
+ * best-effort: a failure is logged and the delete still stands in LMDB.
+ */
+void builder_snapshot_forget(const char *key, const char *actor_name);
+
 /* True if the bridge is open and recording (for tests and status). */
 int builder_snapshot_enabled(void);
 

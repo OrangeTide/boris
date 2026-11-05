@@ -362,14 +362,14 @@ argument shapes in the table in section 3.1.
   run and resets on restart, with no new struct field or on-disk storage key. A
   per-account persisted cursor (surviving restart) remains the open upgrade,
   the same storage-key question `doc/scratch-obj-spec.md` section 8 defers.
-- **Deletions in snapshots.** A restore now records the subtree it wrote
+- **Deletions in snapshots (resolved).** A restore records the subtree it wrote
   (`builder_snapshot_subtree`), so the tip tracks live and undo is auditable per
-  section 6.1. What remains is that the dirty-only bridge (section 4.1) is
-  additive: it mirrors the objects that exist but never removes one a restore
-  deleted, so the tip's copy of a shrunken subtree still carries the dropped
-  keys. A deletion-aware snapshot (recording removals, not only writes) is the
-  remaining fix; the live store is always correct regardless, since LMDB is the
-  source of truth.
+  section 6.1. Deletions are handled by a recomputed wipe rather than a tracked
+  log: the subtree snapshot drops committed keys that are no longer live, and a
+  `@destroy` drops its key through `builder_snapshot_forget`, both over the
+  `obj_cache_cas_del` tombstone added to the cache (its commit rebuild drops the
+  entry and cascades away an emptied directory). The incremental per-edit
+  snapshot stays additive, which is correct for a single-object save.
 - **Scratch lifetime.** When is a published or abandoned scratch area
   reclaimed, and is there a quota on scratch areas per builder
   (`doc/zone-spec.md` section 5 quotas)?
@@ -463,10 +463,11 @@ argument shapes in the table in section 3.1.
    world tip keeps tracking live and the operation itself lands in history
    (section 6.1): the cursor navigates the log as frozen at the first step and
    re-anchors on the tip each step produces, and `@checkout`/`@publish` read a
-   faithful tip. The one remaining gap is deletions: the additive bridge
-   (section 4.1) never removes a key a restore deleted, so a subtree that lost
-   objects still carries them in history until a deletion-aware snapshot lands
-   (section 14).
+   faithful tip. Deletions are carried too: `builder_snapshot_subtree` recomputes
+   the wipe (it drops committed keys no longer live, the same replacement the
+   LMDB restore does), and `@destroy` calls `builder_snapshot_forget`, both over
+   a new `obj_cache_cas_del` tombstone. So the tip is a faithful mirror of live
+   across writes, restores, and deletions alike.
 7. Tests per section 12, wired into `module.mk`. Done:
    `src/builder/test_builder_history.c` drives the workflow engine over a real
    muddb and CAS depot: per-edit undo/redo with index rebuild (round trip),

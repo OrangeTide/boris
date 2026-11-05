@@ -393,6 +393,60 @@ restore_entry(void)
 		== BUILDER_HISTORY_ERR);
 }
 
+/* Wipe on restore: an undo that drops an object removes it from the history
+ * tip too, so a later checkout does not resurrect it (the recomputed wipe, not
+ * deletion tracking). */
+static void
+wipe_on_restore(void)
+{
+	char scratch[OBJ_PATH_MAX] = "", msg[256];
+
+	put_named("zone/wipe/keep", "Keep");
+	record("zone/wipe/keep");
+	put_named("zone/wipe/extra", "Extra");
+	record("zone/wipe/extra");
+	check("extra present pre-undo", exists("zone/wipe/extra"));
+
+	/* undo back to the single-room snapshot: extra leaves live... */
+	check("undo wipe ok", builder_history_undo("tester", "zone/wipe", 0,
+		msg, sizeof msg) == BUILDER_HISTORY_OK);
+	check("keep survives undo", exists("zone/wipe/keep"));
+	check("extra gone from live after undo", !exists("zone/wipe/extra"));
+
+	/* ...and a checkout reads the tip, which must no longer carry extra */
+	check("checkout wipe ok", builder_history_checkout("tester",
+		"zone/wipe", "wcopy", 0, scratch, sizeof scratch, msg,
+		sizeof msg) == BUILDER_HISTORY_OK);
+	check("keep copied to scratch",
+		exists("zone/scratch/tester/wcopy/keep"));
+	check("extra not resurrected into scratch",
+		!exists("zone/scratch/tester/wcopy/extra"));
+}
+
+/* Forget on destroy: builder_snapshot_forget drops a destroyed key from the
+ * tip, so a checkout does not carry the dead object. */
+static void
+forget_on_destroy(void)
+{
+	char scratch[OBJ_PATH_MAX] = "", msg[256];
+
+	put_named("zone/fg/a", "A");
+	put_named("zone/fg/b", "B");
+	record("zone/fg/a");
+	record("zone/fg/b");
+
+	check("destroy b from live", obj_delete("zone/fg/b") == OBJ_OK);
+	builder_snapshot_forget("zone/fg/b", "tester");
+
+	check("checkout fg ok", builder_history_checkout("tester", "zone/fg",
+		"fgcopy", 0, scratch, sizeof scratch, msg, sizeof msg)
+		== BUILDER_HISTORY_OK);
+	check("surviving object copied",
+		exists("zone/scratch/tester/fgcopy/a"));
+	check("destroyed object not in the tip",
+		!exists("zone/scratch/tester/fgcopy/b"));
+}
+
 /* @checkpoint pins the current root under a named ref that is not "world". */
 static void
 checkpoint(void)
@@ -441,6 +495,8 @@ main(void)
 	publish_fast_forward();
 	publish_race();
 	restore_entry();
+	wipe_on_restore();
+	forget_on_destroy();
 	checkpoint();
 
 	builder_snapshot_shutdown();

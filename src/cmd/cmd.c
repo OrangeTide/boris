@@ -104,6 +104,7 @@ static const struct command_table {
 	{ "@checkout", command_do_checkout },
 	{ "@publish", command_do_publish },
 	{ "@checkpoint", command_do_checkpoint },
+	{ "@export", command_do_export },
 	{ "@dig", command_do_dig },
 	{ "return", command_do_return },
 	{ "@create", command_do_create },
