@@ -18,4 +18,23 @@
  * "%parent", "%location", "template", or "exit.<dir>.to". */
 int objref_is_ref_name(const char *name);
 
+struct obj;
+
+/*
+ * Rewrite every reference in obj whose value falls inside the subtree rooted at
+ * src_prefix, moving it to dst_prefix (doc/snapshot-restore-spec.md section 5).
+ * A reference value is "inside" when it equals src_prefix or begins with
+ * "src_prefix/"; its prefix is then replaced with dst_prefix. References
+ * pointing outside the subtree (a template, another zone) and all non-reference
+ * properties are left untouched: the pass acts on '~'-marked keys only, never
+ * on string content. This is the rewrite the copy primitive applies when a
+ * subtree is copied to a different prefix (checkout and publish).
+ *
+ * Returns the number of references rewritten (>= 0), or -1 on an allocation
+ * failure or if a rewritten value would exceed OBJ_PATH_MAX (the object is then
+ * left unchanged so the caller can refuse the copy).
+ */
+int objref_rewrite_prefix(struct obj *obj, const char *src_prefix,
+	const char *dst_prefix);
+
 #endif

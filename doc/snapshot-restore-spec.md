@@ -406,7 +406,17 @@ argument shapes in the table in section 3.1.
    and owner indexes, and invalidates the cache, all in one `muddb_txn`. Tested
    in `test_world_restore.c`. Cross-path copy (checkout and publish) returns an
    error until the rewrite pass (step 3).
-3. The reference-rewrite pass over the fixed property set (section 5).
+3. The reference-rewrite pass over the fixed property set (section 5). Done:
+   `objref_rewrite_prefix` (`src/obj/objref.c`) rewrites every `~`-marked
+   reference whose value is inside the source subtree (equal to the prefix or
+   under `prefix/`) to the destination prefix, leaving external references and
+   all non-reference string values untouched. `world_restore` now remaps each
+   object's key and, on a cross-path copy, rewrites its references, so
+   checkout-to-scratch and publish-back work (same engine, different prefixes).
+   The object's own identity is its storage key, which the restore remaps; the
+   non-reference `id` property, where present, is left as-is per the
+   references-only rule. Tested in `test_world_restore.c` (a rewrite unit test
+   plus an end-to-end checkout).
 4. The integrity pass, outbound and inbound (section 6.4).
 5. Retention and GC wiring (section 8).
 6. The `world-backup-commands` in-game surface (section 10), ACS-gated and

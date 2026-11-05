@@ -8,6 +8,7 @@
 #include "builder_snapshot.h"
 
 #include "obj.h"
+#include "objref.h"
 #include "muddb.h"
 
 #include <cas.h>
@@ -63,6 +64,35 @@ set_name(const char *key, const char *name)
 		obj_save(key);
 		obj_release(o);
 	}
+}
+
+/* write-through create from a JSON body */
+static void
+put_json(const char *key, const char *json)
+{
+	OBJ *o = obj_new_from_json(key, json);
+
+	if (o) {
+		obj_put(key, o);
+		obj_free(o);
+	}
+}
+
+/* read a reference property (strdup'd), or NULL */
+static char *
+ref_of(const char *key, const char *name)
+{
+	OBJ *o = obj_get(key);
+	char *out = NULL;
+
+	if (o) {
+		char *v = obj_prop_get_ref(o, name);
+
+		if (v)
+			out = strdup(v);
+		obj_release(o);
+	}
+	return out;
 }
 
 static char *
@@ -190,6 +220,102 @@ run(void)
 		obj_contents_count("zone/world/hall") == 1);
 }
 
+/* the rewrite primitive in isolation: marked in-subtree references move, and
+ * out-of-subtree references and non-reference properties do not. */
+static void
+test_rewrite_primitive(void)
+{
+	OBJ *o = obj_new_from_json("zone/town/square",
+		"{\"name\":\"zone/town/decoy\","	/* a path-looking string value */
+		"\"%parent~\":\"templates/room\","
+		"\"exit.n.to~\":\"zone/town/market\","
+		"\"exit.e.to~\":\"zone/world/hall\","
+		"\"%location~\":\"zone/town\"}");
+	int n;
+	char *v;
+
+	check("built rewrite fixture", o != NULL);
+	n = objref_rewrite_prefix(o, "zone/town", "zone/scratch/w");
+	check("two in-subtree refs rewritten", n == 2);
+
+	v = obj_prop_get_ref(o, "exit.n.to");
+	check("in-subtree exit remapped",
+		v && strcmp(v, "zone/scratch/w/market") == 0);
+	v = obj_prop_get_ref(o, "%location");
+	check("exact-prefix location remapped",
+		v && strcmp(v, "zone/scratch/w") == 0);
+	v = obj_prop_get_ref(o, "exit.e.to");
+	check("out-of-subtree exit untouched",
+		v && strcmp(v, "zone/world/hall") == 0);
+	v = obj_prop_get_ref(o, "%parent");
+	check("external parent untouched",
+		v && strcmp(v, "templates/room") == 0);
+	v = obj_prop_get(o, "name");
+	check("path-looking string value untouched",
+		v && strcmp(v, "zone/town/decoy") == 0);
+
+	obj_free(o);
+}
+
+/* cross-path copy (checkout): the subtree is copied to a new prefix with its
+ * internal references remapped, external references kept, and the source left
+ * in place. */
+static void
+checkout(void)
+{
+	char root[CAS_HASH_HEX + 1];
+	char *v;
+
+	put_json("zone/town/square",
+		"{\"name\":\"Square\",\"%parent~\":\"templates/room\","
+		"\"exit.n.to~\":\"zone/town/market\","
+		"\"exit.e.to~\":\"zone/world/hall\"}");
+	put_json("zone/town/market", "{\"name\":\"Market\"}");
+	put_json("zone/town/stall",
+		"{\"name\":\"Stall\",\"%location~\":\"zone/town/square\"}");
+
+	record("zone/town/square");
+	record("zone/town/market");
+	record("zone/town/stall");
+	check("captured town root",
+		cas_tree_ref_read(builder_snapshot_tree(), "world", root)
+		== CAS_OK);
+
+	check("checkout ok", world_restore(builder_snapshot_tree(), root,
+		"zone/town", "zone/scratch/w", 1) == WORLD_RESTORE_OK);
+
+	/* destination objects exist with references remapped where internal */
+	check("square copied", exists("zone/scratch/w/square"));
+	check("market copied", exists("zone/scratch/w/market"));
+
+	v = ref_of("zone/scratch/w/square", "exit.n.to");
+	check("internal exit remapped to scratch",
+		v && strcmp(v, "zone/scratch/w/market") == 0);
+	free(v);
+	v = ref_of("zone/scratch/w/square", "exit.e.to");
+	check("external exit kept",
+		v && strcmp(v, "zone/world/hall") == 0);
+	free(v);
+	v = ref_of("zone/scratch/w/square", "%parent");
+	check("external parent kept",
+		v && strcmp(v, "templates/room") == 0);
+	free(v);
+
+	v = obj_location("zone/scratch/w/stall");
+	check("item location remapped to scratch",
+		v && strcmp(v, "zone/scratch/w/square") == 0);
+	free(v);
+	check("contents index built at destination",
+		listed("zone/scratch/w/square", "zone/scratch/w/stall"));
+
+	/* the source zone is untouched by a checkout */
+	check("source square still present", exists("zone/town/square"));
+	v = ref_of("zone/town/square", "exit.n.to");
+	check("source exit unchanged",
+		v && strcmp(v, "zone/town/market") == 0);
+	free(v);
+}
+
 int
 main(void)
 {
@@ -213,7 +339,9 @@ main(void)
 		return EXIT_FAILURE;
 	}
 
+	test_rewrite_primitive();
 	run();
+	checkout();
 
 	builder_snapshot_shutdown();
 	obj_shutdown();

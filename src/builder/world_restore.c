@@ -7,6 +7,7 @@
 #include "builder_snapshot.h"
 
 #include "obj.h"
+#include "objref.h"
 
 #include <cas.h>
 #include <cas-tree.h>
@@ -220,12 +221,12 @@ collect_dir(struct cas_tree *ct, const char *dir_hash, const char *rel,
 }
 
 static int
-in_objlist(const struct objlist *l, const char *key)
+in_keyset(char *const *keys, size_t n, const char *key)
 {
 	size_t i;
 
-	for (i = 0; i < l->count; i++)
-		if (strcmp(l->keys[i], key) == 0)
+	for (i = 0; i < n; i++)
+		if (keys[i] && strcmp(keys[i], key) == 0)
 			return 1;
 	return 0;
 }
@@ -239,9 +240,10 @@ world_restore(struct cas_tree *ct, const char *root_hash,
 	char scan_prefix[OBJ_PATH_MAX];
 	struct objlist src = {0};
 	struct keylist live = {0};
+	char **dst_keys = NULL;
 	const char **del_keys = NULL;
-	size_t n_del = 0, i;
-	int rc = WORLD_RESTORE_ERR;
+	size_t slen, dlen, n_del = 0, i;
+	int remap, rc = WORLD_RESTORE_ERR;
 
 	if (!ct || !root_hash || !src_prefix || !src_prefix[0] || !dst_prefix
 		|| !dst_prefix[0]) {
@@ -249,11 +251,14 @@ world_restore(struct cas_tree *ct, const char *root_hash,
 		return WORLD_RESTORE_ERR;
 	}
 
-	/* Step 2 covers the in-place case only; cross-path copy needs the
-	 * reference rewrite pass (spec step 3). */
-	if (rewrite || strcmp(src_prefix, dst_prefix) != 0) {
-		LOG_ERROR("restore: cross-path copy and rewrite not yet "
-			"implemented (spec step 3)");
+	slen = strlen(src_prefix);
+	dlen = strlen(dst_prefix);
+	remap = strcmp(src_prefix, dst_prefix) != 0;
+
+	/* Moving a subtree to a new prefix requires rewriting its internal
+	 * references, or they would dangle back at the source. */
+	if (remap && !rewrite) {
+		LOG_ERROR("restore: cross-path copy requires rewrite");
 		return WORLD_RESTORE_ERR;
 	}
 
@@ -273,8 +278,34 @@ world_restore(struct cas_tree *ct, const char *root_hash,
 		goto done;
 	}
 
-	/* 2. list the live keys under the destination, so keys absent from the
-	 * source subtree can be deleted. Match the subtree exactly by scanning
+	/* 2. compute each object's destination key (identity when the prefixes
+	 * match) and, on a cross-path copy, rewrite its intra-subtree references
+	 * from src_prefix to dst_prefix (spec section 5). */
+	if (src.count) {
+		dst_keys = calloc(src.count, sizeof(*dst_keys));
+		if (!dst_keys)
+			goto done;
+	}
+	for (i = 0; i < src.count; i++) {
+		const char *k = src.keys[i];		/* starts with src_prefix */
+		size_t suffixlen = strlen(k) - slen;	/* bytes after src_prefix */
+
+		dst_keys[i] = malloc(dlen + suffixlen + 1);
+		if (!dst_keys[i])
+			goto done;
+		memcpy(dst_keys[i], dst_prefix, dlen);
+		memcpy(dst_keys[i] + dlen, k + slen, suffixlen + 1);
+
+		if (remap && objref_rewrite_prefix(src.objs[i], src_prefix,
+			dst_prefix) < 0) {
+			LOG_ERROR("restore: reference rewrite failed for \"%s\"",
+				k);
+			goto done;
+		}
+	}
+
+	/* 3. list the live keys under the destination, so keys absent from the
+	 * restored set can be deleted. Match the subtree exactly by scanning
 	 * "<dst_prefix>/". */
 	if (snprintf(scan_prefix, sizeof scan_prefix, "%s/", dst_prefix)
 		>= (int)sizeof scan_prefix) {
@@ -288,24 +319,29 @@ world_restore(struct cas_tree *ct, const char *root_hash,
 		if (!del_keys)
 			goto done;
 		for (i = 0; i < live.count; i++)
-			if (!in_objlist(&src, live.keys[i]))
+			if (!in_keyset(dst_keys, src.count, live.keys[i]))
 				del_keys[n_del++] = live.keys[i];
 	}
 
-	/* 3. apply writes, deletes, index rebuild, and cache invalidation in one
+	/* 4. apply writes, deletes, index rebuild, and cache invalidation in one
 	 * transaction. */
-	if (obj_apply_restore((const char *const *)src.keys,
+	if (obj_apply_restore((const char *const *)dst_keys,
 		(OBJ *const *)src.objs, src.count, del_keys, n_del) != OBJ_OK) {
 		LOG_ERROR("restore: apply failed for \"%s\"", dst_prefix);
 		goto done;
 	}
 
-	LOG_INFO("restored \"%s\": %zu objects, %zu removed", dst_prefix,
-		src.count, n_del);
+	LOG_INFO("restored \"%s\" from \"%s\": %zu objects, %zu removed",
+		dst_prefix, src_prefix, src.count, n_del);
 	rc = WORLD_RESTORE_OK;
 
 done:
 	free(del_keys);
+	if (dst_keys) {
+		for (i = 0; i < src.count; i++)
+			free(dst_keys[i]);
+		free(dst_keys);
+	}
 	keylist_free(&live);
 	objlist_free(&src);
 	return rc;
