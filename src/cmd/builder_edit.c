@@ -13,6 +13,7 @@
 #include "builder.h"
 #include "builder_snapshot.h"
 #include "olc.h"
+#include "objref.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -347,6 +348,32 @@ command_do_unlink(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UN
 
 /* --------------------------------------------------------------------- @set */
 
+/* Apply one @set value. A reference-named key (exit.<dir>.to, template) is
+ * stored as a '~'-marked reference, the only form links and @check inspect, so
+ * @set matches redit and @link instead of leaving a dead plain key. Everything
+ * else is a plain property. Reports the failure and returns 0 on error. */
+static int
+set_room_prop(DESCRIPTOR_DATA *cl, OBJ *r, const char *prop, const char *value)
+{
+	int is_ref = objref_is_ref_name(prop);
+	int rc = is_ref ? obj_prop_set_ref(r, prop, value)
+			: obj_prop_set(r, prop, value);
+
+	if (rc == OBJ_OK)
+		return 1;
+	if (rc == OBJ_ERR_PROTECTED)
+		telnetclient_printf(cl,
+			"\"%s\" is a protected property and cannot be set here.\n",
+			prop);
+	else if (is_ref)
+		telnetclient_printf(cl,
+			"\"%s\" needs a reference target: a path id with no spaces.\n",
+			prop);
+	else
+		telnetclient_printf(cl, "Could not set \"%s\".\n", prop);
+	return 0;
+}
+
 int
 command_do_set(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED,
 	const char *arg)
@@ -376,10 +403,7 @@ command_do_set(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSE
 		telnetclient_puts(cl, "You are in an invalid room.\n");
 		return 0;
 	}
-	if (obj_prop_set(r, prop, value) == OBJ_ERR_PROTECTED) {
-		telnetclient_printf(cl,
-			"\"%s\" is a protected property and cannot be set here.\n",
-			prop);
+	if (!set_room_prop(cl, r, prop, value)) {
 		room_edit_free(r);
 		return 0;
 	}
