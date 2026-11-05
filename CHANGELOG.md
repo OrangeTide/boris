@@ -8,6 +8,17 @@ Highlights per tagged version, newest first.
 
 #### Added
 
+- Builder world history: every accepted builder edit is snapshotted to a
+  content-addressed depot, with in-game `@history`, `@undo`, `@redo`,
+  `@restore`, `@checkout`, `@publish`, and `@checkpoint` (ACS-gated and
+  zone-scoped). Restore is Subversion-style path-copy -- check a zone out to a
+  private `zone/scratch/<user>/` area, edit it, and publish back under a
+  fork-point guard -- with referential-integrity checks and log retention/GC.
+  Object references became a `~`-marked key type (converted by a one-time
+  `muddb-tool migrate-refs` pass).
+- In-game `@export` (wizard) dumps the live world to `data/export/<timestamp>/`
+  in the JSON-record format, over a shared `muddb_export` library that
+  `muddb-tool export` also uses.
 - OBJ object model: in-memory mutable JSON over a single copy-on-write buffer,
   with prototype walking, containment and owner indexes, and object lifecycle.
 - muddb persistence layer on LMDB, serving the `objs`, `users`, `chars`,

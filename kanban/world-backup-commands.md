@@ -69,3 +69,7 @@ cas-to-muddb restore and an undo/redo/checkout/publish surface, rather than
 - [x] tests: the cas-to-muddb import/restore and `@checkpoint` round-trips
       (`test_world_restore`, `test_builder_history`, `test_builder_snapshot`),
       and the JSON-record export (`test_muddb_export`)
+
+Follow-ups deferred from `doc/snapshot-restore-spec.md` section 14:
+[[builder-scratch-area-lifetime]] (reclaim and quota for scratch areas) and
+[[snapshot-retention-config]] (make the retention/GC bounds configurable).
