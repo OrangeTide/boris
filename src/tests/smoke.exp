@@ -656,15 +656,18 @@ switch -- $test {
 			"> " {}
 			timeout { fail "redit_check: no prompt after @check" }
 		}
-		# add a dangling exit, then re-check: it must soft-warn
-		send "@set exit.testexit.to zone/world/ghost\r"
+		# add a dangling exit, then re-check: it must soft-warn.
+		# @link stores the exit as a '~'-marked reference, the only form
+		# @check inspects. A plain @set would write a non-reference key
+		# that is not a real exit, so @check would not flag it.
+		send "@link w zone/world/ghost\r"
 		expect {
-			-re "Set exit.testexit.to" {}
-			timeout { fail "redit_check: @set did not set the exit" }
+			-re "Linked w ->" {}
+			timeout { fail "redit_check: @link did not create the exit" }
 		}
 		expect {
 			"> " {}
-			timeout { fail "redit_check: no prompt after @set" }
+			timeout { fail "redit_check: no prompt after @link" }
 		}
 		send "@check\r"
 		expect {
