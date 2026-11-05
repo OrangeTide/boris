@@ -398,7 +398,14 @@ argument shapes in the table in section 3.1.
 2. The scoped cas-to-muddb import (the rollback gap in
    `snapshot-proposal.md`), taking a root, a source prefix, a destination
    prefix, and the rewrite flag; it writes and deletes LMDB keys, rebuilds the
-   affected indexes, and invalidates the obj_cache.
+   affected indexes, and invalidates the obj_cache. Done for the in-place case
+   (undo, redo, same-path restore): `src/builder/world_restore.c` reads the
+   source subtree from a snapshot root through the shared `cas_tree`
+   (`builder_snapshot_tree()`), and `obj_apply_restore` in `obj_store.c` writes
+   the objects, deletes live keys absent from the source, rebuilds the contents
+   and owner indexes, and invalidates the cache, all in one `muddb_txn`. Tested
+   in `test_world_restore.c`. Cross-path copy (checkout and publish) returns an
+   error until the rewrite pass (step 3).
 3. The reference-rewrite pass over the fixed property set (section 5).
 4. The integrity pass, outbound and inbound (section 6.4).
 5. Retention and GC wiring (section 8).

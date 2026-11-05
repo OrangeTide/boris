@@ -16,19 +16,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/*
- * The live object cache keeps all game objects in one muddb domain, "objs"
- * (obj_store.c). Builder edits are objects in that domain, so the snapshot
- * mirror is a single cas cache on the same domain, writing to cas-tree paths
- * of the form "objs/<key>". This matches the full-world export in
- * `muddb-tool to-cas`, so the incremental bridge and the offline export share
- * one depot layout.
- */
-#define SNAPSHOT_DOMAIN "objs"
-
-/* The ref that holds the single live world's history (section 3.1). */
-#define SNAPSHOT_REF "world"
-
 /* Unreferenced-object cache bound for obj_cache_cas_new. The bridge commits
  * after every record, so at most a handful sit uncommitted; this is headroom. */
 #define SNAPSHOT_CACHE_SLOTS 64
@@ -60,8 +47,8 @@ builder_snapshot_init(const char *depot_path)
 	}
 	cas_tree_set_flags(snap_tree, CAS_TREE_USE_HTREE);
 
-	snap_cache = obj_cache_cas_new(snap_tree, SNAPSHOT_REF, SNAPSHOT_DOMAIN,
-		SNAPSHOT_CACHE_SLOTS);
+	snap_cache = obj_cache_cas_new(snap_tree, BUILDER_SNAPSHOT_REF,
+		BUILDER_SNAPSHOT_DOMAIN, SNAPSHOT_CACHE_SLOTS);
 	if (!snap_cache) {
 		LOG_ERROR("snapshot bridge: could not create cache");
 		cas_tree_free(snap_tree);
@@ -72,7 +59,7 @@ builder_snapshot_init(const char *depot_path)
 	}
 
 	LOG_INFO("Snapshot bridge opened at %s (ref %s).", depot_path,
-		SNAPSHOT_REF);
+		BUILDER_SNAPSHOT_REF);
 	return 0;
 }
 
@@ -97,6 +84,12 @@ int
 builder_snapshot_enabled(void)
 {
 	return snap_cache != NULL;
+}
+
+struct cas_tree *
+builder_snapshot_tree(void)
+{
+	return snap_tree;
 }
 
 /* Build the attribution comment: who changed what, and which zone it falls

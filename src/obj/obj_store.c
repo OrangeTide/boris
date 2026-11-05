@@ -173,6 +173,151 @@ obj_foreach_key(const char *prefix,
 	return n;
 }
 
+/*
+ * The contents and owner index coordinates an object currently occupies,
+ * captured from the store before a restore changes it so the stale entries can
+ * be removed. Both may be NULL (unset).
+ */
+struct obj_coord {
+	char *loc;
+	char *owner;
+};
+
+/* Read key's current %location and %owner straight from the store (not the
+ * cache), so a restore can clear the index entries they point at. */
+static void
+capture_coord(MUDDB *db, const char *domain, const char *key,
+	struct obj_coord *oc)
+{
+	OBJ *o;
+	char *l, *w;
+
+	oc->loc = NULL;
+	oc->owner = NULL;
+	o = muddb_get(db, domain, key);
+	if (!o)
+		return;
+	l = obj_prop_get_ref(o, "%location");
+	if (l && *l)
+		oc->loc = strdup(l);
+	w = obj_prop_get(o, "%owner");
+	if (w && *w)
+		oc->owner = strdup(w);
+	obj_free(o);
+}
+
+int
+obj_apply_restore(const char *const *put_keys, OBJ *const *put_objs,
+	size_t n_put, const char *const *del_keys, size_t n_del)
+{
+	MUDDB *db = store_muddb();
+	const char *domain;
+	struct obj_coord *pc = NULL, *dc = NULL;
+	MUDDB_TXN *t = NULL;
+	size_t i;
+	int rc = OBJ_ERR;
+
+	if (!db) {
+		LOG_ERROR("obj_apply_restore requires the muddb backend");
+		return OBJ_ERR;
+	}
+	if ((n_put && (!put_keys || !put_objs)) || (n_del && !del_keys))
+		return OBJ_ERR;
+	if (!n_put && !n_del)
+		return OBJ_OK; /* nothing to do */
+
+	domain = obj_cache_muddb_domain(obj_global_cache);
+
+	/* Persist any pending cached edits first, so the coordinates we read and
+	 * the indexes we maintain reflect the true current state (section 7). */
+	obj_cache_flush_all(obj_global_cache);
+
+	if (n_put && !(pc = calloc(n_put, sizeof(*pc))))
+		goto done;
+	if (n_del && !(dc = calloc(n_del, sizeof(*dc))))
+		goto done;
+
+	for (i = 0; i < n_put; i++)
+		capture_coord(db, domain, put_keys[i], &pc[i]);
+	for (i = 0; i < n_del; i++)
+		capture_coord(db, domain, del_keys[i], &dc[i]);
+
+	/* Drop cached copies before the store changes underneath the cache. */
+	for (i = 0; i < n_put; i++)
+		obj_forget(put_keys[i]);
+	for (i = 0; i < n_del; i++)
+		obj_forget(del_keys[i]);
+
+	t = muddb_txn_begin(db);
+	if (!t)
+		goto done;
+
+	for (i = 0; i < n_put; i++) {
+		char *nl, *nw;
+
+		if (pc[i].loc && muddb_txn_index_del(t, OBJ_CONTENTS_INDEX,
+				pc[i].loc, put_keys[i]) != MUDDB_OK)
+			goto abort;
+		if (pc[i].owner && muddb_txn_index_del(t, OBJ_OWNER_INDEX,
+				pc[i].owner, put_keys[i]) != MUDDB_OK)
+			goto abort;
+		if (muddb_txn_put(t, domain, put_keys[i], put_objs[i])
+				!= MUDDB_OK)
+			goto abort;
+		nl = obj_prop_get_ref(put_objs[i], "%location");
+		if (nl && *nl && muddb_txn_index_add(t, OBJ_CONTENTS_INDEX,
+				nl, put_keys[i]) != MUDDB_OK)
+			goto abort;
+		nw = obj_prop_get(put_objs[i], "%owner");
+		if (nw && *nw && muddb_txn_index_add(t, OBJ_OWNER_INDEX,
+				nw, put_keys[i]) != MUDDB_OK)
+			goto abort;
+	}
+	for (i = 0; i < n_del; i++) {
+		if (dc[i].loc && muddb_txn_index_del(t, OBJ_CONTENTS_INDEX,
+				dc[i].loc, del_keys[i]) != MUDDB_OK)
+			goto abort;
+		if (dc[i].owner && muddb_txn_index_del(t, OBJ_OWNER_INDEX,
+				dc[i].owner, del_keys[i]) != MUDDB_OK)
+			goto abort;
+		if (muddb_txn_del(t, domain, del_keys[i]) != MUDDB_OK)
+			goto abort;
+	}
+
+	if (muddb_txn_commit(t) != MUDDB_OK)
+		goto done; /* commit frees the txn even on failure */
+	t = NULL;
+	rc = OBJ_OK;
+
+	/* Forget again so the next read loads the committed restored state. */
+	for (i = 0; i < n_put; i++)
+		obj_forget(put_keys[i]);
+	for (i = 0; i < n_del; i++)
+		obj_forget(del_keys[i]);
+	goto done;
+
+abort:
+	muddb_txn_abort(t);
+	t = NULL;
+
+done:
+	if (pc) {
+		for (i = 0; i < n_put; i++) {
+			free(pc[i].loc);
+			free(pc[i].owner);
+		}
+		free(pc);
+	}
+	if (dc) {
+		for (i = 0; i < n_del; i++) {
+			free(dc[i].loc);
+			free(dc[i].owner);
+		}
+		free(dc);
+	}
+	return rc;
+}
+
 OBJ *
 obj_create(const char *id)
 {

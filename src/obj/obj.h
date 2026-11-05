@@ -142,6 +142,20 @@ char *obj_resolve_prop_ref(const char *id, const char *name);
 int obj_delete(const char *id);
 
 /*
+ * Apply a scoped restore to the live store in one transaction: write each
+ * put_objs[i] under put_keys[i], delete each del_keys[j], rebuild the contents
+ * and owner indexes for every touched key, and invalidate the object cache
+ * (doc/snapshot-restore-spec.md sections 6 and 7). The put objects are borrowed
+ * (serialized into the store; the caller keeps ownership). On success the whole
+ * set is committed atomically; on any error the transaction is aborted and the
+ * store is left unchanged. The cache is flushed before the writes so pending
+ * edits are not lost, and the touched keys are forgotten so a later obj_get
+ * reloads the restored state. Returns OBJ_OK or OBJ_ERR. muddb backend only.
+ */
+int obj_apply_restore(const char *const *put_keys, OBJ *const *put_objs,
+	size_t n_put, const char *const *del_keys, size_t n_del);
+
+/*
  * Drop a cached copy of id without deleting it from the store, so the next
  * obj_get reloads the current stored value. Use after a write-through obj_put
  * to a key that may already be cached (editing an existing object), keeping

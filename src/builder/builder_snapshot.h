@@ -5,6 +5,18 @@
 
 #include "obj.h"
 
+struct cas_tree;
+
+/*
+ * The live object cache keeps every game object in one muddb domain, "objs"
+ * (obj_store.c). Snapshots mirror that domain, so a CAS object lives at the
+ * tree path "objs/<key>". The snapshot bridge and the restore path share this.
+ */
+#define BUILDER_SNAPSHOT_DOMAIN "objs"
+
+/* The ref that holds the single live world's history (spec section 3.1). */
+#define BUILDER_SNAPSHOT_REF "world"
+
 /*
  * The snapshot bridge records world history as a side effect of builder
  * edits (doc/snapshot-restore-spec.md section 4). After builder_save commits
@@ -41,5 +53,12 @@ void builder_snapshot_record(const char *key, OBJ *obj, const char *actor_name);
 
 /* True if the bridge is open and recording (for tests and status). */
 int builder_snapshot_enabled(void);
+
+/*
+ * The cas_tree backing the history depot, or NULL when the bridge is disabled.
+ * The restore path reads snapshots through this shared handle, because the
+ * depot lock is exclusive and a second cas on the same depot would block.
+ */
+struct cas_tree *builder_snapshot_tree(void);
 
 #endif
