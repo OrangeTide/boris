@@ -235,7 +235,7 @@ command_do_restore(DESCRIPTOR_DATA *cl, struct user *u UNUSED,
 		return 0;
 	}
 
-	rc = builder_history_restore(zone_path, entry, dst, force, msg,
+	rc = builder_history_restore(name, zone_path, entry, dst, force, msg,
 		sizeof msg);
 	telnetclient_printf(cl, "%s\n", msg);
 	return rc == BUILDER_HISTORY_OK;

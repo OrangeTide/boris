@@ -8,7 +8,7 @@ EXECUTABLES     += test_builder_save
 TEST_TARGETS    += test_builder_save
 test_builder_save_DIR := $(builder_DIR)
 test_builder_save_SRCS = test_builder_save.c
-test_builder_save_LIBS = builder obj acs log smolvfs
+test_builder_save_LIBS = builder obj database hashtable acs log smolvfs lmdb
 define test_builder_save_TESTCMD
 $(test_builder_save_RUN)
 endef
@@ -17,7 +17,7 @@ EXECUTABLES     += test_builder_snapshot
 TEST_TARGETS    += test_builder_snapshot
 test_builder_snapshot_DIR := $(builder_DIR)
 test_builder_snapshot_SRCS = test_builder_snapshot.c
-test_builder_snapshot_LIBS = builder obj hashtable acs log smolvfs
+test_builder_snapshot_LIBS = builder obj database hashtable acs log smolvfs lmdb
 define test_builder_snapshot_TESTCMD
 $(test_builder_snapshot_RUN)
 endef
@@ -29,4 +29,13 @@ test_world_restore_SRCS = test_world_restore.c
 test_world_restore_LIBS = builder obj database hashtable acs log smolvfs lmdb
 define test_world_restore_TESTCMD
 $(test_world_restore_RUN)
+endef
+
+EXECUTABLES     += test_builder_history
+TEST_TARGETS    += test_builder_history
+test_builder_history_DIR := $(builder_DIR)
+test_builder_history_SRCS = test_builder_history.c
+test_builder_history_LIBS = builder obj database hashtable acs log smolvfs lmdb
+define test_builder_history_TESTCMD
+$(test_builder_history_RUN)
 endef

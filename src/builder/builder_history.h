@@ -73,8 +73,8 @@ int builder_history_redo(const char *user, const char *zone_path, int force,
  * restore is in place (no rewrite); otherwise it is a cross-path copy with
  * reference rewrite on. force is the wizard override. Returns OK or ERR, msg set.
  */
-int builder_history_restore(const char *zone_path, int entry_no,
-	const char *dst_prefix, int force, char *msg, size_t msglen);
+int builder_history_restore(const char *user, const char *zone_path,
+	int entry_no, const char *dst_prefix, int force, char *msg, size_t msglen);
 
 /*
  * Copy the live src_zone subtree into the user's scratch area

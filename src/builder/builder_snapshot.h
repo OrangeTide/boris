@@ -55,6 +55,19 @@ void builder_snapshot_record(const char *key, OBJ *obj, const char *actor_name);
 int builder_snapshot_enabled(void);
 
 /*
+ * Record every live object under "<prefix>/" as one commit on the "world" ref,
+ * with comment as the attribution line. This is the subtree counterpart of
+ * builder_snapshot_record: the restore workflows (builder_history.c) call it
+ * after writing a subtree into live (an undo, a restore, a checkout, a publish)
+ * so the world tip keeps tracking the live store and the operation is recorded
+ * in history. Like a dirty-only save it is additive: it mirrors the objects
+ * that exist now and never removes a key the restore deleted (spec section 4.1,
+ * the deletion gap). A no-op returning -1 when the bridge is disabled; best
+ * effort otherwise, returning 0 on a committed snapshot or -1 on failure.
+ */
+int builder_snapshot_subtree(const char *prefix, const char *comment);
+
+/*
  * Configure history retention and garbage collection on the "world" log
  * (doc/snapshot-restore-spec.md section 8). Per-save snapshots grow the log by
  * one entry per edit, so retention is mandatory; builder_snapshot_init applies

@@ -119,6 +119,24 @@ subtree_hash(struct cas_tree *ct, const char *root, const char *key_prefix,
 	return 0;
 }
 
+/* After a restore writes a subtree into live, record it as a snapshot so the
+ * world tip keeps tracking the live store and the operation itself lands in
+ * history (spec section 6.1). Best-effort: a failed recording is logged by the
+ * bridge and does not undo the live change. */
+static void
+record_subtree(const char *dst_prefix, const char *user, const char *verb)
+{
+	char slug[64], comment[200];
+
+	if (zone_slug(dst_prefix, slug, sizeof slug) == 0)
+		snprintf(comment, sizeof comment, "%s %s %s (zone %s)",
+			user ? user : "?", verb, dst_prefix, slug);
+	else
+		snprintf(comment, sizeof comment, "%s %s %s",
+			user ? user : "?", verb, dst_prefix);
+	builder_snapshot_subtree(dst_prefix, comment);
+}
+
 /* --- world-log collection, filtered to one zone ---------------------- */
 
 struct hentry {
@@ -364,6 +382,12 @@ nav_step(const char *user, const char *zone_path, int dir, int force,
 		return BUILDER_HISTORY_ERR;
 	}
 	n->pos = target;
+	/* record the restore and keep navigating from the tip it produced, so a
+	 * run of undo/redo stays on the same frozen list (nav_find's anchor
+	 * check) while a later real edit still re-anchors the cursor. */
+	record_subtree(zone_path, user, dir < 0 ? "undid" : "redid");
+	if (world_tip(ct, tip) == 0)
+		snprintf(n->last_tip, sizeof n->last_tip, "%s", tip);
 	setmsg(msg, msglen, "%s %s to snapshot %d of %d.",
 		dir < 0 ? "Undid" : "Redid", zone_path, target + 1, n->count);
 	return BUILDER_HISTORY_OK;
@@ -386,7 +410,7 @@ builder_history_redo(const char *user, const char *zone_path, int force,
 /* --- restore a numbered entry ---------------------------------------- */
 
 int
-builder_history_restore(const char *zone_path, int entry_no,
+builder_history_restore(const char *user, const char *zone_path, int entry_no,
 	const char *dst_prefix, int force, char *msg, size_t msglen)
 {
 	struct cas_tree *ct = hist_tree();
@@ -429,6 +453,7 @@ builder_history_restore(const char *zone_path, int entry_no,
 			force ? "" : " (a wizard may force)");
 		return BUILDER_HISTORY_ERR;
 	}
+	record_subtree(dst, user, "restored");
 	setmsg(msg, msglen, "Restored %s from entry %d of %s.", dst, entry_no,
 		zone_path);
 	return BUILDER_HISTORY_OK;
@@ -535,6 +560,10 @@ builder_history_checkout(const char *user, const char *src_zone,
 	if (subtree_hash(ct, tip, src_zone, co->fork_hash) != 0)
 		co->fork_hash[0] = '\0';	/* fork point unknown */
 
+	/* record the scratch area so the tip holds it for a later publish, even
+	 * for objects the builder never re-saves in scratch. */
+	record_subtree(scratch, user, "checked out");
+
 	if (scratch_out)
 		snprintf(scratch_out, scratch_len, "%s", scratch);
 	setmsg(msg, msglen, "Checked out %s to %s.", src_zone, scratch);
@@ -613,13 +642,14 @@ builder_history_publish(const char *user, const char *name,
 		return BUILDER_HISTORY_ERR;
 	}
 
-	/* Re-anchor the fork point to the just-published state, so an immediate
+	/* record the published zone (advancing the tip to match live), then
+	 * re-anchor the fork point to that just-published state so an immediate
 	 * re-publish of the same scratch is a clean fast-forward rather than a
-	 * spurious "changed" refusal. The publish did not advance the tip (a
-	 * restore records no snapshot), so the published subtree hash equals the
-	 * scratch subtree hash in the tip. */
+	 * spurious "changed" refusal. */
+	record_subtree(dst_zone, user, "published");
 	snprintf(co->src_zone, sizeof co->src_zone, "%s", dst_zone);
-	if (subtree_hash(ct, tip, scratch, co->fork_hash) != 0)
+	if (world_tip(ct, tip) != 0
+		|| subtree_hash(ct, tip, dst_zone, co->fork_hash) != 0)
 		co->fork_hash[0] = '\0';
 
 	setmsg(msg, msglen, "Published %s over %s.", scratch, dst_zone);

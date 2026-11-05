@@ -362,12 +362,14 @@ argument shapes in the table in section 3.1.
   run and resets on restart, with no new struct field or on-disk storage key. A
   per-account persisted cursor (surviving restart) remains the open upgrade,
   the same storage-key question `doc/scratch-obj-spec.md` section 8 defers.
-- **Snapshot on restore / deletions.** The dirty-only bridge (section 4.1) is
-  additive: it never removes an object from the CAS tree, and a restore records
-  no snapshot. So the world tip can lag live across deletions and across an
-  undo. A deletion-aware snapshot that records restores as commits would make
-  the tip a faithful mirror of live (closing both step-6 limitations) and make
-  undo auditable per section 6.1.
+- **Deletions in snapshots.** A restore now records the subtree it wrote
+  (`builder_snapshot_subtree`), so the tip tracks live and undo is auditable per
+  section 6.1. What remains is that the dirty-only bridge (section 4.1) is
+  additive: it mirrors the objects that exist but never removes one a restore
+  deleted, so the tip's copy of a shrunken subtree still carries the dropped
+  keys. A deletion-aware snapshot (recording removals, not only writes) is the
+  remaining fix; the live store is always correct regardless, since LMDB is the
+  source of truth.
 - **Scratch lifetime.** When is a published or abandoned scratch area
   reclaimed, and is there a quota on scratch areas per builder
   (`doc/zone-spec.md` section 5 quotas)?
@@ -455,12 +457,23 @@ argument shapes in the table in section 3.1.
    zone) (the section 14 question, resolved to process-lifetime: survives
    reconnect within a run, resets on restart, no new struct field or storage
    key). `@checkpoint` pins under a namespaced ref (`cp-<label>`) since a ref
-   name cannot hold `/`; that ref is spared world-log truncation. Two
-   limitations are carried as documented follow-ups, both rooted in the
-   dirty-only, additive bridge (section 4.1): a restore writes live but records
-   no new snapshot, so the cursor navigates the log frozen at the first step and
-   a real edit re-anchors it; and `@checkout`/`@publish` copy the source from
-   the current world tip (the last snapshot), which mirrors live except
-   immediately after an undo of that same subtree. Deletion-aware,
-   restore-recording snapshots are the fix that closes both (section 14).
-7. Tests per section 12, wired into `module.mk`.
+   name cannot hold `/`; that ref is spared world-log truncation. Every restore
+   into live (undo, redo, `@restore`, `@checkout`, `@publish`) records the
+   subtree it wrote as one commit through `builder_snapshot_subtree`, so the
+   world tip keeps tracking live and the operation itself lands in history
+   (section 6.1): the cursor navigates the log as frozen at the first step and
+   re-anchors on the tip each step produces, and `@checkout`/`@publish` read a
+   faithful tip. The one remaining gap is deletions: the additive bridge
+   (section 4.1) never removes a key a restore deleted, so a subtree that lost
+   objects still carries them in history until a deletion-aware snapshot lands
+   (section 14).
+7. Tests per section 12, wired into `module.mk`. Done:
+   `src/builder/test_builder_history.c` drives the workflow engine over a real
+   muddb and CAS depot: per-edit undo/redo with index rebuild (round trip),
+   zone-scoped undo that leaves another zone alone (scoping), the zone-filtered
+   history listing, checkout reference rewrite, publish fast-forward, publish
+   refusal on a moved fork point (publish race), a numbered `@restore`, and
+   `@checkpoint`. The reference-rewrite and inbound/outbound integrity cases
+   remain covered at the primitive level in `test_world_restore.c`, and
+   retention in `test_builder_snapshot.c`. All wired into `module.mk`
+   (test_builder_history, 41 checks).

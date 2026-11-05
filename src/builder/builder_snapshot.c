@@ -13,6 +13,7 @@
 
 #include <log.h>
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -168,4 +169,85 @@ builder_snapshot_record(const char *key, OBJ *obj, const char *actor_name)
 		LOG_WARNING("snapshot bridge: could not commit %s", key);
 		return;
 	}
+}
+
+/* A growable list of keys gathered from obj_foreach_key. */
+struct keygrab {
+	char **keys;
+	size_t count;
+	size_t cap;
+	int    oom;
+};
+
+static void
+keygrab_cb(const char *key, void *ctx)
+{
+	struct keygrab *g = ctx;
+	char *dup;
+
+	if (g->count == g->cap) {
+		size_t ncap = g->cap ? g->cap * 2 : 32;
+		char **nk = realloc(g->keys, ncap * sizeof *nk);
+
+		if (!nk) {
+			g->oom = 1;
+			return;
+		}
+		g->keys = nk;
+		g->cap = ncap;
+	}
+	dup = strdup(key);
+	if (dup)
+		g->keys[g->count++] = dup;
+	else
+		g->oom = 1;
+}
+
+int
+builder_snapshot_subtree(const char *prefix, const char *comment)
+{
+	struct keygrab g = {0};
+	char scan[OBJ_PATH_MAX];
+	size_t i;
+	int rc = 0;
+
+	if (!snap_cache)
+		return -1;
+	if (!prefix || !prefix[0]) {
+		LOG_WARNING("snapshot bridge: bad subtree request");
+		return -1;
+	}
+	if ((size_t)snprintf(scan, sizeof scan, "%s/", prefix) >= sizeof scan) {
+		LOG_WARNING("snapshot bridge: subtree prefix too long");
+		return -1;
+	}
+
+	obj_foreach_key(scan, keygrab_cb, &g);
+
+	for (i = 0; i < g.count; i++) {
+		OBJ *o = obj_get(g.keys[i]);
+
+		if (o) {
+			if (obj_cache_cas_put(snap_cache, g.keys[i], o)
+				!= OBJ_CACHE_OK) {
+				LOG_WARNING("snapshot bridge: could not mirror %s",
+					g.keys[i]);
+				rc = -1;
+			}
+			obj_release(o);
+		}
+		free(g.keys[i]);
+	}
+	free(g.keys);
+
+	if (g.oom) {
+		LOG_WARNING("snapshot bridge: out of memory scanning %s", prefix);
+		rc = -1;
+	}
+	if (obj_cache_cas_commit(snap_cache, comment) != OBJ_CACHE_OK) {
+		LOG_WARNING("snapshot bridge: could not commit subtree %s",
+			prefix);
+		rc = -1;
+	}
+	return rc;
 }
