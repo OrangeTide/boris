@@ -91,7 +91,11 @@ zone_resolve_prop(const char *zone_path, const char *propname)
 char *
 zone_template(const char *zone_path)
 {
-	return zone_resolve_prop(zone_path, "template");
+	char key[OBJ_PATH_MAX];
+
+	if (zone_info_key(zone_path, key, sizeof key) != 0)
+		return NULL;
+	return obj_resolve_prop_ref(key, "template");
 }
 
 /* Read a property from the zone's own zoneinfo, not inherited. strdup'd. */

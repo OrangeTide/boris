@@ -26,7 +26,7 @@ link_exit(const struct acs_info *acs, const char *actor, const char *room_key,
 	struct builder_req req;
 
 	snprintf(prop, sizeof prop, "exit.%s.to", dir);
-	obj_prop_set(room, prop, target);
+	obj_prop_set_ref(room, prop, target);
 	req = (struct builder_req){
 		.actor = acs,
 		.actor_name = actor,
@@ -100,14 +100,14 @@ command_do_dig(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSE
 	obj_prop_set_internal(room, "%kind", "room");
 	template = zone_template(zone_path);
 	if (template)
-		obj_prop_set_internal(room, "%parent", template);
+		obj_prop_set_ref_internal(room, "%parent", template);
 	free(template);
 	obj_prop_set(room, "name", title);
 	obj_prop_set(room, "desc.short", "An unfinished room.");
 	if (opp) {
 		char prop[64];
 		snprintf(prop, sizeof prop, "exit.%s.to", opp);
-		obj_prop_set(room, prop, cur);
+		obj_prop_set_ref(room, prop, cur);
 	}
 
 	req = (struct builder_req){

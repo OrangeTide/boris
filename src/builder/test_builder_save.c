@@ -315,8 +315,8 @@ test_dangling_exit(void)
 
 	acs_init(&builder, 1, BUILDER_FLAG);
 
-	obj_prop_set(room, "exit.out.to", "zone/darkwood/mud-room");	/* exists */
-	obj_prop_set(room, "exit.n.to", "zone/darkwood/void");		/* missing */
+	obj_prop_set_ref(room, "exit.out.to", "zone/darkwood/mud-room");	/* exists */
+	obj_prop_set_ref(room, "exit.n.to", "zone/darkwood/void");		/* missing */
 
 	check("dangling exit still saves",
 		builder_save(&ops, &req, &res) == BUILDER_OK);
@@ -338,8 +338,8 @@ test_check(void)
 	struct builder_result res;
 	OBJ *room = new_room("zone/darkwood/closet");
 
-	obj_prop_set(room, "exit.out.to", "zone/darkwood/mud-room");	/* exists */
-	obj_prop_set(room, "exit.n.to", "zone/darkwood/void");		/* missing */
+	obj_prop_set_ref(room, "exit.out.to", "zone/darkwood/mud-room");	/* exists */
+	obj_prop_set_ref(room, "exit.n.to", "zone/darkwood/void");		/* missing */
 
 	check("builder_check reports the dangling exit",
 		builder_check(&ops, room, &res) == 1);
@@ -348,7 +348,7 @@ test_check(void)
 	check("builder_check never commits", m.commit_count == 0);
 
 	/* a clean room yields no warnings */
-	obj_prop_delete(room, "exit.n.to");
+	obj_prop_delete_ref(room, "exit.n.to");
 	check("builder_check clean room has no warnings",
 		builder_check(&ops, room, &res) == 0);
 

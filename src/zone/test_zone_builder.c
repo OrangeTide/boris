@@ -113,7 +113,7 @@ test_nested_parent(void)
 
 	z = zone_get("zone/darkwood/mansion");
 	if (z) {
-		v = obj_prop_get(z, "%parent");
+		v = obj_prop_get_ref(z, "%parent");
 		check("sub-zone %parent points at the enclosing zoneinfo",
 			v && strcmp(v, "zone/darkwood/zoneinfo") == 0);
 		obj_release(z);

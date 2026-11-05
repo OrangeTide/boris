@@ -99,7 +99,7 @@ entity_create(struct entity *e, OBJ_CACHE *cache, const char *id,
 	if (obj_prop_set_internal(obj, "%kind", entity_kind_name(kind))
 		!= OBJ_OK) goto fail;
 	if (template_ref
-		&& obj_prop_set_internal(obj, "%parent", template_ref)
+		&& obj_prop_set_ref_internal(obj, "%parent", template_ref)
 		!= OBJ_OK) goto fail;
 	obj_cache_mark_dirty(cache, obj);
 

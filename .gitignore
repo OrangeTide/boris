@@ -20,6 +20,7 @@ junk*/
 # ignore database and runtime files
 /data/users/*
 data/muddb
+/data/export/
 /depot
 boris.pid
 

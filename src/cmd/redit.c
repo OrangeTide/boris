@@ -38,7 +38,7 @@ static int
 redit_get(void *ctx, const char *key, char *buf, size_t len)
 {
 	struct redit *r = ctx;
-	char *v = obj_prop_get(r->scratch, key);
+	char *v = olc_field_get(r->scratch, key);
 
 	return (int)snprintf(buf, len, "%s", v ? v : "");
 }
@@ -48,7 +48,7 @@ redit_set(void *ctx, const char *key, const char *value)
 {
 	struct redit *r = ctx;
 
-	return obj_prop_set(r->scratch, key, value) == OBJ_OK ? 0 : -1;
+	return olc_field_set(r->scratch, key, value) == OBJ_OK ? 0 : -1;
 }
 
 /* --- submit / lifecycle ---------------------------------------------- */
@@ -158,7 +158,7 @@ static int
 se_get(void *ctx, const char *key, char *buf, size_t len)
 {
 	struct single_exit *se = ctx;
-	char *v = obj_prop_get(se->r->scratch, key);
+	char *v = olc_field_get(se->r->scratch, key);
 
 	return (int)snprintf(buf, len, "%s", v ? v : "");
 }
@@ -168,7 +168,7 @@ se_set(void *ctx, const char *key, const char *value)
 {
 	struct single_exit *se = ctx;
 
-	return obj_prop_set(se->r->scratch, key, value) == OBJ_OK ? 0 : -1;
+	return olc_field_set(se->r->scratch, key, value) == OBJ_OK ? 0 : -1;
 }
 
 static void
@@ -184,7 +184,7 @@ exit_remove(struct ui_session *s, void *binding)
 	struct single_exit *se = binding;
 	struct redit *r = se->r;
 
-	obj_prop_delete(r->scratch, se->to_key);
+	obj_prop_delete_ref(r->scratch, se->to_key);
 	obj_prop_delete(r->scratch, se->desc_key);
 	ui_pop(s);				/* pop the single-exit frame (frees se) */
 	ui_swap_top(s, build_exit_list(r));	/* refresh the (now stale) list */
@@ -286,7 +286,7 @@ add_submit(struct ui_session *s, void *binding)
 	resolve_room_ref(r, ae->dest, destkey, sizeof destkey);
 
 	snprintf(prop, sizeof prop, "exit.%s.to", dirkey);
-	obj_prop_set(r->scratch, prop, destkey);
+	obj_prop_set_ref(r->scratch, prop, destkey);
 	if (ae->desc[0]) {
 		snprintf(prop, sizeof prop, "exit.%s.desc", dirkey);
 		obj_prop_set(r->scratch, prop, ae->desc);
@@ -316,7 +316,7 @@ add_submit(struct ui_session *s, void *binding)
 		struct builder_result res;
 
 		snprintf(prop, sizeof prop, "exit.%s.to", opp);
-		obj_prop_set(tr, prop, r->commit_key);
+		obj_prop_set_ref(tr, prop, r->commit_key);
 		if (builder_save(builder_zone_ops(), &req, &res) == BUILDER_OK)
 			telnetclient_printf(cl, "Reverse exit (%s) linked from %s.\n",
 				opp, destkey);
@@ -394,10 +394,10 @@ build_exit_list(struct redit *r)
 		char tgt_zone[OBJ_PATH_MAX], ann[OBJ_PATH_MAX + 16] = "";
 		char lbl[160];
 
-		if (strncmp(k, "exit.", 5) != 0 || kl < 8
-			|| strcmp(k + kl - 3, ".to") != 0)
+		if (strncmp(k, "exit.", 5) != 0 || kl < 10
+			|| strcmp(k + kl - 4, ".to~") != 0)
 			continue;
-		dl = kl - 5 - 3;
+		dl = kl - 5 - 4;
 		if (dl == 0 || dl >= sizeof el->dirs[0])
 			continue;
 		memcpy(el->dirs[n], k + 5, dl);
@@ -528,7 +528,7 @@ command_do_redit(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNU
 			zone_resolve(key, zone_path, sizeof zone_path);
 		template = zone_template(zone_path);
 		if (template)
-			obj_prop_set_internal(r->scratch, "%parent", template);
+			obj_prop_set_ref_internal(r->scratch, "%parent", template);
 		free(template);
 	}
 

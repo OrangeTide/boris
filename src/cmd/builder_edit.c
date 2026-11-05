@@ -11,7 +11,9 @@
 #include "zone.h"
 #include "zone_builder.h"
 #include "builder.h"
+#include "builder_snapshot.h"
 #include "olc.h"
+#include "objref.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -239,7 +241,7 @@ command_do_link(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUS
 		return 0;
 	}
 	snprintf(prop, sizeof prop, "exit.%s.to", dirkey);
-	obj_prop_set(r, prop, targetkey);
+	obj_prop_set_ref(r, prop, targetkey);
 	if (desc) {
 		snprintf(prop, sizeof prop, "exit.%s.desc", dirkey);
 		obj_prop_set(r, prop, desc);
@@ -260,7 +262,7 @@ command_do_link(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUS
 			return 1;
 		}
 		snprintf(prop, sizeof prop, "exit.%s.to", opp);
-		obj_prop_set(tr, prop, cur);
+		obj_prop_set_ref(tr, prop, cur);
 		if (save_obj(cl, &a, targetkey, tr, "link reverse"))
 			telnetclient_printf(cl, "Reverse exit (%s) linked from %s.\n",
 				opp, targetkey);
@@ -305,7 +307,7 @@ command_do_unlink(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UN
 		return 0;
 	}
 	snprintf(prop, sizeof prop, "exit.%s.to", dirkey);
-	target = obj_prop_get(r, prop);
+	target = obj_prop_get_ref(r, prop);
 	if (!target) {
 		telnetclient_printf(cl, "There is no %s exit here.\n", dirkey);
 		room_edit_free(r);
@@ -313,7 +315,7 @@ command_do_unlink(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UN
 	}
 	snprintf(targetkey, sizeof targetkey, "%s", target);	/* copy before edits */
 
-	obj_prop_delete(r, prop);
+	obj_prop_delete_ref(r, prop);
 	snprintf(prop, sizeof prop, "exit.%s.desc", dirkey);
 	obj_prop_delete(r, prop);
 	if (!save_obj(cl, &a, cur, r, "unlink")) {
@@ -329,9 +331,9 @@ command_do_unlink(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UN
 		if (!tr)
 			return 1;
 		snprintf(prop, sizeof prop, "exit.%s.to", opp);
-		back = obj_prop_get(tr, prop);
+		back = obj_prop_get_ref(tr, prop);
 		if (back && strcmp(back, cur) == 0) {
-			obj_prop_delete(tr, prop);
+			obj_prop_delete_ref(tr, prop);
 			snprintf(prop, sizeof prop, "exit.%s.desc", opp);
 			obj_prop_delete(tr, prop);
 			if (save_obj(cl, &a, targetkey, tr, "unlink reverse"))
@@ -345,6 +347,32 @@ command_do_unlink(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UN
 }
 
 /* --------------------------------------------------------------------- @set */
+
+/* Apply one @set value. A reference-named key (exit.<dir>.to, template) is
+ * stored as a '~'-marked reference, the only form links and @check inspect, so
+ * @set matches redit and @link instead of leaving a dead plain key. Everything
+ * else is a plain property. Reports the failure and returns 0 on error. */
+static int
+set_room_prop(DESCRIPTOR_DATA *cl, OBJ *r, const char *prop, const char *value)
+{
+	int is_ref = objref_is_ref_name(prop);
+	int rc = is_ref ? obj_prop_set_ref(r, prop, value)
+			: obj_prop_set(r, prop, value);
+
+	if (rc == OBJ_OK)
+		return 1;
+	if (rc == OBJ_ERR_PROTECTED)
+		telnetclient_printf(cl,
+			"\"%s\" is a protected property and cannot be set here.\n",
+			prop);
+	else if (is_ref)
+		telnetclient_printf(cl,
+			"\"%s\" needs a reference target: a path id with no spaces.\n",
+			prop);
+	else
+		telnetclient_printf(cl, "Could not set \"%s\".\n", prop);
+	return 0;
+}
 
 int
 command_do_set(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSED,
@@ -375,10 +403,7 @@ command_do_set(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNUSE
 		telnetclient_puts(cl, "You are in an invalid room.\n");
 		return 0;
 	}
-	if (obj_prop_set(r, prop, value) == OBJ_ERR_PROTECTED) {
-		telnetclient_printf(cl,
-			"\"%s\" is a protected property and cannot be set here.\n",
-			prop);
+	if (!set_room_prop(cl, r, prop, value)) {
 		room_edit_free(r);
 		return 0;
 	}
@@ -450,6 +475,9 @@ command_do_destroy(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd U
 			key);
 		return 0;
 	}
+	/* mirror the deletion into history so the world tip stops carrying it
+	 * (best-effort, like the save-side snapshot) */
+	builder_snapshot_forget(key, a.name);
 	telnetclient_printf(cl, "Destroyed %s. "
 		"(Exits pointing here may now dangle.)\n", key);
 	return 1;

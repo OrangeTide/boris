@@ -44,22 +44,20 @@ static int
 medit_get(void *ctx, const char *key, char *buf, size_t len)
 {
 	struct medit *m = ctx;
-	char *v = obj_prop_get(m->scratch, key);
+	char *v = olc_field_get(m->scratch, key);
 
 	return (int)snprintf(buf, len, "%s", v ? v : "");
 }
 
-/* %-prefixed keys (%kind, %parent) are protected; route them through the
- * internal setter so they are editable fields here (olc-spec 7). */
+/* Reference and %-prefixed keys (%kind, %parent) route through olc_field_set,
+ * which uses the ref accessors and bypasses the public-setter protection, so
+ * they are editable fields here (olc-spec 7). */
 static int
 medit_set(void *ctx, const char *key, const char *value)
 {
 	struct medit *m = ctx;
-	int rc = (key[0] == '%')
-		? obj_prop_set_internal(m->scratch, key, value)
-		: obj_prop_set(m->scratch, key, value);
 
-	return rc == OBJ_OK ? 0 : -1;
+	return olc_field_set(m->scratch, key, value) == OBJ_OK ? 0 : -1;
 }
 
 /* --- validators ------------------------------------------------------ */

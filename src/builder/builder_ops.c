@@ -4,6 +4,7 @@
 #define LOG_SUBSYSTEM "builder"
 
 #include "builder.h"
+#include "builder_snapshot.h"
 #include "obj.h"
 #include "user.h"
 
@@ -42,10 +43,21 @@ default_commit(void *ctx, const char *key, OBJ *obj)
 	return 0;
 }
 
+/* Mirror the committed edit into world history. A no-op until
+ * builder_snapshot_init runs at startup, so a test or tool using the default
+ * ops without a depot simply records nothing. */
+static void
+default_snapshot(void *ctx, const char *key, OBJ *obj, const char *actor_name)
+{
+	(void)ctx;
+	builder_snapshot_record(key, obj, actor_name);
+}
+
 static const struct builder_ops default_ops = {
 	.key_exists = default_key_exists,
 	.owner_exists = default_owner_exists,
 	.commit = default_commit,
+	.snapshot = default_snapshot,
 	.ctx = NULL,
 };
 

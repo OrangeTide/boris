@@ -153,6 +153,8 @@ boris_SRCS = \
 	cmd/charset.c \
 	cmd/edit.c \
 	cmd/zone_cmd.c \
+	cmd/history_cmd.c \
+	cmd/export_cmd.c \
 	cmd/dig.c \
 	cmd/builder_edit.c \
 	cmd/olc.c \
@@ -178,4 +180,4 @@ boris_LIBS = \
 	verb vm compile vfs resolve character freelist acs \
 	crypt daemonize hashtable log scrypt util help iox net passwd obj entity rpg \
 	database security lmdb mth tinyaes \
-	zone_builder zone builder ui stred smolvfs
+	zone_builder zone builder ui stred smolvfs muddb_export

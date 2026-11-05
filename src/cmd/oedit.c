@@ -41,22 +41,20 @@ static int
 oedit_get(void *ctx, const char *key, char *buf, size_t len)
 {
 	struct oedit *o = ctx;
-	char *v = obj_prop_get(o->scratch, key);
+	char *v = olc_field_get(o->scratch, key);
 
 	return (int)snprintf(buf, len, "%s", v ? v : "");
 }
 
-/* %-prefixed keys (%parent) are protected; route them through the internal
- * setter so Template is an editable field. */
+/* Reference and %-prefixed keys route through olc_field_set, which uses the
+ * ref accessors and bypasses the public-setter protection, so Template
+ * (%parent, a reference) is an editable field. */
 static int
 oedit_set(void *ctx, const char *key, const char *value)
 {
 	struct oedit *o = ctx;
-	int rc = (key[0] == '%')
-		? obj_prop_set_internal(o->scratch, key, value)
-		: obj_prop_set(o->scratch, key, value);
 
-	return rc == OBJ_OK ? 0 : -1;
+	return olc_field_set(o->scratch, key, value) == OBJ_OK ? 0 : -1;
 }
 
 /* Accept an empty value or a non-negative integer (weight/bulk/value/cap). */

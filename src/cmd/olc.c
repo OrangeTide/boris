@@ -5,6 +5,7 @@
 #include <boris.h>
 #include "telnetclient.h"
 #include "builder.h"
+#include "objref.h"
 
 #include <stdio.h>
 
@@ -15,12 +16,31 @@ olc_copy_props(OBJ *dst, OBJ *src)
 	const char *k, *v;
 
 	while (obj_iter_next(it, &k, &v)) {
-		if (k[0] == '%')
+		/* %-keys and reference keys (marked with '~') are rejected by the
+		 * public setter, so copy them raw through the internal setter. */
+		if (k[0] == '%' || obj_prop_is_ref(k))
 			obj_prop_set_internal(dst, k, v);
 		else
 			obj_prop_set(dst, k, v);
 	}
 	obj_iter_end(it);
+}
+
+char *
+olc_field_get(OBJ *o, const char *key)
+{
+	return objref_is_ref_name(key) ? obj_prop_get_ref(o, key)
+		: obj_prop_get(o, key);
+}
+
+int
+olc_field_set(OBJ *o, const char *key, const char *value)
+{
+	if (objref_is_ref_name(key))
+		return (key[0] == '%') ? obj_prop_set_ref_internal(o, key, value)
+			: obj_prop_set_ref(o, key, value);
+	return (key[0] == '%') ? obj_prop_set_internal(o, key, value)
+		: obj_prop_set(o, key, value);
 }
 
 OBJ *

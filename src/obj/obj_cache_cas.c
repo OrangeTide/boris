@@ -42,11 +42,13 @@ struct parent_link {
 	OBJ_CACHE *cache;
 };
 
-/* one buffered save: a blob already in CAS, not yet linked in a tree */
+/* one buffered change: a blob already in CAS, not yet linked in a tree, or a
+ * removal (remove != 0) that drops the key from the tree on the next commit */
 struct pending {
 	struct pending *next;
 	char hash[CAS_HASH_HEX + 1];
 	char *path;		/* "<domain>/<key>" */
+	int  remove;		/* queued deletion rather than a save */
 };
 
 struct cas_bridge {
@@ -69,6 +71,7 @@ struct cas_bridge {
 struct commit_item {
 	const char *path;
 	const char *hash;
+	int         remove;
 };
 
 /****************************************************************
@@ -86,8 +89,11 @@ pending_find(struct cas_bridge *b, const char *id)
 	return NULL;
 }
 
+/* Record a pending save (remove == 0, hash required) or a pending removal
+ * (remove != 0, hash ignored) for id, replacing any earlier pending change to
+ * the same key. */
 static int
-pending_upsert(struct cas_bridge *b, const char *id, const char *hash)
+pending_set(struct cas_bridge *b, const char *id, const char *hash, int remove)
 {
 	struct pending *pd = pending_find(b, id);
 
@@ -106,7 +112,11 @@ pending_upsert(struct cas_bridge *b, const char *id, const char *hash)
 		b->pending = pd;
 		b->pending_count++;
 	}
-	memcpy(pd->hash, hash, CAS_HASH_HEX + 1);
+	pd->remove = remove;
+	if (remove)
+		pd->hash[0] = '\0';
+	else
+		memcpy(pd->hash, hash, CAS_HASH_HEX + 1);
 	return OBJ_CACHE_OK;
 }
 
@@ -196,10 +206,11 @@ bridge_load(void *ctx, const char *id)
 {
 	struct cas_bridge *b = ctx;
 
-	/* a buffered save is newer than anything committed */
+	/* a buffered change is newer than anything committed: a save shadows the
+	 * tree, a removal hides it */
 	struct pending *pd = pending_find(b, id);
 	if (pd)
-		return blob_to_obj(b, id, pd->hash);
+		return pd->remove ? NULL : blob_to_obj(b, id, pd->hash);
 
 	char root[CAS_HASH_HEX + 1];
 	int rc = cas_tree_ref_read(b->ct, b->ref, root);
@@ -308,7 +319,7 @@ bridge_save(void *ctx, const char *id, OBJ *obj)
 			cas_strerror(rc));
 		return OBJ_CACHE_ERR;
 	}
-	return pending_upsert(b, id, hash);
+	return pending_set(b, id, hash, 0);
 }
 
 /****************************************************************
@@ -391,6 +402,20 @@ dir_find(struct cas_tree_dir *dir, const char *name)
 	return NULL;
 }
 
+/* drop an entry by name, preserving the order of the rest. no-op if absent. */
+static void
+dir_remove(struct cas_tree_dir *dir, const char *name)
+{
+	for (int i = 0; i < dir->count; i++)
+		if (strcmp(dir->entries[i].name, name) == 0) {
+			memmove(&dir->entries[i], &dir->entries[i + 1],
+				(size_t)(dir->count - i - 1)
+					* sizeof(dir->entries[0]));
+			dir->count--;
+			return;
+		}
+}
+
 /* replace an entry's hash, or add a new entry. rejects a change of
  * entry type (file vs directory) under the same name. */
 static int
@@ -428,10 +453,13 @@ dir_set(struct cas_tree_dir *dir, const char *name, const char *hash,
 static int
 rebuild_level(struct cas_tree *ct, const char *dir_hash,
 	const struct commit_item *items, int count, size_t offset,
-	char *hash_out)
+	char *hash_out, int *empty_out)
 {
 	struct cas_tree_dir dir;
 	int rc;
+
+	if (empty_out)
+		*empty_out = 0;
 
 	if (dir_hash) {
 		rc = cas_tree_load(ct, dir_hash, &dir);
@@ -478,10 +506,16 @@ rebuild_level(struct cas_tree *ct, const char *dir_hash,
 				rc = CAS_ERR;
 				goto out;
 			}
-			rc = dir_set(&dir, comp, items[i].hash,
-				CAS_TREE_S_IFREG | 0644);
-			if (rc != CAS_OK)
-				goto out;
+			if (items[i].remove) {
+				/* drop the entry (file or subtree node) if
+				 * present; a vanished key is not an error */
+				dir_remove(&dir, comp);
+			} else {
+				rc = dir_set(&dir, comp, items[i].hash,
+					CAS_TREE_S_IFREG | 0644);
+				if (rc != CAS_OK)
+					goto out;
+			}
 		} else {
 			char child_old[CAS_HASH_HEX + 1];
 			const char *child_hash = NULL;
@@ -500,20 +534,29 @@ rebuild_level(struct cas_tree *ct, const char *dir_hash,
 			}
 
 			char child_new[CAS_HASH_HEX + 1];
+			int child_empty = 0;
 
 			rc = rebuild_level(ct, child_hash, items + i, j - i,
-				offset + clen + 1, child_new);
+				offset + clen + 1, child_new, &child_empty);
 			if (rc != CAS_OK)
 				goto out;
-			rc = dir_set(&dir, comp, child_new,
-				CAS_TREE_S_IFDIR | 0755);
-			if (rc != CAS_OK)
-				goto out;
+			if (child_empty) {
+				/* removals emptied the subtree: drop the now
+				 * childless directory so the wipe cascades up */
+				dir_remove(&dir, comp);
+			} else {
+				rc = dir_set(&dir, comp, child_new,
+					CAS_TREE_S_IFDIR | 0755);
+				if (rc != CAS_OK)
+					goto out;
+			}
 		}
 		i = j;
 	}
 
 	rc = cas_tree_store(ct, &dir, hash_out);
+	if (rc == CAS_OK && empty_out)
+		*empty_out = (dir.count == 0);
 out:
 	cas_tree_dir_free(&dir);
 	return rc;
@@ -543,6 +586,7 @@ obj_cache_cas_commit(OBJ_CACHE *c, const char *comment)
 	for (struct pending *pd = b->pending; pd; pd = pd->next) {
 		items[n].path = pd->path;
 		items[n].hash = pd->hash;
+		items[n].remove = pd->remove;
 		n++;
 	}
 	qsort(items, n, sizeof(*items), item_cmp);
@@ -563,7 +607,7 @@ obj_cache_cas_commit(OBJ_CACHE *c, const char *comment)
 
 	char new_root[CAS_HASH_HEX + 1];
 
-	rc = rebuild_level(b->ct, root_in, items, (int)n, 0, new_root);
+	rc = rebuild_level(b->ct, root_in, items, (int)n, 0, new_root, NULL);
 	free(items);
 	if (rc != CAS_OK) {
 		LOG_ERROR("tree rebuild failed: %s", cas_strerror(rc));
@@ -716,6 +760,23 @@ obj_cache_cas_put(OBJ_CACHE *c, const char *id, OBJ *obj)
 	if (!b)
 		return OBJ_CACHE_ERR;
 	return bridge_save(b, id, obj);
+}
+
+int
+obj_cache_cas_del(OBJ_CACHE *c, const char *id)
+{
+	if (!c || !id)
+		return OBJ_CACHE_ERR;
+
+	struct cas_bridge *b = obj_cache_ctx(c);
+
+	if (!b)
+		return OBJ_CACHE_ERR;
+	if (!valid_save_id(b, id)) {
+		LOG_ERROR("invalid key \"%s/%s\"", b->domain, id);
+		return OBJ_CACHE_ERR;
+	}
+	return pending_set(b, id, NULL, 1);
 }
 
 unsigned

@@ -33,6 +33,7 @@
 #include <eventlog.h>
 #include <muddb.h>
 #include <obj.h>
+#include <builder_snapshot.h>
 #include <room.h>
 #include <help.h>
 #define LOG_SUBSYSTEM "server"
@@ -495,6 +496,14 @@ main(int argc, char **argv)
 	}
 
 	atexit(obj_shutdown);
+
+	/* World history is best-effort: if the snapshot depot cannot be opened
+	 * the bridge disables itself and the server runs without recording
+	 * (doc/snapshot-restore-spec.md section 4.4). */
+	if (builder_snapshot_init("data/world-depot") != 0)
+		LOG_WARNING("snapshots disabled: could not open history depot");
+
+	atexit(builder_snapshot_shutdown);
 
 	if (character_initialize()) {
 		LOG_ERROR("could not load character sub-system");

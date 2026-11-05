@@ -61,13 +61,25 @@ int obj_cache_cas_link_parent(OBJ_CACHE *c, const char *domain,
 int obj_cache_cas_put(OBJ_CACHE *c, const char *id, OBJ *obj);
 
 /*
- * Commit all buffered saves: copy-on-write rebuild of the tree levels
+ * Queue removal of a key, so the next commit drops it from the tree. This is
+ * how a deletion reaches history, the counterpart of obj_cache_cas_put: the
+ * tree is append-only through puts otherwise, so a key a restore or a destroy
+ * removed would linger without this. Removing a key that names a directory
+ * drops the whole subtree, and a directory emptied by removals is dropped too.
+ * Buffered like a save (an obj_cache_get sees the key gone before the commit);
+ * removing an absent key is a no-op committed as such. The key is validated as
+ * for a save. Returns OBJ_CACHE_OK or OBJ_CACHE_ERR.
+ */
+int obj_cache_cas_del(OBJ_CACHE *c, const char *id);
+
+/*
+ * Commit all buffered changes: copy-on-write rebuild of the tree levels
  * touched since the last commit, then advance the ref. No-op when
  * nothing is pending. comment may be NULL.
  */
 int obj_cache_cas_commit(OBJ_CACHE *c, const char *comment);
 
-/* Number of buffered saves not yet committed. */
+/* Number of buffered changes not yet committed. */
 unsigned obj_cache_cas_pending(OBJ_CACHE *c);
 
 /*

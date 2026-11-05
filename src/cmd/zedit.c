@@ -35,22 +35,20 @@ static int
 zedit_get(void *ctx, const char *key, char *buf, size_t len)
 {
 	struct zedit *z = ctx;
-	char *v = obj_prop_get(z->scratch, key);
+	char *v = olc_field_get(z->scratch, key);
 
 	return (int)snprintf(buf, len, "%s", v ? v : "");
 }
 
-/* %-prefixed keys (%parent) are protected; route them through the internal
- * setter so the parent-zone link is editable. */
+/* Reference and %-prefixed keys route through olc_field_set, which uses the
+ * ref accessors and bypasses the public-setter protection, so the parent-zone
+ * link (%parent) and the dig template are editable fields. */
 static int
 zedit_set(void *ctx, const char *key, const char *value)
 {
 	struct zedit *z = ctx;
-	int rc = (key[0] == '%')
-		? obj_prop_set_internal(z->scratch, key, value)
-		: obj_prop_set(z->scratch, key, value);
 
-	return rc == OBJ_OK ? 0 : -1;
+	return olc_field_set(z->scratch, key, value) == OBJ_OK ? 0 : -1;
 }
 
 /* Rebuild a whitespace/comma-separated list, adding or removing name.

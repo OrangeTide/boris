@@ -34,4 +34,14 @@ OBJ *olc_make_scratch(struct descriptor_data *cl, const char *key,
 int olc_submit(struct descriptor_data *cl, const struct builder_ops *ops,
 	struct builder_req *req);
 
+/*
+ * Field accessors for the OLC editors. A reference field (objref schema) is
+ * read and written through the obj reference accessors so its value carries
+ * the '~' key marker; a %-prefixed field bypasses the public-setter protection;
+ * every other field is a plain string. olc_field_get returns a borrowed value
+ * (NULL if unset); olc_field_set returns OBJ_OK or an OBJ_ERR* code.
+ */
+char *olc_field_get(OBJ *o, const char *key);
+int olc_field_set(OBJ *o, const char *key, const char *value);
+
 #endif

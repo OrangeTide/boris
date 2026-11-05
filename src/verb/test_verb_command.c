@@ -14,6 +14,7 @@
 #include "verb_dispatch.h"
 #include "vm_sys.h"
 #include "obj.h"
+#include "objref.h"
 #include "muddb.h"
 
 #include <elf32.h>
@@ -276,7 +277,8 @@ prop_eq(const char *id, const char *name, const char *want)
 
 	if (!o)
 		return 0;
-	v = obj_prop_get(o, name);
+	v = objref_is_ref_name(name) ? obj_prop_get_ref(o, name)
+		: obj_prop_get(o, name);
 	eq = v && strcmp(v, want) == 0;
 	obj_release(o);
 	return eq;

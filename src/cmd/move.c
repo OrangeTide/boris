@@ -101,7 +101,7 @@ do_move(DESCRIPTOR_DATA *cl, const char *exit_name)
 	}
 
 	snprintf(exitkey, sizeof exitkey, "exit.%s.to", exit_name);
-	dest = obj_prop_get(r, exitkey);
+	dest = obj_prop_get_ref(r, exitkey);
 	if (!dest) {
 		room_put(r);
 		telnetclient_puts(cl, "You can't go that way.\n");
@@ -241,7 +241,7 @@ command_do_enter(DESCRIPTOR_DATA *cl, struct user *u UNUSED, const char *cmd UNU
 
 		r = room_get(room_id);
 		if (r) {
-			int has_enter = obj_prop_get(r, "exit.enter.to") != NULL;
+			int has_enter = obj_prop_get_ref(r, "exit.enter.to") != NULL;
 			room_put(r);
 			if (has_enter)
 				return do_move(cl, "enter");

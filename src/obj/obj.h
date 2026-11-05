@@ -48,6 +48,51 @@ int obj_prop_delete_internal(OBJ *obj, const char *propname);
  * Only meaningful at the prototype-walk layer. */
 int obj_prop_is_tombstoned(OBJ *obj, const char *propname);
 
+/*
+ * Object references.
+ *
+ * A reference is a property whose stored key carries the reserved reference
+ * marker '~' as a trailing character (e.g. "exit.e.to~", "%parent~"), with the
+ * referenced object's path-id as a plain string value. The marker makes a
+ * reference distinguishable from a string by the key alone, so a path rewrite
+ * or an integrity scan can act on references and never on other string content.
+ * See doc/snapshot-restore-spec.md section 5.1. A list of references is a set
+ * of indexed reference keys ("keys.0~", "keys.1~"), not an array value.
+ *
+ * The accessors below take the logical name WITHOUT the marker and add it
+ * internally. The generic obj_prop_set / obj_prop_delete reject a marked key
+ * (OBJ_ERR_PROTECTED), so a reference is written only through these, which
+ * validate the value as a path-id.
+ */
+#define OBJ_REF_MARK '~'
+
+/* True if propname is a reference key: its last character is the marker and it
+ * is not a tombstone. Takes a stored key (with the marker), as iteration
+ * yields it. */
+int obj_prop_is_ref(const char *propname);
+
+/* Get the path-id stored under reference `name` (the marker is added
+ * internally). Returns a borrowed pointer valid until the next mutation or
+ * obj_free, or NULL if unset. */
+char *obj_prop_get_ref(OBJ *obj, const char *name);
+
+/* Set reference `name` to path-id `value` (the marker is added internally).
+ * Rejects a `name` beginning with '%' or '!' (OBJ_ERR_PROTECTED) and a `value`
+ * that is not a well-formed path-id (OBJ_ERR). Returns OBJ_OK or an error. */
+int obj_prop_set_ref(OBJ *obj, const char *name, const char *value);
+
+/* Privileged variant: writes a structural reference ('%parent', '%location')
+ * without the %-prefix protection. Used by the cache and the migration. */
+int obj_prop_set_ref_internal(OBJ *obj, const char *name, const char *value);
+
+/* Delete reference `name` (the marker is added internally). Rejects a `name`
+ * beginning with '%' or '!'. Returns OBJ_OK. */
+int obj_prop_delete_ref(OBJ *obj, const char *name);
+
+/* Privileged variant: deletes a structural reference ('%location') raw, with
+ * no %-prefix protection and no tombstone. Used by the containment path. */
+int obj_prop_delete_ref_internal(OBJ *obj, const char *name);
+
 int obj_get_json(OBJ *obj, char *buf, size_t len, size_t *out_len);
 int obj_compact(OBJ *obj);
 
@@ -64,6 +109,14 @@ void obj_iter_end(OBJ_ITER *it);
 /* global object cache, backed by muddb */
 int obj_initialize(struct muddb *db, unsigned cache_size);
 void obj_shutdown(void);
+
+/* The muddb handle backing the global object cache, or NULL before
+ * obj_initialize. For callers that read the store directly, such as export. */
+struct muddb *obj_db(void);
+
+/* Flush every dirty cached object to the backing store, so a direct read of
+ * muddb (e.g. export) reflects live edits. Returns OBJ_OK or OBJ_ERR. */
+int obj_sync(void);
 OBJ *obj_get(const char *id);
 void obj_release(OBJ *obj);
 
@@ -84,10 +137,31 @@ int obj_put(const char *id, OBJ *obj);
 char *obj_resolve_prop(const char *id, const char *propname);
 
 /*
+ * As obj_resolve_prop, but for a reference property: the '~' marker is added
+ * to `name` internally, so a caller resolves an inherited reference (e.g. a
+ * zone's "template") without spelling the marker.
+ */
+char *obj_resolve_prop_ref(const char *id, const char *name);
+
+/*
  * Delete id from the global store and drop any cached copy. Returns OBJ_OK,
  * or OBJ_ERR if the delete failed.
  */
 int obj_delete(const char *id);
+
+/*
+ * Apply a scoped restore to the live store in one transaction: write each
+ * put_objs[i] under put_keys[i], delete each del_keys[j], rebuild the contents
+ * and owner indexes for every touched key, and invalidate the object cache
+ * (doc/snapshot-restore-spec.md sections 6 and 7). The put objects are borrowed
+ * (serialized into the store; the caller keeps ownership). On success the whole
+ * set is committed atomically; on any error the transaction is aborted and the
+ * store is left unchanged. The cache is flushed before the writes so pending
+ * edits are not lost, and the touched keys are forgotten so a later obj_get
+ * reloads the restored state. Returns OBJ_OK or OBJ_ERR. muddb backend only.
+ */
+int obj_apply_restore(const char *const *put_keys, OBJ *const *put_objs,
+	size_t n_put, const char *const *del_keys, size_t n_del);
 
 /*
  * Drop a cached copy of id without deleting it from the store, so the next

@@ -46,12 +46,12 @@ zone_create(const struct builder_ops *ops, const struct acs_info *actor,
 				"invalid parent zone: %s", parent_path);
 			return res->status = BUILDER_ERR;
 		}
-		obj_prop_set_internal(zi, "%parent", parent_key);
+		obj_prop_set_ref_internal(zi, "%parent", parent_key);
 	}
 	if (title && title[0])
 		obj_prop_set(zi, "title", title);
 	if (template_ref && template_ref[0])
-		obj_prop_set(zi, "template", template_ref);
+		obj_prop_set_ref(zi, "template", template_ref);
 
 	req = (struct builder_req){
 		.actor = actor,

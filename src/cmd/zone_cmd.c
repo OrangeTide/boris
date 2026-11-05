@@ -122,9 +122,9 @@ zone_info(DESCRIPTOR_DATA *cl, const char *arg)
 	telnetclient_printf(cl, "  title    : %s\n", v ? v : "(unset)");
 	v = obj_prop_get(z, "creator");
 	telnetclient_printf(cl, "  creator  : %s\n", v ? v : "(unset)");
-	v = obj_prop_get(z, "template");
+	v = obj_prop_get_ref(z, "template");
 	telnetclient_printf(cl, "  template : %s\n", v ? v : "(unset)");
-	v = obj_prop_get(z, "%parent");
+	v = obj_prop_get_ref(z, "%parent");
 	telnetclient_printf(cl, "  parent   : %s\n", v ? v : "(none)");
 	v = obj_prop_get(z, "builders");
 	telnetclient_printf(cl, "  builders : %s\n", v && v[0] ? v : "(open)");
